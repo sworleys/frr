@@ -270,7 +270,7 @@ void ospf_nbr_add_self(struct ospf_interface *oi, struct in_addr router_id)
 	if (rn->info) {
 		/* There is already pseudo neighbor. */
 		zlog_warn("Router-ID %s already present in neighbor table.",
-			  inet_ntoa(router_id), rn->lock);
+			  inet_ntoa(router_id));
 		assert (oi->nbr_self == rn->info);
 		route_unlock_node(rn);
 	} else
