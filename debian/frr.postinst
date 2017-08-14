@@ -36,12 +36,5 @@ fi
 
 db_stop
 
-# Because frr is pulled in as an implict dependency from quagga-compat
-# as part of a 3.3.2 or earlier upgrade to 3.4.0 or later, it is eligible
-# to be removed by 'apt-get autoremove' after 'apt-get remove quagga quagga-compat'
-# This prevents that from happening
-_auto=$(apt-mark showauto frr)
-[ "$_auto" = "frr" ] && apt-mark manual frr > /dev/null || true
-
 #DEBHELPER#
 
