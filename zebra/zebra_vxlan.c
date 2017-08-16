@@ -2985,6 +2985,8 @@ int zebra_vxlan_local_neigh_add_update(struct interface *ifp,
 		{
 			UNSET_FLAG(n->flags, ZEBRA_NEIGH_REMOTE);
 			n->r_vtep_ip.s_addr = 0;
+			SET_FLAG(n->flags, ZEBRA_NEIGH_LOCAL);
+			n->ifindex = ifp->ifindex;
 		}
 	} else {
 		n = zvni_neigh_add(zvni, ip, macaddr);
@@ -2996,6 +2998,9 @@ int zebra_vxlan_local_neigh_add_update(struct interface *ifp,
 				ifp->name, ifp->ifindex, zvni->vni);
 			return -1;
 		}
+		/* Set "local" forwarding info. */
+		SET_FLAG(n->flags, ZEBRA_NEIGH_LOCAL);
+		n->ifindex = ifp->ifindex;
 	}
 
 	/* Before we program this in BGP, we need to check if MAC is locally
