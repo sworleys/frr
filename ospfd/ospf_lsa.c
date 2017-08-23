@@ -2844,11 +2844,12 @@ static int ospf_maxage_lsa_remover(struct thread *thread)
 void ospf_lsa_maxage_delete(struct ospf *ospf, struct ospf_lsa *lsa)
 {
 	struct route_node *rn;
-	struct prefix_ptr lsa_prefix;
+	struct prefix lsa_prefix;
 
+	memset(&lsa_prefix, 0, sizeof(struct prefix));
 	lsa_prefix.family = 0;
-	lsa_prefix.prefixlen = sizeof(lsa_prefix.prefix) * CHAR_BIT;
-	lsa_prefix.prefix = (uintptr_t)lsa;
+	lsa_prefix.prefixlen = sizeof(lsa_prefix.u.prefix) * CHAR_BIT;
+	lsa_prefix.u.prefix = (uintptr_t)lsa;
 
 	if ((rn = route_node_lookup(ospf->maxage_lsa,
 				    (struct prefix *)&lsa_prefix))) {
@@ -2870,7 +2871,7 @@ void ospf_lsa_maxage_delete(struct ospf *ospf, struct ospf_lsa *lsa)
  */
 void ospf_lsa_maxage(struct ospf *ospf, struct ospf_lsa *lsa)
 {
-	struct prefix_ptr lsa_prefix;
+	struct prefix lsa_prefix;
 	struct route_node *rn;
 
 	/* When we saw a MaxAge LSA flooded to us, we put it on the list
@@ -2884,13 +2885,13 @@ void ospf_lsa_maxage(struct ospf *ospf, struct ospf_lsa *lsa)
 		return;
 	}
 
+	memset(&lsa_prefix, 0, sizeof(struct prefix));
 	lsa_prefix.family = 0;
-	lsa_prefix.prefixlen = sizeof(lsa_prefix.prefix) * CHAR_BIT;
-	lsa_prefix.prefix = (uintptr_t)lsa;
+	lsa_prefix.prefixlen = sizeof(lsa_prefix.u.prefix) * CHAR_BIT;
+	lsa_prefix.u.prefix = (uintptr_t)lsa;
 
 	if ((rn = route_node_get(ospf->maxage_lsa,
-				 (struct prefix *)&lsa_prefix))
-	    != NULL) {
+				 (struct prefix *)&lsa_prefix)) != NULL) {
 		if (rn->info != NULL) {
 			if (IS_DEBUG_OSPF(lsa, LSA_FLOODING))
 				zlog_debug(
