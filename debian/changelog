@@ -1,3 +1,9 @@
+frr (3.1+cl3u2) RELEASED; urgency=medium
+
+  * Fixes: CM-17867 Stale routes left behind when FRR stopped
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Wed, 27 Sep 2017 09:43:19 -0400
+
 frr (3.1+cl3u1) RELEASED; urgency=medium
 
   * New Enabled: FRR Uplift
