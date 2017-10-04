@@ -9,6 +9,7 @@
 
 module=${0##*/}
 funcs=(frr)
+nondef_funcs=(bgptable)
 json=
 jexec=
 
@@ -31,12 +32,11 @@ func_frr()
     exec_cmd ospf6.database.router vtysh -c "show ipv6 ospf6 database router"
     exec_cmd ospf6.show_running vtysh -c "show running ospf6d"
 
+    exec_cmd bgp.show_running vtysh -c "show running bgpd"
     exec_cmd $jexec bgp.summary vtysh -c "show ip bgp vrf all summary $json"
     exec_cmd $jexec bgp.neighbors vtysh -c "show ip bgp vrf all neighbors $json"
     exec_cmd bgp.nexthop vtysh -c "show ip bgp vrf all nexthop"
     exec_cmd bgp.update_group vtysh -c "show ip bgp vrf all update-group"
-    exec_cmd $jexec bgp.route vtysh -c "show ip bgp vrf all $json"
-    exec_cmd bgp.show_running vtysh -c "show running bgpd"
 
     exec_cmd $jexec bgp.ipv6_summary vtysh -c "show bgp vrf all summary $json"
     exec_cmd bgp.ipv6_update_group vtysh -c "show bgp vrf all update-group"
@@ -68,12 +68,12 @@ func_frr()
     exec_cmd $jexec pim.msdp.sa vtysh -c "show ip msdp vrf all sa detail $json"
     exec_cmd $jexec pim.msdp.mesh vtysh -c "show ip msdp vrf all mesh-group $json"
 
-	exec_cmd $jexec evpn.vni vtysh -c "show evpn vni"
-	exec_cmd $jexec evpn.mac.vni vtysh -c "show evpn mac vni all"
-	exec_cmd $jexec bgp.evpn.summary vtysh -c "show bgp evpn summary"
-	exec_cmd $jexec bgp.evpn.vni vtysh -c "show bgp evpn vni"
-	exec_cmd $jexec bgp.evpn.route vtysh -c "show bgp evpn route"
-	exec_cmd $jexec bgp.evpn.route.vni.all vtysh -c "show bgp evpn route vni all"
+    exec_cmd $jexec evpn.vni vtysh -c "show evpn vni"
+    exec_cmd $jexec evpn.mac.vni vtysh -c "show evpn mac vni all"
+    exec_cmd $jexec bgp.evpn.summary vtysh -c "show bgp evpn summary"
+    exec_cmd $jexec bgp.evpn.vni vtysh -c "show bgp evpn vni"
+    exec_cmd $jexec bgp.evpn.route vtysh -c "show bgp evpn route"
+    exec_cmd $jexec bgp.evpn.route.vni.all vtysh -c "show bgp evpn route vni all"
 
     [ $SUP_SECURE -eq 0 ] && {
         [ $SUP_VERBOSE -eq 1 ] &&
@@ -85,13 +85,18 @@ func_frr()
      }
 }
 
+func_bgptable()
+{
+    exec_cmd $jexec bgp.route vtysh -c "show ip bgp vrf all $json"
+}
+
 # main
 while getopts "c:jl" Option; do
     case $Option in
     c) [ $SUP_VERBOSE -eq 1 ] && # default submods
         echo ${module}: Invoked for "$OPTARG" core dumps 1>&2 ;;
     j) jexec=-j json=json ;;
-    l) echo ${funcs[@]}
+    l) echo ${funcs[@]} ';' ${nondef_funcs[@]}
        exit 0 ;;
     *) ;;
     esac
@@ -102,6 +107,11 @@ main()
 {
     local -r TIMEFORMAT='%2R seconds' tfile=/run/${module}_funcstime$$
     local secs
+
+    if [ $# -ne 0 ]; then # only run specified sub-modules
+        [ $SUP_VERBOSE -eq 1 ] && echo ${module}: run only submodules: $@ 1>&$stderr
+        funcs=($@)
+    fi
 
     for func in ${funcs[@]}; do
         [ $SUP_VERBOSE -eq 1 ] && echo "$module.$func" 1>&2
