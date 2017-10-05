@@ -1,3 +1,12 @@
+frr (3.1+cl3u3) RELEASED; urgency=medium
+
+  * Fixes: CM-17497 bgpd: Fixes too many open FD's
+  * Fixes: CM-17923 FRR: Add better cl-support for large routing tables
+  * Fixes: CM-18221 ospfd: Some lsa maxage issues
+  * Fixes: CM-18220 ospfd: Failed redistribution in some rare cases
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Thu, 5 Oct 2017 13:21:59 -0400
+
 frr (3.1+cl3u2) RELEASED; urgency=medium
 
   * Fixes: CM-17867 Stale routes left behind when FRR stopped
