@@ -42,7 +42,7 @@ void bgp_add_routermac_ecom(struct attr *attr, struct ethaddr *routermac)
 	memset(&routermac_ecom, 0, sizeof(struct ecommunity_val));
 	routermac_ecom.val[0] = ECOMMUNITY_ENCODE_EVPN;
 	routermac_ecom.val[1] = ECOMMUNITY_EVPN_SUBTYPE_ROUTERMAC;
-	memcpy(&routermac_ecom.val[2], routermac->octet, ETHER_ADDR_LEN);
+	memcpy(&routermac_ecom.val[2], routermac->octet, ETH_ALEN);
 	if (!attr->ecommunity)
 		attr->ecommunity = ecommunity_new();
 	ecommunity_add_val(attr->ecommunity, &routermac_ecom);
@@ -105,6 +105,65 @@ char *ecom_mac2str(char *ecom_mac)
 	return prefix_mac2str((struct ethaddr *)en, NULL, 0);
 }
 
+/* Fetch router-mac from extended community */
+void bgp_attr_rmac(struct attr *attr,
+		   struct ethaddr *rmac)
+{
+	int i = 0;
+	struct ecommunity *ecom;
+
+	ecom = attr->ecommunity;
+	if (!ecom || !ecom->size)
+		return;
+
+	/* If there is a router mac extended community, set RMAC in attr */
+	for (i = 0; i < ecom->size; i++) {
+		u_char *pnt = NULL;
+		u_char type = 0;
+		u_char sub_type = 0;
+
+		pnt = (ecom->val + (i * ECOMMUNITY_SIZE));
+		type = *pnt++;
+		sub_type = *pnt++;
+
+		if (!(type == ECOMMUNITY_ENCODE_EVPN &&
+		     sub_type == ECOMMUNITY_EVPN_SUBTYPE_ROUTERMAC))
+			continue;
+
+		memcpy(rmac, pnt, ETH_ALEN);
+	}
+}
+
+/*
+ * return true if attr contains default gw extended community
+ */
+uint8_t bgp_attr_default_gw(struct attr *attr)
+{
+	struct ecommunity	*ecom;
+	int			i;
+
+	ecom = attr->ecommunity;
+	if (!ecom || !ecom->size)
+		return 0;
+
+	/* If there is a default gw extendd community return true otherwise
+	 * return 0 */
+	for (i = 0; i < ecom->size; i++) {
+		u_char		*pnt;
+		u_char		type, sub_type;
+
+		pnt = (ecom->val + (i * ECOMMUNITY_SIZE));
+		type = *pnt++;
+		sub_type = *pnt++;
+
+		if ((type == ECOMMUNITY_ENCODE_OPAQUE
+		      && sub_type == ECOMMUNITY_EVPN_SUBTYPE_DEF_GW))
+			return 1;
+	}
+
+	return 0;
+}
+
 /*
  * Fetch and return the sequence number from MAC Mobility extended
  * community, if present, else 0.
@@ -144,11 +203,8 @@ u_int32_t bgp_attr_mac_mobility_seqnum(struct attr *attr, u_char *sticky)
 			*sticky = 0;
 
 		pnt++;
-		seq_num = (*pnt++ << 24);
-		seq_num |= (*pnt++ << 16);
-		seq_num |= (*pnt++ << 8);
-		seq_num |= (*pnt++);
-
+		pnt = ptr_get_be32(pnt, &seq_num);
+		(void)pnt; /* consume value */
 		return seq_num;
 	}
 
@@ -169,7 +225,7 @@ extern int bgp_build_evpn_prefix(int evpn_type, uint32_t eth_tag,
 	prefix_copy(src, dst);
 	memset(dst, 0, sizeof(struct prefix));
 	p_evpn_p = &(dst->u.prefix_evpn);
-	dst->family = AF_ETHERNET;
+	dst->family = AF_EVPN;
 	p_evpn_p->route_type = evpn_type;
 	if (evpn_type == BGP_EVPN_IP_PREFIX_ROUTE) {
 		p_evpn_p->eth_tag = eth_tag;

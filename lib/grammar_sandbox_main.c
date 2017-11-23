@@ -26,10 +26,11 @@
 #include "command.h"
 #include "memory_vty.h"
 
-static void vty_do_exit(void)
+static void vty_do_exit(int isexit)
 {
 	printf("\nend.\n");
-	exit(0);
+	if (!isexit)
+		exit(0);
 }
 
 struct thread_master *master;
@@ -49,6 +50,7 @@ int main(int argc, char **argv)
 	/* Library inits. */
 	cmd_init(1);
 	host.name = strdup("test");
+	host.domainname = strdup("testdomainname");
 
 	vty_init(master);
 	memory_init();

@@ -57,8 +57,8 @@ static struct zclient *zclient_vnc = NULL;
 /*
  * Routes coming from zebra get added to VNC here
  */
-static void vnc_redistribute_add(struct prefix *p, struct in_addr *nexthop,
-				 u_int32_t metric, uint8_t type)
+static void vnc_redistribute_add(struct prefix *p, u_int32_t metric,
+				 uint8_t type)
 {
 	struct bgp *bgp = bgp_get_default();
 	struct prefix_rd prd;
@@ -183,22 +183,32 @@ static void vnc_redistribute_add(struct prefix *p, struct in_addr *nexthop,
 			vncHD1VR.peer->status =
 				Established; /* keep bgp core happy */
 			bgp_sync_delete(vncHD1VR.peer); /* don't need these */
-			if (vncHD1VR.peer->ibuf) {
-				stream_free(vncHD1VR.peer
-						    ->ibuf); /* don't need it */
+
+			/*
+			 * since this peer is not on the I/O thread, this lock
+			 * is not strictly necessary, but serves as a reminder
+			 * to those who may meddle...
+			 */
+			pthread_mutex_lock(&vncHD1VR.peer->io_mtx);
+			{
+				// we don't need any I/O related facilities
+				if (vncHD1VR.peer->ibuf)
+					stream_fifo_free(vncHD1VR.peer->ibuf);
+				if (vncHD1VR.peer->obuf)
+					stream_fifo_free(vncHD1VR.peer->obuf);
+
+				if (vncHD1VR.peer->ibuf_work)
+					stream_free(vncHD1VR.peer->ibuf_work);
+				if (vncHD1VR.peer->obuf_work)
+					stream_free(vncHD1VR.peer->obuf_work);
+
 				vncHD1VR.peer->ibuf = NULL;
-			}
-			if (vncHD1VR.peer->obuf) {
-				stream_fifo_free(
-					vncHD1VR.peer
-						->obuf); /* don't need it */
 				vncHD1VR.peer->obuf = NULL;
+				vncHD1VR.peer->obuf_work = NULL;
+				vncHD1VR.peer->ibuf_work = NULL;
 			}
-			if (vncHD1VR.peer->work) {
-				stream_free(vncHD1VR.peer
-						    ->work); /* don't need it */
-				vncHD1VR.peer->work = NULL;
-			}
+			pthread_mutex_unlock(&vncHD1VR.peer->io_mtx);
+
 			/* base code assumes have valid host pointer */
 			vncHD1VR.peer->host =
 				XSTRDUP(MTYPE_BGP_PEER_HOST, ".zebra.");
@@ -329,156 +339,33 @@ static void vnc_redistribute_withdraw(struct bgp *bgp, afi_t afi, uint8_t type)
  *
  * Assumes 1 nexthop
  */
-static int vnc_zebra_read_ipv4(int command, struct zclient *zclient,
-			       zebra_size_t length, vrf_id_t vrf_id)
+static int vnc_zebra_read_route(int command, struct zclient *zclient,
+				zebra_size_t length, vrf_id_t vrf_id)
 {
-	struct stream *s;
-	struct zapi_ipv4 api;
-	struct in_addr nexthop;
-	struct prefix_ipv4 p;
+	struct zapi_route api;
+	int add;
 
-	s = zclient->ibuf;
-	nexthop.s_addr = 0;
+	if (zapi_route_decode(zclient->ibuf, &api) < 0)
+		return -1;
 
-	/* Type, flags, message. */
-	api.type = stream_getc(s);
-	api.flags = stream_getc(s);
-	api.message = stream_getc(s);
-
-	/* IPv4 prefix. */
-	memset(&p, 0, sizeof(struct prefix_ipv4));
-	p.family = AF_INET;
-	p.prefixlen = stream_getc(s);
-	stream_get(&p.prefix, s, PSIZE(p.prefixlen));
-
-	/* Nexthop, ifindex, distance, metric. */
-	if (CHECK_FLAG(api.message, ZAPI_MESSAGE_NEXTHOP)) {
-		api.nexthop_num = stream_getc(s);
-		nexthop.s_addr = stream_get_ipv4(s);
-	}
-	if (CHECK_FLAG(api.message, ZAPI_MESSAGE_IFINDEX)) {
-		api.ifindex_num = stream_getc(s);
-		stream_getl(s);
-	}
-	if (CHECK_FLAG(api.message, ZAPI_MESSAGE_DISTANCE))
-		api.distance = stream_getc(s);
-	if (CHECK_FLAG(api.message, ZAPI_MESSAGE_METRIC))
-		api.metric = stream_getl(s);
-	else
-		api.metric = 0;
-
-	if (command == ZEBRA_IPV4_ROUTE_ADD) {
-		if (BGP_DEBUG(zebra, ZEBRA)) {
-			char buf[2][INET_ADDRSTRLEN];
-			vnc_zlog_debug_verbose(
-				"%s: Zebra rcvd: IPv4 route add %s %s/%d nexthop %s metric %u",
-				__func__, zebra_route_string(api.type),
-				inet_ntop(AF_INET, &p.prefix, buf[0],
-					  sizeof(buf[0])),
-				p.prefixlen, inet_ntop(AF_INET, &nexthop,
-						       buf[1], sizeof(buf[1])),
-				api.metric);
-		}
-		vnc_redistribute_add((struct prefix *)&p, &nexthop, api.metric,
-				     api.type);
-	} else {
-		if (BGP_DEBUG(zebra, ZEBRA)) {
-			char buf[2][INET_ADDRSTRLEN];
-			vnc_zlog_debug_verbose(
-				"%s: Zebra rcvd: IPv4 route delete %s %s/%d "
-				"nexthop %s metric %u",
-				__func__, zebra_route_string(api.type),
-				inet_ntop(AF_INET, &p.prefix, buf[0],
-					  sizeof(buf[0])),
-				p.prefixlen, inet_ntop(AF_INET, &nexthop,
-						       buf[1], sizeof(buf[1])),
-				api.metric);
-		}
-		vnc_redistribute_delete((struct prefix *)&p, api.type);
-	}
-
-	return 0;
-}
-
-/* Zebra route add and delete treatment. */
-static int vnc_zebra_read_ipv6(int command, struct zclient *zclient,
-			       zebra_size_t length, vrf_id_t vrf_id)
-{
-	struct stream *s;
-	struct zapi_ipv6 api;
-	struct in6_addr nexthop;
-	struct prefix_ipv6 p, src_p;
-
-	s = zclient->ibuf;
-	memset(&nexthop, 0, sizeof(struct in6_addr));
-
-	/* Type, flags, message. */
-	api.type = stream_getc(s);
-	api.flags = stream_getc(s);
-	api.message = stream_getc(s);
-
-	/* IPv6 prefix. */
-	memset(&p, 0, sizeof(struct prefix_ipv6));
-	p.family = AF_INET6;
-	p.prefixlen = stream_getc(s);
-	stream_get(&p.prefix, s, PSIZE(p.prefixlen));
-
-	memset(&src_p, 0, sizeof(struct prefix_ipv6));
-	src_p.family = AF_INET6;
-	if (CHECK_FLAG(api.message, ZAPI_MESSAGE_SRCPFX)) {
-		src_p.prefixlen = stream_getc(s);
-		stream_get(&src_p.prefix, s, PSIZE(src_p.prefixlen));
-	}
-
-	if (src_p.prefixlen)
-		/* we completely ignore srcdest routes for now. */
+	/* we completely ignore srcdest routes for now. */
+	if (CHECK_FLAG(api.message, ZAPI_MESSAGE_SRCPFX))
 		return 0;
 
-	/* Nexthop, ifindex, distance, metric. */
-	if (CHECK_FLAG(api.message, ZAPI_MESSAGE_NEXTHOP)) {
-		api.nexthop_num = stream_getc(s);
-		stream_get(&nexthop, s, 16);
-	}
-	if (CHECK_FLAG(api.message, ZAPI_MESSAGE_IFINDEX)) {
-		api.ifindex_num = stream_getc(s);
-		stream_getl(s);
-	}
-	if (CHECK_FLAG(api.message, ZAPI_MESSAGE_DISTANCE))
-		api.distance = stream_getc(s);
+	add = (command == ZEBRA_REDISTRIBUTE_ROUTE_ADD);
+	if (add)
+		vnc_redistribute_add(&api.prefix, api.metric, api.type);
 	else
-		api.distance = 0;
-	if (CHECK_FLAG(api.message, ZAPI_MESSAGE_METRIC))
-		api.metric = stream_getl(s);
-	else
-		api.metric = 0;
+		vnc_redistribute_delete(&api.prefix, api.type);
 
-	/* Simply ignore link-local address. */
-	if (IN6_IS_ADDR_LINKLOCAL(&p.prefix))
-		return 0;
+	if (BGP_DEBUG(zebra, ZEBRA)) {
+		char buf[PREFIX_STRLEN];
 
-	if (command == ZEBRA_IPV6_ROUTE_ADD) {
-		if (BGP_DEBUG(zebra, ZEBRA)) {
-			char buf[INET6_ADDRSTRLEN];
-			vnc_zlog_debug_verbose(
-				"Zebra rcvd: IPv6 route add %s %s/%d metric %u",
-				zebra_route_string(api.type),
-				inet_ntop(AF_INET6, &p.prefix, buf,
-					  sizeof(buf)),
-				p.prefixlen, api.metric);
-		}
-		vnc_redistribute_add((struct prefix *)&p, NULL, api.metric,
-				     api.type);
-	} else {
-		if (BGP_DEBUG(zebra, ZEBRA)) {
-			char buf[INET6_ADDRSTRLEN];
-			vnc_zlog_debug_verbose(
-				"Zebra rcvd: IPv6 route delete %s %s/%d metric %u",
-				zebra_route_string(api.type),
-				inet_ntop(AF_INET6, &p.prefix, buf,
-					  sizeof(buf)),
-				p.prefixlen, api.metric);
-		}
-		vnc_redistribute_delete((struct prefix *)&p, api.type);
+		prefix2str(&api.prefix, buf, sizeof(buf));
+		vnc_zlog_debug_verbose(
+			"%s: Zebra rcvd: route delete %s %s metric %u",
+			__func__, zebra_route_string(api.type), buf,
+			api.metric);
 	}
 
 	return 0;
@@ -491,91 +378,66 @@ static int vnc_zebra_read_ipv6(int command, struct zclient *zclient,
 /*
  * low-level message builder
  */
-static void vnc_zebra_route_msg(struct prefix *p, int nhp_count, void *nhp_ary,
-				int add) /* 1 = add, 0 = del */
+static void vnc_zebra_route_msg(struct prefix *p, unsigned int nhp_count,
+				void *nhp_ary, int add) /* 1 = add, 0 = del */
 {
+	struct zapi_route api;
+	struct zapi_nexthop *api_nh;
+	int i;
+
 	if (!nhp_count) {
 		vnc_zlog_debug_verbose("%s: empty nexthop list, skipping",
 				       __func__);
 		return;
 	}
 
-	if (p->family == AF_INET) {
+	memset(&api, 0, sizeof(api));
+	api.vrf_id = VRF_DEFAULT;
+	api.type = ZEBRA_ROUTE_VNC;
+	api.safi = SAFI_UNICAST;
+	api.prefix = *p;
 
-		struct zapi_ipv4 api;
+	/* Nexthops */
+	SET_FLAG(api.message, ZAPI_MESSAGE_NEXTHOP);
+	api.nexthop_num = MIN(nhp_count, multipath_num);
+	for (i = 0; i < api.nexthop_num; i++) {
+		struct in_addr *nhp_ary4;
+		struct in6_addr *nhp_ary6;
 
-		api.flags = 0;
-		api.vrf_id = VRF_DEFAULT;
-		api.type = ZEBRA_ROUTE_VNC;
-		api.message = 0;
-		SET_FLAG(api.message,
-			 ZAPI_MESSAGE_NEXTHOP); /* TBD what's it mean? */
-		api.nexthop_num = nhp_count;
-		api.nexthop = nhp_ary;
-		api.ifindex_num = 0;
-		api.instance = 0;
-		api.safi = SAFI_UNICAST;
-
-		if (BGP_DEBUG(zebra, ZEBRA)) {
-
-			char buf[INET_ADDRSTRLEN];
-			vnc_zlog_debug_verbose(
-				"%s: Zebra send: IPv4 route %s %s/%d, nhp_count=%d",
-				__func__, (add ? "add" : "del"),
-				inet_ntop(AF_INET, &p->u.prefix4, buf,
-					  sizeof(buf)),
-				p->prefixlen, nhp_count);
+		api_nh = &api.nexthops[i];
+		switch (p->family) {
+		case AF_INET:
+			nhp_ary4 = nhp_ary;
+			memcpy(&api_nh->gate.ipv4, &nhp_ary4[i],
+			       sizeof(api_nh->gate.ipv4));
+			api_nh->type = NEXTHOP_TYPE_IPV4;
+			break;
+		case AF_INET6:
+			nhp_ary6 = nhp_ary;
+			memcpy(&api_nh->gate.ipv6, &nhp_ary6[i],
+			       sizeof(api_nh->gate.ipv6));
+			api_nh->type = NEXTHOP_TYPE_IPV6;
+			break;
 		}
-
-		zapi_ipv4_route((add ? ZEBRA_IPV4_NEXTHOP_ADD
-				     : ZEBRA_IPV4_NEXTHOP_DELETE),
-				zclient_vnc, (struct prefix_ipv4 *)p, &api);
-
-	} else if (p->family == AF_INET6) {
-
-		struct zapi_ipv6 api;
-		ifindex_t ifindex = 0;
-
-		/* Make Zebra API structure. */
-		api.flags = 0;
-		api.vrf_id = VRF_DEFAULT;
-		api.type = ZEBRA_ROUTE_VNC;
-		api.message = 0;
-		SET_FLAG(api.message, ZAPI_MESSAGE_NEXTHOP); /* TBD means? */
-		api.nexthop_num = nhp_count;
-		api.nexthop = nhp_ary;
-		SET_FLAG(api.message, ZAPI_MESSAGE_IFINDEX);
-		api.ifindex_num = 1;
-		api.ifindex = &ifindex;
-		api.instance = 0;
-		api.safi = SAFI_UNICAST;
-
-		if (BGP_DEBUG(zebra, ZEBRA)) {
-
-			char buf[INET6_ADDRSTRLEN];
-			vnc_zlog_debug_verbose(
-				"%s: Zebra send: IPv6 route %s %s/%d nhp_count=%d",
-				__func__, (add ? "add" : "del"),
-				inet_ntop(AF_INET6, &p->u.prefix6, buf,
-					  sizeof(buf)),
-				p->prefixlen, nhp_count);
-		}
-
-		zapi_ipv6_route((add ? ZEBRA_IPV6_NEXTHOP_ADD
-				     : ZEBRA_IPV6_NEXTHOP_DELETE),
-				zclient_vnc, (struct prefix_ipv6 *)p, NULL,
-				&api);
-	} else {
-		vnc_zlog_debug_verbose(
-			"%s: unknown prefix address family, skipping",
-			__func__);
-		return;
 	}
+
+	if (BGP_DEBUG(zebra, ZEBRA)) {
+		char buf[PREFIX_STRLEN];
+
+		prefix2str(&api.prefix, buf, sizeof(buf));
+		vnc_zlog_debug_verbose(
+			"%s: Zebra send: route %s %s, nhp_count=%d", __func__,
+			(add ? "add" : "del"), buf, nhp_count);
+	}
+
+	zclient_route_send((add ? ZEBRA_ROUTE_ADD : ZEBRA_ROUTE_DELETE),
+			   zclient_vnc, &api);
 }
 
 
 static void
-nve_list_to_nh_array(u_char family, struct list *nve_list, int *nh_count_ret,
+nve_list_to_nh_array(u_char family, struct list *nve_list,
+		     unsigned int *nh_count_ret,
 		     void **nh_ary_ret,  /* returned address array */
 		     void **nhp_ary_ret) /* returned pointer array */
 {
@@ -698,7 +560,7 @@ static void vnc_zebra_add_del_prefix(struct bgp *bgp,
 {
 	struct list *nves;
 
-	int nexthop_count = 0;
+	unsigned int nexthop_count = 0;
 	void *nh_ary = NULL;
 	void *nhp_ary = NULL;
 
@@ -732,7 +594,7 @@ static void vnc_zebra_add_del_prefix(struct bgp *bgp,
 		nve_list_to_nh_array(rn->p.family, nves, &nexthop_count,
 				     &nh_ary, &nhp_ary);
 
-		list_delete(nves);
+		list_delete_and_null(&nves);
 
 		if (nexthop_count)
 			vnc_zebra_route_msg(&rn->p, nexthop_count, nhp_ary,
@@ -862,7 +724,7 @@ static void vnc_zebra_add_del_group_afi(struct bgp *bgp,
 	uint8_t family = afi2family(afi);
 
 	struct list *nves = NULL;
-	int nexthop_count = 0;
+	unsigned int nexthop_count = 0;
 	void *nh_ary = NULL;
 	void *nhp_ary = NULL;
 
@@ -901,7 +763,7 @@ static void vnc_zebra_add_del_group_afi(struct bgp *bgp,
 		vnc_zlog_debug_verbose("%s: family: %d, nve count: %d",
 				       __func__, family, nexthop_count);
 
-		list_delete(nves);
+		list_delete_and_null(&nves);
 
 		if (nexthop_count) {
 			/*
@@ -1031,6 +893,7 @@ int vnc_redistribute_unset(struct bgp *bgp, afi_t afi, int type)
 	return CMD_SUCCESS;
 }
 
+extern struct zebra_privs_t bgpd_privs;
 
 /*
  * Modeled after bgp_zebra.c'bgp_zebra_init()
@@ -1040,12 +903,10 @@ void vnc_zebra_init(struct thread_master *master)
 {
 	/* Set default values. */
 	zclient_vnc = zclient_new(master);
-	zclient_init(zclient_vnc, ZEBRA_ROUTE_VNC, 0);
+	zclient_init(zclient_vnc, ZEBRA_ROUTE_VNC, 0, &bgpd_privs);
 
-	zclient_vnc->redistribute_route_ipv4_add = vnc_zebra_read_ipv4;
-	zclient_vnc->redistribute_route_ipv4_del = vnc_zebra_read_ipv4;
-	zclient_vnc->redistribute_route_ipv6_add = vnc_zebra_read_ipv6;
-	zclient_vnc->redistribute_route_ipv6_del = vnc_zebra_read_ipv6;
+	zclient_vnc->redistribute_route_add = vnc_zebra_read_route;
+	zclient_vnc->redistribute_route_del = vnc_zebra_read_route;
 }
 
 void vnc_zebra_destroy(void)

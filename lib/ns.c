@@ -312,7 +312,7 @@ DEFUN_NOSH (ns_netns,
 	if (ns->name && strcmp(ns->name, pathname) != 0) {
 		vty_out(vty, "NS %u is already configured with NETNS %s\n",
 			ns->ns_id, ns->name);
-		return CMD_WARNING_CONFIG_FAILED;
+		return CMD_WARNING;
 	}
 
 	if (!ns->name)
@@ -378,8 +378,7 @@ static int ns_config_write(struct vty *vty)
 	struct ns *ns;
 	int write = 0;
 
-	RB_FOREACH(ns, ns_head, &ns_tree)
-	{
+	RB_FOREACH (ns, ns_head, &ns_tree) {
 		if (ns->ns_id == NS_DEFAULT || ns->name == NULL)
 			continue;
 

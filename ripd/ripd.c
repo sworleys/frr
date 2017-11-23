@@ -49,9 +49,6 @@ DEFINE_QOBJ_TYPE(rip)
 /* UDP receive buffer size */
 #define RIP_UDP_RCV_BUF 41600
 
-/* privileges global */
-extern struct zebra_privs_t ripd_privs;
-
 /* RIP Structure. */
 struct rip *rip = NULL;
 
@@ -132,8 +129,7 @@ static int rip_garbage_collect(struct thread *t)
 	/* Unlock route_node. */
 	listnode_delete(rp->info, rinfo);
 	if (list_isempty((struct list *)rp->info)) {
-		list_free(rp->info);
-		rp->info = NULL;
+		list_delete_and_null((struct list **)&rp->info);
 		route_unlock_node(rp);
 	}
 
@@ -373,16 +369,16 @@ static int rip_filter(int rip_distribute, struct prefix_ipv4 *p,
 /* Check nexthop address validity. */
 static int rip_nexthop_check(struct in_addr *addr)
 {
-	struct listnode *node;
-	struct listnode *cnode;
+	struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
 	struct interface *ifp;
+	struct listnode *cnode;
 	struct connected *ifc;
 	struct prefix *p;
 
 	/* If nexthop address matches local configured address then it is
 	   invalid nexthop. */
 
-	for (ALL_LIST_ELEMENTS_RO(vrf_iflist(VRF_DEFAULT), node, ifp)) {
+	FOR_ALL_INTERFACES (vrf, ifp) {
 		for (ALL_LIST_ELEMENTS_RO(ifp->connected, cnode, ifc)) {
 			p = ifc->address;
 
@@ -1685,6 +1681,7 @@ int rip_recvmsg(int sock, u_char *buf, int size, struct sockaddr_in *from,
 	struct cmsghdr *ptr;
 	char adata[1024];
 
+	memset(&msg, 0, sizeof(msg));
 	msg.msg_name = (void *)from;
 	msg.msg_namelen = sizeof(struct sockaddr_in);
 	msg.msg_iov = &iov;
@@ -2445,7 +2442,7 @@ static void rip_update_interface(struct connected *ifc, u_char version,
 /* Update send to all interface and neighbor. */
 static void rip_update_process(int route_type)
 {
-	struct listnode *node;
+	struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
 	struct listnode *ifnode, *ifnnode;
 	struct connected *connected;
 	struct interface *ifp;
@@ -2455,7 +2452,7 @@ static void rip_update_process(int route_type)
 	struct prefix *p;
 
 	/* Send RIP update to each interface. */
-	for (ALL_LIST_ELEMENTS_RO(vrf_iflist(VRF_DEFAULT), node, ifp)) {
+	FOR_ALL_INTERFACES (vrf, ifp) {
 		if (if_is_loopback(ifp))
 			continue;
 
@@ -2880,7 +2877,7 @@ DEFUN (rip_route,
 	if (node->info) {
 		vty_out(vty, "There is already same static route.\n");
 		route_unlock_node(node);
-		return CMD_WARNING_CONFIG_FAILED;
+		return CMD_WARNING;
 	}
 
 	node->info = (void *)1;
@@ -3352,7 +3349,7 @@ DEFUN (rip_allow_ecmp,
 {
 	if (rip->ecmp) {
 		vty_out(vty, "ECMP is already enabled.\n");
-		return CMD_WARNING_CONFIG_FAILED;
+		return CMD_WARNING;
 	}
 
 	rip->ecmp = 1;
@@ -3368,7 +3365,7 @@ DEFUN (no_rip_allow_ecmp,
 {
 	if (!rip->ecmp) {
 		vty_out(vty, "ECMP is already disabled.\n");
-		return CMD_WARNING_CONFIG_FAILED;
+		return CMD_WARNING;
 	}
 
 	rip->ecmp = 0;
@@ -3512,7 +3509,7 @@ DEFUN (show_ip_rip_status,
        "Show RIP routes\n"
        "IP routing protocol process parameters and statistics\n")
 {
-	struct listnode *node;
+	struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
 	struct interface *ifp;
 	struct rip_interface *ri;
 	extern const struct message ri_version_msg[];
@@ -3545,14 +3542,14 @@ DEFUN (show_ip_rip_status,
 	vty_out(vty, "  Default version control: send version %s,",
 		lookup_msg(ri_version_msg, rip->version_send, NULL));
 	if (rip->version_recv == RI_RIP_VERSION_1_AND_2)
-		vty_out(vty, " receive any version\n");
+		vty_out(vty, " receive any version \n");
 	else
-		vty_out(vty, " receive version %s\n",
+		vty_out(vty, " receive version %s \n",
 			lookup_msg(ri_version_msg, rip->version_recv, NULL));
 
 	vty_out(vty, "    Interface        Send  Recv   Key-chain\n");
 
-	for (ALL_LIST_ELEMENTS_RO(vrf_iflist(VRF_DEFAULT), node, ifp)) {
+	FOR_ALL_INTERFACES (vrf, ifp) {
 		ri = ifp->info;
 
 		if (!ri->running)
@@ -3586,7 +3583,7 @@ DEFUN (show_ip_rip_status,
 
 	{
 		int found_passive = 0;
-		for (ALL_LIST_ELEMENTS_RO(vrf_iflist(VRF_DEFAULT), node, ifp)) {
+		FOR_ALL_INTERFACES (vrf, ifp) {
 			ri = ifp->info;
 
 			if ((ri->enable_network || ri->enable_interface)
@@ -3771,10 +3768,10 @@ void rip_distribute_update_interface(struct interface *ifp)
 /* ARGSUSED */
 static void rip_distribute_update_all(struct prefix_list *notused)
 {
+	struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
 	struct interface *ifp;
-	struct listnode *node, *nnode;
 
-	for (ALL_LIST_ELEMENTS(vrf_iflist(VRF_DEFAULT), node, nnode, ifp))
+	FOR_ALL_INTERFACES (vrf, ifp)
 		rip_distribute_update_interface(ifp);
 }
 /* ARGSUSED */
@@ -3808,7 +3805,7 @@ void rip_clean(void)
 					RIP_TIMER_OFF(rinfo->t_garbage_collect);
 					rip_info_free(rinfo);
 				}
-				list_delete(list);
+				list_delete_and_null(&list);
 				rp->info = NULL;
 				route_unlock_node(rp);
 			}
@@ -3827,6 +3824,7 @@ void rip_clean(void)
 			rip->sock = -1;
 		}
 
+		stream_free(rip->obuf);
 		/* Static RIP route configuration. */
 		for (rp = route_top(rip->route); rp; rp = route_next(rp))
 			if (rp->info) {
@@ -3946,10 +3944,10 @@ static void rip_routemap_update_redistribute(void)
 /* ARGSUSED */
 static void rip_routemap_update(const char *notused)
 {
+	struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
 	struct interface *ifp;
-	struct listnode *node, *nnode;
 
-	for (ALL_LIST_ELEMENTS(vrf_iflist(VRF_DEFAULT), node, nnode, ifp))
+	FOR_ALL_INTERFACES (vrf, ifp)
 		rip_if_rmap_update_interface(ifp);
 
 	rip_routemap_update_redistribute();

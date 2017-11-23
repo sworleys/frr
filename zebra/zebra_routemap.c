@@ -62,23 +62,26 @@ static int zebra_route_match_add(struct vty *vty, const char *command,
 {
 	VTY_DECLVAR_CONTEXT(route_map_index, index);
 	int ret;
+	int retval = CMD_SUCCESS;
 
 	ret = route_map_add_match(index, command, arg);
-	if (ret) {
-		switch (ret) {
-		case RMAP_RULE_MISSING:
-			vty_out(vty, "%% Zebra Can't find rule.\n");
-			return CMD_WARNING_CONFIG_FAILED;
-		case RMAP_COMPILE_ERROR:
-			vty_out(vty, "%% Zebra Argument is malformed.\n");
-			return CMD_WARNING_CONFIG_FAILED;
+	switch (ret) {
+	case RMAP_RULE_MISSING:
+		vty_out(vty, "%% Zebra Can't find rule.\n");
+		retval = CMD_WARNING_CONFIG_FAILED;
+		break;
+	case RMAP_COMPILE_ERROR:
+		vty_out(vty, "%% Zebra Argument is malformed.\n");
+		retval = CMD_WARNING_CONFIG_FAILED;
+		break;
+	case RMAP_COMPILE_SUCCESS:
+		if (type != RMAP_EVENT_MATCH_ADDED) {
+			route_map_upd8_dependency(type, arg, index->map->name);
 		}
+		break;
 	}
 
-	if (type != RMAP_EVENT_MATCH_ADDED) {
-		route_map_upd8_dependency(type, arg, index->map->name);
-	}
-	return CMD_SUCCESS;
+	return retval;
 }
 
 /* Delete zebra route map rule. */
@@ -87,6 +90,7 @@ static int zebra_route_match_delete(struct vty *vty, const char *command,
 {
 	VTY_DECLVAR_CONTEXT(route_map_index, index);
 	int ret;
+	int retval = CMD_SUCCESS;
 	char *dep_name = NULL;
 	const char *tmpstr;
 	char *rmap_name = NULL;
@@ -105,26 +109,27 @@ static int zebra_route_match_delete(struct vty *vty, const char *command,
 	}
 
 	ret = route_map_delete_match(index, command, arg);
-	if (ret) {
-		switch (ret) {
-		case RMAP_RULE_MISSING:
-			vty_out(vty, "%% Zebra Can't find rule.\n");
-			return CMD_WARNING_CONFIG_FAILED;
-		case RMAP_COMPILE_ERROR:
-			vty_out(vty, "%% Zebra Argument is malformed.\n");
-			return CMD_WARNING_CONFIG_FAILED;
-		}
+	switch (ret) {
+	case RMAP_RULE_MISSING:
+		vty_out(vty, "%% Zebra Can't find rule.\n");
+		retval = CMD_WARNING_CONFIG_FAILED;
+		break;
+	case RMAP_COMPILE_ERROR:
+		vty_out(vty, "%% Zebra Argument is malformed.\n");
+		retval = CMD_WARNING_CONFIG_FAILED;
+		break;
+	case RMAP_COMPILE_SUCCESS:
+		if (type != RMAP_EVENT_MATCH_DELETED && dep_name)
+			route_map_upd8_dependency(type, dep_name, rmap_name);
+		break;
 	}
-
-	if (type != RMAP_EVENT_MATCH_DELETED && dep_name)
-		route_map_upd8_dependency(type, dep_name, rmap_name);
 
 	if (dep_name)
 		XFREE(MTYPE_ROUTE_MAP_RULE, dep_name);
 	if (rmap_name)
 		XFREE(MTYPE_ROUTE_MAP_NAME, rmap_name);
 
-	return CMD_SUCCESS;
+	return retval;
 }
 
 /* 'match tag TAG'
@@ -256,7 +261,7 @@ DEFUN (no_match_ip_nexthop_prefix_len,
 
 DEFUN (match_source_protocol,
        match_source_protocol_cmd,
-       "match source-protocol <bgp|ospf|rip|ripng|isis|ospf6|connected|system|kernel|static>",
+       "match source-protocol <bgp|ospf|rip|ripng|isis|ospf6|pim|nhrp|eigrp|babel|connected|system|kernel|static>",
        MATCH_STR
        "Match protocol via which the route was learnt\n"
        "BGP protocol\n"
@@ -265,6 +270,10 @@ DEFUN (match_source_protocol,
        "RIPNG protocol\n"
        "ISIS protocol\n"
        "OSPF6 protocol\n"
+       "PIM protocol\n"
+       "NHRP protocol\n"
+       "EIGRP protocol\n"
+       "BABEL protocol\n"
        "Routes from directly connected peer\n"
        "Routes from system configuration\n"
        "Routes from kernel\n"
@@ -284,7 +293,7 @@ DEFUN (match_source_protocol,
 
 DEFUN (no_match_source_protocol,
        no_match_source_protocol_cmd,
-       "no match source-protocol [<bgp|ospf|rip|ripng|isis|ospf6|connected|system|kernel|static>]",
+       "no match source-protocol [<bgp|ospf|rip|ripng|isis|ospf6|pim|nhrp|eigrp|babel|connected|system|kernel|static>]",
        NO_STR
        MATCH_STR
        "No match protocol via which the route was learnt\n"
@@ -294,6 +303,10 @@ DEFUN (no_match_source_protocol,
        "RIPNG protocol\n"
        "ISIS protocol\n"
        "OSPF6 protocol\n"
+       "PIM protocol\n"
+       "NHRP protocol\n"
+       "EIGRP protocol\n"
+       "BABEL protocol\n"
        "Routes from directly connected peer\n"
        "Routes from system configuration\n"
        "Routes from kernel\n"
@@ -341,8 +354,7 @@ DEFUN (set_src,
 		return CMD_WARNING_CONFIG_FAILED;
 	}
 
-	RB_FOREACH(vrf, vrf_id_head, &vrfs_by_id)
-	{
+	RB_FOREACH (vrf, vrf_id_head, &vrfs_by_id) {
 		if (family == AF_INET)
 			pif = if_lookup_exact_address((void *)&src.ipv4,
 						      AF_INET, vrf->vrf_id);

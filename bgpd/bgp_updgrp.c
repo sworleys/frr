@@ -53,6 +53,7 @@
 #include "bgpd/bgp_updgrp.h"
 #include "bgpd/bgp_route.h"
 #include "bgpd/bgp_filter.h"
+#include "bgpd/bgp_io.h"
 
 /********************
  * PRIVATE FUNCTIONS
@@ -84,7 +85,9 @@ static void sync_init(struct update_subgroup *subgrp)
 	BGP_ADV_FIFO_INIT(&subgrp->sync->update);
 	BGP_ADV_FIFO_INIT(&subgrp->sync->withdraw);
 	BGP_ADV_FIFO_INIT(&subgrp->sync->withdraw_low);
-	subgrp->hash = hash_create(baa_hash_key, baa_hash_cmp, NULL);
+	subgrp->hash = hash_create(baa_hash_key,
+				   baa_hash_cmp,
+				   "BGP SubGroup Hash");
 
 	/* We use a larger buffer for subgrp->work in the event that:
 	 * - We RX a BGP_UPDATE where the attributes alone are just
@@ -547,8 +550,7 @@ static int update_group_show_walkcb(struct update_group *updgrp, void *arg)
 		return CMD_SUCCESS;
 
 	if (ctx->subgrp_id) {
-		UPDGRP_FOREACH_SUBGRP(updgrp, subgrp)
-		{
+		UPDGRP_FOREACH_SUBGRP (updgrp, subgrp) {
 			if (ctx->subgrp_id && (ctx->subgrp_id != subgrp->id))
 				continue;
 			else {
@@ -589,8 +591,7 @@ static int update_group_show_walkcb(struct update_group *updgrp, void *arg)
 				? " replace-as"
 				: "");
 
-	UPDGRP_FOREACH_SUBGRP(updgrp, subgrp)
-	{
+	UPDGRP_FOREACH_SUBGRP (updgrp, subgrp) {
 		if (ctx->subgrp_id && (ctx->subgrp_id != subgrp->id))
 			continue;
 		vty_out(vty, "\n");
@@ -634,8 +635,8 @@ static int update_group_show_walkcb(struct update_group *updgrp, void *arg)
 				: "");
 		if (subgrp->peer_count > 0) {
 			vty_out(vty, "    Peers:\n");
-			SUBGRP_FOREACH_PEER(subgrp, paf)
-			vty_out(vty, "      - %s\n", paf->peer->host);
+			SUBGRP_FOREACH_PEER (subgrp, paf)
+				vty_out(vty, "      - %s\n", paf->peer->host);
 		}
 	}
 	return UPDWALK_CONTINUE;
@@ -653,8 +654,7 @@ static int updgrp_show_packet_queue_walkcb(struct update_group *updgrp,
 	struct vty *vty;
 
 	vty = ctx->vty;
-	UPDGRP_FOREACH_SUBGRP(updgrp, subgrp)
-	{
+	UPDGRP_FOREACH_SUBGRP (updgrp, subgrp) {
 		if (ctx->subgrp_id && (ctx->subgrp_id != subgrp->id))
 			continue;
 		vty_out(vty, "update group %" PRIu64 ", subgroup %" PRIu64 "\n",
@@ -957,8 +957,7 @@ static struct update_subgroup *update_subgroup_find(struct update_group *updgrp,
 	if (!peer_established(PAF_PEER(paf)))
 		return NULL;
 
-	UPDGRP_FOREACH_SUBGRP(updgrp, subgrp)
-	{
+	UPDGRP_FOREACH_SUBGRP (updgrp, subgrp) {
 		if (subgrp->version != version
 		    || CHECK_FLAG(subgrp->sflags,
 				  SUBGRP_STATUS_DEFAULT_ORIGINATE))
@@ -1107,8 +1106,7 @@ int update_subgroup_check_merge(struct update_subgroup *subgrp,
 	/*
 	 * Look for a subgroup to merge into.
 	 */
-	UPDGRP_FOREACH_SUBGRP(subgrp->update_group, target)
-	{
+	UPDGRP_FOREACH_SUBGRP (subgrp->update_group, target) {
 		if (update_subgroup_can_merge_into(subgrp, target))
 			break;
 	}
@@ -1175,15 +1173,14 @@ static void update_subgroup_copy_adj_out(struct update_subgroup *source,
 {
 	struct bgp_adj_out *aout, *aout_copy;
 
-	SUBGRP_FOREACH_ADJ(source, aout)
-	{
+	SUBGRP_FOREACH_ADJ (source, aout) {
 		/*
 		 * Copy the adj out.
 		 */
 		aout_copy =
 			bgp_adj_out_alloc(dest, aout->rn, aout->addpath_tx_id);
 		aout_copy->attr =
-			aout->attr ? bgp_attr_refcount(aout->attr) : NULL;
+			aout->attr ? bgp_attr_intern(aout->attr) : NULL;
 	}
 }
 
@@ -1359,15 +1356,13 @@ static int updgrp_policy_update_walkcb(struct update_group *updgrp, void *arg)
 	 * refresh.
 	 */
 	if (ctx->policy_event_start_flag) {
-		UPDGRP_FOREACH_SUBGRP(updgrp, subgrp)
-		{
+		UPDGRP_FOREACH_SUBGRP (updgrp, subgrp) {
 			update_subgroup_set_needs_refresh(subgrp, 1);
 		}
 		return UPDWALK_CONTINUE;
 	}
 
-	UPDGRP_FOREACH_SUBGRP(updgrp, subgrp)
-	{
+	UPDGRP_FOREACH_SUBGRP (updgrp, subgrp) {
 		if (changed) {
 			if (bgp_debug_update(NULL, NULL, updgrp, 0))
 				zlog_debug(
@@ -1406,8 +1401,8 @@ static int update_group_periodic_merge_walkcb(struct update_group *updgrp,
 	struct update_subgroup *tmp_subgrp;
 	const char *reason = arg;
 
-	UPDGRP_FOREACH_SUBGRP_SAFE(updgrp, subgrp, tmp_subgrp)
-	update_subgroup_check_merge(subgrp, reason);
+	UPDGRP_FOREACH_SUBGRP_SAFE (updgrp, subgrp, tmp_subgrp)
+		update_subgroup_check_merge(subgrp, reason);
 	return UPDWALK_CONTINUE;
 }
 
@@ -1548,17 +1543,18 @@ void update_bgp_group_init(struct bgp *bgp)
 {
 	int afid;
 
-	AF_FOREACH(afid)
-	bgp->update_groups[afid] =
-		hash_create(updgrp_hash_key_make, updgrp_hash_cmp, NULL);
+	AF_FOREACH (afid)
+		bgp->update_groups[afid] =
+			hash_create(updgrp_hash_key_make,
+				    updgrp_hash_cmp,
+				    "BGP Update Group Hash");
 }
 
 void update_bgp_group_free(struct bgp *bgp)
 {
 	int afid;
 
-	AF_FOREACH(afid)
-	{
+	AF_FOREACH (afid) {
 		if (bgp->update_groups[afid]) {
 			hash_free(bgp->update_groups[afid]);
 			bgp->update_groups[afid] = NULL;
@@ -1736,8 +1732,7 @@ void update_group_walk(struct bgp *bgp, updgrp_walkcb cb, void *ctx)
 	afi_t afi;
 	safi_t safi;
 
-	FOREACH_AFI_SAFI(afi, safi)
-	{
+	FOREACH_AFI_SAFI (afi, safi) {
 		update_group_af_walk(bgp, afi, safi, cb, ctx);
 	}
 }
@@ -1759,8 +1754,7 @@ update_group_default_originate_route_map_walkcb(struct update_group *updgrp,
 	afi_t afi;
 	safi_t safi;
 
-	UPDGRP_FOREACH_SUBGRP(updgrp, subgrp)
-	{
+	UPDGRP_FOREACH_SUBGRP (updgrp, subgrp) {
 		peer = SUBGRP_PEER(subgrp);
 		afi = SUBGRP_AFI(subgrp);
 		safi = SUBGRP_SAFI(subgrp);
@@ -1820,8 +1814,7 @@ void peer_af_announce_route(struct peer_af *paf, int combine)
 		 */
 		all_pending = 1;
 
-		SUBGRP_FOREACH_PEER(subgrp, cur_paf)
-		{
+		SUBGRP_FOREACH_PEER (subgrp, cur_paf) {
 			if (cur_paf == paf)
 				continue;
 
@@ -1856,8 +1849,7 @@ void peer_af_announce_route(struct peer_af *paf, int combine)
 	 *
 	 * First stop refresh timers on all the other peers.
 	 */
-	SUBGRP_FOREACH_PEER(subgrp, cur_paf)
-	{
+	SUBGRP_FOREACH_PEER (subgrp, cur_paf) {
 		if (cur_paf == paf)
 			continue;
 
@@ -1880,18 +1872,16 @@ void subgroup_trigger_write(struct update_subgroup *subgrp)
 {
 	struct peer_af *paf;
 
-#if 0
-  if (bgp_debug_update(NULL, NULL, subgrp->update_group, 0))
-    zlog_debug("u%llu:s%llu scheduling write thread for peers",
-               subgrp->update_group->id, subgrp->id);
-#endif
+	/*
+	 * For each peer in the subgroup, schedule a job to pull packets from
+	 * the subgroup output queue into their own output queue. This action
+	 * will trigger a write job on the I/O thread.
+	 */
 	SUBGRP_FOREACH_PEER(subgrp, paf)
-	{
-		if (paf->peer->status == Established) {
-			BGP_PEER_WRITE_ON(paf->peer->t_write, bgp_write,
-					  paf->peer->fd, paf->peer);
-		}
-	}
+	if (paf->peer->status == Established)
+		thread_add_timer_msec(bm->master, bgp_generate_updgrp_packets,
+				      paf->peer, 0,
+				      &paf->peer->t_generate_updgrp_packets);
 }
 
 int update_group_clear_update_dbg(struct update_group *updgrp, void *arg)

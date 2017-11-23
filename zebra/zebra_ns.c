@@ -29,10 +29,11 @@
 #include "zebra_ns.h"
 #include "zebra_vrf.h"
 #include "zebra_memory.h"
+#include "zebra_vxlan.h"
 
 DEFINE_MTYPE(ZEBRA, ZEBRA_NS, "Zebra Name Space")
 
-struct zebra_ns *dzns;
+static struct zebra_ns *dzns;
 
 struct zebra_ns *zebra_ns_lookup(ns_id_t ns_id)
 {
@@ -48,6 +49,7 @@ int zebra_ns_enable(ns_id_t ns_id, void **info)
 #endif
 
 	zns->if_table = route_table_init();
+	zebra_vxlan_ns_init(zns);
 	kernel_init(zns);
 	interface_list(zns);
 	route_read(zns);
@@ -60,6 +62,7 @@ int zebra_ns_disable(ns_id_t ns_id, void **info)
 	struct zebra_ns *zns = (struct zebra_ns *)(*info);
 
 	route_table_finish(zns->if_table);
+	zebra_vxlan_ns_disable(zns);
 #if defined(HAVE_RTADV)
 	rtadv_terminate(zns);
 #endif

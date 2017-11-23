@@ -21,6 +21,8 @@
 
 #include <zebra.h>
 
+#ifdef SUNOS_5
+
 #include "if.h"
 #include "sockunion.h"
 #include "prefix.h"
@@ -168,8 +170,7 @@ calculate_lifc_len: /* must hold privileges to enter here */
 		       && (*(lifreq->lifr_name + normallen) != ':'))
 			normallen++;
 
-		ifp = if_get_by_name_len(lifreq->lifr_name, normallen,
-					 VRF_DEFAULT, 0);
+		ifp = if_get_by_name(lifreq->lifr_name, VRF_DEFAULT, 0);
 
 		if (lifreq->lifr_addr.ss_family == AF_INET)
 			ifp->flags |= IFF_IPV4;
@@ -226,9 +227,9 @@ static int if_get_index(struct interface *ifp)
 
 /* OK we got interface index. */
 #ifdef ifr_ifindex
-	ifp->ifindex = lifreq.lifr_ifindex;
+	if_set_index(ifp, lifreq.lifr_ifindex);
 #else
-	ifp->ifindex = lifreq.lifr_index;
+	if_set_index(ifp, lifreq.lifr_index);
 #endif
 	return ifp->ifindex;
 }
@@ -315,8 +316,7 @@ static int if_get_addr(struct interface *ifp, struct sockaddr *addr,
 				   (struct in_addr *)dest_pnt, label);
 	else if (af == AF_INET6)
 		connected_add_ipv6(ifp, flags, &SIN6(addr)->sin6_addr,
-				   prefixlen, (struct in6_addr *)dest_pnt,
-				   label);
+				   prefixlen, label);
 
 	return 0;
 }
@@ -358,3 +358,5 @@ struct connected *if_lookup_linklocal(struct interface *ifp)
 
 	return NULL;
 }
+
+#endif /* SUNOS_5 */

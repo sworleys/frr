@@ -26,6 +26,7 @@
 #include "vty.h"
 #include "vrf.h"
 #include "zclient.h"
+#include "ferr.h"
 
 #include "pim_igmp.h"
 #include "pim_upstream.h"
@@ -121,6 +122,9 @@ struct pim_interface {
 	uint32_t pim_dr_priority;	  /* config */
 	int pim_dr_num_nondrpri_neighbors; /* neighbors without dr_pri */
 
+	/* boundary prefix-list */
+	char *boundary_oil_plist;
+
 	int64_t pim_ifstat_start; /* start timestamp for stats */
 	uint32_t pim_ifstat_hello_sent;
 	uint32_t pim_ifstat_hello_sendfail;
@@ -182,8 +186,8 @@ int pim_if_t_override_msec(struct interface *ifp);
 
 struct in_addr pim_find_primary_addr(struct interface *ifp);
 
-int pim_if_igmp_join_add(struct interface *ifp, struct in_addr group_addr,
-			 struct in_addr source_addr);
+ferr_r pim_if_igmp_join_add(struct interface *ifp, struct in_addr group_addr,
+			    struct in_addr source_addr);
 int pim_if_igmp_join_del(struct interface *ifp, struct in_addr group_addr,
 			 struct in_addr source_addr);
 

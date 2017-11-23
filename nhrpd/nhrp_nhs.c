@@ -171,7 +171,7 @@ static int nhrp_reg_send_req(struct thread *t)
 
 	zb = zbuf_alloc(1400);
 	hdr = nhrp_packet_push(zb, NHRP_PACKET_REGISTRATION_REQUEST, &nifp->nbma, &if_ad->addr, dst_proto);
-	hdr->hop_count = 0;
+	hdr->hop_count = 1;
 	if (!(if_ad->flags & NHRP_IFF_REG_NO_UNIQUE))
 		hdr->flags |= htons(NHRP_FLAG_REGISTRATION_UNIQUE);
 
@@ -352,13 +352,13 @@ int nhrp_nhs_free(struct nhrp_nhs *nhs)
 
 void nhrp_nhs_terminate(void)
 {
+	struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
 	struct interface *ifp;
 	struct nhrp_interface *nifp;
 	struct nhrp_nhs *nhs, *tmp;
-	struct listnode *node;
 	afi_t afi;
 
-	for (ALL_LIST_ELEMENTS_RO(vrf_iflist (VRF_DEFAULT), node, ifp)) {
+	FOR_ALL_INTERFACES (vrf, ifp) {
 		nifp = ifp->info;
 		for (afi = 0; afi < AFI_MAX; afi++) {
 			list_for_each_entry_safe(nhs, tmp, &nifp->afi[afi].nhslist_head, nhslist_entry)

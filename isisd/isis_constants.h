@@ -73,7 +73,7 @@
 #define MAX_MIN_LSP_GEN_INTERVAL      120  /* RFC 4444 says 65535 */
 #define DEFAULT_MIN_LSP_GEN_INTERVAL  30
 
-#define MIN_LSP_TRANS_INTERVAL        5
+#define MIN_LSP_RETRANS_INTERVAL      5 /* Seconds */
 
 #define MIN_CSNP_INTERVAL             1
 #define MAX_CSNP_INTERVAL             600
@@ -166,10 +166,6 @@
 #define ISO_MTU(C)                                                             \
 	((if_is_broadcast((C)->interface)) ? (C->interface->mtu - LLC_LEN)     \
 					   : (C->interface->mtu))
-
-#ifndef ETH_ALEN
-#define ETH_ALEN 6
-#endif
 
 #define MAX_LLC_LEN 0x5ff
 #define ETHERTYPE_EXT_LLC 0x8870

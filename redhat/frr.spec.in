@@ -10,11 +10,9 @@
 
 #################### FRRouting (FRR) configure options #####################
 # with-feature options
-%{!?with_tcp_zebra:     %global  with_tcp_zebra     0 }
 %{!?with_pam:           %global  with_pam           0 }
 %{!?with_ospfclient:    %global  with_ospfclient    1 }
 %{!?with_ospfapi:       %global  with_ospfapi       1 }
-%{!?with_irdp:          %global  with_irdp          1 }
 %{!?with_rtadv:         %global  with_rtadv         1 }
 %{!?with_ldpd:          %global  with_ldpd          1 }
 %{!?with_nhrpd:         %global  with_nhrpd         1 }
@@ -28,6 +26,9 @@
 %{!?with_watchfrr:      %global  with_watchfrr      1 }
 %{!?with_bgp_vnc:       %global  with_bgp_vnc       0 }
 %{!?with_pimd:          %global  with_pimd          1 }
+%{!?with_cumulus:       %global  with_cumulus       1 }
+%{!?with_datacenter:    %global  with_datacenter    1 }
+%{!?with_oldvpn:        %global  with_oldvpn        1 }
 
 # path defines
 %define     _sysconfdir   /etc/frr
@@ -75,16 +76,7 @@
     %global  with_pimd  0
 %endif
 
-# if FPM is enabled, then enable tcp_zebra as well 
-#
-%if %{with_fpm}
-    %global with_tcp_zebra  1
-%endif
-
 # misc internal defines
-%{!?frr_uid:            %global  frr_uid            92 }
-%{!?frr_gid:            %global  frr_gid            92 }
-%{!?vty_gid:            %global  vty_gid            85 }
 
 %define     daemon_list zebra ripd ospfd bgpd isisd ripngd ospf6d
 
@@ -168,7 +160,8 @@ Requires(pre):      initscripts >= 5.60
 %endif
 Provides:           routingdaemon = %{version}-%{release}
 BuildRoot:          %{_tmppath}/%{name}-%{version}-root
-Obsoletes:          bird gated mrt zebra frr-sysvinit
+Obsoletes:          gated mrt zebra frr-sysvinit
+Conflicts:          bird
 
 %description
 FRRouting is a free software that manages TCP/IP based routing
@@ -227,14 +220,12 @@ developing OSPF-API and frr applications.
     --libexecdir=%{_libexecdir} \
     --localstatedir=%{_localstatedir} \
     --disable-werror \
+    --enable-irdp \
 %if !%{with_shared}
     --disable-shared \
 %endif
 %if %{with_multipath}
     --enable-multipath=%{with_multipath} \
-%endif
-%if %{with_tcp_zebra}
-    --enable-tcp-zebra \
 %endif
     --enable-vtysh \
 %if %{with_ospfclient}
@@ -246,11 +237,6 @@ developing OSPF-API and frr applications.
     --enable-ospfapi=yes \
 %else
     --enable-ospfapi=no \
-%endif
-%if %{with_irdp}
-    --enable-irdp=yes \
-%else
-    --enable-irdp=no \
 %endif
 %if %{with_rtadv}
     --enable-rtadv=yes \
@@ -311,7 +297,21 @@ developing OSPF-API and frr applications.
 %if "%{initsystem}" == "systemd"
     --enable-systemd=yes \
 %endif
-    --enable-poll=yes
+%if %{with_cumulus}
+    --enable-cumulus=yes \
+%else
+    --enable-cumulus=no \
+%endif
+%if %{with_datacenter}
+    --enable-datacenter=yes \
+%else
+    --enable-datacenter=no \
+%endif
+%if %{with_oldvpn}
+    --enable-oldvpn-commands=yes
+%else
+    --enable-oldvpn-commands=no
+%endif
 
 make %{?_smp_mflags} MAKEINFO="makeinfo --no-split"
 
@@ -331,19 +331,27 @@ make DESTDIR=%{buildroot} INSTALL="install -p" CP="cp -p" install
 # Remove this file, as it is uninstalled and causes errors when building on RH9
 rm -rf %{buildroot}/usr/share/info/dir
 
+# cumulus/support is inapplicable outside Cumulus Linux
+rm -rf %{buildroot}/usr/share/cumulus/support
+
 # Remove debian init script if it was installed
 rm -f %{buildroot}%{_sbindir}/frr
+
+# kill bogus libtool files for modules
+rm -f %{buildroot}%{_libdir}/frr/modules/*.la
 
 # install /etc sources
 %if "%{initsystem}" == "systemd"
 mkdir -p %{buildroot}%{_unitdir}
-install %{zeb_rh_src}/frr.service \
+install -m644 %{zeb_rh_src}/frr.service \
     %{buildroot}%{_unitdir}/frr.service
 install %{zeb_rh_src}/frr.init \
     %{buildroot}%{_sbindir}/frr
 %else
 mkdir -p %{buildroot}/etc/rc.d/init.d
 install %{zeb_rh_src}/frr.init \
+    %{buildroot}%{_sbindir}/frr
+ln -s %{_sbindir}/frr \
     %{buildroot}/etc/rc.d/init.d/frr
 %endif
 
@@ -358,17 +366,16 @@ install -d -m750  %{buildroot}/var/run/frr
 # add vty_group
 %if 0%{?vty_group:1}
 if getent group %vty_group > /dev/null ; then : ; else \
- /usr/sbin/groupadd -r -g %vty_gid %vty_group > /dev/null || : ; fi
+ /usr/sbin/groupadd -r %vty_group > /dev/null || : ; fi
 %endif
 
 # add frr user and group
 %if 0%{?frr_user:1}
-# Ensure that frr_gid gets correctly allocated
 if getent group %frr_user >/dev/null; then : ; else \
- /usr/sbin/groupadd -g %frr_gid %frr_user > /dev/null || : ; \
+ /usr/sbin/groupadd %frr_user > /dev/null || : ; \
 fi
 if getent passwd %frr_user >/dev/null ; then : ; else \
- /usr/sbin/useradd  -u %frr_uid -g %frr_gid \
+ /usr/sbin/useradd  -g %frr_user \
   -M -r -s /sbin/nologin -c "FRRouting suite" \
   -d %_localstatedir %frr_user 2> /dev/null || : ; \
 fi
@@ -426,6 +433,10 @@ done
 /sbin/chkconfig --add frr
 %endif
 
+# Fix bad path in previous config files
+#  Config files won't get replaced by default, so we do this ugly hack to fix it
+%__sed -i 's|/etc/init.d/|%{_sbindir}/|g' %{_sysconfdir}/daemons 2> /dev/null || true
+
 /sbin/install-info %{_infodir}/frr.info.gz %{_infodir}/dir
 
 # Create dummy files if they don't exist so basic functions can be used.
@@ -474,7 +485,7 @@ if [ "$1" -ge 1 ]; then
         ##
         ## Systemd Version
         ##
-        %systemd_postun frr.service
+        %systemd_postun_with_restart frr.service
     %else
         ##
         ## init.d Version
@@ -489,18 +500,14 @@ fi
     ##
     ## Systemd Version
     ##
-    if [ "$1" = "0" ]; then
-        for daemon in %all_daemons ; do
-            if [ x"${daemon}" != x"" ] ; then
-                %systemd_preun frr.service
-            fi
-        done
+    if [ $1 -eq 0 ] ; then
+        %systemd_preun frr.service
     fi
 %else
     ##
     ## init.d Version
     ##
-    if [ "$1" = "0" ]; then
+    if [ $1 -eq 0 ] ; then
         /etc/rc.d/init.d/frr stop  >/dev/null 2>&1
         /sbin/chkconfig --del frr
     fi
@@ -563,14 +570,16 @@ rm -rf %{buildroot}
 %{_libdir}/lib*.so.0
 %attr(755,root,root) %{_libdir}/lib*.so.0.*
 %endif
+%attr(755,root,root) %{_libdir}/frr/modules/zebra_irdp.so
 %{_bindir}/*
 %config(noreplace) /etc/frr/[!v]*.conf*
 %config(noreplace) %attr(750,%frr_user,%frr_user) /etc/frr/daemons
 %if "%{initsystem}" == "systemd"
-    %config %{_unitdir}/frr.service
+    %attr(644,root,root) %{_unitdir}/frr.service
     %{_sbindir}/frr
 %else
-    %config /etc/rc.d/init.d/frr
+    /etc/rc.d/init.d/frr
+    %{_sbindir}/frr
 %endif
 %config(noreplace) /etc/pam.d/frr
 %config(noreplace) %attr(640,root,root) /etc/logrotate.d/*
@@ -606,7 +615,11 @@ rm -rf %{buildroot}
 %endif
 
 %changelog
-* Mon Jun  5 2017 Martin Winter <mwinter@opensourcerouting.org> - %{version}
+* Fri Oct 20 2017 Martin Winter <mwinter@opensourcerouting.org> - %{version}
+- Fix script location for watchfrr restart functions in daemon config
+- Fix postun script to restart frr during upgrade
+
+* Mon Jun  5 2017 Martin Winter <mwinter@opensourcerouting.org>
 - added NHRP and EIGRP daemon
 
 * Mon Apr 17 2017 Martin Winter <mwinter@opensourcerouting.org>

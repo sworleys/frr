@@ -34,8 +34,8 @@
 # When using "vtysh" such a config file is also needed. It should be owned by
 # group "frrvty" and set to ug=rw,o= though. Check /etc/pam.d/frr, too.
 #
-watchfrr_enable=no
-watchfrr_options=("-Az" "-b_" "-r/etc/init.d/frr_restart_%s" "-s/etc/init.d/frr_start_%s" "-k/etc/init.d/frr_stop_%s")
+watchfrr_enable=yes
+watchfrr_options=("-az" "-b_" "-t 90" "-r /usr/lib/frr/frr_restart_%s" "-s /usr/lib/frr/frr_start_%s" "-k /usr/lib/frr/frr_stop_%s")
 #
 zebra=no
 bgpd=no
@@ -64,4 +64,9 @@ pimd_options=("-A 127.0.0.1")
 nhrpd_options=("-A 127.0.0.1")
 eigrpd_options=("-A 127.0.0.1")
 babeld_options=("-A 127.0.0.1")
+
+#
+# Allow the frr script to read in
+# config from frr.conf
+vtysh_enable=yes
 

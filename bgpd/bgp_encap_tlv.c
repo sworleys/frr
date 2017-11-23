@@ -22,6 +22,7 @@
 #include "memory.h"
 #include "prefix.h"
 #include "filter.h"
+#include "stream.h"
 
 #include "bgpd.h"
 #include "bgp_attr.h"
@@ -46,7 +47,7 @@ static struct bgp_attr_encap_subtlv *subtlv_encode_encap_l2tpv3_over_ip(
 	assert(total <= 0xff);
 
 	new = XCALLOC(MTYPE_ENCAP_TLV,
-		      sizeof(struct bgp_attr_encap_subtlv) - 1 + total);
+		      sizeof(struct bgp_attr_encap_subtlv) + total);
 	assert(new);
 	new->type = BGP_ENCAP_SUBTLV_TYPE_ENCAPSULATION;
 	new->length = total;
@@ -71,7 +72,7 @@ subtlv_encode_encap_gre(struct bgp_tea_subtlv_encap_gre_key *st)
 	assert(total <= 0xff);
 
 	new = XCALLOC(MTYPE_ENCAP_TLV,
-		      sizeof(struct bgp_attr_encap_subtlv) - 1 + total);
+		      sizeof(struct bgp_attr_encap_subtlv) + total);
 	assert(new);
 	new->type = BGP_ENCAP_SUBTLV_TYPE_ENCAPSULATION;
 	new->length = total;
@@ -94,7 +95,7 @@ subtlv_encode_encap_pbb(struct bgp_tea_subtlv_encap_pbb *st)
 	assert(total <= 0xff);
 
 	new = XCALLOC(MTYPE_ENCAP_TLV,
-		      sizeof(struct bgp_attr_encap_subtlv) - 1 + total);
+		      sizeof(struct bgp_attr_encap_subtlv) + total);
 	assert(new);
 	new->type = BGP_ENCAP_SUBTLV_TYPE_ENCAPSULATION;
 	new->length = total;
@@ -127,7 +128,7 @@ subtlv_encode_proto_type(struct bgp_tea_subtlv_proto_type *st)
 	assert(total <= 0xff);
 
 	new = XCALLOC(MTYPE_ENCAP_TLV,
-		      sizeof(struct bgp_attr_encap_subtlv) - 1 + total);
+		      sizeof(struct bgp_attr_encap_subtlv) + total);
 	assert(new);
 	new->type = BGP_ENCAP_SUBTLV_TYPE_PROTO_TYPE;
 	new->length = total;
@@ -149,7 +150,7 @@ subtlv_encode_color(struct bgp_tea_subtlv_color *st)
 	assert(total <= 0xff);
 
 	new = XCALLOC(MTYPE_ENCAP_TLV,
-		      sizeof(struct bgp_attr_encap_subtlv) - 1 + total);
+		      sizeof(struct bgp_attr_encap_subtlv) + total);
 	assert(new);
 	new->type = BGP_ENCAP_SUBTLV_TYPE_COLOR;
 	new->length = total;
@@ -181,7 +182,7 @@ subtlv_encode_ipsec_ta(struct bgp_tea_subtlv_ipsec_ta *st)
 	assert(total <= 0xff);
 
 	new = XCALLOC(MTYPE_ENCAP_TLV,
-		      sizeof(struct bgp_attr_encap_subtlv) - 1 + total);
+		      sizeof(struct bgp_attr_encap_subtlv) + total);
 	assert(new);
 	new->type = BGP_ENCAP_SUBTLV_TYPE_IPSEC_TA;
 	new->length = total;
@@ -205,7 +206,7 @@ subtlv_encode_remote_endpoint(struct bgp_tea_subtlv_remote_endpoint *st)
 	assert(total <= 0xff);
 
 	new = XCALLOC(MTYPE_ENCAP_TLV,
-		      sizeof(struct bgp_attr_encap_subtlv) - 1 + total);
+		      sizeof(struct bgp_attr_encap_subtlv) + total);
 	assert(new);
 	new->type = BGP_ENCAP_SUBTLV_TYPE_REMOTE_ENDPOINT;
 	new->length = total;
@@ -403,7 +404,7 @@ void bgp_encap_type_vxlan_to_tlv(
 	if (attr->encap_subtlvs)
 		XFREE(MTYPE_ENCAP_TLV, attr->encap_subtlvs);
 	tlv = XCALLOC(MTYPE_ENCAP_TLV,
-		      sizeof(struct bgp_attr_encap_subtlv) - 1 + 12);
+		      sizeof(struct bgp_attr_encap_subtlv) + 12);
 	tlv->type = 1; /* encapsulation type */
 	tlv->length = 12;
 	if (bet->vnid) {
@@ -470,8 +471,7 @@ static int subtlv_decode_encap_l2tpv3_over_ip(
 		return -1;
 	}
 
-	st->sessionid = (subtlv->value[0] << 24) | (subtlv->value[1] << 16)
-			| (subtlv->value[2] << 8) | subtlv->value[3];
+	ptr_get_be32(subtlv->value, &st->sessionid);
 	st->cookie_length = subtlv->length - 4;
 	if (st->cookie_length > sizeof(st->cookie)) {
 		zlog_debug("%s, subtlv length %d is greater than %d", __func__,
@@ -491,8 +491,7 @@ static int subtlv_decode_encap_gre(struct bgp_attr_encap_subtlv *subtlv,
 			   subtlv->length);
 		return -1;
 	}
-	st->gre_key = (subtlv->value[0] << 24) | (subtlv->value[1] << 16)
-		      | (subtlv->value[2] << 8) | subtlv->value[3];
+	ptr_get_be32(subtlv->value, &st->gre_key);
 	return 0;
 }
 
@@ -545,8 +544,7 @@ static int subtlv_decode_color(struct bgp_attr_encap_subtlv *subtlv,
 			   __func__);
 		return -1;
 	}
-	st->color = (subtlv->value[4] << 24) | (subtlv->value[5] << 16)
-		    | (subtlv->value[6] << 8) | subtlv->value[7];
+	ptr_get_be32(subtlv->value + 4, &st->color);
 	return 0;
 }
 
@@ -580,16 +578,13 @@ subtlv_decode_remote_endpoint(struct bgp_attr_encap_subtlv *subtlv,
 	}
 	if (subtlv->length == 8) {
 		st->family = AF_INET;
-		st->ip_address.v4.s_addr =
-			((subtlv->value[0] << 24) | (subtlv->value[1] << 16)
-			 | (subtlv->value[2] << 8) | subtlv->value[3]);
+		memcpy(&st->ip_address.v4.s_addr, subtlv->value, 4);
 	} else {
 		st->family = AF_INET6;
 		memcpy(&(st->ip_address.v6.s6_addr), subtlv->value, 16);
 	}
 	i = subtlv->length - 4;
-	st->as4 = ((subtlv->value[i] << 24) | (subtlv->value[i + 1] << 16)
-		   | (subtlv->value[i + 2] << 8) | subtlv->value[i + 3]);
+	ptr_get_be32(subtlv->value + i, &st->as4);
 	return 0;
 }
 

@@ -41,6 +41,9 @@ struct host {
 	/* Host name of this router. */
 	char *name;
 
+	/* Domainname of this router */
+	char *domainname;
+
 	/* Password for vty interface. */
 	char *password;
 	char *password_encrypt;
@@ -133,6 +136,7 @@ enum node_type {
 	FORWARDING_NODE,	/* IP forwarding node. */
 	PROTOCOL_NODE,		/* protocol filtering node */
 	MPLS_NODE,		/* MPLS config node */
+	PW_NODE,		/* Pseudowire config node */
 	VTY_NODE,		/* Vty node. */
 	LINK_PARAMS_NODE,       /* Link-parameters node */
 	BGP_EVPN_VNI_NODE,      /* BGP EVPN VNI */
@@ -353,6 +357,7 @@ struct cmd_node {
 #define OSPF_RI_STR "OSPF Router Information specific commands\n"
 #define PCE_STR "PCE Router Information specific commands\n"
 #define MPLS_STR "MPLS information\n"
+#define WATCHFRR_STR "watchfrr information\n"
 
 #define CONF_BACKUP_EXT ".sav"
 
@@ -375,6 +380,13 @@ extern void uninstall_element(enum node_type, struct cmd_element *);
    string with a space between each element (allocated using
    XMALLOC(MTYPE_TMP)).  Returns NULL if shift >= argc. */
 extern char *argv_concat(struct cmd_token **argv, int argc, int shift);
+
+/*
+ * It is preferred that you set the index initial value
+ * to a 0.  This way in the future if you modify the
+ * cli then there is no need to modify the initial
+ * value of the index
+ */
 extern int argv_find(struct cmd_token **argv, int argc, const char *text,
 		     int *index);
 
@@ -397,7 +409,10 @@ extern void cmd_terminate(void);
 extern void cmd_exit(struct vty *vty);
 extern int cmd_list_cmds(struct vty *vty, int do_permute);
 
+extern int cmd_domainname_set(const char *domainname);
 extern int cmd_hostname_set(const char *hostname);
+extern const char *cmd_hostname_get(void);
+extern const char *cmd_domainname_get(void);
 
 /* NOT safe for general use; call this only if DEV_BUILD! */
 extern void grammar_sandbox_init(void);

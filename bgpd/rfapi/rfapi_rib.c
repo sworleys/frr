@@ -510,13 +510,12 @@ void rfapiRibClear(struct rfapi_descriptor *rfd)
 				 */
 				if (pn->info) {
 					if (pn->info != (void *)1) {
-						list_delete(
-							(struct list
-								 *)(pn->info));
+						list_delete_and_null(
+							(struct list **)(&pn->info));
 					}
 					pn->info = NULL;
-					route_unlock_node(
-						pn); /* linklist or 1 deleted */
+					/* linklist or 1 deleted */
+					route_unlock_node(pn);
 				}
 			}
 		}
@@ -687,7 +686,7 @@ static void rfapiRibBi2Ri(struct bgp_info *bi, struct rfapi_info *ri,
 		/* copy from RD already stored in bi, so we don't need it_node
 		 */
 		memcpy(&vo->v.l2addr.macaddr, bi->extra->vnc.import.rd.val + 2,
-		       ETHER_ADDR_LEN);
+		       ETH_ALEN);
 
 		if (bi->attr) {
 			(void)rfapiEcommunityGetLNI(
@@ -1435,7 +1434,7 @@ callback:
 		}
 
 		delete_list->del = (void (*)(void *))rfapi_info_free;
-		list_delete(delete_list);
+		list_delete_and_null(&delete_list);
 	}
 
 	RFAPI_RIB_CHECK_COUNTS(0, 0);
@@ -1450,7 +1449,7 @@ callback:
 		route_unlock_node(pn);
 	}
 	if (lPendCost) {
-		list_delete(lPendCost);
+		list_delete_and_null(&lPendCost);
 		pn->info = NULL;
 		route_unlock_node(pn);
 	}
@@ -1634,7 +1633,7 @@ void rfapiRibUpdatePendingNode(
 	 */
 	if (pn->info) {
 		if (pn->info != (void *)1) {
-			list_delete((struct list *)(pn->info));
+			list_delete_and_null((struct list **)(&pn->info));
 		}
 		pn->info = NULL;
 		route_unlock_node(pn); /* linklist or 1 deleted */
@@ -1669,7 +1668,7 @@ void rfapiRibUpdatePendingNode(
 
 			struct prefix pfx_vn;
 
-			rfapiRaddr2Qprefix(&rfd->vn_addr, &pfx_vn);
+			assert(!rfapiRaddr2Qprefix(&rfd->vn_addr, &pfx_vn));
 			if (prefix_same(&pfx_vn, &pfx_nh))
 				continue;
 		}
@@ -2236,9 +2235,12 @@ void rfapiRibShowResponsesSummary(void *stream)
 	struct rfapi_descriptor *rfd;
 	struct listnode *node;
 
-
 	if (rfapiStream2Vty(stream, &fp, &vty, &out, &vty_newline) == 0)
 		return;
+	if (!bgp) {
+		fp(out, "Unable to find default BGP instance\n");
+		return;
+	}
 
 	fp(out, "%-24s ", "Responses: (Prefixes)");
 	fp(out, "%-8s %-8u ", "Active:", bgp->rfapi->rib_prefix_count_total);
@@ -2388,6 +2390,11 @@ void rfapiRibShowResponses(void *stream, struct prefix *pfx_match,
 
 	if (rfapiStream2Vty(stream, &fp, &vty, &out, &vty_newline) == 0)
 		return;
+	if (!bgp) {
+		fp(out, "Unable to find default BGP instance\n");
+		return;
+	}
+
 	/*
 	 * loop over NVEs
 	 */

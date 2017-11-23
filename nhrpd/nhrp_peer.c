@@ -182,7 +182,9 @@ struct nhrp_peer *nhrp_peer_get(struct interface *ifp, const union sockunion *re
 	struct nhrp_vc *vc;
 
 	if (!nifp->peer_hash) {
-		nifp->peer_hash = hash_create(nhrp_peer_key, nhrp_peer_cmp, NULL);
+		nifp->peer_hash = hash_create(nhrp_peer_key,
+					      nhrp_peer_cmp,
+					      "NHRP Peer Hash");
 		if (!nifp->peer_hash) return NULL;
 	}
 
@@ -598,6 +600,10 @@ static struct {
 	const char *name;
 	void (*handler)(struct nhrp_packet_parser *);
 } packet_types[] = {
+	[0] = {
+		.type = PACKET_UNKNOWN,
+		.name = "UNKNOWN",
+	},
 	[NHRP_PACKET_RESOLUTION_REQUEST] = {
 		.type = PACKET_REQUEST,
 		.name = "Resolution-Request",
@@ -797,7 +803,7 @@ void nhrp_peer_recv(struct nhrp_peer *p, struct zbuf *zb)
 
 	nbma_afi = htons(hdr->afnum);
 	proto_afi = proto2afi(htons(hdr->protocol_type));
-	if (hdr->type > ZEBRA_NUM_OF(packet_types) ||
+	if (hdr->type > NHRP_PACKET_MAX ||
 	    hdr->version != NHRP_VERSION_RFC2332 ||
 	    nbma_afi >= AFI_MAX || proto_afi == AF_UNSPEC ||
 	    packet_types[hdr->type].type == PACKET_UNKNOWN ||

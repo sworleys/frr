@@ -271,7 +271,7 @@ static int bgp_capability_mp(struct peer *peer, struct capability_header *hdr)
 }
 
 static void bgp_capability_orf_not_support(struct peer *peer, iana_afi_t afi,
-					   safi_t safi, u_char type,
+					   iana_safi_t safi, u_char type,
 					   u_char mode)
 {
 	if (bgp_debug_neighbor_events(peer))
@@ -298,7 +298,8 @@ static int bgp_capability_orf_entry(struct peer *peer,
 	u_char num;
 	iana_afi_t pkt_afi;
 	afi_t afi;
-	safi_t pkt_safi, safi;
+	iana_safi_t pkt_safi;
+	safi_t safi;
 	u_char type;
 	u_char mode;
 	u_int16_t sm_cap = 0; /* capability send-mode receive */
@@ -466,7 +467,7 @@ static int bgp_capability_restart(struct peer *peer,
 		afi_t afi;
 		safi_t safi;
 		iana_afi_t pkt_afi = stream_getw(s);
-		safi_t pkt_safi = stream_getc(s);
+		iana_safi_t pkt_safi = stream_getc(s);
 		u_char flag = stream_getc(s);
 
 		/* Convert AFI, SAFI to internal values, check. */
@@ -543,7 +544,7 @@ static int bgp_capability_addpath(struct peer *peer,
 		afi_t afi;
 		safi_t safi;
 		iana_afi_t pkt_afi = stream_getw(s);
-		safi_t pkt_safi = stream_getc(s);
+		iana_safi_t pkt_safi = stream_getc(s);
 		u_char send_receive = stream_getc(s);
 
 		if (bgp_debug_neighbor_events(peer))
@@ -600,7 +601,8 @@ static int bgp_capability_enhe(struct peer *peer, struct capability_header *hdr)
 	while (stream_get_getp(s) + 6 <= end) {
 		iana_afi_t pkt_afi = stream_getw(s);
 		afi_t afi;
-		safi_t safi, pkt_safi = stream_getw(s);
+		iana_safi_t pkt_safi = stream_getw(s);
+		safi_t safi;
 		iana_afi_t pkt_nh_afi = stream_getw(s);
 		afi_t nh_afi;
 
@@ -1199,7 +1201,7 @@ static void bgp_open_capability_orf(struct stream *s, struct peer *peer,
 	unsigned long numberp;
 	int number_of_orfs = 0;
 	iana_afi_t pkt_afi;
-	safi_t pkt_safi;
+	iana_safi_t pkt_safi;
 
 	/* Convert AFI, SAFI to values for packet. */
 	bgp_map_afi_safi_int2iana(afi, safi, &pkt_afi, &pkt_safi);
@@ -1264,11 +1266,11 @@ void bgp_open_capability(struct stream *s, struct peer *peer)
 	unsigned long cp, capp, rcapp;
 	iana_afi_t pkt_afi;
 	afi_t afi;
-	safi_t safi, pkt_safi;
+	safi_t safi;
+	iana_safi_t pkt_safi;
 	as_t local_as;
 	u_int32_t restart_time;
 	u_char afi_safi_count = 0;
-	struct utsname names;
 	int adv_addpath_tx = 0;
 
 	/* Remember current pointer for Opt Parm Len. */
@@ -1438,8 +1440,7 @@ void bgp_open_capability(struct stream *s, struct peer *peer)
 	}
 
 	/* Hostname capability */
-	uname(&names);
-	if (names.nodename[0] != '\0') {
+	if (cmd_hostname_get()) {
 		SET_FLAG(peer->cap, PEER_CAP_HOSTNAME_ADV);
 		stream_putc(s, BGP_OPEN_OPT_CAP);
 		rcapp = stream_get_endp(s); /* Ptr to length placeholder */
@@ -1447,26 +1448,21 @@ void bgp_open_capability(struct stream *s, struct peer *peer)
 		stream_putc(s, CAPABILITY_CODE_FQDN);
 		capp = stream_get_endp(s);
 		stream_putc(s, 0); /* dummy len for now */
-		len = strlen(names.nodename);
+		len = strlen(cmd_hostname_get());
 		if (len > BGP_MAX_HOSTNAME)
 			len = BGP_MAX_HOSTNAME;
 
 		stream_putc(s, len);
-		stream_put(s, names.nodename, len);
-#ifdef HAVE_STRUCT_UTSNAME_DOMAINNAME
-		if ((names.domainname[0] != '\0')
-		    && (strcmp(names.domainname, "(none)") != 0)) {
-			len = strlen(names.domainname);
+		stream_put(s, cmd_hostname_get(), len);
+		if (cmd_domainname_get()) {
+			len = strlen(cmd_domainname_get());
 			if (len > BGP_MAX_HOSTNAME)
 				len = BGP_MAX_HOSTNAME;
 
 			stream_putc(s, len);
-			stream_put(s, names.domainname, len);
+			stream_put(s, cmd_domainname_get(), len);
 		} else
-#endif
-		{
 			stream_putc(s, 0); /* 0 length */
-		}
 
 		/* Set the lengths straight */
 		len = stream_get_endp(s) - rcapp - 1;
@@ -1475,14 +1471,10 @@ void bgp_open_capability(struct stream *s, struct peer *peer)
 		stream_putc_at(s, capp, len);
 
 		if (bgp_debug_neighbor_events(peer))
-#ifdef HAVE_STRUCT_UTSNAME_DOMAINNAME
 			zlog_debug(
 				"%s Sending hostname cap with hn = %s, dn = %s",
-				peer->host, names.nodename, names.domainname);
-#else
-			zlog_debug("%s Sending hostname cap with hn = %s",
-				   peer->host, names.nodename);
-#endif
+				peer->host, cmd_hostname_get(),
+				cmd_domainname_get());
 	}
 
 	/* Sending base graceful-restart capability irrespective of the config

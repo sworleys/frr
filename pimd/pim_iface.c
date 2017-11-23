@@ -27,6 +27,7 @@
 #include "linklist.h"
 #include "plist.h"
 #include "hash.h"
+#include "ferr.h"
 
 #include "pimd.h"
 #include "pim_instance.h"
@@ -70,19 +71,19 @@ static void *if_list_clean(struct pim_interface *pim_ifp)
 	struct pim_ifchannel *ch;
 
 	if (pim_ifp->igmp_join_list)
-		list_delete(pim_ifp->igmp_join_list);
+		list_delete_and_null(&pim_ifp->igmp_join_list);
 
 	if (pim_ifp->igmp_socket_list)
-		list_delete(pim_ifp->igmp_socket_list);
+		list_delete_and_null(&pim_ifp->igmp_socket_list);
 
 	if (pim_ifp->pim_neighbor_list)
-		list_delete(pim_ifp->pim_neighbor_list);
+		list_delete_and_null(&pim_ifp->pim_neighbor_list);
 
 	if (pim_ifp->upstream_switch_list)
-		list_delete(pim_ifp->upstream_switch_list);
+		list_delete_and_null(&pim_ifp->upstream_switch_list);
 
 	if (pim_ifp->sec_addr_list)
-		list_delete(pim_ifp->sec_addr_list);
+		list_delete_and_null(&pim_ifp->sec_addr_list);
 
 	while ((ch = RB_ROOT(pim_ifchannel_rb,
 			     &pim_ifp->ifchannel_rb)) != NULL)
@@ -240,10 +241,13 @@ void pim_if_delete(struct interface *ifp)
 
 	pim_if_del_vif(ifp);
 
-	list_delete(pim_ifp->igmp_socket_list);
-	list_delete(pim_ifp->pim_neighbor_list);
-	list_delete(pim_ifp->upstream_switch_list);
-	list_delete(pim_ifp->sec_addr_list);
+	list_delete_and_null(&pim_ifp->igmp_socket_list);
+	list_delete_and_null(&pim_ifp->pim_neighbor_list);
+	list_delete_and_null(&pim_ifp->upstream_switch_list);
+	list_delete_and_null(&pim_ifp->sec_addr_list);
+
+	if (pim_ifp->boundary_oil_plist)
+		XFREE(MTYPE_PIM_INTERFACE, pim_ifp->boundary_oil_plist);
 
 	while ((ch = RB_ROOT(pim_ifchannel_rb,
 			     &pim_ifp->ifchannel_rb)) != NULL)
@@ -262,7 +266,7 @@ void pim_if_update_could_assert(struct interface *ifp)
 	pim_ifp = ifp->info;
 	zassert(pim_ifp);
 
-	RB_FOREACH(ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb) {
+	RB_FOREACH (ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb) {
 		pim_ifchannel_update_could_assert(ch);
 	}
 }
@@ -275,7 +279,7 @@ static void pim_if_update_my_assert_metric(struct interface *ifp)
 	pim_ifp = ifp->info;
 	zassert(pim_ifp);
 
-	RB_FOREACH(ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb) {
+	RB_FOREACH (ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb) {
 		pim_ifchannel_update_my_assert_metric(ch);
 	}
 }
@@ -1019,10 +1023,9 @@ int pim_if_del_vif(struct interface *ifp)
 struct interface *pim_if_find_by_vif_index(struct pim_instance *pim,
 					   ifindex_t vif_index)
 {
-	struct listnode *ifnode;
 	struct interface *ifp;
 
-	for (ALL_LIST_ELEMENTS_RO(vrf_iflist(pim->vrf_id), ifnode, ifp)) {
+	FOR_ALL_INTERFACES (pim->vrf, ifp) {
 		if (ifp->info) {
 			struct pim_interface *pim_ifp;
 			pim_ifp = ifp->info;
@@ -1270,7 +1273,7 @@ static struct igmp_join *igmp_join_new(struct interface *ifp,
 	return ij;
 }
 
-int pim_if_igmp_join_add(struct interface *ifp, struct in_addr group_addr,
+ferr_r pim_if_igmp_join_add(struct interface *ifp, struct in_addr group_addr,
 			 struct in_addr source_addr)
 {
 	struct pim_interface *pim_ifp;
@@ -1278,47 +1281,30 @@ int pim_if_igmp_join_add(struct interface *ifp, struct in_addr group_addr,
 
 	pim_ifp = ifp->info;
 	if (!pim_ifp) {
-		zlog_warn("%s: multicast not enabled on interface %s",
-			  __PRETTY_FUNCTION__, ifp->name);
-		return -1;
+		return ferr_cfg_invalid("multicast not enabled on interface %s",
+					ifp->name);
 	}
 
 	if (!pim_ifp->igmp_join_list) {
 		pim_ifp->igmp_join_list = list_new();
 		if (!pim_ifp->igmp_join_list) {
-			zlog_err("%s %s: failure: igmp_join_list=list_new()",
-				 __FILE__, __PRETTY_FUNCTION__);
-			return -2;
+			return ferr_cfg_invalid("Insufficient memory");
 		}
 		pim_ifp->igmp_join_list->del = (void (*)(void *))igmp_join_free;
 	}
 
 	ij = igmp_join_find(pim_ifp->igmp_join_list, group_addr, source_addr);
+
+	/* This interface has already been configured to join this IGMP group
+	 */
 	if (ij) {
-		char group_str[INET_ADDRSTRLEN];
-		char source_str[INET_ADDRSTRLEN];
-		pim_inet4_dump("<grp?>", group_addr, group_str,
-			       sizeof(group_str));
-		pim_inet4_dump("<src?>", source_addr, source_str,
-			       sizeof(source_str));
-		zlog_warn(
-			"%s: can't re-join existing IGMP group %s source %s on interface %s",
-			__PRETTY_FUNCTION__, group_str, source_str, ifp->name);
-		return -3;
+		return ferr_ok();
 	}
 
 	ij = igmp_join_new(ifp, group_addr, source_addr);
 	if (!ij) {
-		char group_str[INET_ADDRSTRLEN];
-		char source_str[INET_ADDRSTRLEN];
-		pim_inet4_dump("<grp?>", group_addr, group_str,
-			       sizeof(group_str));
-		pim_inet4_dump("<src?>", source_addr, source_str,
-			       sizeof(source_str));
-		zlog_warn(
-			"%s: igmp_join_new() failure for IGMP group %s source %s on interface %s",
-			__PRETTY_FUNCTION__, group_str, source_str, ifp->name);
-		return -4;
+		return ferr_cfg_invalid(
+			"Failure to create new join data structure, see log file for more information");
 	}
 
 	if (PIM_DEBUG_IGMP_EVENTS) {
@@ -1333,7 +1319,7 @@ int pim_if_igmp_join_add(struct interface *ifp, struct in_addr group_addr,
 			__PRETTY_FUNCTION__, source_str, group_str, ifp->name);
 	}
 
-	return 0;
+	return ferr_ok();
 }
 
 
@@ -1386,7 +1372,7 @@ int pim_if_igmp_join_del(struct interface *ifp, struct in_addr group_addr,
 	listnode_delete(pim_ifp->igmp_join_list, ij);
 	igmp_join_free(ij);
 	if (listcount(pim_ifp->igmp_join_list) < 1) {
-		list_delete(pim_ifp->igmp_join_list);
+		list_delete_and_null(&pim_ifp->igmp_join_list);
 		pim_ifp->igmp_join_list = 0;
 	}
 
@@ -1437,7 +1423,7 @@ void pim_if_assert_on_neighbor_down(struct interface *ifp,
 	pim_ifp = ifp->info;
 	zassert(pim_ifp);
 
-	RB_FOREACH(ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb) {
+	RB_FOREACH (ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb) {
 		/* Is (S,G,I) assert loser ? */
 		if (ch->ifassert_state != PIM_IFASSERT_I_AM_LOSER)
 			continue;
@@ -1454,13 +1440,13 @@ void pim_if_update_join_desired(struct pim_interface *pim_ifp)
 	struct pim_ifchannel *ch;
 
 	/* clear off flag from interface's upstreams */
-	RB_FOREACH(ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb) {
+	RB_FOREACH (ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb) {
 		PIM_UPSTREAM_FLAG_UNSET_DR_JOIN_DESIRED_UPDATED(
 			ch->upstream->flags);
 	}
 
 	/* scan per-interface (S,G,I) state on this I interface */
-	RB_FOREACH(ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb) {
+	RB_FOREACH (ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb) {
 		struct pim_upstream *up = ch->upstream;
 
 		if (PIM_UPSTREAM_FLAG_TEST_DR_JOIN_DESIRED_UPDATED(up->flags))
@@ -1481,7 +1467,7 @@ void pim_if_update_assert_tracking_desired(struct interface *ifp)
 	if (!pim_ifp)
 		return;
 
-	RB_FOREACH(ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb) {
+	RB_FOREACH (ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb) {
 		pim_ifchannel_update_assert_tracking_desired(ch);
 	}
 }
@@ -1493,17 +1479,16 @@ void pim_if_update_assert_tracking_desired(struct interface *ifp)
  */
 void pim_if_create_pimreg(struct pim_instance *pim)
 {
-	char pimreg_name[100];
+	char pimreg_name[INTERFACE_NAMSIZ];
 
 	if (!pim->regiface) {
 		if (pim->vrf_id == VRF_DEFAULT)
-			strcpy(pimreg_name, "pimreg");
+			strlcpy(pimreg_name, "pimreg", sizeof(pimreg_name));
 		else
-			sprintf(pimreg_name, "pimreg%d",
-				pim->vrf->data.l.table_id);
+			snprintf(pimreg_name, sizeof(pimreg_name), "pimreg%u",
+				 pim->vrf->data.l.table_id);
 
-		pim->regiface = if_create(pimreg_name, strlen(pimreg_name),
-					  pim->vrf_id);
+		pim->regiface = if_create(pimreg_name, pim->vrf_id);
 		pim->regiface->ifindex = PIM_OIF_PIM_REGISTER_VIF;
 
 		pim_if_new(pim->regiface, 0, 0);
@@ -1548,8 +1533,7 @@ int pim_if_is_vrf_device(struct interface *ifp)
 {
 	struct vrf *vrf;
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	{
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
 		if (strncmp(ifp->name, vrf->name, strlen(ifp->name)) == 0)
 			return 1;
 	}
@@ -1562,7 +1546,7 @@ int pim_if_ifchannel_count(struct pim_interface *pim_ifp)
 	struct pim_ifchannel *ch;
 	int count = 0;
 
-	RB_FOREACH(ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb) {
+	RB_FOREACH (ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb) {
 		count++;
 	}
 

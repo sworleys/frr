@@ -44,7 +44,6 @@ enum pim_spt_switchover {
 
 /* Per VRF PIM DB */
 struct pim_instance {
-	afi_t afi;
 	vrf_id_t vrf_id;
 	struct vrf *vrf;
 
@@ -77,7 +76,11 @@ struct pim_instance {
 	struct hash *upstream_hash;
 	struct timer_wheel *upstream_sg_wheel;
 
+	/*
+	 * RP information
+	 */
 	struct list *rp_list;
+	struct route_table *rp_table;
 
 	int iface_vif_index[MAXVIFS];
 

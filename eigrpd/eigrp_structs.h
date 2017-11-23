@@ -59,7 +59,7 @@ struct eigrp_master {
 
 struct eigrp_metrics {
 	u_int32_t delay;
-	u_int32_t bandwith;
+	u_int32_t bandwidth;
 	unsigned char mtu[3];
 	u_char hop_count;
 	u_char reliability;
@@ -100,7 +100,7 @@ struct eigrp {
 
 	struct route_table *networks; /* EIGRP config networks. */
 
-	struct list *topology_table;
+	struct route_table *topology_table;
 
 	uint64_t serno; /* Global serial number counter for topology entry
 			   changes*/
@@ -135,10 +135,32 @@ struct eigrp {
 	QOBJ_FIELDS
 };
 DECLARE_QOBJ_TYPE(eigrp)
-//------------------------------------------------------------------------------------------------------------------------------------------
+
+struct eigrp_if_params {
+	u_char passive_interface;
+	u_int32_t v_hello;
+	u_int16_t v_wait;
+	u_char type;      /* type of interface */
+	u_int32_t bandwidth;
+	u_int32_t delay;
+	u_char reliability;
+	u_char load;
+
+	char *auth_keychain; /* Associated keychain with interface*/
+	int auth_type; /* EIGRP authentication type */
+};
+
+enum { MEMBER_ALLROUTERS = 0,
+       MEMBER_MAX,
+};
 
 /*EIGRP interface structure*/
 struct eigrp_interface {
+	struct eigrp_if_params params;
+
+	/*multicast group refcnts */
+	bool member_allrouters;
+	
 	/* This interface's parent eigrp instance. */
 	struct eigrp *eigrp;
 
@@ -150,8 +172,6 @@ struct eigrp_interface {
 
 	/* To which multicast groups do we currently belong? */
 
-	/* Configured varables. */
-	struct eigrp_if_params *params;
 
 	u_char multicast_memberships;
 
@@ -195,39 +215,6 @@ struct eigrp_interface {
 	/* Route-map. */
 	struct route_map *routemap[EIGRP_FILTER_MAX];
 };
-
-struct eigrp_if_params {
-	DECLARE_IF_PARAM(u_char, passive_interface); /* EIGRP Interface is
-							passive: no sending or
-							receiving (no need to
-							join multicast groups)
-							*/
-	DECLARE_IF_PARAM(u_int32_t, v_hello);	/* Hello Interval */
-	DECLARE_IF_PARAM(u_int16_t, v_wait); /* Router Hold Time Interval */
-	DECLARE_IF_PARAM(u_char, type);      /* type of interface */
-	DECLARE_IF_PARAM(u_int32_t, bandwidth);
-	DECLARE_IF_PARAM(u_int32_t, delay);
-	DECLARE_IF_PARAM(u_char, reliability);
-	DECLARE_IF_PARAM(u_char, load);
-
-	DECLARE_IF_PARAM(char *,
-			 auth_keychain); /* Associated keychain with interface*/
-	DECLARE_IF_PARAM(int, auth_type); /* EIGRP authentication type */
-};
-
-enum { MEMBER_ALLROUTERS = 0,
-       MEMBER_MAX,
-};
-
-struct eigrp_if_info {
-	struct eigrp_if_params *def_params;
-	struct route_table *params;
-	struct route_table *eifs;
-	unsigned int
-		membership_counts[MEMBER_MAX]; /* multicast group refcnts */
-};
-
-//------------------------------------------------------------------------------------------------------------------------------------------
 
 /* Determines if it is first or last packet
  * when packet consists of multiple packet
@@ -311,6 +298,8 @@ struct eigrp_packet {
 
 	/* EIGRP packet length. */
 	u_int16_t length;
+
+	struct eigrp_neighbor *nbr;
 };
 
 struct eigrp_fifo {
@@ -467,10 +456,7 @@ struct eigrp_prefix_entry {
 	u_char af;	 // address family
 	u_char req_action; // required action
 
-	struct prefix_ipv4
-		*destination_ipv4; // pointer to struct with ipv4 address
-	struct prefix_ipv6
-		*destination_ipv6; // pointer to struct with ipv6 address
+	struct prefix *destination;
 
 	// If network type is REMOTE_EXTERNAL, pointer will have reference to
 	// its external TLV
@@ -481,7 +467,7 @@ struct eigrp_prefix_entry {
 };
 
 /* EIGRP Topology table record structure */
-struct eigrp_neighbor_entry {
+struct eigrp_nexthop_entry {
 	struct eigrp_prefix_entry *prefix;
 	u_int32_t reported_distance; // distance reported by neighbor
 	u_int32_t distance; // sum of reported distance and link cost to
@@ -497,6 +483,11 @@ struct eigrp_neighbor_entry {
 };
 
 //---------------------------------------------------------------------------------------------------------------------------------------------
+typedef enum {
+	EIGRP_CONNECTED,
+	EIGRP_INT,
+	EIGRP_EXT,
+} msg_data_t;
 
 /* EIGRP Finite State Machine */
 
@@ -504,13 +495,10 @@ struct eigrp_fsm_action_message {
 	u_char packet_type;		   // UPDATE, QUERY, SIAQUERY, SIAREPLY
 	struct eigrp *eigrp;		   // which thread sent mesg
 	struct eigrp_neighbor *adv_router; // advertising neighbor
-	struct eigrp_neighbor_entry *entry;
+	struct eigrp_nexthop_entry *entry;
 	struct eigrp_prefix_entry *prefix;
-	int data_type; // internal or external tlv type
-	union {
-		struct TLV_IPv4_External_type *ipv4_ext_data;
-		struct TLV_IPv4_Internal_type *ipv4_int_type;
-	} data;
+	msg_data_t data_type; // internal or external tlv type
+	struct eigrp_metrics metrics;
 };
 
 #endif /* _ZEBRA_EIGRP_STRUCTURES_H_ */

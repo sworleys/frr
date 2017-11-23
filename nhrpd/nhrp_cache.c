@@ -81,7 +81,9 @@ struct nhrp_cache *nhrp_cache_get(struct interface *ifp, union sockunion *remote
 	struct nhrp_cache key;
 
 	if (!nifp->cache_hash) {
-		nifp->cache_hash = hash_create(nhrp_cache_protocol_key, nhrp_cache_protocol_cmp, NULL);
+		nifp->cache_hash = hash_create(nhrp_cache_protocol_key,
+					       nhrp_cache_protocol_cmp,
+					       "NHRP Cache");
 		if (!nifp->cache_hash)
 			return NULL;
 	}
@@ -289,7 +291,7 @@ int nhrp_cache_update_binding(struct nhrp_cache *c, enum nhrp_cache_type type, i
 		if (holding_time > 0)
 			c->new.expires = monotime(NULL) + holding_time;
 		else if (holding_time < 0)
-			c->new.type = NHRP_CACHE_INVALID;
+			nhrp_cache_reset_new(c);
 
 		if (c->new.type == NHRP_CACHE_INVALID ||
 		    c->new.type >= NHRP_CACHE_STATIC ||

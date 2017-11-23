@@ -30,6 +30,8 @@
 #include "zclient.h"
 
 #include "zebra/zebra_ns.h"
+#include "zebra/zebra_pw.h"
+
 /* Default port information. */
 #define ZEBRA_VTY_PORT                2601
 
@@ -106,8 +108,12 @@ struct zserv {
 	u_int32_t bfd_client_reg_cnt;
 	u_int32_t vniadd_cnt;
 	u_int32_t vnidel_cnt;
+	u_int32_t l3vniadd_cnt;
+	u_int32_t l3vnidel_cnt;
 	u_int32_t macipadd_cnt;
 	u_int32_t macipdel_cnt;
+	u_int32_t prefixadd_cnt;
+	u_int32_t prefixdel_cnt;
 
 	time_t connect_time;
 	time_t last_read_time;
@@ -175,6 +181,7 @@ extern int zsend_interface_vrf_update(struct zserv *, struct interface *,
 				      vrf_id_t);
 
 extern int zsend_interface_link_params(struct zserv *, struct interface *);
+extern int zsend_pw_update(struct zserv *, struct zebra_pw *);
 
 extern pid_t pid;
 

@@ -99,8 +99,10 @@ struct route_map_rule_cmd {
 
 /* Route map apply error. */
 enum {
+	RMAP_COMPILE_SUCCESS,
+
 	/* Route map rule is missing. */
-	RMAP_RULE_MISSING = 1,
+	RMAP_RULE_MISSING,
 
 	/* Route map rule can't compile */
 	RMAP_COMPILE_ERROR
@@ -192,7 +194,15 @@ extern int route_map_delete_set(struct route_map_index *index,
 /* Install rule command to the match list. */
 extern void route_map_install_match(struct route_map_rule_cmd *cmd);
 
-/* Install rule command to the set list. */
+/*
+ * Install rule command to the set list.
+ *
+ * When installing a particular item, Allow a difference of handling
+ * of bad cli inputted(return NULL) -vs- this particular daemon cannot use
+ * this form of the command(return a pointer and handle it appropriately
+ * in the apply command).  See 'set metric' command
+ * as it is handled in ripd/ripngd and ospfd.
+ */
 extern void route_map_install_set(struct route_map_rule_cmd *cmd);
 
 /* Lookup route map by name. */

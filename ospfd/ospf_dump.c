@@ -169,6 +169,7 @@ const char *ospf_timeval_dump(struct timeval *t, char *buf, size_t size)
 	if (us >= 1000) {
 		ms = us / 1000;
 		us %= 1000;
+		(void)us; /* unused */
 	}
 
 	if (ms >= 1000) {
@@ -1597,28 +1598,29 @@ static int show_debugging_ospf_common(struct vty *vty, struct ospf *ospf)
 	return CMD_SUCCESS;
 }
 
-DEFUN (show_debugging_ospf,
-       show_debugging_ospf_cmd,
-       "show debugging ospf",
-       SHOW_STR
-       DEBUG_STR
-       OSPF_STR)
+DEFUN_NOSH (show_debugging_ospf,
+	    show_debugging_ospf_cmd,
+	    "show debugging [ospf]",
+	    SHOW_STR
+	    DEBUG_STR
+	    OSPF_STR)
 {
-	struct ospf *ospf;
+	struct ospf *ospf = NULL;
 
-	if ((ospf = ospf_lookup()) == NULL)
+	ospf = ospf_lookup_by_vrf_id(VRF_DEFAULT);
+	if (ospf == NULL)
 		return CMD_SUCCESS;
 
 	return show_debugging_ospf_common(vty, ospf);
 }
 
-DEFUN (show_debugging_ospf_instance,
-       show_debugging_ospf_instance_cmd,
-       "show debugging ospf (1-65535)",
-       SHOW_STR
-       DEBUG_STR
-       OSPF_STR
-       "Instance ID\n")
+DEFUN_NOSH (show_debugging_ospf_instance,
+	    show_debugging_ospf_instance_cmd,
+	    "show debugging ospf (1-65535)",
+	    SHOW_STR
+	    DEBUG_STR
+	    OSPF_STR
+	    "Instance ID\n")
 {
 	int idx_number = 3;
 	struct ospf *ospf;
@@ -1651,7 +1653,8 @@ static int config_write_debug(struct vty *vty)
 	char str[16];
 	memset(str, 0, 16);
 
-	if ((ospf = ospf_lookup()) == NULL)
+	ospf = ospf_lookup_by_vrf_id(VRF_DEFAULT);
+	if (ospf == NULL)
 		return CMD_SUCCESS;
 
 	if (ospf->instance)

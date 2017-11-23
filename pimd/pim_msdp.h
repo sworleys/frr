@@ -69,7 +69,7 @@ enum pim_msdp_sa_flags {
 	PIM_MSDP_SAF_PEER = (1 << 1),
 	PIM_MSDP_SAF_REF = (PIM_MSDP_SAF_LOCAL | PIM_MSDP_SAF_PEER),
 	PIM_MSDP_SAF_STALE = (1 << 2), /* local entries can get kicked out on
-				       * misc pim events such as RP change */
+					* misc pim events such as RP change */
 	PIM_MSDP_SAF_UP_DEL_IN_PROG = (1 << 3)
 };
 

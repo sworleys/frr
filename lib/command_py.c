@@ -199,6 +199,8 @@ static PyObject *graph_to_pyobj(struct wrap_graph *wgraph,
 				item(IPV4_PREFIX_TKN) // IPV4 network prefixes
 				item(IPV6_TKN)	// IPV6 prefixes
 				item(IPV6_PREFIX_TKN) // IPV6 network prefixes
+				item(MAC_TKN)	 // MAC address
+				item(MAC_PREFIX_TKN)  // MAC address with mask
 
 				/* plumbing types */
 				item(FORK_TKN) item(JOIN_TKN) item(START_TKN)
@@ -248,6 +250,8 @@ static PyObject *graph_parse(PyTypeObject *type, PyObject *args,
 static void graph_wrap_free(void *arg)
 {
 	struct wrap_graph *wgraph = arg;
+
+	graph_delete_graph(wgraph->graph);
 	free(wgraph->nodewrappers);
 	free(wgraph->definition);
 }

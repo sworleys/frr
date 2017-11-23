@@ -122,6 +122,14 @@ const char *prefix_list_name(struct prefix_list *plist)
 	return plist->name;
 }
 
+afi_t prefix_list_afi(struct prefix_list *plist)
+{
+	if (plist->master == &prefix_master_ipv4
+	    || plist->master == &prefix_master_orf_v4)
+		return AFI_IP;
+	return AFI_IP6;
+}
+
 /* Lookup prefix_list from list of prefix_list by name. */
 static struct prefix_list *prefix_list_lookup_do(afi_t afi, int orf,
 						 const char *name)
@@ -671,7 +679,9 @@ static int prefix_list_entry_match(struct prefix_list_entry *pentry,
 	return 1;
 }
 
-enum prefix_list_type prefix_list_apply(struct prefix_list *plist, void *object)
+enum prefix_list_type prefix_list_apply_which_prefix(struct prefix_list *plist,
+						     struct prefix **which,
+						     void *object)
 {
 	struct prefix_list_entry *pentry, *pbest = NULL;
 
@@ -681,11 +691,17 @@ enum prefix_list_type prefix_list_apply(struct prefix_list *plist, void *object)
 	size_t validbits = p->prefixlen;
 	struct pltrie_table *table;
 
-	if (plist == NULL)
+	if (plist == NULL) {
+		if (which)
+			*which = NULL;
 		return PREFIX_DENY;
+	}
 
-	if (plist->count == 0)
+	if (plist->count == 0) {
+		if (which)
+			*which = NULL;
 		return PREFIX_PERMIT;
+	}
 
 	depth = plist->master->trie_depth;
 	table = plist->trie;
@@ -719,6 +735,13 @@ enum prefix_list_type prefix_list_apply(struct prefix_list *plist, void *object)
 				pbest = pentry;
 		}
 		break;
+	}
+
+	if (which) {
+		if (pbest)
+			*which = &pbest->prefix;
+		else
+			*which = NULL;
 	}
 
 	if (pbest == NULL)

@@ -156,7 +156,7 @@ void zebra_ptm_finish(void)
 	if (ptm_cb.wb)
 		buffer_free(ptm_cb.wb);
 
-	if (ptm_cb.ptm_sock != -1)
+	if (ptm_cb.ptm_sock >= 0)
 		close(ptm_cb.ptm_sock);
 }
 
@@ -257,23 +257,24 @@ DEFUN (zebra_ptm_enable,
        "Enable neighbor check with specified topology\n")
 {
 	struct vrf *vrf;
-	struct listnode *i;
 	struct interface *ifp;
 	struct zebra_if *if_data;
 
 	ptm_cb.ptm_enable = ZEBRA_IF_PTM_ENABLE_ON;
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	for (ALL_LIST_ELEMENTS_RO(vrf->iflist, i, ifp))
-		if (!ifp->ptm_enable) {
-			if_data = (struct zebra_if *)ifp->info;
-			if (if_data && (if_data->ptm_enable
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name)
+		FOR_ALL_INTERFACES (vrf, ifp)
+			if (!ifp->ptm_enable) {
+				if_data = (struct zebra_if *)ifp->info;
+				if (if_data
+				    && (if_data->ptm_enable
 					== ZEBRA_IF_PTM_ENABLE_UNSPEC)) {
-				ifp->ptm_enable = ZEBRA_IF_PTM_ENABLE_ON;
+					ifp->ptm_enable =
+						ZEBRA_IF_PTM_ENABLE_ON;
+				}
+				/* Assign a default unknown status */
+				ifp->ptm_status = ZEBRA_PTM_STATUS_UNKNOWN;
 			}
-			/* Assign a default unknown status */
-			ifp->ptm_status = ZEBRA_PTM_STATUS_UNKNOWN;
-		}
 
 	zebra_ptm_connect(NULL);
 
@@ -660,7 +661,7 @@ int zebra_ptm_sock_read(struct thread *thread)
 }
 
 /* BFD peer/dst register/update */
-int zebra_ptm_bfd_dst_register(struct zserv *client, int sock, u_short length,
+int zebra_ptm_bfd_dst_register(struct zserv *client, u_short length,
 			       int command, struct zebra_vrf *zvrf)
 {
 	struct stream *s;
@@ -818,7 +819,7 @@ int zebra_ptm_bfd_dst_register(struct zserv *client, int sock, u_short length,
 }
 
 /* BFD peer/dst deregister */
-int zebra_ptm_bfd_dst_deregister(struct zserv *client, int sock, u_short length,
+int zebra_ptm_bfd_dst_deregister(struct zserv *client, u_short length,
 				 struct zebra_vrf *zvrf)
 {
 	struct stream *s;
@@ -945,7 +946,7 @@ int zebra_ptm_bfd_dst_deregister(struct zserv *client, int sock, u_short length,
 }
 
 /* BFD client register */
-int zebra_ptm_bfd_client_register(struct zserv *client, int sock,
+int zebra_ptm_bfd_client_register(struct zserv *client,
 				  u_short length)
 {
 	struct stream *s;
@@ -959,6 +960,9 @@ int zebra_ptm_bfd_client_register(struct zserv *client, int sock,
 	if (IS_ZEBRA_DEBUG_EVENT)
 		zlog_debug("bfd_client_register msg from client %s: length=%d",
 			   zebra_route_string(client->proto), length);
+
+	s = client->ibuf;
+	pid = stream_getl(s);
 
 	if (ptm_cb.ptm_sock == -1) {
 		ptm_cb.t_timer = NULL;
@@ -976,9 +980,6 @@ int zebra_ptm_bfd_client_register(struct zserv *client, int sock,
 	ptm_lib_append_msg(ptm_hdl, out_ctxt, ZEBRA_PTM_BFD_CLIENT_FIELD,
 			   tmp_buf);
 
-	s = client->ibuf;
-
-	pid = stream_getl(s);
 	sprintf(tmp_buf, "%d", pid);
 	ptm_lib_append_msg(ptm_hdl, out_ctxt, ZEBRA_PTM_BFD_SEQID_FIELD,
 			   tmp_buf);
@@ -1086,30 +1087,30 @@ void zebra_ptm_send_status_req(void)
 void zebra_ptm_reset_status(int ptm_disable)
 {
 	struct vrf *vrf;
-	struct listnode *i;
 	struct interface *ifp;
 	int send_linkup;
 
-	RB_FOREACH(vrf, vrf_id_head, &vrfs_by_id)
-	for (ALL_LIST_ELEMENTS_RO(vrf->iflist, i, ifp)) {
-		send_linkup = 0;
-		if (ifp->ptm_enable) {
-			if (!if_is_operative(ifp))
-				send_linkup = 1;
+	RB_FOREACH (vrf, vrf_id_head, &vrfs_by_id)
+		FOR_ALL_INTERFACES (vrf, ifp) {
+			send_linkup = 0;
+			if (ifp->ptm_enable) {
+				if (!if_is_operative(ifp))
+					send_linkup = 1;
 
-			if (ptm_disable)
-				ifp->ptm_enable = ZEBRA_IF_PTM_ENABLE_OFF;
-			ifp->ptm_status = ZEBRA_PTM_STATUS_UNKNOWN;
+				if (ptm_disable)
+					ifp->ptm_enable =
+						ZEBRA_IF_PTM_ENABLE_OFF;
+				ifp->ptm_status = ZEBRA_PTM_STATUS_UNKNOWN;
 
-			if (if_is_operative(ifp) && send_linkup) {
-				if (IS_ZEBRA_DEBUG_EVENT)
-					zlog_debug(
-						"%s: Bringing up interface %s",
-						__func__, ifp->name);
-				if_up(ifp);
+				if (if_is_operative(ifp) && send_linkup) {
+					if (IS_ZEBRA_DEBUG_EVENT)
+						zlog_debug(
+							"%s: Bringing up interface %s",
+							__func__, ifp->name);
+					if_up(ifp);
+				}
 			}
 		}
-	}
 }
 
 void zebra_ptm_if_init(struct zebra_if *zebra_ifp)

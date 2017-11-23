@@ -31,6 +31,7 @@
 #include "command.h"
 #include "sigevent.h"
 #include "network.h"
+#include "jhash.h"
 
 DEFINE_MTYPE_STATIC(LIB, THREAD, "Thread")
 DEFINE_MTYPE_STATIC(LIB, THREAD_MASTER, "Thread master")
@@ -47,9 +48,6 @@ DEFINE_MTYPE_STATIC(LIB, THREAD_STATS, "Thread stats")
 		write(m->io_pipe[1], &wakebyte, 1);                            \
 	} while (0);
 
-/* max # of thread_fetch() calls before we force a poll() */
-#define MAX_TICK_IO 1000
-
 /* control variable for initializer */
 pthread_once_t init_once = PTHREAD_ONCE_INIT;
 pthread_key_t thread_current;
@@ -61,7 +59,9 @@ static struct list *masters;
 /* CLI start ---------------------------------------------------------------- */
 static unsigned int cpu_record_hash_key(struct cpu_thread_history *a)
 {
-	return (uintptr_t)a->func;
+	int size = sizeof (&a->func);
+
+	return jhash(&a->func, size, 0);
 }
 
 static int cpu_record_hash_cmp(const struct cpu_thread_history *a,
@@ -89,7 +89,7 @@ static void cpu_record_hash_free(void *a)
 static void vty_out_cpu_thread_history(struct vty *vty,
 				       struct cpu_thread_history *a)
 {
-	vty_out(vty, "%5d %10ld.%03ld %9d %8ld %9ld %8ld %9ld", a->total_active,
+	vty_out(vty, "%5d %10lu.%03lu %9u %8lu %9lu %8lu %9lu", a->total_active,
 		a->cpu.total / 1000, a->cpu.total % 1000, a->total_calls,
 		a->cpu.total / a->total_calls, a->cpu.max,
 		a->real.total / a->total_calls, a->real.max);
@@ -340,9 +340,6 @@ static void cancelreq_del(void *cr)
 /* initializer, only ever called once */
 static void initializer()
 {
-	if (!masters)
-		masters = list_new();
-
 	pthread_key_create(&thread_current, NULL);
 }
 
@@ -382,9 +379,11 @@ struct thread_master *thread_master_create(const char *name)
 		return NULL;
 	}
 
-	rv->cpu_record = hash_create(
+	rv->cpu_record = hash_create_size(
+		8,
 		(unsigned int (*)(void *))cpu_record_hash_key,
-		(int (*)(const void *, const void *))cpu_record_hash_cmp, NULL);
+		(int (*)(const void *, const void *))cpu_record_hash_cmp,
+		"Thread Hash");
 
 
 	/* Initialize the timer queues */
@@ -415,9 +414,12 @@ struct thread_master *thread_master_create(const char *name)
 	rv->handler.copy = XCALLOC(MTYPE_THREAD_MASTER,
 				   sizeof(struct pollfd) * rv->handler.pfdsize);
 
-	/* add to list */
+	/* add to list of threadmasters */
 	pthread_mutex_lock(&masters_mtx);
 	{
+		if (!masters)
+			masters = list_new();
+
 		listnode_add(masters, rv);
 	}
 	pthread_mutex_unlock(&masters_mtx);
@@ -551,6 +553,9 @@ void thread_master_free(struct thread_master *m)
 	pthread_mutex_lock(&masters_mtx);
 	{
 		listnode_delete(masters, m);
+		if (masters->count == 0) {
+			list_delete_and_null(&masters);
+		}
 	}
 	pthread_mutex_unlock(&masters_mtx);
 
@@ -561,14 +566,18 @@ void thread_master_free(struct thread_master *m)
 	thread_list_free(m, &m->ready);
 	thread_list_free(m, &m->unuse);
 	pthread_mutex_destroy(&m->mtx);
+	pthread_cond_destroy(&m->cancel_cond);
 	close(m->io_pipe[0]);
 	close(m->io_pipe[1]);
-	list_delete(m->cancel_req);
+	list_delete_and_null(&m->cancel_req);
+	m->cancel_req = NULL;
 
 	hash_clean(m->cpu_record, cpu_record_hash_free);
 	hash_free(m->cpu_record);
 	m->cpu_record = NULL;
 
+	if (m->name)
+		XFREE(MTYPE_THREAD_MASTER, m->name);
 	XFREE(MTYPE_THREAD_MASTER, m->handler.pfds);
 	XFREE(MTYPE_THREAD_MASTER, m->handler.copy);
 	XFREE(MTYPE_THREAD_MASTER, m);
@@ -1316,6 +1325,20 @@ struct thread *thread_fetch(struct thread_master *m, struct thread *fetch)
 		do_thread_cancel(m);
 
 		/*
+		 * Attempt to flush ready queue before going into poll().
+		 * This is performance-critical. Think twice before modifying.
+		 */
+		if ((thread = thread_trim_head(&m->ready))) {
+			fetch = thread_run(m, thread, fetch);
+			if (fetch->ref)
+				*fetch->ref = NULL;
+			pthread_mutex_unlock(&m->mtx);
+			break;
+		}
+
+		/* otherwise, tick through scheduling sequence */
+
+		/*
 		 * Post events to ready queue. This must come before the
 		 * following block since events should occur immediately
 		 */
@@ -1358,44 +1381,26 @@ struct thread *thread_fetch(struct thread_master *m, struct thread *fetch)
 		memcpy(m->handler.copy, m->handler.pfds,
 		       m->handler.copycount * sizeof(struct pollfd));
 
-		/*
-		 * Attempt to flush ready queue before going into poll().
-		 * This is performance-critical. Think twice before modifying.
-		 */
-		if (m->ready.count == 0 || m->tick_since_io >= MAX_TICK_IO) {
-			pthread_mutex_unlock(&m->mtx);
-			{
-				m->tick_since_io = 0;
-				num = fd_poll(m, m->handler.copy,
-					      m->handler.pfdsize,
-					      m->handler.copycount, tw);
-			}
-			pthread_mutex_lock(&m->mtx);
+		pthread_mutex_unlock(&m->mtx);
+		{
+			num = fd_poll(m, m->handler.copy, m->handler.pfdsize,
+				      m->handler.copycount, tw);
+		}
+		pthread_mutex_lock(&m->mtx);
 
-			/* Handle any errors received in poll() */
-			if (num < 0) {
-				if (errno == EINTR) {
-					pthread_mutex_unlock(&m->mtx);
-					/* loop around to signal handler */
-					continue;
-				}
-
-				/* else die */
-				zlog_warn("poll() error: %s",
-					  safe_strerror(errno));
+		/* Handle any errors received in poll() */
+		if (num < 0) {
+			if (errno == EINTR) {
 				pthread_mutex_unlock(&m->mtx);
-				fetch = NULL;
-				break;
+				/* loop around to signal handler */
+				continue;
 			}
 
-			/*
-			 * Since we could have received more cancellation
-			 * requests during poll(), process those
-			 */
-			do_thread_cancel(m);
-
-		} else {
-			m->tick_since_io++;
+			/* else die */
+			zlog_warn("poll() error: %s", safe_strerror(errno));
+			pthread_mutex_unlock(&m->mtx);
+			fetch = NULL;
+			break;
 		}
 
 		/* Post timers to ready queue. */
@@ -1405,13 +1410,6 @@ struct thread *thread_fetch(struct thread_master *m, struct thread *fetch)
 		/* Post I/O to ready queue. */
 		if (num > 0)
 			thread_process_io(m, num);
-
-		/* have a ready task ==> return it to caller */
-		if ((thread = thread_trim_head(&m->ready))) {
-			fetch = thread_run(m, thread, fetch);
-			if (fetch->ref)
-				*fetch->ref = NULL;
-		}
 
 		pthread_mutex_unlock(&m->mtx);
 

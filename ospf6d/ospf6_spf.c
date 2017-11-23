@@ -141,7 +141,7 @@ static struct ospf6_vertex *ospf6_vertex_create(struct ospf6_lsa *lsa)
 	v->options[2] = *(u_char *)(OSPF6_LSA_HEADER_END(lsa->header) + 3);
 
 	v->nh_list = list_new();
-	v->nh_list->del = (void (*)(void *))ospf6_nexthop_delete;
+	v->nh_list->del = (void (*) (void *))ospf6_nexthop_delete;
 
 	v->parent = NULL;
 	v->child_list = list_new();
@@ -152,8 +152,8 @@ static struct ospf6_vertex *ospf6_vertex_create(struct ospf6_lsa *lsa)
 
 static void ospf6_vertex_delete(struct ospf6_vertex *v)
 {
-	list_delete(v->nh_list);
-	list_delete(v->child_list);
+	list_delete_and_null(&v->nh_list);
+	list_delete_and_null(&v->child_list);
 	XFREE(MTYPE_OSPF6_VERTEX, v);
 }
 
@@ -240,7 +240,8 @@ static char *ospf6_lsdesc_backlink(struct ospf6_lsa *lsa, caddr_t lsdesc,
 	}
 
 	if (IS_OSPF6_DEBUG_SPF(PROCESS))
-		zlog_debug("  Backlink %s", (found ? "OK" : "FAIL"));
+		zlog_debug("Vertex %s Lsa %s Backlink %s", v->name, lsa->name,
+			   (found ? "OK" : "FAIL"));
 
 	return found;
 }
@@ -576,6 +577,7 @@ static int ospf6_spf_calculation_thread(struct thread *t)
 
 	/* execute SPF calculation */
 	monotime(&start);
+	ospf6->ts_spf = start;
 
 	if (ospf6_is_router_abr(ospf6))
 		ospf6_abr_range_reset_cost(ospf6);
@@ -585,6 +587,7 @@ static int ospf6_spf_calculation_thread(struct thread *t)
 		if (oa == ospf6->backbone)
 			continue;
 
+		monotime(&oa->ts_spf);
 		if (IS_OSPF6_DEBUG_SPF(PROCESS))
 			zlog_debug("SPF calculation for Area %s", oa->name);
 		if (IS_OSPF6_DEBUG_SPF(DATABASE))
@@ -598,6 +601,7 @@ static int ospf6_spf_calculation_thread(struct thread *t)
 	}
 
 	if (ospf6->backbone) {
+		monotime(&ospf6->backbone->ts_spf);
 		if (IS_OSPF6_DEBUG_SPF(PROCESS))
 			zlog_debug("SPF calculation for Backbone area %s",
 				   ospf6->backbone->name);
@@ -632,6 +636,7 @@ static int ospf6_spf_calculation_thread(struct thread *t)
 		"Reason: %s\n",
 		areas_processed, (long long)runtime.tv_sec,
 		(long long)runtime.tv_usec, rbuf);
+
 	ospf6->last_spf_reason = ospf6->spf_reason;
 	ospf6_reset_spf_reason(ospf6);
 	return 0;

@@ -33,6 +33,8 @@
 #include "zebra/rt.h"
 #include "zebra/interface.h"
 
+#ifndef SUNOS_5
+
 #ifdef HAVE_BSD_LINK_DETECT
 #include <net/if_media.h>
 #endif /* HAVE_BSD_LINK_DETECT*/
@@ -42,7 +44,7 @@ extern struct zebra_privs_t zserv_privs;
 /* clear and set interface name string */
 void ifreq_set_name(struct ifreq *ifreq, struct interface *ifp)
 {
-	strncpy(ifreq->ifr_name, ifp->name, IFNAMSIZ);
+	strlcpy(ifreq->ifr_name, ifp->name, sizeof(ifreq->ifr_name));
 }
 
 /* call ioctl system call */
@@ -177,9 +179,14 @@ int if_set_prefix(struct interface *ifp, struct connected *ifc)
 {
 	int ret;
 	struct ifaliasreq addreq;
-	struct sockaddr_in addr;
-	struct sockaddr_in mask;
+	struct sockaddr_in addr, mask, peer;
 	struct prefix_ipv4 *p;
+
+	/* don't configure PtP addresses on broadcast ifs or reverse */
+	if (!(ifp->flags & IFF_POINTOPOINT) != !CONNECTED_PEER(ifc)) {
+		errno = EINVAL;
+		return -1;
+	}
 
 	p = (struct prefix_ipv4 *)ifc->address;
 	rib_lookup_and_pushup(p, ifp->vrf_id);
@@ -194,6 +201,18 @@ int if_set_prefix(struct interface *ifp, struct connected *ifc)
 	addr.sin_len = sizeof(struct sockaddr_in);
 #endif
 	memcpy(&addreq.ifra_addr, &addr, sizeof(struct sockaddr_in));
+
+	if (CONNECTED_PEER(ifc)) {
+		p = (struct prefix_ipv4 *)ifc->destination;
+		memset(&mask, 0, sizeof(struct sockaddr_in));
+		peer.sin_addr = p->prefix;
+		peer.sin_family = p->family;
+#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+		peer.sin_len = sizeof(struct sockaddr_in);
+#endif
+		memcpy(&addreq.ifra_broadaddr, &peer,
+		       sizeof(struct sockaddr_in));
+	}
 
 	memset(&mask, 0, sizeof(struct sockaddr_in));
 	masklen2ip(p->prefixlen, &mask.sin_addr);
@@ -215,9 +234,14 @@ int if_unset_prefix(struct interface *ifp, struct connected *ifc)
 {
 	int ret;
 	struct ifaliasreq addreq;
-	struct sockaddr_in addr;
-	struct sockaddr_in mask;
+	struct sockaddr_in addr, mask, peer;
 	struct prefix_ipv4 *p;
+
+	/* this would probably wreak havoc */
+	if (!(ifp->flags & IFF_POINTOPOINT) != !CONNECTED_PEER(ifc)) {
+		errno = EINVAL;
+		return -1;
+	}
 
 	p = (struct prefix_ipv4 *)ifc->address;
 
@@ -231,6 +255,18 @@ int if_unset_prefix(struct interface *ifp, struct connected *ifc)
 	addr.sin_len = sizeof(struct sockaddr_in);
 #endif
 	memcpy(&addreq.ifra_addr, &addr, sizeof(struct sockaddr_in));
+
+	if (CONNECTED_PEER(ifc)) {
+		p = (struct prefix_ipv4 *)ifc->destination;
+		memset(&mask, 0, sizeof(struct sockaddr_in));
+		peer.sin_addr = p->prefix;
+		peer.sin_family = p->family;
+#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+		peer.sin_len = sizeof(struct sockaddr_in);
+#endif
+		memcpy(&addreq.ifra_broadaddr, &peer,
+		       sizeof(struct sockaddr_in));
+	}
 
 	memset(&mask, 0, sizeof(struct sockaddr_in));
 	masklen2ip(p->prefixlen, &mask.sin_addr);
@@ -563,3 +599,5 @@ int if_prefix_delete_ipv6(struct interface *ifp, struct connected *ifc)
 #endif /* HAVE_STRUCT_IN6_ALIASREQ */
 
 #endif /* LINUX_IPV6 */
+
+#endif /* !SUNOS_5 */

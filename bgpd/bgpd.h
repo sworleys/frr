@@ -22,6 +22,8 @@
 #define _QUAGGA_BGPD_H
 
 #include "qobj.h"
+#include <pthread.h>
+
 #include "lib/json.h"
 #include "vrf.h"
 #include "vty.h"
@@ -34,6 +36,7 @@
 #include "defaults.h"
 #include "bgp_memory.h"
 #include "bitfield.h"
+#include "vxlan.h"
 
 #define BGP_MAX_HOSTNAME 64	/* Linux max, is larger than most other sys */
 #define BGP_PEER_MAX_HASH_SIZE 16384
@@ -98,6 +101,10 @@ struct bgp_master {
 	/* BGP thread master.  */
 	struct thread_master *master;
 
+/* BGP pthreads. */
+#define PTHREAD_IO              (1 << 1)
+#define PTHREAD_KEEPALIVES      (1 << 2)
+
 	/* work queues */
 	struct work_queue *process_main_queue;
 
@@ -129,6 +136,9 @@ struct bgp_master {
 				      /* $FRR indent$ */
 				      /* clang-format off */
 #define RMAP_DEFAULT_UPDATE_TIMER 5 /* disabled by default */
+
+	/* Id space for automatic RD derivation for an EVI/VRF */
+	bitfield_t rd_idspace;
 
 	QOBJ_FIELDS
 };
@@ -303,6 +313,7 @@ struct bgp {
 #define BGP_FLAG_FORCE_STATIC_PROCESS     (1 << 18)
 #define BGP_FLAG_SHOW_HOSTNAME            (1 << 19)
 #define BGP_FLAG_GR_PRESERVE_FWD          (1 << 20)
+#define BGP_FLAG_GRACEFUL_SHUTDOWN        (1 << 21)
 
 	/* BGP Per AF flags */
 	u_int16_t af_flags[AFI_MAX][SAFI_MAX];
@@ -337,6 +348,9 @@ struct bgp {
 	/* BGP redistribute configuration. */
 	struct list *redist[AFI_MAX][ZEBRA_ROUTE_MAX];
 
+	/* Allocate MPLS labels */
+	u_char allocate_mpls_labels[AFI_MAX][SAFI_MAX];
+
 	/* timer to re-evaluate neighbor default-originate route-maps */
 	struct thread *t_rmap_def_originate_eval;
 #define RMAP_DEFAULT_ORIGINATE_EVAL_TIMER 5
@@ -368,7 +382,9 @@ struct bgp {
 #define BGP_FLAG_IBGP_MULTIPATH_SAME_CLUSTERLEN (1 << 0)
 	} maxpaths[AFI_MAX][SAFI_MAX];
 
-	u_int32_t wpkt_quanta; /* per peer packet quanta to write */
+	_Atomic uint32_t wpkt_quanta; // max # packets to write per i/o cycle
+	_Atomic uint32_t rpkt_quanta; // max # packets to read per i/o cycle
+
 	u_int32_t coalesce_time;
 
 	u_int32_t addpath_tx_id;
@@ -393,8 +409,41 @@ struct bgp {
 	/* Hash table of Import RTs to EVIs */
 	struct hash *import_rt_hash;
 
-	/* Id space for automatic RD derivation for an EVI */
-	bitfield_t rd_idspace;
+	/* Hash table of VRF import RTs to VRFs */
+	struct hash *vrf_import_rt_hash;
+
+	/* L3-VNI corresponding to this vrf */
+	vni_t l3vni;
+
+	/* router-mac to be used in mac-ip routes for this vrf */
+	struct ethaddr rmac;
+
+	/* originator ip - to be used as NH for type-5 routes */
+	struct in_addr originator_ip;
+
+	/* vrf flags */
+	uint32_t vrf_flags;
+#define BGP_VRF_AUTO                        (1 << 0)
+#define BGP_VRF_ADVERTISE_IPV4_IN_EVPN      (1 << 1)
+#define BGP_VRF_ADVERTISE_IPV6_IN_EVPN      (1 << 2)
+#define BGP_VRF_IMPORT_RT_CFGD              (1 << 3)
+#define BGP_VRF_EXPORT_RT_CFGD              (1 << 4)
+#define BGP_VRF_RD_CFGD                     (1 << 5)
+
+	/* unique ID for auto derivation of RD for this vrf */
+	uint16_t vrf_rd_id;
+
+	/* RD for this VRF */
+	struct prefix_rd vrf_prd;
+
+	/* import rt list for the vrf instance */
+	struct list *vrf_import_rtl;
+
+	/* export rt list for the vrf instance */
+	struct list *vrf_export_rtl;
+
+	/* list of corresponding l2vnis (struct bgpevpn) */
+	struct list *l2vnis;
 
 	QOBJ_FIELDS
 };
@@ -579,12 +628,17 @@ struct peer {
 	struct in_addr local_id;
 
 	/* Packet receive and send buffer. */
-	struct stream *ibuf;
-	struct stream_fifo *obuf;
-	struct stream *work;
+	pthread_mutex_t io_mtx;   // guards ibuf, obuf
+	struct stream_fifo *ibuf; // packets waiting to be processed
+	struct stream_fifo *obuf; // packets waiting to be written
+
+	struct stream *ibuf_work; // WiP buffer used by bgp_read() only
+	struct stream *obuf_work; // WiP buffer used to construct packets
+
+	struct stream *curr; // the current packet being parsed
 
 	/* We use a separate stream to encode MP_REACH_NLRI for efficient
-	 * NLRI packing. peer->work stores all the other attributes. The
+	 * NLRI packing. peer->obuf_work stores all the other attributes. The
 	 * actual packet is then constructed by concatenating the two.
 	 */
 	struct stream *scratch;
@@ -767,50 +821,63 @@ struct peer {
 #define PEER_CONFIG_TIMER             (1 << 0) /* keepalive & holdtime */
 #define PEER_CONFIG_CONNECT           (1 << 1) /* connect */
 #define PEER_CONFIG_ROUTEADV          (1 << 2) /* route advertise */
+#define PEER_GROUP_CONFIG_TIMER       (1 << 3) /* timers from peer-group */
 
-	u_int32_t holdtime;
-	u_int32_t keepalive;
-	u_int32_t connect;
-	u_int32_t routeadv;
+#define PEER_OR_GROUP_TIMER_SET(peer)                                        \
+	(CHECK_FLAG(peer->config, PEER_CONFIG_TIMER)			     \
+	 || CHECK_FLAG(peer->config, PEER_GROUP_CONFIG_TIMER))
+
+	_Atomic uint32_t holdtime;
+	_Atomic uint32_t keepalive;
+	_Atomic uint32_t connect;
+	_Atomic uint32_t routeadv;
 
 	/* Timer values. */
-	u_int32_t v_start;
-	u_int32_t v_connect;
-	u_int32_t v_holdtime;
-	u_int32_t v_keepalive;
-	u_int32_t v_routeadv;
-	u_int32_t v_pmax_restart;
-	u_int32_t v_gr_restart;
+	_Atomic uint32_t v_start;
+	_Atomic uint32_t v_connect;
+	_Atomic uint32_t v_holdtime;
+	_Atomic uint32_t v_keepalive;
+	_Atomic uint32_t v_routeadv;
+	_Atomic uint32_t v_pmax_restart;
+	_Atomic uint32_t v_gr_restart;
 
 	/* Threads. */
 	struct thread *t_read;
 	struct thread *t_write;
 	struct thread *t_start;
+	struct thread *t_connect_check_r;
+	struct thread *t_connect_check_w;
 	struct thread *t_connect;
 	struct thread *t_holdtime;
-	struct thread *t_keepalive;
 	struct thread *t_routeadv;
 	struct thread *t_pmax_restart;
 	struct thread *t_gr_restart;
 	struct thread *t_gr_stale;
+	struct thread *t_generate_updgrp_packets;
+	struct thread *t_process_packet;
 
+	/* Thread flags. */
+	_Atomic uint16_t thread_flags;
+#define PEER_THREAD_WRITES_ON         (1 << 0)
+#define PEER_THREAD_READS_ON          (1 << 1)
+#define PEER_THREAD_KEEPALIVES_ON     (1 << 2)
 	/* workqueues */
 	struct work_queue *clear_node_queue;
 
 	/* Statistics field */
-	u_int32_t open_in;	 /* Open message input count */
-	u_int32_t open_out;	/* Open message output count */
-	u_int32_t update_in;       /* Update message input count */
-	u_int32_t update_out;      /* Update message ouput count */
-	time_t update_time;	/* Update message received time. */
-	u_int32_t keepalive_in;    /* Keepalive input count */
-	u_int32_t keepalive_out;   /* Keepalive output count */
-	u_int32_t notify_in;       /* Notify input count */
-	u_int32_t notify_out;      /* Notify output count */
-	u_int32_t refresh_in;      /* Route Refresh input count */
-	u_int32_t refresh_out;     /* Route Refresh output count */
-	u_int32_t dynamic_cap_in;  /* Dynamic Capability input count.  */
-	u_int32_t dynamic_cap_out; /* Dynamic Capability output count.  */
+	_Atomic uint32_t open_in;         /* Open message input count */
+	_Atomic uint32_t open_out;        /* Open message output count */
+	_Atomic uint32_t update_in;       /* Update message input count */
+	_Atomic uint32_t update_out;      /* Update message ouput count */
+	_Atomic time_t update_time;       /* Update message received time. */
+	_Atomic uint32_t keepalive_in;    /* Keepalive input count */
+	_Atomic uint32_t keepalive_out;   /* Keepalive output count */
+	_Atomic uint32_t notify_in;       /* Notify input count */
+	_Atomic uint32_t notify_out;      /* Notify output count */
+	_Atomic uint32_t refresh_in;      /* Route Refresh input count */
+	_Atomic uint32_t refresh_out;     /* Route Refresh output count */
+	_Atomic uint32_t dynamic_cap_in;  /* Dynamic Capability input count.  */
+	_Atomic uint32_t dynamic_cap_out; /* Dynamic Capability output count.  */
 
 	/* BGP state count */
 	u_int32_t established; /* Established */
@@ -823,8 +890,10 @@ struct peer {
 	/* Syncronization list and time.  */
 	struct bgp_synchronize *sync[AFI_MAX][SAFI_MAX];
 	time_t synctime;
-	time_t last_write;  /* timestamp when the last msg was written */
-	time_t last_update; /* timestamp when the last UPDATE msg was written */
+	/* timestamp when the last UPDATE msg was written */
+	_Atomic time_t last_write;
+	/* timestamp when the last msg was written */
+	_Atomic time_t last_update;
 
 	/* Send prefix count. */
 	unsigned long scount[AFI_MAX][SAFI_MAX];
@@ -834,9 +903,6 @@ struct peer {
 
 	/* Notify data. */
 	struct bgp_notify notify;
-
-	/* Whole packet size to be read. */
-	unsigned long packet_size;
 
 	/* Filter structure. */
 	struct bgp_filter filter[AFI_MAX][SAFI_MAX];
@@ -930,10 +996,10 @@ DECLARE_QOBJ_TYPE(peer)
    stream. */
 struct bgp_nlri {
 	/* AFI.  */
-	afi_t afi;
+	uint16_t afi; /* iana_afi_t */
 
 	/* SAFI.  */
-	safi_t safi;
+	uint8_t safi; /* iana_safi_t */
 
 	/* Pointer to NLRI byte stream.  */
 	u_char *nlri;
@@ -1095,6 +1161,10 @@ struct bgp_nlri {
 /* BGP default local preference.  */
 #define BGP_DEFAULT_LOCAL_PREF                 100
 
+/* BGP local-preference to send when 'bgp graceful-shutdown'
+ * is configured */
+#define BGP_GSHUT_LOCAL_PREF                     0
+
 /* BGP default subgroup packet queue max .  */
 #define BGP_DEFAULT_SUBGROUP_PKT_QUEUE_MAX      40
 
@@ -1127,7 +1197,7 @@ enum bgp_clear_type {
 };
 
 /* Macros. */
-#define BGP_INPUT(P)         ((P)->ibuf)
+#define BGP_INPUT(P)         ((P)->curr)
 #define BGP_INPUT_PNT(P)     (STREAM_PNT(BGP_INPUT(P)))
 #define BGP_IS_VALID_STATE_FOR_NOTIF(S)                                        \
 	(((S) == OpenSent) || ((S) == OpenConfirm) || ((S) == Established))
@@ -1235,11 +1305,12 @@ extern void peer_xfer_config(struct peer *dst, struct peer *src);
 extern char *peer_uptime(time_t, char *, size_t, u_char, json_object *);
 
 extern int bgp_config_write(struct vty *);
-extern void bgp_config_write_family_header(struct vty *, afi_t, safi_t, int *);
 
 extern void bgp_master_init(struct thread_master *master);
 
 extern void bgp_init(void);
+extern void bgp_pthreads_run(void);
+extern void bgp_pthreads_finish(void);
 extern void bgp_route_map_init(void);
 extern void bgp_session_reset(struct peer *);
 
@@ -1255,9 +1326,6 @@ extern int bgp_delete(struct bgp *);
 extern int bgp_flag_set(struct bgp *, int);
 extern int bgp_flag_unset(struct bgp *, int);
 extern int bgp_flag_check(struct bgp *, int);
-
-extern void bgp_lock(struct bgp *);
-extern void bgp_unlock(struct bgp *);
 
 extern void bgp_router_id_zebra_bump(vrf_id_t, const struct prefix *);
 extern int bgp_router_id_static_set(struct bgp *, struct in_addr);
@@ -1287,6 +1355,7 @@ extern int bgp_listen_limit_unset(struct bgp *);
 
 extern int bgp_update_delay_active(struct bgp *);
 extern int bgp_update_delay_configured(struct bgp *);
+extern int bgp_afi_safi_peer_exists(struct bgp *bgp, afi_t afi, safi_t safi);
 extern void peer_as_change(struct peer *, as_t, int);
 extern int peer_remote_as(struct bgp *, union sockunion *, const char *, as_t *,
 			  int, afi_t, safi_t);
@@ -1389,16 +1458,30 @@ extern void bgp_route_map_terminate(void);
 
 extern int peer_cmp(struct peer *p1, struct peer *p2);
 
-extern int bgp_map_afi_safi_iana2int(iana_afi_t pkt_afi, safi_t pkt_safi,
+extern int bgp_map_afi_safi_iana2int(iana_afi_t pkt_afi, iana_safi_t pkt_safi,
 				     afi_t *afi, safi_t *safi);
 extern int bgp_map_afi_safi_int2iana(afi_t afi, safi_t safi,
-				     iana_afi_t *pkt_afi, safi_t *pkt_safi);
+				     iana_afi_t *pkt_afi, iana_safi_t *pkt_safi);
 
 extern struct peer_af *peer_af_create(struct peer *, afi_t, safi_t);
 extern struct peer_af *peer_af_find(struct peer *, afi_t, safi_t);
 extern int peer_af_delete(struct peer *, afi_t, safi_t);
 
 extern void bgp_close(void);
+extern void bgp_free(struct bgp *);
+
+static inline struct bgp *bgp_lock(struct bgp *bgp)
+{
+	bgp->lock++;
+	return bgp;
+}
+
+static inline void bgp_unlock(struct bgp *bgp)
+{
+	assert(bgp->lock > 0);
+	if (--bgp->lock == 0)
+		bgp_free(bgp);
+}
 
 static inline int afindex(afi_t afi, safi_t safi)
 {
@@ -1544,10 +1627,8 @@ static inline struct vrf *bgp_vrf_lookup_by_instance_type(struct bgp *bgp)
 static inline void bgp_vrf_link(struct bgp *bgp, struct vrf *vrf)
 {
 	bgp->vrf_id = vrf->vrf_id;
-	if (vrf->info != (void *)bgp) {
-		bgp_lock(bgp);
-		vrf->info = (void *)bgp;
-	}
+	if (vrf->info != (void *)bgp)
+		vrf->info = (void *)bgp_lock(bgp);
 }
 
 /* Unlink BGP instance from VRF. */

@@ -21,6 +21,8 @@
 
 #include <zebra.h>
 
+#ifdef SUNOS_5
+
 #include "prefix.h"
 #include "log.h"
 #include "if.h"
@@ -73,8 +75,8 @@
 static void handle_route_entry(mib2_ipRouteEntry_t *routeEntry)
 {
 	struct prefix prefix;
-	struct in_addr tmpaddr, gateway;
-	union g_addr *ggateway;
+	struct in_addr tmpaddr;
+	struct nexthop nh;
 	u_char zebra_flags = 0;
 
 	if (routeEntry->ipRouteInfo.re_ire_type & IRE_CACHETABLE)
@@ -91,11 +93,12 @@ static void handle_route_entry(mib2_ipRouteEntry_t *routeEntry)
 	tmpaddr.s_addr = routeEntry->ipRouteMask;
 	prefix.prefixlen = ip_masklen(tmpaddr);
 
-	gateway.s_addr = routeEntry->ipRouteNextHop;
-	ggateway = (union g_addr *)&gateway;
+	memset(&nh, 0, sizeof(nh));
+	nh.type = NEXTHOP_TYPE_IPV4;
+	nh.gate.ipv4.s_addr = routeEntry->ipRouteNextHop;
 
 	rib_add(AFI_IP, SAFI_UNICAST, VRF_DEFAULT, ZEBRA_ROUTE_KERNEL, 0,
-		zebra_flags, &prefix, NULL, ggateway, NULL, 0, 0, 0, 0, 0);
+		zebra_flags, &prefix, NULL, &nh, 0, 0, 0, 0);
 }
 
 void route_read(struct zebra_ns *zns)
@@ -258,3 +261,5 @@ void neigh_read(struct zebra_ns *zns)
 void neigh_read_for_vlan(struct zebra_ns *zns, struct interface *vlan_if)
 {
 }
+
+#endif /* SUNOS_5 */

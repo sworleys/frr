@@ -33,6 +33,7 @@
 #include "lib/log.h"
 #include "lib/skiplist.h"
 #include "lib/thread.h"
+#include "lib/stream.h"
 
 #include "bgpd/bgpd.h"
 #include "bgpd/bgp_ecommunity.h"
@@ -308,7 +309,7 @@ int rfapiGetL2o(struct attr *attr, struct rfapi_l2address_option *l2o)
 					if (pEncap->value[1] == 14) {
 						memcpy(l2o->macaddr.octet,
 						       pEncap->value + 2,
-						       ETHER_ADDR_LEN);
+						       ETH_ALEN);
 						l2o->label =
 							((pEncap->value[10]
 							  >> 4)
@@ -1079,10 +1080,7 @@ int rfapiEcommunityGetEthernetTag(struct ecommunity *ecom, uint16_t *tag_id)
 
 			if (*p++ == ECOMMUNITY_ROUTE_TARGET) {
 				if (encode == ECOMMUNITY_ENCODE_AS4) {
-					as = (*p++ << 24);
-					as |= (*p++ << 16);
-					as |= (*p++ << 8);
-					as |= (*p++);
+					p = ptr_get_be32(p, &as);
 				} else if (encode == ECOMMUNITY_ENCODE_AS) {
 					as = (*p++ << 8);
 					as |= (*p++);
@@ -1224,8 +1222,8 @@ static int rfapiVpnBiSamePtUn(struct bgp_info *bi1, struct bgp_info *bi2)
 
 	switch (pfx_un1.family) {
 	case AF_INET:
-		if (!IPV4_ADDR_SAME(&pfx_un1.u.prefix4.s_addr,
-				    &pfx_un2.u.prefix4.s_addr))
+		if (!IPV4_ADDR_SAME(&pfx_un1.u.prefix4,
+				    &pfx_un2.u.prefix4))
 			return 0;
 		break;
 	case AF_INET6:
@@ -1327,7 +1325,7 @@ rfapiRouteInfo2NextHopEntry(struct rfapi_ip_prefix *rprefix,
 		vo->type = RFAPI_VN_OPTION_TYPE_L2ADDR;
 
 		memcpy(&vo->v.l2addr.macaddr, &rn->p.u.prefix_eth.octet,
-		       ETHER_ADDR_LEN);
+		       ETH_ALEN);
 		/* only low 3 bytes of this are significant */
 		if (bi->attr) {
 			(void)rfapiEcommunityGetLNI(
@@ -1998,6 +1996,7 @@ static void rfapiBgpInfoAttachSorted(struct route_node *rn,
 	struct bgp_info *prev;
 	struct bgp_info *next;
 	char pfx_buf[PREFIX2STR_BUFFER];
+
 
 	bgp = bgp_get_default(); /* assume 1 instance for now */
 
@@ -3531,7 +3530,10 @@ void rfapiBgpInfoFilteredImportVPN(
 			 * Compare types. Doing so prevents a RFP-originated
 			 * route from matching an imported route, for example.
 			 */
-			assert(bi->type == type);
+			if (VNC_DEBUG(VERBOSE) && bi->type != type)
+				/* should be handled by RDs, but warn for now */
+				zlog_warn("%s: type mismatch! (bi=%d, arg=%d)",
+					  __func__, bi->type, type);
 
 			vnc_zlog_debug_verbose("%s: found matching bi",
 					       __func__);
@@ -3862,6 +3864,20 @@ void rfapiBgpInfoFilteredImportVPN(
 	VNC_ITRCCK;
 }
 
+static void rfapiBgpInfoFilteredImportBadSafi(
+	struct rfapi_import_table *import_table, int action, struct peer *peer,
+	void *rfd, /* set for looped back routes */
+	struct prefix *p,
+	struct prefix *aux_prefix, /* AFI_L2VPN: optional IP */
+	afi_t afi, struct prefix_rd *prd,
+	struct attr *attr, /* part of bgp_info */
+	u_char type,       /* part of bgp_info */
+	u_char sub_type,   /* part of bgp_info */
+	uint32_t *label)   /* part of bgp_info */
+{
+	vnc_zlog_debug_verbose("%s: Error, bad safi", __func__);
+}
+
 static rfapi_bi_filtered_import_f *
 rfapiBgpInfoFilteredImportFunction(safi_t safi)
 {
@@ -3871,9 +3887,12 @@ rfapiBgpInfoFilteredImportFunction(safi_t safi)
 
 	case SAFI_ENCAP:
 		return rfapiBgpInfoFilteredImportEncap;
+
+	default:
+		/* not expected */
+		zlog_err("%s: bad safi %d", __func__, safi);
+		return rfapiBgpInfoFilteredImportBadSafi;
 	}
-	zlog_err("%s: bad safi %d", __func__, safi);
-	return NULL;
 }
 
 void rfapiProcessUpdate(struct peer *peer,
@@ -4247,7 +4266,7 @@ static void rfapiBgpTableFilteredImport(struct bgp *bgp,
 struct rfapi *bgp_rfapi_new(struct bgp *bgp)
 {
 	struct rfapi *h;
-	int afi;
+	afi_t afi;
 	struct rfapi_rfp_cfg *cfg = NULL;
 	struct rfapi_rfp_cb_methods *cbm = NULL;
 
@@ -4256,9 +4275,7 @@ struct rfapi *bgp_rfapi_new(struct bgp *bgp)
 	h = (struct rfapi *)XCALLOC(MTYPE_RFAPI, sizeof(struct rfapi));
 
 	for (afi = AFI_IP; afi < AFI_MAX; afi++) {
-		/* ugly, to deal with addition of delegates, part of 0.99.24.1
-		 * merge */
-		h->un[afi].delegate = route_table_get_default_delegate();
+		h->un[afi] = route_table_init();
 	}
 
 	/*
@@ -4291,6 +4308,8 @@ struct rfapi *bgp_rfapi_new(struct bgp *bgp)
 
 void bgp_rfapi_destroy(struct bgp *bgp, struct rfapi *h)
 {
+	afi_t afi;
+
 	if (bgp == NULL || h == NULL)
 		return;
 
@@ -4326,6 +4345,11 @@ void bgp_rfapi_destroy(struct bgp *bgp, struct rfapi *h)
 
 	if (h->rfp != NULL)
 		rfp_stop(h->rfp);
+
+	for (afi = AFI_IP; afi < AFI_MAX; afi++) {
+		route_table_finish(h->un[afi]);
+	}
+
 	XFREE(MTYPE_RFAPI_IMPORTTABLE, h->it_ce);
 	XFREE(MTYPE_RFAPI, h);
 }

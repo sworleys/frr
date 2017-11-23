@@ -61,6 +61,14 @@ int pim_nexthop_lookup(struct pim_instance *pim, struct pim_nexthop *nexthop,
 	int found = 0;
 	int i = 0;
 
+	/*
+	 * We should not attempt to lookup a
+	 * 255.255.255.255 address, since
+	 * it will never work
+	 */
+	if (addr.s_addr == INADDR_NONE)
+		return -1;
+
 	if ((nexthop->last_lookup.s_addr == addr.s_addr)
 	    && (nexthop->last_lookup_time > last_route_change_time)) {
 		if (PIM_DEBUG_TRACE) {
@@ -233,10 +241,9 @@ enum pim_rpf_result pim_rpf_update(struct pim_instance *pim,
 	} else {
 		if (!pim_ecmp_nexthop_lookup(
 			    pim, &rpf->source_nexthop, up->upstream_addr, &src,
-			    &grp,
-			    !PIM_UPSTREAM_FLAG_TEST_FHR(up->flags)
-				    && !PIM_UPSTREAM_FLAG_TEST_SRC_IGMP(
-					       up->flags)))
+			    &grp, !PIM_UPSTREAM_FLAG_TEST_FHR(up->flags)
+					  && !PIM_UPSTREAM_FLAG_TEST_SRC_IGMP(
+						     up->flags)))
 			return PIM_RPF_FAILURE;
 	}
 

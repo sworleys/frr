@@ -72,7 +72,7 @@ struct bgp_attr_encap_subtlv {
 	unsigned long refcnt;
 	uint16_t type;
 	uint16_t length;
-	uint8_t value[1]; /* will be extended */
+	uint8_t value[0]; /* will be extended */
 };
 
 #if ENABLE_BGP_VNC
@@ -162,6 +162,9 @@ struct attr {
 	/* Static MAC for EVPN */
 	u_char sticky;
 
+	/* Flag for default gateway extended community in EVPN */
+	u_char default_gw;
+
 	/* route tag */
 	route_tag_t tag;
 
@@ -182,6 +185,9 @@ struct attr {
 
 	/* EVPN MAC Mobility sequence number, if any. */
 	u_int32_t mm_seqnum;
+
+	/* EVPN local router-mac */
+	struct ethaddr rmac;
 };
 
 /* rmap_change_flags definition */
@@ -207,7 +213,12 @@ struct transit {
 	u_char *val;
 };
 
-#define ATTR_FLAG_BIT(X)  (1ULL << ((X) - 1))
+/* "(void) 0" will generate a compiler error.  this is a safety check to
+ * ensure we're not using a value that exceeds the bit size of attr->flag. */
+#define ATTR_FLAG_BIT(X) \
+	__builtin_choose_expr((X) >= 1 && (X) <= 64, \
+			      1ULL << ((X) - 1), \
+			      (void) 0)
 
 #define BGP_CLUSTER_LIST_LENGTH(attr)                                          \
 	(((attr)->flag & ATTR_FLAG_BIT(BGP_ATTR_CLUSTER_LIST))                 \
@@ -233,10 +244,7 @@ extern bgp_attr_parse_ret_t bgp_attr_parse(struct peer *, struct attr *,
 					   bgp_size_t, struct bgp_nlri *,
 					   struct bgp_nlri *);
 extern void bgp_attr_dup(struct attr *, struct attr *);
-extern void bgp_attr_deep_dup(struct attr *, struct attr *);
-extern void bgp_attr_deep_free(struct attr *);
 extern struct attr *bgp_attr_intern(struct attr *attr);
-extern struct attr *bgp_attr_refcount(struct attr *attr);
 extern void bgp_attr_unintern_sub(struct attr *);
 extern void bgp_attr_unintern(struct attr **);
 extern void bgp_attr_flush(struct attr *);
@@ -250,7 +258,8 @@ extern bgp_size_t bgp_packet_attribute(struct bgp *bgp, struct peer *,
 				       struct bpacket_attr_vec_arr *vecarr,
 				       struct prefix *, afi_t, safi_t,
 				       struct peer *, struct prefix_rd *,
-				       mpls_label_t *, int, u_int32_t);
+				       mpls_label_t *, u_int32_t,
+				       int, u_int32_t);
 extern void bgp_dump_routes_attr(struct stream *, struct attr *,
 				 struct prefix *);
 extern int attrhash_cmp(const void *, const void *);
@@ -298,7 +307,8 @@ extern size_t bgp_packet_mpattr_start(struct stream *s, struct peer *peer,
 				      struct attr *attr);
 extern void bgp_packet_mpattr_prefix(struct stream *s, afi_t afi, safi_t safi,
 				     struct prefix *p, struct prefix_rd *prd,
-				     mpls_label_t *label, int addpath_encode,
+				     mpls_label_t *label, u_int32_t num_labels,
+				     int addpath_encode,
 				     u_int32_t addpath_tx_id, struct attr *);
 extern size_t bgp_packet_mpattr_prefix_size(afi_t afi, safi_t safi,
 					    struct prefix *p);
@@ -308,7 +318,8 @@ extern size_t bgp_packet_mpunreach_start(struct stream *s, afi_t afi,
 					 safi_t safi);
 extern void bgp_packet_mpunreach_prefix(struct stream *s, struct prefix *p,
 					afi_t afi, safi_t safi,
-					struct prefix_rd *prd, mpls_label_t *,
+					struct prefix_rd *prd,
+					mpls_label_t *, u_int32_t,
 					int, u_int32_t, struct attr *);
 extern void bgp_packet_mpunreach_end(struct stream *s, size_t attrlen_pnt);
 

@@ -70,8 +70,7 @@ void zebra_vrf_update_all(struct zserv *client)
 {
 	struct vrf *vrf;
 
-	RB_FOREACH(vrf, vrf_id_head, &vrfs_by_id)
-	{
+	RB_FOREACH (vrf, vrf_id_head, &vrfs_by_id) {
 		if (vrf->vrf_id)
 			zsend_vrf_add(client, vrf_info_lookup(vrf->vrf_id));
 	}
@@ -93,51 +92,6 @@ static int zebra_vrf_new(struct vrf *vrf)
 	zvrf->vrf = vrf;
 
 	return 0;
-}
-
-/*
- * Moving an interface amongst different vrf's
- * causes the interface to get a new ifindex
- * so we need to find static routes with
- * the old ifindex and replace with new
- * ifindex to insert back into the table
- */
-void zebra_vrf_static_route_interface_fixup(struct interface *ifp)
-{
-	afi_t afi;
-	safi_t safi;
-	struct zebra_vrf *zvrf = zebra_vrf_lookup_by_id(ifp->vrf_id);
-	struct route_table *stable = NULL;
-	struct route_node *rn = NULL;
-	struct static_route *si = NULL;
-
-	if (!zvrf)
-		return;
-
-	for (afi = AFI_IP; afi < AFI_MAX; afi++) {
-		for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++) {
-			stable = zvrf->stable[afi][safi];
-			if (stable)
-				for (rn = route_top(stable); rn;
-				     rn = route_next(rn)) {
-					if (rn->info) {
-						si = rn->info;
-						if ((strcmp(si->ifname,
-							    ifp->name)
-						     == 0)
-						    && (si->ifindex
-							!= ifp->ifindex)) {
-							si->ifindex =
-								ifp->ifindex;
-							static_install_route(
-								afi, safi,
-								&rn->p, NULL,
-								si);
-						}
-					}
-				}
-		}
-	}
 }
 
 /* Callback upon enabling a VRF. */
@@ -225,7 +179,6 @@ static int zebra_vrf_delete(struct vrf *vrf)
 
 	/* uninstall everything */
 	if (!CHECK_FLAG(zvrf->flags, ZEBRA_VRF_RETAIN)) {
-		struct listnode *node;
 		struct interface *ifp;
 
 		for (afi = AFI_IP; afi <= AFI_IP6; afi++) {
@@ -248,8 +201,9 @@ static int zebra_vrf_delete(struct vrf *vrf)
 		zebra_vxlan_close_tables(zvrf);
 
 		zebra_mpls_close_tables(zvrf);
+		zebra_pw_exit(zvrf);
 
-		for (ALL_LIST_ELEMENTS_RO(vrf->iflist, node, ifp))
+		FOR_ALL_INTERFACES (vrf, ifp)
 			if_nbr_ipv6ll_to_ipv4ll_neigh_del_all(ifp);
 	}
 
@@ -296,6 +250,10 @@ static int zebra_vrf_delete(struct vrf *vrf)
 		route_table_finish(zvrf->rnh_table[afi]);
 		route_table_finish(zvrf->import_check_table[afi]);
 	}
+
+	/* cleanup evpn states for vrf */
+	zebra_vxlan_vrf_delete(zvrf);
+
 	list_delete_all_node(zvrf->rid_all_sorted_list);
 	list_delete_all_node(zvrf->rid_lo_sorted_list);
 	XFREE(MTYPE_ZEBRA_VRF, zvrf);
@@ -334,8 +292,9 @@ static void zebra_rtable_node_cleanup(struct route_table *table,
 {
 	struct route_entry *re, *next;
 
-	RNODE_FOREACH_RE_SAFE(node, re, next)
-	rib_unlink(node, re);
+	RNODE_FOREACH_RE_SAFE (node, re, next) {
+		rib_unlink(node, re);
+	}
 
 	if (node->info)
 		XFREE(MTYPE_RIB_DEST, node->info);
@@ -417,6 +376,7 @@ struct zebra_vrf *zebra_vrf_alloc(void)
 
 	zebra_vxlan_init_tables(zvrf);
 	zebra_mpls_init_tables(zvrf);
+	zebra_pw_init(zvrf);
 
 	return zvrf;
 }
@@ -510,11 +470,16 @@ static int vrf_config_write(struct vty *vty)
 	struct vrf *vrf;
 	struct zebra_vrf *zvrf;
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	{
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
 		zvrf = vrf->info;
-		if (!zvrf || strcmp(zvrf_name(zvrf), VRF_DEFAULT_NAME)) {
+
+		if (!zvrf)
+			continue;
+
+		if (strcmp(zvrf_name(zvrf), VRF_DEFAULT_NAME)) {
 			vty_out(vty, "vrf %s\n", zvrf_name(zvrf));
+			if (zvrf->l3vni)
+				vty_out(vty, " vni %u\n", zvrf->l3vni);
 			vty_out(vty, "!\n");
 		}
 	}

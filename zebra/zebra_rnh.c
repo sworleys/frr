@@ -126,6 +126,7 @@ struct rnh *zebra_add_rnh(struct prefix *p, vrf_id_t vrfid, rnh_type_t type)
 		rnh->client_list = list_new();
 		rnh->vrf_id = vrfid;
 		rnh->zebra_static_route_list = list_new();
+		rnh->zebra_pseudowire_list = list_new();
 		route_lock_node(rn);
 		rn->info = rnh;
 		rnh->node = rn;
@@ -159,8 +160,9 @@ struct rnh *zebra_lookup_rnh(struct prefix *p, vrf_id_t vrfid, rnh_type_t type)
 void zebra_free_rnh(struct rnh *rnh)
 {
 	rnh->flags |= ZEBRA_NHT_DELETED;
-	list_free(rnh->client_list);
-	list_free(rnh->zebra_static_route_list);
+	list_delete_and_null(&rnh->client_list);
+	list_delete_and_null(&rnh->zebra_static_route_list);
+	list_delete_and_null(&rnh->zebra_pseudowire_list);
 	free_state(rnh->vrf_id, rnh->state, rnh->node);
 	XFREE(MTYPE_RNH, rnh);
 }
@@ -210,7 +212,8 @@ void zebra_remove_rnh_client(struct rnh *rnh, struct zserv *client,
 	}
 	listnode_delete(rnh->client_list, client);
 	if (list_isempty(rnh->client_list)
-	    && list_isempty(rnh->zebra_static_route_list))
+	    && list_isempty(rnh->zebra_static_route_list)
+	    && list_isempty(rnh->zebra_pseudowire_list))
 		zebra_delete_rnh(rnh, type);
 }
 
@@ -237,7 +240,8 @@ void zebra_deregister_rnh_static_nh(vrf_id_t vrf_id, struct prefix *nh,
 	listnode_delete(rnh->zebra_static_route_list, static_rn);
 
 	if (list_isempty(rnh->client_list)
-	    && list_isempty(rnh->zebra_static_route_list))
+	    && list_isempty(rnh->zebra_static_route_list)
+	    && list_isempty(rnh->zebra_pseudowire_list))
 		zebra_delete_rnh(rnh, RNH_NEXTHOP_TYPE);
 }
 
@@ -282,6 +286,59 @@ void zebra_deregister_rnh_static_nexthops(vrf_id_t vrf_id,
 		}
 		zebra_deregister_rnh_static_nh(vrf_id, &nh_p, rn);
 	}
+}
+
+/* XXX move this utility function elsewhere? */
+static void addr2hostprefix(int af, const union g_addr *addr,
+			    struct prefix *prefix)
+{
+	switch (af) {
+	case AF_INET:
+		prefix->family = AF_INET;
+		prefix->prefixlen = IPV4_MAX_BITLEN;
+		prefix->u.prefix4 = addr->ipv4;
+		break;
+	case AF_INET6:
+		prefix->family = AF_INET6;
+		prefix->prefixlen = IPV6_MAX_BITLEN;
+		prefix->u.prefix6 = addr->ipv6;
+		break;
+	default:
+		memset(prefix, 0, sizeof(*prefix));
+		zlog_warn("%s: unknown address family %d", __func__, af);
+		break;
+	}
+}
+
+void zebra_register_rnh_pseudowire(vrf_id_t vrf_id, struct zebra_pw *pw)
+{
+	struct prefix nh;
+	struct rnh *rnh;
+
+	addr2hostprefix(pw->af, &pw->nexthop, &nh);
+	rnh = zebra_add_rnh(&nh, vrf_id, RNH_NEXTHOP_TYPE);
+	if (rnh && !listnode_lookup(rnh->zebra_pseudowire_list, pw)) {
+		listnode_add(rnh->zebra_pseudowire_list, pw);
+		pw->rnh = rnh;
+		zebra_evaluate_rnh(vrf_id, pw->af, 1, RNH_NEXTHOP_TYPE, &nh);
+	}
+}
+
+void zebra_deregister_rnh_pseudowire(vrf_id_t vrf_id, struct zebra_pw *pw)
+{
+	struct rnh *rnh;
+
+	rnh = pw->rnh;
+	if (!rnh)
+		return;
+
+	listnode_delete(rnh->zebra_pseudowire_list, pw);
+	pw->rnh = NULL;
+
+	if (list_isempty(rnh->client_list)
+	    && list_isempty(rnh->zebra_static_route_list)
+	    && list_isempty(rnh->zebra_pseudowire_list))
+		zebra_delete_rnh(rnh, RNH_NEXTHOP_TYPE);
 }
 
 /* Apply the NHT route-map for a client to the route (and nexthops)
@@ -349,8 +406,7 @@ static struct route_entry *zebra_rnh_resolve_entry(vrf_id_t vrfid, int family,
 		re = NULL;
 	else {
 		/* Identify appropriate route entry. */
-		RNODE_FOREACH_RE(rn, re)
-		{
+		RNODE_FOREACH_RE (rn, re) {
 			if (CHECK_FLAG(re->status, ROUTE_ENTRY_REMOVED))
 				continue;
 			if (!CHECK_FLAG(re->status, ROUTE_ENTRY_SELECTED_FIB))
@@ -522,8 +578,7 @@ static void zebra_rnh_process_static_routes(vrf_id_t vrfid, int family,
 	/* Evaluate each static route associated with this nexthop. */
 	for (ALL_LIST_ELEMENTS_RO(rnh->zebra_static_route_list, node,
 				  static_rn)) {
-		RNODE_FOREACH_RE(static_rn, sre)
-		{
+		RNODE_FOREACH_RE (static_rn, sre) {
 			if (sre->type != ZEBRA_ROUTE_STATIC)
 				continue;
 
@@ -595,6 +650,15 @@ static void zebra_rnh_process_static_routes(vrf_id_t vrfid, int family,
 	}
 }
 
+static void zebra_rnh_process_pseudowires(vrf_id_t vrfid, struct rnh *rnh)
+{
+	struct zebra_pw *pw;
+	struct listnode *node;
+
+	for (ALL_LIST_ELEMENTS_RO(rnh->zebra_pseudowire_list, node, pw))
+		zebra_pw_update(pw);
+}
+
 /*
  * See if a tracked nexthop entry has undergone any change, and if so,
  * take appropriate action; this involves notifying any clients and/or
@@ -636,6 +700,9 @@ static void zebra_rnh_eval_nexthop_entry(vrf_id_t vrfid, int family, int force,
 		/* Process static routes attached to this nexthop */
 		zebra_rnh_process_static_routes(vrfid, family, nrn, rnh, prn,
 						rnh->state);
+
+		/* Process pseudowires attached to this nexthop */
+		zebra_rnh_process_pseudowires(vrfid, rnh);
 	}
 }
 
@@ -694,8 +761,10 @@ static void zebra_rnh_clear_nhc_flag(vrf_id_t vrfid, int family,
 
 	re = zebra_rnh_resolve_entry(vrfid, family, type, nrn, rnh, &prn);
 
-	if (re)
+	if (re) {
 		UNSET_FLAG(re->status, ROUTE_ENTRY_NEXTHOPS_CHANGED);
+		UNSET_FLAG(re->status, ROUTE_ENTRY_LABELS_CHANGED);
+	}
 }
 
 /* Evaluate all tracked entries (nexthops or routes for import into BGP)
@@ -815,6 +884,7 @@ static void copy_state(struct rnh *rnh, struct route_entry *re,
 
 	state = XCALLOC(MTYPE_RE, sizeof(struct route_entry));
 	state->type = re->type;
+	state->distance = re->distance;
 	state->metric = re->metric;
 
 	route_entry_copy_nexthops(state, re->nexthop);
@@ -830,13 +900,17 @@ static int compare_state(struct route_entry *r1, struct route_entry *r2)
 	if ((!r1 && r2) || (r1 && !r2))
 		return 1;
 
+	if (r1->distance != r2->distance)
+		return 1;
+
 	if (r1->metric != r2->metric)
 		return 1;
 
 	if (r1->nexthop_num != r2->nexthop_num)
 		return 1;
 
-	if (CHECK_FLAG(r1->status, ROUTE_ENTRY_NEXTHOPS_CHANGED))
+	if (CHECK_FLAG(r1->status, ROUTE_ENTRY_NEXTHOPS_CHANGED)
+	    || CHECK_FLAG(r1->status, ROUTE_ENTRY_LABELS_CHANGED))
 		return 1;
 
 	return 0;
@@ -999,5 +1073,7 @@ static void print_rnh(struct route_node *rn, struct vty *vty)
 	if (!list_isempty(rnh->zebra_static_route_list))
 		vty_out(vty, " zebra%s",
 			rnh->filtered[ZEBRA_ROUTE_STATIC] ? "(filtered)" : "");
+	if (!list_isempty(rnh->zebra_pseudowire_list))
+		vty_out(vty, " zebra[pseudowires]");
 	vty_out(vty, "\n");
 }

@@ -48,8 +48,8 @@ static int nhrp_if_delete_hook(struct interface *ifp)
 
 void nhrp_interface_init(void)
 {
-	if_add_hook(IF_NEW_HOOK,    nhrp_if_new_hook);
-	if_add_hook(IF_DELETE_HOOK, nhrp_if_delete_hook);
+	hook_register_prio(if_add, 0, nhrp_if_new_hook);
+	hook_register_prio(if_del, 0, nhrp_if_delete_hook);
 }
 
 void nhrp_interface_update_mtu(struct interface *ifp, afi_t afi)
@@ -299,7 +299,7 @@ int nhrp_interface_delete(int cmd, struct zclient *client,
 		return 0;
 
 	debugf(NHRP_DEBUG_IF, "if-delete: %s", ifp->name);
-	ifp->ifindex = IFINDEX_INTERNAL;
+	if_set_index(ifp, ifp->ifindex);
 	nhrp_interface_update(ifp);
 	/* if_delete(ifp); */
 	return 0;

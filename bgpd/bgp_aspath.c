@@ -892,7 +892,7 @@ size_t aspath_put(struct stream *s, struct aspath *as, int use32bit)
 				assegment_data_put(s, seg->as, AS_SEGMENT_MAX,
 						   use32bit);
 				written += AS_SEGMENT_MAX;
-				bytes += ASSEGMENT_SIZE(written, use32bit);
+				bytes += ASSEGMENT_SIZE(AS_SEGMENT_MAX, use32bit);
 			}
 
 			/* write the final segment, probably is also the first
@@ -1914,7 +1914,8 @@ static const char *aspath_gettoken(const char *buf, enum as_token *token,
 
 	/* There is no match then return unknown token. */
 	*token = as_token_unknown;
-	return p++;
+	p++;
+	return p;
 }
 
 struct aspath *aspath_str2aspath(const char *str)
@@ -2019,7 +2020,10 @@ int aspath_cmp(const void *arg1, const void *arg2)
 /* AS path hash initialize. */
 void aspath_init(void)
 {
-	ashash = hash_create_size(32768, aspath_key_make, aspath_cmp, NULL);
+	ashash = hash_create_size(32768,
+				  aspath_key_make,
+				  aspath_cmp,
+				  "BGP AS Path");
 }
 
 void aspath_finish(void)

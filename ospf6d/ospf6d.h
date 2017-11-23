@@ -21,8 +21,6 @@
 #ifndef OSPF6D_H
 #define OSPF6D_H
 
-#define OSPF6_DAEMON_VERSION    "0.9.7r"
-
 #include "libospf.h"
 #include "thread.h"
 
@@ -96,6 +94,7 @@ extern struct thread_master *master;
 		return CMD_SUCCESS;                                            \
 	}
 
+extern struct zebra_privs_t ospf6d_privs;
 
 /* Function Prototypes */
 extern struct route_node *route_prev(struct route_node *node);

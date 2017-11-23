@@ -280,8 +280,7 @@ static void set_namespaces()
 	struct namespace *namespace;
 	int fd;
 
-	LIST_FOREACH(namespace, &namespace_head, list)
-	{
+	LIST_FOREACH (namespace, &namespace_head, list) {
 		if ((fd = open(namespace->path, O_RDONLY)) == -1)
 			fatal("open namespace %s: %s", namespace->path,
 			      strerror(errno));
@@ -539,10 +538,7 @@ static void parse_options(int argc, char *const *argv)
 			execname = optarg;
 			break;
 		case 'c': /* --chuid <username>|<uid> */
-			/* we copy the string just in case we need the
-			 * argument later. */
-			changeuser = strdup(optarg);
-			changeuser = strtok(changeuser, ":");
+			changeuser = strtok(optarg, ":");
 			changegroup = strtok(NULL, ":");
 			break;
 		case 'r': /* --chroot /new/root */

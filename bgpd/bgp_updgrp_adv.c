@@ -113,8 +113,7 @@ static int group_announce_route_walkcb(struct update_group *updgrp, void *arg)
 	peer = UPDGRP_PEER(updgrp);
 	addpath_capable = bgp_addpath_encode_tx(peer, afi, safi);
 
-	UPDGRP_FOREACH_SUBGRP(updgrp, subgrp)
-	{
+	UPDGRP_FOREACH_SUBGRP (updgrp, subgrp) {
 
 		/*
 		 * Skip the subgroups that have coalesce timer running. We will
@@ -262,8 +261,7 @@ static int updgrp_show_adj_walkcb(struct update_group *updgrp, void *arg)
 	struct vty *vty;
 
 	vty = ctx->vty;
-	UPDGRP_FOREACH_SUBGRP(updgrp, subgrp)
-	{
+	UPDGRP_FOREACH_SUBGRP (updgrp, subgrp) {
 		if (ctx->subgrp_id && (ctx->subgrp_id != subgrp->id))
 			continue;
 		vty_out(vty, "update group %" PRIu64 ", subgroup %" PRIu64 "\n",
@@ -311,8 +309,7 @@ static int subgroup_coalesce_timer(struct thread *thread)
 		struct peer_af *paf;
 		struct peer *peer;
 
-		SUBGRP_FOREACH_PEER(subgrp, paf)
-		{
+		SUBGRP_FOREACH_PEER (subgrp, paf) {
 			peer = PAF_PEER(paf);
 			BGP_TIMER_OFF(peer->t_routeadv);
 			BGP_TIMER_ON(peer->t_routeadv, bgp_routeadv_timer, 0);
@@ -326,8 +323,7 @@ static int update_group_announce_walkcb(struct update_group *updgrp, void *arg)
 {
 	struct update_subgroup *subgrp;
 
-	UPDGRP_FOREACH_SUBGRP(updgrp, subgrp)
-	{
+	UPDGRP_FOREACH_SUBGRP (updgrp, subgrp) {
 		subgroup_announce_all(subgrp);
 	}
 
@@ -348,8 +344,7 @@ static int update_group_announce_rrc_walkcb(struct update_group *updgrp,
 
 	/* Only announce if this is a group of route-reflector-clients */
 	if (CHECK_FLAG(peer->af_flags[afi][safi], PEER_FLAG_REFLECTOR_CLIENT)) {
-		UPDGRP_FOREACH_SUBGRP(updgrp, subgrp)
-		{
+		UPDGRP_FOREACH_SUBGRP (updgrp, subgrp) {
 			subgroup_announce_all(subgrp);
 		}
 	}
@@ -468,8 +463,7 @@ void bgp_adj_out_set_subgroup(struct bgp_node *rn,
 	if (BGP_ADV_FIFO_EMPTY(&subgrp->sync->update)) {
 		struct peer_af *paf;
 
-		SUBGRP_FOREACH_PEER(subgrp, paf)
-		{
+		SUBGRP_FOREACH_PEER (subgrp, paf) {
 			bgp_adjust_routeadv(PAF_PEER(paf));
 		}
 	}
@@ -489,7 +483,7 @@ void bgp_adj_out_unset_subgroup(struct bgp_node *rn,
 {
 	struct bgp_adj_out *adj;
 	struct bgp_advertise *adv;
-	char trigger_write;
+	bool trigger_write;
 
 	if (DISABLE_BGP_ANNOUNCE)
 		return;
@@ -508,17 +502,13 @@ void bgp_adj_out_unset_subgroup(struct bgp_node *rn,
 			adv->adj = adj;
 
 			/* Note if we need to trigger a packet write */
-			if (BGP_ADV_FIFO_EMPTY(&subgrp->sync->withdraw))
-				trigger_write = 1;
-			else
-				trigger_write = 0;
+			trigger_write =
+				BGP_ADV_FIFO_EMPTY(&subgrp->sync->withdraw);
 
 			/* Add to synchronization entry for withdraw
 			 * announcement.  */
 			BGP_ADV_FIFO_ADD(&subgrp->sync->withdraw, &adv->fifo);
 
-			/* Schedule packet write, if FIFO is getting its first
-			 * entry. */
 			if (trigger_write)
 				subgroup_trigger_write(subgrp);
 		} else {
@@ -556,8 +546,7 @@ void subgroup_clear_table(struct update_subgroup *subgrp)
 {
 	struct bgp_adj_out *aout, *taout;
 
-	SUBGRP_FOREACH_ADJ_SAFE(subgrp, aout, taout)
-	{
+	SUBGRP_FOREACH_ADJ_SAFE (subgrp, aout, taout) {
 		struct bgp_node *rn = aout->rn;
 		bgp_adj_out_remove_subgroup(rn, aout, subgrp);
 		bgp_unlock_node(rn);
@@ -691,13 +680,14 @@ void subgroup_default_originate(struct update_subgroup *subgrp, int withdraw)
 
 	bgp_attr_default_set(&attr, BGP_ORIGIN_IGP);
 	aspath = attr.aspath;
+
 	attr.local_pref = bgp->default_local_pref;
 
-	if (afi == AFI_IP)
-		str2prefix("0.0.0.0/0", &p);
-	else if (afi == AFI_IP6) {
-		str2prefix("::/0", &p);
+	memset(&p, 0, sizeof(p));
+	p.family = afi2family(afi);
+	p.prefixlen = 0;
 
+	if ((afi == AFI_IP6) || peer_cap_enhe(peer, afi, safi)) {
 		/* IPv6 global nexthop must be included. */
 		attr.mp_nexthop_len = BGP_ATTR_NHLEN_IPV6_GLOBAL;
 
@@ -749,6 +739,11 @@ void subgroup_default_originate(struct update_subgroup *subgrp, int withdraw)
 	} else {
 		if (!CHECK_FLAG(subgrp->sflags,
 				SUBGRP_STATUS_DEFAULT_ORIGINATE)) {
+
+			if (bgp_flag_check(bgp, BGP_FLAG_GRACEFUL_SHUTDOWN)) {
+				bgp_attr_add_gshut_community(&attr);
+			}
+
 			SET_FLAG(subgrp->sflags,
 				 SUBGRP_STATUS_DEFAULT_ORIGINATE);
 			subgroup_default_update_packet(subgrp, &attr, from);
@@ -760,10 +755,9 @@ void subgroup_default_originate(struct update_subgroup *subgrp, int withdraw)
 			 * clear adj_out for the 0.0.0.0/0 prefix in the BGP
 			 * table.
 			 */
-			if (afi == AFI_IP)
-				str2prefix("0.0.0.0/0", &p);
-			else
-				str2prefix("::/0", &p);
+			memset(&p, 0, sizeof(p));
+			p.family = afi2family(afi);
+			p.prefixlen = 0;
 
 			rn = bgp_afi_node_get(bgp->rib[afi][safi], afi, safi,
 					      &p, NULL);

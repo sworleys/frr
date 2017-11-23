@@ -48,7 +48,7 @@ static void pim_instance_terminate(struct pim_instance *pim)
 	}
 
 	if (pim->static_routes)
-		list_delete(pim->static_routes);
+		list_delete_and_null(&pim->static_routes);
 
 	pim_rp_free(pim);
 
@@ -72,10 +72,11 @@ static struct pim_instance *pim_instance_init(struct vrf *vrf)
 	if (!pim)
 		return NULL;
 
+	pim_if_init(pim);
+
 	pim->keep_alive_time = PIM_KEEPALIVE_PERIOD;
 	pim->rp_keep_alive_time = PIM_RP_KEEPALIVE_PERIOD;
 
-	pim_if_init(pim);
 
 	pim->vrf_id = vrf->vrf_id;
 	pim->vrf = vrf;
@@ -86,7 +87,7 @@ static struct pim_instance *pim_instance_init(struct vrf *vrf)
 	pim_msdp_init(pim, master);
 
 	snprintf(hash_name, 64, "PIM %s RPF Hash", vrf->name);
-	pim->rpf_hash = hash_create_size(256, pim_rpf_hash_key,
+	pim->rpf_hash =	hash_create_size(256, pim_rpf_hash_key,
 					 pim_rpf_equal, hash_name);
 
 	if (PIM_DEBUG_ZEBRA)
@@ -191,14 +192,18 @@ static int pim_vrf_config_write(struct vty *vty)
 	struct vrf *vrf;
 	struct pim_instance *pim;
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	{
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
 		pim = vrf->info;
-		if (!pim || vrf->vrf_id != VRF_DEFAULT) {
-			vty_out(vty, "vrf %s\n", vrf->name);
-			pim_global_config_write_worker(pim, vty);
-			vty_out(vty, "!\n");
-		}
+
+		if (!pim)
+			continue;
+
+		if (vrf->vrf_id == VRF_DEFAULT)
+			continue;
+
+		vty_frame(vty, "vrf %s\n", vrf->name);
+		pim_global_config_write_worker(pim, vty);
+		vty_endframe(vty, "!\n");
 	}
 
 	return 0;

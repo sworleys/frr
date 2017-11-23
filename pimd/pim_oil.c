@@ -101,7 +101,6 @@ static unsigned int pim_oil_hash_key(void *arg)
 
 void pim_oil_init(struct pim_instance *pim)
 {
-
 	char hash_name[64];
 
 	snprintf(hash_name, 64, "PIM %s Oil Hash", pim->vrf->name);
@@ -124,8 +123,7 @@ void pim_oil_init(struct pim_instance *pim)
 void pim_oil_terminate(struct pim_instance *pim)
 {
 	if (pim->channel_oil_list)
-		list_delete(pim->channel_oil_list);
-	pim->channel_oil_list = NULL;
+		list_delete_and_null(&pim->channel_oil_list);
 
 	if (pim->channel_oil_hash)
 		hash_free(pim->channel_oil_hash);

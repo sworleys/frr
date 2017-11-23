@@ -24,6 +24,19 @@ else
 TESTS_BGPD =
 endif
 
+if ISISD
+if SOLARIS
+TESTS_ISISD =
+else
+TESTS_ISISD = \
+	isisd/test_fuzz_isis_tlv \
+	isisd/test_isis_vertex_queue \
+	# end
+endif
+else
+TESTS_ISISD =
+endif
+
 if OSPF6D
 TESTS_OSPF6D = \
 	ospf6d/test_lsdb \
@@ -61,8 +74,15 @@ check_PROGRAMS = \
 	lib/cli/test_cli \
 	lib/cli/test_commands \
 	$(TESTS_BGPD) \
+	$(TESTS_ISISD) \
 	$(TESTS_OSPF6D) \
 	# end
+
+if ZEROMQ
+check_PROGRAMS += \
+	lib/test_zmq \
+	# end
+endif
 
 ../vtysh/vtysh_cmd.c:
 	$(MAKE) -C ../vtysh vtysh_cmd.c
@@ -75,7 +95,10 @@ lib/cli/test_commands_defun.c: ../vtysh/vtysh_cmd.c
 		< ../vtysh/vtysh_cmd.c \
 		> "$@"
 
-BUILT_SOURCES = lib/cli/test_commands_defun.c
+isisd/test_fuzz_isis_tlv_tests.h: $(top_srcdir)/tests/isisd/test_fuzz_isis_tlv_tests.h.gz
+	gzip -d < $(top_srcdir)/tests/isisd/test_fuzz_isis_tlv_tests.h.gz > "$@"
+isisd/isisd_test_fuzz_isis_tlv-test_fuzz_isis_tlv.$(OBJEXT): \
+	isisd/test_fuzz_isis_tlv_tests.h
 
 noinst_HEADERS = \
 	./helpers/c/prng.h \
@@ -101,6 +124,8 @@ lib_test_timer_correctness_SOURCES = lib/test_timer_correctness.c \
 lib_test_timer_performance_SOURCES = lib/test_timer_performance.c \
                                      helpers/c/prng.c
 lib_test_ttable_SOURCES = lib/test_ttable.c
+lib_test_zmq_SOURCES = lib/test_zmq.c
+lib_test_zmq_CFLAGS = $(AM_CFLAGS) $(ZEROMQ_CFLAGS)
 lib_cli_test_cli_SOURCES = lib/cli/test_cli.c lib/cli/common_cli.c
 lib_cli_test_commands_SOURCES = lib/cli/test_commands_defun.c \
                                 lib/cli/test_commands.c \
@@ -110,11 +135,15 @@ bgpd_test_capability_SOURCES = bgpd/test_capability.c
 bgpd_test_ecommunity_SOURCES = bgpd/test_ecommunity.c
 bgpd_test_mp_attr_SOURCES = bgpd/test_mp_attr.c
 bgpd_test_mpath_SOURCES = bgpd/test_mpath.c
+isisd_test_fuzz_isis_tlv_SOURCES = isisd/test_fuzz_isis_tlv.c
+isisd_test_fuzz_isis_tlv_CPPFLAGS = $(AM_CPPFLAGS) -I$(top_builddir)/tests/isisd
+isisd_test_isis_vertex_queue_SOURCES = isisd/test_isis_vertex_queue.c
 
 ospf6d_test_lsdb_SOURCES = ospf6d/test_lsdb.c lib/cli/common_cli.c
 
 ALL_TESTS_LDADD = ../lib/libfrr.la @LIBCAP@
 BGP_TEST_LDADD = ../bgpd/libbgp.a $(BGP_VNC_RFP_LIB) $(ALL_TESTS_LDADD) -lm
+ISISD_TEST_LDADD = ../isisd/libisis.a $(ALL_TESTS_LDADD)
 OSPF6_TEST_LDADD = ../ospf6d/libospf6.a $(ALL_TESTS_LDADD)
 
 lib_test_buffer_LDADD = $(ALL_TESTS_LDADD)
@@ -133,6 +162,7 @@ lib_test_table_LDADD = $(ALL_TESTS_LDADD) -lm
 lib_test_timer_correctness_LDADD = $(ALL_TESTS_LDADD)
 lib_test_timer_performance_LDADD = $(ALL_TESTS_LDADD)
 lib_test_ttable_LDADD = $(ALL_TESTS_LDADD)
+lib_test_zmq_LDADD = ../lib/libfrrzmq.la $(ALL_TESTS_LDADD) $(ZEROMQ_LIBS)
 lib_cli_test_cli_LDADD = $(ALL_TESTS_LDADD)
 lib_cli_test_commands_LDADD = $(ALL_TESTS_LDADD)
 bgpd_test_aspath_LDADD = $(BGP_TEST_LDADD)
@@ -140,6 +170,8 @@ bgpd_test_capability_LDADD = $(BGP_TEST_LDADD)
 bgpd_test_ecommunity_LDADD = $(BGP_TEST_LDADD)
 bgpd_test_mp_attr_LDADD = $(BGP_TEST_LDADD)
 bgpd_test_mpath_LDADD = $(BGP_TEST_LDADD)
+isisd_test_fuzz_isis_tlv_LDADD = $(ISISD_TEST_LDADD)
+isisd_test_isis_vertex_queue_LDADD = $(ISISD_TEST_LDADD)
 ospf6d_test_lsdb_LDADD = $(OSPF6_TEST_LDADD)
 
 EXTRA_DIST = \
@@ -151,6 +183,9 @@ EXTRA_DIST = \
     bgpd/test_mpath.py \
     helpers/python/frrsix.py \
     helpers/python/frrtest.py \
+    isisd/test_fuzz_isis_tlv.py \
+    isisd/test_fuzz_isis_tlv_tests.h.gz \
+    isisd/test_isis_vertex_queue.py \
     lib/cli/test_commands.in \
     lib/cli/test_commands.py \
     lib/cli/test_commands.refout \

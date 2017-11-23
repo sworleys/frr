@@ -123,7 +123,7 @@ int rfapi_get_response_lifetime_default(void *rfp_start_val)
 /*------------------------------------------
  * rfapi_is_vnc_configured
  *
- * Returns if VNC (BGP VPN messaging /VPN & encap SAFIs) are configured
+ * Returns if VNC is configured
  *
  * input:
  *    rfp_start_val     value returned by rfp_start or
@@ -138,7 +138,9 @@ int rfapi_get_response_lifetime_default(void *rfp_start_val)
 int rfapi_is_vnc_configured(void *rfp_start_val)
 {
 	struct bgp *bgp = rfapi_bgp_lookup_by_rfp(rfp_start_val);
-	return bgp_rfapi_is_vnc_configured(bgp);
+	if (bgp_rfapi_is_vnc_configured(bgp) == 0)
+		return 0;
+	return ENXIO;
 }
 
 
@@ -206,7 +208,7 @@ static int rfapi_find_node(struct bgp *bgp, struct rfapi_ip_addr *vn_addr,
 	struct prefix p;
 	struct route_node *rn;
 	int rc;
-	int afi;
+	afi_t afi;
 
 	if (!bgp) {
 		return ENXIO;
@@ -225,7 +227,7 @@ static int rfapi_find_node(struct bgp *bgp, struct rfapi_ip_addr *vn_addr,
 	if ((rc = rfapiRaddr2Qprefix(un_addr, &p)))
 		return rc;
 
-	rn = route_node_lookup(&h->un[afi], &p);
+	rn = route_node_lookup(h->un[afi], &p);
 
 	if (!rn)
 		return ENOENT;
@@ -491,7 +493,8 @@ void del_vnc_route(struct rfapi_descriptor *rfd,
 		 * Delete local_nexthops list
 		 */
 		if (bi->extra && bi->extra->vnc.export.local_nexthops) {
-			list_delete(bi->extra->vnc.export.local_nexthops);
+			list_delete_and_null(
+				&bi->extra->vnc.export.local_nexthops);
 		}
 
 		bgp_aggregate_decrement(bgp, p, bi, afi, safi);
@@ -755,7 +758,7 @@ void add_vnc_route(struct rfapi_descriptor *rfd, /* cookie, VPN UN addr, peer */
 
 		encaptlv =
 			XCALLOC(MTYPE_ENCAP_TLV,
-				sizeof(struct bgp_attr_encap_subtlv) - 1 + 4);
+				sizeof(struct bgp_attr_encap_subtlv) + 4);
 		assert(encaptlv);
 		encaptlv->type =
 			BGP_VNC_SUBTLV_TYPE_LIFETIME; /* prefix lifetime */
@@ -799,8 +802,8 @@ void add_vnc_route(struct rfapi_descriptor *rfd, /* cookie, VPN UN addr, peer */
 				 */
 				encaptlv = XCALLOC(
 					MTYPE_ENCAP_TLV,
-					sizeof(struct bgp_attr_encap_subtlv) - 1
-						+ 2 + hop->length);
+					sizeof(struct bgp_attr_encap_subtlv)
+					+ 2 + hop->length);
 				assert(encaptlv);
 				encaptlv->type =
 					BGP_VNC_SUBTLV_TYPE_RFPOPTION; /* RFP
@@ -1302,18 +1305,31 @@ static int rfapi_open_inner(struct rfapi_descriptor *rfd, struct bgp *bgp,
 	rfd->peer = peer_new(bgp);
 	rfd->peer->status = Established; /* keep bgp core happy */
 	bgp_sync_delete(rfd->peer);      /* don't need these */
-	if (rfd->peer->ibuf) {
-		stream_free(rfd->peer->ibuf); /* don't need it */
+
+	/*
+	 * since this peer is not on the I/O thread, this lock is not strictly
+	 * necessary, but serves as a reminder to those who may meddle...
+	 */
+	pthread_mutex_lock(&rfd->peer->io_mtx);
+	{
+		// we don't need any I/O related facilities
+		if (rfd->peer->ibuf)
+			stream_fifo_free(rfd->peer->ibuf);
+		if (rfd->peer->obuf)
+			stream_fifo_free(rfd->peer->obuf);
+
+		if (rfd->peer->ibuf_work)
+			stream_free(rfd->peer->ibuf_work);
+		if (rfd->peer->obuf_work)
+			stream_free(rfd->peer->obuf_work);
+
 		rfd->peer->ibuf = NULL;
-	}
-	if (rfd->peer->obuf) {
-		stream_fifo_free(rfd->peer->obuf); /* don't need it */
 		rfd->peer->obuf = NULL;
+		rfd->peer->obuf_work = NULL;
+		rfd->peer->ibuf_work = NULL;
 	}
-	if (rfd->peer->work) {
-		stream_free(rfd->peer->work); /* don't need it */
-		rfd->peer->work = NULL;
-	}
+	pthread_mutex_unlock(&rfd->peer->io_mtx);
+
 	{ /* base code assumes have valid host pointer */
 		char buf[BUFSIZ];
 		buf[0] = 0;
@@ -1416,7 +1432,7 @@ int rfapi_init_and_open(struct bgp *bgp, struct rfapi_descriptor *rfd,
 		assert(afi_vn && afi_un);
 		assert(!rfapiRaddr2Qprefix(&rfd->un_addr, &pfx_un));
 
-		rn = route_node_get(&(h->un[afi_un]), &pfx_un);
+		rn = route_node_get(h->un[afi_un], &pfx_un);
 		assert(rn);
 		rfd->next = rn->info;
 		rn->info = rfd;
@@ -1569,7 +1585,7 @@ rfapi_query_inner(void *handle, struct rfapi_ip_addr *target,
 
 	if (l2o) {
 		if (!memcmp(l2o->macaddr.octet, rfapi_ethaddr0.octet,
-			    ETHER_ADDR_LEN)) {
+			    ETH_ALEN)) {
 			eth_is_0 = 1;
 		}
 		/* per t/c Paul/Lou 151022 */
@@ -2368,7 +2384,7 @@ int rfapi_register(void *handle, struct rfapi_ip_prefix *prefix,
 	struct prefix p;
 	struct prefix *pfx_ip = NULL;
 	struct prefix_rd prd;
-	int afi;
+	afi_t afi;
 	struct prefix pfx_mac_buf;
 	struct prefix *pfx_mac = NULL;
 	struct prefix pfx_vn_buf;
@@ -3417,7 +3433,7 @@ DEFUN (debug_rfapi_query_vn_un_l2o,
 	/* construct option chain */
 
 	memset(valbuf, 0, sizeof(valbuf));
-	memcpy(valbuf, &l2o_buf.macaddr.octet, ETHER_ADDR_LEN);
+	memcpy(valbuf, &l2o_buf.macaddr.octet, ETH_ALEN);
 	valbuf[11] = (l2o_buf.logical_net_id >> 16) & 0xff;
 	valbuf[12] = (l2o_buf.logical_net_id >> 8) & 0xff;
 	valbuf[13] = l2o_buf.logical_net_id & 0xff;

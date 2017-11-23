@@ -66,8 +66,8 @@ static int eigrp_interface_state_down(int, struct zclient *, zebra_size_t,
 				      vrf_id_t vrf_id);
 static struct interface *zebra_interface_if_lookup(struct stream *);
 
-static int eigrp_zebra_read_ipv4(int, struct zclient *, zebra_size_t,
-				 vrf_id_t vrf_id);
+static int eigrp_zebra_read_route(int, struct zclient *, zebra_size_t,
+				  vrf_id_t vrf_id);
 
 /* Zebra structure to hold current status. */
 struct zclient *zclient = NULL;
@@ -103,7 +103,7 @@ void eigrp_zebra_init(void)
 {
 	zclient = zclient_new(master);
 
-	zclient_init(zclient, ZEBRA_ROUTE_EIGRP, 0);
+	zclient_init(zclient, ZEBRA_ROUTE_EIGRP, 0, &eigrpd_privs);
 	zclient->zebra_connected = eigrp_zebra_connected;
 	zclient->router_id_update = eigrp_router_id_update_zebra;
 	zclient->interface_add = eigrp_interface_add;
@@ -112,59 +112,31 @@ void eigrp_zebra_init(void)
 	zclient->interface_down = eigrp_interface_state_down;
 	zclient->interface_address_add = eigrp_interface_address_add;
 	zclient->interface_address_delete = eigrp_interface_address_delete;
-	zclient->redistribute_route_ipv4_add = eigrp_zebra_read_ipv4;
-	zclient->redistribute_route_ipv4_del = eigrp_zebra_read_ipv4;
+	zclient->redistribute_route_add = eigrp_zebra_read_route;
+	zclient->redistribute_route_del = eigrp_zebra_read_route;
 }
 
 
 /* Zebra route add and delete treatment. */
-static int eigrp_zebra_read_ipv4(int command, struct zclient *zclient,
-				 zebra_size_t length, vrf_id_t vrf_id)
+static int eigrp_zebra_read_route(int command, struct zclient *zclient,
+				  zebra_size_t length, vrf_id_t vrf_id)
 {
-	struct stream *s;
-	struct zapi_ipv4 api;
-	struct prefix_ipv4 p;
+	struct zapi_route api;
 	struct eigrp *eigrp;
 
-	s = zclient->ibuf;
+	if (zapi_route_decode(zclient->ibuf, &api) < 0)
+		return -1;
 
-	/* Type, flags, message. */
-	api.type = stream_getc(s);
-	api.instance = stream_getw(s);
-	api.flags = stream_getc(s);
-	api.message = stream_getc(s);
-
-	/* IPv4 prefix. */
-	memset(&p, 0, sizeof(struct prefix_ipv4));
-	p.family = AF_INET;
-	p.prefixlen = stream_getc(s);
-	stream_get(&p.prefix, s, PSIZE(p.prefixlen));
-
-	if (IPV4_NET127(ntohl(p.prefix.s_addr)))
+	if (IPV4_NET127(ntohl(api.prefix.u.prefix4.s_addr)))
 		return 0;
-
-	/* Nexthop, ifindex, distance, metric. */
-	if (CHECK_FLAG(api.message, ZAPI_MESSAGE_NEXTHOP)) {
-		api.nexthop_num = stream_getc(s);
-		stream_get_ipv4(s);
-	}
-	if (CHECK_FLAG(api.message, ZAPI_MESSAGE_IFINDEX)) {
-		api.ifindex_num = stream_getc(s);
-		/* XXX assert(api.ifindex_num == 1); */
-		stream_getl(s); /* ifindex, unused */
-	}
-	if (CHECK_FLAG(api.message, ZAPI_MESSAGE_DISTANCE))
-		api.distance = stream_getc(s);
-	if (CHECK_FLAG(api.message, ZAPI_MESSAGE_METRIC))
-		api.metric = stream_getl(s);
 
 	eigrp = eigrp_lookup();
 	if (eigrp == NULL)
 		return 0;
 
-	if (command == ZEBRA_IPV4_ROUTE_ADD) {
+	if (command == ZEBRA_REDISTRIBUTE_ROUTE_ADD) {
 
-	} else /* if (command == ZEBRA_IPV4_ROUTE_DELETE) */
+	} else /* if (command == ZEBRA_REDISTRIBUTE_ROUTE_DEL) */
 	{
 	}
 
@@ -176,15 +148,16 @@ static int eigrp_interface_add(int command, struct zclient *zclient,
 			       zebra_size_t length, vrf_id_t vrf_id)
 {
 	struct interface *ifp;
+	struct eigrp_interface *ei;
 
 	ifp = zebra_interface_add_read(zclient->ibuf, vrf_id);
 
-	assert(ifp->info);
+	if (!ifp->info)
+		return 0;
 
-	if (!EIGRP_IF_PARAM_CONFIGURED(IF_DEF_PARAMS(ifp), type)) {
-		SET_IF_PARAM(IF_DEF_PARAMS(ifp), type);
-		IF_DEF_PARAMS(ifp)->type = eigrp_default_iftype(ifp);
-	}
+	ei = ifp->info;
+
+	ei->params.type = eigrp_default_iftype(ifp);
 
 	eigrp_if_update(ifp);
 
@@ -196,7 +169,6 @@ static int eigrp_interface_delete(int command, struct zclient *zclient,
 {
 	struct interface *ifp;
 	struct stream *s;
-	struct route_node *rn;
 
 	s = zclient->ibuf;
 	/* zebra_interface_state_read () updates interface structure in iflist
@@ -216,12 +188,11 @@ static int eigrp_interface_delete(int command, struct zclient *zclient,
 			ifp->name, ifp->ifindex, (unsigned long long)ifp->flags,
 			ifp->metric, ifp->mtu);
 
-	for (rn = route_top(IF_OIFS(ifp)); rn; rn = route_next(rn))
-		if (rn->info)
-			eigrp_if_free((struct eigrp_interface *)rn->info,
-				      INTERFACE_DOWN_BY_ZEBRA);
+	if (ifp->info)
+		eigrp_if_free(ifp->info,
+			      INTERFACE_DOWN_BY_ZEBRA);
 
-	ifp->ifindex = IFINDEX_INTERNAL;
+	if_set_index(ifp, IFINDEX_INTERNAL);
 	return 0;
 }
 
@@ -253,8 +224,6 @@ static int eigrp_interface_address_delete(int command, struct zclient *zclient,
 	struct connected *c;
 	struct interface *ifp;
 	struct eigrp_interface *ei;
-	struct route_node *rn;
-	struct prefix p;
 
 	c = zebra_interface_address_read(command, zclient->ibuf, vrf_id);
 
@@ -269,17 +238,9 @@ static int eigrp_interface_address_delete(int command, struct zclient *zclient,
 	}
 
 	ifp = c->ifp;
-	p = *c->address;
-	p.prefixlen = IPV4_MAX_PREFIXLEN;
-
-	rn = route_node_lookup(IF_OIFS(ifp), &p);
-	if (!rn) {
-		connected_free(c);
+	ei = ifp->info;
+	if (!ei)
 		return 0;
-	}
-
-	assert(rn->info);
-	ei = rn->info;
 
 	/* Call interface hook functions to clean up */
 	eigrp_if_free(ei, INTERFACE_DOWN_BY_ZEBRA);
@@ -293,8 +254,6 @@ static int eigrp_interface_state_up(int command, struct zclient *zclient,
 				    zebra_size_t length, vrf_id_t vrf_id)
 {
 	struct interface *ifp;
-	struct eigrp_interface *ei;
-	struct route_node *rn;
 
 	ifp = zebra_interface_if_lookup(zclient->ibuf);
 
@@ -342,12 +301,8 @@ static int eigrp_interface_state_up(int command, struct zclient *zclient,
 		zlog_debug("Zebra: Interface[%s] state change to up.",
 			   ifp->name);
 
-	for (rn = route_top(IF_OIFS(ifp)); rn; rn = route_next(rn)) {
-		if ((ei = rn->info) == NULL)
-			continue;
-
-		eigrp_if_up(ei);
-	}
+	if (ifp->info)
+		eigrp_if_up(ifp->info);
 
 	return 0;
 }
@@ -356,8 +311,6 @@ static int eigrp_interface_state_down(int command, struct zclient *zclient,
 				      zebra_size_t length, vrf_id_t vrf_id)
 {
 	struct interface *ifp;
-	struct eigrp_interface *ei;
-	struct route_node *node;
 
 	ifp = zebra_interface_state_read(zclient->ibuf, vrf_id);
 
@@ -368,11 +321,8 @@ static int eigrp_interface_state_down(int command, struct zclient *zclient,
 		zlog_debug("Zebra: Interface[%s] state change to down.",
 			   ifp->name);
 
-	for (node = route_top(IF_OIFS(ifp)); node; node = route_next(node)) {
-		if ((ei = node->info) == NULL)
-			continue;
-		eigrp_if_down(ei);
-	}
+	if (ifp->info)
+		eigrp_if_down(ifp->info);
 
 	return 0;
 }
@@ -385,94 +335,72 @@ static struct interface *zebra_interface_if_lookup(struct stream *s)
 	stream_get(ifname_tmp, s, INTERFACE_NAMSIZ);
 
 	/* And look it up. */
-	return if_lookup_by_name_len(
-		ifname_tmp, strnlen(ifname_tmp, INTERFACE_NAMSIZ), VRF_DEFAULT);
+	return if_lookup_by_name(ifname_tmp, VRF_DEFAULT);
 }
 
-void eigrp_zebra_route_add(struct prefix_ipv4 *p, struct list *successors)
+void eigrp_zebra_route_add(struct prefix *p, struct list *successors)
 {
-	struct eigrp_neighbor_entry *te;
+	struct zapi_route api;
+	struct zapi_nexthop *api_nh;
+	struct eigrp_nexthop_entry *te;
 	struct listnode *node;
-	u_char message;
-	u_char flags;
-	int psize;
-	struct stream *s;
+	int count = 0;
 
-	if (zclient->redist[AFI_IP][ZEBRA_ROUTE_EIGRP]) {
-		message = 0;
-		flags = 0;
+	if (!zclient->redist[AFI_IP][ZEBRA_ROUTE_EIGRP])
+		return;
 
-		/* EIGRP pass nexthop and metric */
-		SET_FLAG(message, ZAPI_MESSAGE_NEXTHOP);
+	memset(&api, 0, sizeof(api));
+	api.vrf_id = VRF_DEFAULT;
+	api.type = ZEBRA_ROUTE_EIGRP;
+	api.safi = SAFI_UNICAST;
+	memcpy(&api.prefix, p, sizeof(*p));
 
-		/* Make packet. */
-		s = zclient->obuf;
-		stream_reset(s);
+	SET_FLAG(api.message, ZAPI_MESSAGE_NEXTHOP);
 
-		/* Put command, type, flags, message. */
-		zclient_create_header(s, ZEBRA_IPV4_ROUTE_ADD, VRF_DEFAULT);
-		stream_putc(s, ZEBRA_ROUTE_EIGRP);
-		stream_putw(s, 0);
-		stream_putl(s, flags);
-		stream_putc(s, message);
-		stream_putw(s, SAFI_UNICAST);
+	/* Nexthop, ifindex, distance and metric information. */
+	for (ALL_LIST_ELEMENTS_RO(successors, node, te)) {
+		if (count >= MULTIPATH_NUM)
+			break;
+		api_nh = &api.nexthops[count];
+		if (te->adv_router->src.s_addr) {
+			api_nh->gate.ipv4 = te->adv_router->src;
+			api_nh->type = NEXTHOP_TYPE_IPV4_IFINDEX;
+		} else
+			api_nh->type = NEXTHOP_TYPE_IFINDEX;
+		api_nh->ifindex = te->ei->ifp->ifindex;
 
-		/* Put prefix information. */
-		psize = PSIZE(p->prefixlen);
-		stream_putc(s, p->prefixlen);
-		stream_write(s, (u_char *)&p->prefix, psize);
-
-		/* Nexthop count. */
-		stream_putc(s, successors->count);
-
-		/* Nexthop, ifindex, distance and metric information. */
-		for (ALL_LIST_ELEMENTS_RO(successors, node, te)) {
-			if (te->adv_router->src.s_addr) {
-				stream_putc(s, NEXTHOP_TYPE_IPV4_IFINDEX);
-				stream_put_in_addr(s, &te->adv_router->src);
-			} else
-				stream_putc(s, NEXTHOP_TYPE_IFINDEX);
-			stream_putl(s, te->ei->ifp->ifindex);
-		}
-
-		if (IS_DEBUG_EIGRP(zebra, ZEBRA_REDISTRIBUTE)) {
-			char buf[2][INET_ADDRSTRLEN];
-			zlog_debug("Zebra: Route add %s/%d nexthop %s",
-				   inet_ntop(AF_INET, &p->prefix, buf[0],
-					     sizeof(buf[0])),
-				   p->prefixlen,
-				   inet_ntop(AF_INET, 0 /*&p->nexthop*/, buf[1],
-					     sizeof(buf[1])));
-		}
-
-		stream_putw_at(s, 0, stream_get_endp(s));
-
-		zclient_send_message(zclient);
+		count++;
 	}
+	api.nexthop_num = count;
+
+	if (IS_DEBUG_EIGRP(zebra, ZEBRA_REDISTRIBUTE)) {
+		char buf[2][PREFIX_STRLEN];
+		zlog_debug("Zebra: Route add %s nexthop %s",
+			   prefix2str(p, buf[0], PREFIX_STRLEN),
+			   inet_ntop(AF_INET, 0, buf[1], PREFIX_STRLEN));
+	}
+
+	zclient_route_send(ZEBRA_ROUTE_ADD, zclient, &api);
 }
 
-void eigrp_zebra_route_delete(struct prefix_ipv4 *p)
+void eigrp_zebra_route_delete(struct prefix *p)
 {
-	struct zapi_ipv4 api;
+	struct zapi_route api;
 
-	if (zclient->redist[AFI_IP][ZEBRA_ROUTE_EIGRP]) {
-		api.vrf_id = VRF_DEFAULT;
-		api.type = ZEBRA_ROUTE_EIGRP;
-		api.instance = 0;
-		api.flags = 0;
-		api.message = 0;
-		api.safi = SAFI_UNICAST;
-		zapi_ipv4_route(ZEBRA_IPV4_ROUTE_DELETE, zclient, p, &api);
+	if (!zclient->redist[AFI_IP][ZEBRA_ROUTE_EIGRP])
+		return;
 
-		if (IS_DEBUG_EIGRP(zebra, ZEBRA_REDISTRIBUTE)) {
-			char buf[2][INET_ADDRSTRLEN];
-			zlog_debug("Zebra: Route del %s/%d nexthop %s",
-				   inet_ntop(AF_INET, &p->prefix, buf[0],
-					     sizeof(buf[0])),
-				   p->prefixlen,
-				   inet_ntop(AF_INET, 0 /*&p->nexthop*/, buf[1],
-					     sizeof(buf[1])));
-		}
+	memset(&api, 0, sizeof(api));
+	api.vrf_id = VRF_DEFAULT;
+	api.type = ZEBRA_ROUTE_EIGRP;
+	api.safi = SAFI_UNICAST;
+	memcpy(&api.prefix, p, sizeof(*p));
+	zclient_route_send(ZEBRA_ROUTE_DELETE, zclient, &api);
+
+	if (IS_DEBUG_EIGRP(zebra, ZEBRA_REDISTRIBUTE)) {
+		char buf[PREFIX_STRLEN];
+		zlog_debug("Zebra: Route del %s",
+			   prefix2str(p, buf, PREFIX_STRLEN));
 	}
 
 	return;

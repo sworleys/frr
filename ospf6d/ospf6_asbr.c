@@ -438,6 +438,9 @@ void ospf6_asbr_redistribute_add(int type, ifindex_t ifindex,
 	if (!ospf6_zebra_is_redistribute(type))
 		return;
 
+	memset(&troute, 0, sizeof(troute));
+	memset(&tinfo, 0, sizeof(tinfo));
+
 	if (IS_OSPF6_DEBUG_ASBR) {
 		prefix2str(prefix, pbuf, sizeof(pbuf));
 		zlog_debug("Redistribute %s (%s)", pbuf, ZROUTE_NAME(type));
@@ -457,8 +460,6 @@ void ospf6_asbr_redistribute_add(int type, ifindex_t ifindex,
 
 	/* apply route-map */
 	if (ospf6->rmap[type].map) {
-		memset(&troute, 0, sizeof(troute));
-		memset(&tinfo, 0, sizeof(tinfo));
 		troute.route_option = &tinfo;
 		tinfo.ifindex = ifindex;
 		tinfo.tag = tag;
@@ -985,21 +986,20 @@ static struct route_map_rule_cmd ospf6_routemap_rule_set_tag_cmd = {
 
 static int route_map_command_status(struct vty *vty, int ret)
 {
-	if (!ret)
-		return CMD_SUCCESS;
-
 	switch (ret) {
 	case RMAP_RULE_MISSING:
 		vty_out(vty, "OSPF6 Can't find rule.\n");
+		return CMD_WARNING_CONFIG_FAILED;
 		break;
 	case RMAP_COMPILE_ERROR:
 		vty_out(vty, "OSPF6 Argument is malformed.\n");
+		return CMD_WARNING_CONFIG_FAILED;
 		break;
-	default:
-		vty_out(vty, "OSPF6 route-map add set failed.\n");
+	case RMAP_COMPILE_SUCCESS:
 		break;
 	}
-	return CMD_WARNING_CONFIG_FAILED;
+
+	return CMD_SUCCESS;
 }
 
 /* add "set metric-type" */
@@ -1235,8 +1235,13 @@ DEFUN (show_ipv6_ospf6_redistribute,
 }
 
 struct ospf6_lsa_handler as_external_handler = {
-	OSPF6_LSTYPE_AS_EXTERNAL, "AS-External", "ASE",
-	ospf6_as_external_lsa_show, ospf6_as_external_lsa_get_prefix_str};
+	.lh_type = OSPF6_LSTYPE_AS_EXTERNAL,
+	.lh_name = "AS-External",
+	.lh_short_name = "ASE",
+	.lh_show = ospf6_as_external_lsa_show,
+	.lh_get_prefix_str = ospf6_as_external_lsa_get_prefix_str,
+	.lh_debug = 0
+};
 
 void ospf6_asbr_init(void)
 {

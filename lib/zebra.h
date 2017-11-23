@@ -126,6 +126,13 @@ typedef unsigned char u_int8_t;
 #define __APPLE_USE_RFC_3542
 #endif
 
+#ifndef HAVE_LIBCRYPT
+#   ifdef HAVE_LIBCRYPTO
+#      include <openssl/des.h>
+#      define crypt DES_crypt
+#   endif
+#endif
+
 #include "openbsd-tree.h"
 
 #include <netinet/in.h>
@@ -397,13 +404,14 @@ extern const char *zserv_command_string(unsigned int command);
 /* Zebra message flags */
 #define ZEBRA_FLAG_INTERNAL           0x01
 #define ZEBRA_FLAG_SELFROUTE          0x02
-#define ZEBRA_FLAG_BLACKHOLE          0x04
 #define ZEBRA_FLAG_IBGP               0x08
 #define ZEBRA_FLAG_SELECTED           0x10
 #define ZEBRA_FLAG_STATIC             0x40
-#define ZEBRA_FLAG_REJECT             0x80
 #define ZEBRA_FLAG_SCOPE_LINK         0x100
 #define ZEBRA_FLAG_FIB_OVERRIDE       0x200
+#define ZEBRA_FLAG_EVPN_ROUTE         0x400
+/* ZEBRA_FLAG_BLACKHOLE was 0x04 */
+/* ZEBRA_FLAG_REJECT was 0x80 */
 
 /* Zebra FEC flags. */
 #define ZEBRA_FEC_REGISTER_LABEL_INDEX        0x1
@@ -416,22 +424,15 @@ extern const char *zserv_command_string(unsigned int command);
 typedef enum { AFI_IP = 1, AFI_IP6 = 2, AFI_L2VPN = 3, AFI_MAX = 4 } afi_t;
 
 /* Subsequent Address Family Identifier. */
-#define SAFI_UNICAST              1
-#define SAFI_MULTICAST            2
-#define SAFI_MPLS_VPN             3
-#define SAFI_RESERVED_4           4
-#define SAFI_ENCAP		  5
-#define SAFI_RESERVED_5           5
-#define SAFI_EVPN                 6
-#define SAFI_LABELED_UNICAST      7
-#define SAFI_MAX                  8
-
-#define IANA_SAFI_RESERVED            0
-#define IANA_SAFI_UNICAST             1
-#define IANA_SAFI_MULTICAST           2
-#define IANA_SAFI_LABELED_UNICAST     4
-#define IANA_SAFI_ENCAP               7
-#define IANA_SAFI_MPLS_VPN            128
+typedef enum {
+	SAFI_UNICAST = 1,
+	SAFI_MULTICAST = 2,
+	SAFI_MPLS_VPN = 3,
+	SAFI_ENCAP = 4,
+	SAFI_EVPN = 5,
+	SAFI_LABELED_UNICAST = 6,
+	SAFI_MAX = 7
+} safi_t;
 
 /*
  * The above AFI and SAFI definitions are for internal use. The protocol
@@ -451,12 +452,15 @@ typedef enum {
 	IANA_AFI_IP6MR = 129
 } iana_afi_t;
 
-#define IANA_SAFI_RESERVED            0
-#define IANA_SAFI_UNICAST             1
-#define IANA_SAFI_MULTICAST           2
-#define IANA_SAFI_ENCAP               7
-#define IANA_SAFI_EVPN                70
-#define IANA_SAFI_MPLS_VPN            128
+typedef enum {
+	IANA_SAFI_RESERVED = 0,
+	IANA_SAFI_UNICAST = 1,
+	IANA_SAFI_MULTICAST = 2,
+	IANA_SAFI_LABELED_UNICAST = 4,
+	IANA_SAFI_ENCAP = 7,
+	IANA_SAFI_EVPN = 70,
+	IANA_SAFI_MPLS_VPN = 128
+} iana_safi_t;
 
 /* Default Administrative Distance of each protocol. */
 #define ZEBRA_KERNEL_DISTANCE_DEFAULT      0
@@ -477,8 +481,6 @@ typedef enum {
 #define UNSET_FLAG(V,F)      (V) &= ~(F)
 #define RESET_FLAG(V)        (V) = 0
 
-typedef u_int8_t safi_t;
-
 /* Zebra types. Used in Zserv message header. */
 typedef u_int16_t zebra_size_t;
 typedef u_int16_t zebra_command_t;
@@ -492,58 +494,70 @@ typedef uint32_t route_tag_t;
 
 static inline afi_t afi_iana2int(iana_afi_t afi)
 {
-	if (afi == IANA_AFI_IPV4)
+	switch (afi) {
+	case IANA_AFI_IPV4:
 		return AFI_IP;
-	if (afi == IANA_AFI_IPV6)
+	case IANA_AFI_IPV6:
 		return AFI_IP6;
-	if (afi == IANA_AFI_L2VPN)
+	case IANA_AFI_L2VPN:
 		return AFI_L2VPN;
-	return AFI_MAX;
+	default:
+		return AFI_MAX;
+	}
 }
 
 static inline iana_afi_t afi_int2iana(afi_t afi)
 {
-	if (afi == AFI_IP)
+	switch (afi) {
+	case AFI_IP:
 		return IANA_AFI_IPV4;
-	if (afi == AFI_IP6)
+	case AFI_IP6:
 		return IANA_AFI_IPV6;
-	if (afi == AFI_L2VPN)
+	case AFI_L2VPN:
 		return IANA_AFI_L2VPN;
-	return IANA_AFI_RESERVED;
+	default:
+		return IANA_AFI_RESERVED;
+	}
 }
 
-static inline safi_t safi_iana2int(safi_t safi)
+static inline safi_t safi_iana2int(iana_safi_t safi)
 {
-	if (safi == IANA_SAFI_UNICAST)
+	switch (safi) {
+	case IANA_SAFI_UNICAST:
 		return SAFI_UNICAST;
-	if (safi == IANA_SAFI_MULTICAST)
+	case IANA_SAFI_MULTICAST:
 		return SAFI_MULTICAST;
-	if (safi == IANA_SAFI_MPLS_VPN)
+	case IANA_SAFI_MPLS_VPN:
 		return SAFI_MPLS_VPN;
-	if (safi == IANA_SAFI_ENCAP)
+	case IANA_SAFI_ENCAP:
 		return SAFI_ENCAP;
-	if (safi == IANA_SAFI_EVPN)
+	case IANA_SAFI_EVPN:
 		return SAFI_EVPN;
-	if (safi == IANA_SAFI_LABELED_UNICAST)
+	case IANA_SAFI_LABELED_UNICAST:
 		return SAFI_LABELED_UNICAST;
-	return SAFI_MAX;
+	default:
+		return SAFI_MAX;
+	}
 }
 
-static inline safi_t safi_int2iana(safi_t safi)
+static inline iana_safi_t safi_int2iana(safi_t safi)
 {
-	if (safi == SAFI_UNICAST)
+	switch (safi) {
+	case SAFI_UNICAST:
 		return IANA_SAFI_UNICAST;
-	if (safi == SAFI_MULTICAST)
+	case SAFI_MULTICAST:
 		return IANA_SAFI_MULTICAST;
-	if (safi == SAFI_MPLS_VPN)
+	case SAFI_MPLS_VPN:
 		return IANA_SAFI_MPLS_VPN;
-	if (safi == SAFI_ENCAP)
+	case SAFI_ENCAP:
 		return IANA_SAFI_ENCAP;
-	if (safi == SAFI_EVPN)
+	case SAFI_EVPN:
 		return IANA_SAFI_EVPN;
-	if (safi == SAFI_LABELED_UNICAST)
+	case SAFI_LABELED_UNICAST:
 		return IANA_SAFI_LABELED_UNICAST;
-	return IANA_SAFI_RESERVED;
+	default:
+		return IANA_SAFI_RESERVED;
+	}
 }
 
 #endif /* _ZEBRA_H */

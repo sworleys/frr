@@ -55,8 +55,6 @@ struct rtadv_prefix {
 #endif
 };
 
-extern void rtadv_config_write(struct vty *, struct interface *);
-
 /* RFC4584 Extension to Sockets API for Mobile IPv6 */
 
 #ifndef ND_OPT_ADV_INTERVAL
@@ -105,7 +103,7 @@ typedef enum {
 extern void rtadv_init(struct zebra_ns *);
 extern void rtadv_terminate(struct zebra_ns *);
 extern void rtadv_cmd_init(void);
-extern void zebra_interface_radv_set(struct zserv *client, int sock,
+extern void zebra_interface_radv_set(struct zserv *client,
 				     u_short length, struct zebra_vrf *zvrf,
 				     int enable);
 

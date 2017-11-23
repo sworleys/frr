@@ -292,7 +292,6 @@ static int pim_bfd_nbr_replay(int command, struct zclient *zclient,
 	struct interface *ifp = NULL;
 	struct pim_interface *pim_ifp = NULL;
 	struct pim_neighbor *neigh = NULL;
-	struct listnode *node;
 	struct listnode *neigh_node;
 	struct listnode *neigh_nextnode;
 	struct vrf *vrf = NULL;
@@ -300,8 +299,8 @@ static int pim_bfd_nbr_replay(int command, struct zclient *zclient,
 	/* Send the client registration */
 	bfd_client_sendmsg(zclient, ZEBRA_BFD_CLIENT_REGISTER);
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name) {
-		for (ALL_LIST_ELEMENTS_RO(vrf_iflist(vrf->vrf_id), node, ifp)) {
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
+		FOR_ALL_INTERFACES (vrf, ifp) {
 			pim_ifp = ifp->info;
 
 			if (!pim_ifp)

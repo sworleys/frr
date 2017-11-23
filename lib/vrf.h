@@ -77,8 +77,9 @@ struct vrf {
 	u_char status;
 #define VRF_ACTIVE     (1 << 0)
 
-	/* Master list of interfaces belonging to this VRF */
-	struct list *iflist;
+	/* Interfaces belonging to this VRF */
+	struct if_name_head ifaces_by_name;
+	struct if_index_head ifaces_by_index;
 
 	/* User data */
 	void *info;
@@ -101,6 +102,7 @@ extern struct vrf_name_head vrfs_by_name;
 extern struct vrf *vrf_lookup_by_id(vrf_id_t);
 extern struct vrf *vrf_lookup_by_name(const char *);
 extern struct vrf *vrf_get(vrf_id_t, const char *);
+extern const char *vrf_id_to_name(vrf_id_t);
 extern vrf_id_t vrf_name_to_id(const char *);
 
 #define VRF_GET_ID(V, NAME)                                                    \
@@ -125,15 +127,6 @@ extern vrf_id_t vrf_name_to_id(const char *);
 extern void *vrf_info_get(vrf_id_t);
 /* Look up the data pointer of the specified VRF. */
 extern void *vrf_info_lookup(vrf_id_t);
-
-/*
- * Utilities to obtain the interface list
- */
-
-/* Look up the interface list of the specified VRF. */
-extern struct list *vrf_iflist(vrf_id_t);
-/* Get the interface list of the specified VRF. Create one if not find. */
-extern struct list *vrf_iflist_get(vrf_id_t);
 
 /*
  * VRF bit-map: maintaining flags, one bit per VRF ID

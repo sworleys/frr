@@ -37,7 +37,6 @@ void babelz_zebra_init(void);
 
 /* we must use a pointer because of zclient.c's functions (new, free). */
 struct zclient *zclient;
-static int zebra_config_write (struct vty *vty);
 
 /* Debug types */
 static struct {
@@ -55,202 +54,69 @@ static struct {
     {0, 0, NULL}
 };
 
-static struct {
-    int str_min_len;
-    const char *str;
-} proto_redistnum_type[ZEBRA_ROUTE_MAX] = {
-    [ZEBRA_ROUTE_BABEL]   = {2, "babel"},
-    [ZEBRA_ROUTE_BGP]     = {2, "bgp"},
-    [ZEBRA_ROUTE_CONNECT] = {1, "connected"},
-    [ZEBRA_ROUTE_HSLS]    = {1, "hsls"},
-    [ZEBRA_ROUTE_ISIS]    = {1, "isis"},
-    [ZEBRA_ROUTE_KERNEL]  = {1, "kernel"},
-    [ZEBRA_ROUTE_OLSR]    = {2, "olsr"},
-    [ZEBRA_ROUTE_OSPF]    = {2, "ospf"},
-    [ZEBRA_ROUTE_OSPF6]   = {5, "ospf6"},
-    [ZEBRA_ROUTE_RIP]     = {1, "rip"},
-    [ZEBRA_ROUTE_RIPNG]   = {4, "ripng"},
-    [ZEBRA_ROUTE_STATIC]  = {2, "static"},
-    [ZEBRA_ROUTE_SYSTEM]  = {2, "system"},
-};
-
-/* Zebra node structure. */
-struct cmd_node zebra_node =
-{
-    ZEBRA_NODE,
-    "%s(config-router)# ",
-    1 /* vtysh? yes */
-};
-
-
-/* Zebra route add and delete treatment (ipv6). */
+/* Zebra route add and delete treatment. */
 static int
-babel_zebra_read_ipv6 (int command, struct zclient *zclient,
-		       zebra_size_t length, vrf_id_t vrf)
+babel_zebra_read_route (int command, struct zclient *zclient,
+		        zebra_size_t length, vrf_id_t vrf)
 {
-    struct stream *s;
-    struct zapi_ipv6 api;
-    unsigned long ifindex = -1;
-    struct in6_addr nexthop;
-    struct prefix_ipv6 prefix;
+    struct zapi_route api;
 
-    s = zclient->ibuf;
-    ifindex = 0;
-    memset (&nexthop, 0, sizeof (struct in6_addr));
-    memset (&api, 0, sizeof(struct zapi_ipv6));
-    memset (&prefix, 0, sizeof (struct prefix_ipv6));
-
-    /* Type, flags, message. */
-    api.type = stream_getc (s);
-    api.instance = stream_getw (s);
-    api.flags = stream_getl (s);
-    api.message = stream_getc (s);
-
-    /* IPv6 prefix. */
-    prefix.family = AF_INET6;
-    prefix.prefixlen = stream_getc (s);
-    stream_get (&prefix.prefix, s, PSIZE (prefix.prefixlen));
-
-    /* Nexthop, ifindex, distance, metric. */
-    if (CHECK_FLAG (api.message, ZAPI_MESSAGE_NEXTHOP)) {
-        api.nexthop_num = stream_getc (s);
-        stream_get (&nexthop, s, sizeof(nexthop));
-    }
-    if (CHECK_FLAG (api.message, ZAPI_MESSAGE_IFINDEX)) {
-        api.ifindex_num = stream_getc (s);
-        ifindex = stream_getl (s);
-    }
-    if (CHECK_FLAG (api.message, ZAPI_MESSAGE_DISTANCE))
-        api.distance = stream_getc (s);
-    else
-        api.distance = 0;
-    if (CHECK_FLAG (api.message, ZAPI_MESSAGE_METRIC))
-        api.metric = stream_getl (s);
-    else
-        api.metric = 0;
-
-    if (command == ZEBRA_REDISTRIBUTE_IPV6_ADD)
-        babel_ipv6_route_add(&api, &prefix, ifindex, &nexthop);
-    else
-        babel_ipv6_route_delete(&api, &prefix, ifindex);
-
-    return 0;
-}
-
-static int
-babel_zebra_read_ipv4 (int command, struct zclient *zclient,
-		       zebra_size_t length, vrf_id_t vrf)
-{
-    struct stream *s;
-    struct zapi_ipv4 api;
-    unsigned long ifindex = -1;
-    struct in_addr nexthop;
-    struct prefix_ipv4 prefix;
-
-    s = zclient->ibuf;
-    ifindex = 0;
-    memset (&nexthop, 0, sizeof (struct in_addr));
-    memset (&api, 0, sizeof(struct zapi_ipv4));
-    memset (&prefix, 0, sizeof (struct prefix_ipv4));
-
-    /* Type, flags, message. */
-    api.type = stream_getc (s);
-    api.instance = stream_getw (s);
-    api.flags = stream_getl (s);
-    api.message = stream_getc (s);
-
-    /* IPv6 prefix. */
-    prefix.family = AF_INET;
-    prefix.prefixlen = stream_getc (s);
-    stream_get (&prefix.prefix, s, PSIZE (prefix.prefixlen));
-
-    /* Nexthop, ifindex, distance, metric. */
-    if (CHECK_FLAG (api.message, ZAPI_MESSAGE_NEXTHOP)) {
-        api.nexthop_num = stream_getc (s);
-        stream_get (&nexthop, s, sizeof(nexthop));
-    }
-    if (CHECK_FLAG (api.message, ZAPI_MESSAGE_IFINDEX)) {
-        api.ifindex_num = stream_getc (s);
-        ifindex = stream_getl (s);
-    }
-    if (CHECK_FLAG (api.message, ZAPI_MESSAGE_DISTANCE))
-        api.distance = stream_getc (s);
-    else
-        api.distance = 0;
-    if (CHECK_FLAG (api.message, ZAPI_MESSAGE_METRIC))
-        api.metric = stream_getl (s);
-    else
-        api.metric = 0;
-
-    if (command == ZEBRA_REDISTRIBUTE_IPV4_ADD) {
-        babel_ipv4_route_add(&api, &prefix, ifindex, &nexthop);
-    } else {
-        babel_ipv4_route_delete(&api, &prefix, ifindex);
-    }
-
-    return 0;
-}
-
-static int
-babel_proto_redistnum(const char *s)
-{
-    int i;
-    if (! s)
+    if (zapi_route_decode(zclient->ibuf, &api) < 0)
         return -1;
-    int len = strlen(s);
 
-    for (i = 0; i < ZEBRA_ROUTE_MAX; i++) {
-        if (len <= (int)strlen(proto_redistnum_type[i].str) &&
-            strncmp(proto_redistnum_type[i].str, s,
-                    proto_redistnum_type[i].str_min_len) == 0) {
-            return i;
-        }
+    /* we completely ignore srcdest routes for now. */
+    if (CHECK_FLAG(api.message, ZAPI_MESSAGE_SRCPFX))
+        return 0;
+
+    if (command == ZEBRA_REDISTRIBUTE_ROUTE_ADD) {
+        babel_route_add(&api);
+    } else {
+        babel_route_delete(&api);
     }
 
-    return -1;
+    return 0;
 }
 
 /* [Babel Command] */
 DEFUN (babel_redistribute_type,
        babel_redistribute_type_cmd,
-       "redistribute " FRR_REDIST_STR_BABELD,
-       "Redistribute\n"
-       FRR_REDIST_HELP_STR_BABELD)
-{
-    int type;
-
-    type = babel_proto_redistnum(argv[1]->arg);
-
-    if (type < 0) {
-        vty_out (vty, "Invalid type %s\n", argv[1]->arg);
-        return CMD_WARNING_CONFIG_FAILED;
-    }
-
-    zclient_redistribute (ZEBRA_REDISTRIBUTE_ADD, zclient, AFI_IP, type, 0, VRF_DEFAULT);
-    zclient_redistribute (ZEBRA_REDISTRIBUTE_ADD, zclient, AFI_IP6, type, 0, VRF_DEFAULT);
-    return CMD_SUCCESS;
-}
-
-/* [Babel Command] */
-DEFUN (no_babel_redistribute_type,
-       no_babel_redistribute_type_cmd,
-       "no redistribute " FRR_REDIST_STR_BABELD,
+       "[no] redistribute <ipv4 " FRR_IP_REDIST_STR_BABELD "|ipv6 " FRR_IP6_REDIST_STR_BABELD ">",
        NO_STR
        "Redistribute\n"
-       FRR_REDIST_HELP_STR_BABELD)
+       "Redistribute IPv4 routes\n"
+       FRR_IP_REDIST_HELP_STR_BABELD
+       "Redistribute IPv6 routes\n"
+       FRR_IP6_REDIST_HELP_STR_BABELD)
 {
+    int negate = 0;
+    int family;
+    int afi;
     int type;
+    int idx = 0;
 
-    type = babel_proto_redistnum(argv[2]->arg);
+    if (argv_find(argv, argc, "no", &idx))
+        negate = 1;
+    argv_find(argv, argc, "redistribute", &idx);
+    family = str2family(argv[idx + 1]->text);
+    if (family < 0)
+        return CMD_WARNING_CONFIG_FAILED;
 
+    afi = family2afi(family);
+    if (!afi)
+        return CMD_WARNING_CONFIG_FAILED;
+
+    type = proto_redistnum(afi, argv[idx + 2]->text);
     if (type < 0) {
-        vty_out (vty, "Invalid type %s\n", argv[2]->arg);
+        vty_out (vty, "Invalid type %s\n", argv[idx + 2]->arg);
         return CMD_WARNING_CONFIG_FAILED;
     }
 
-    zclient_redistribute (ZEBRA_REDISTRIBUTE_DELETE, zclient, AFI_IP, type, 0, VRF_DEFAULT);
-    zclient_redistribute (ZEBRA_REDISTRIBUTE_DELETE, zclient, AFI_IP6, type, 0, VRF_DEFAULT);
-    /* perhaps should we remove xroutes having the same type... */
+    if (!negate)
+        zclient_redistribute (ZEBRA_REDISTRIBUTE_ADD, zclient, afi, type, 0, VRF_DEFAULT);
+    else {
+        zclient_redistribute (ZEBRA_REDISTRIBUTE_DELETE, zclient, afi, type, 0, VRF_DEFAULT);
+        /* perhaps should we remove xroutes having the same type... */
+    }
     return CMD_SUCCESS;
 }
 
@@ -349,6 +215,20 @@ debug_babel_config_write (struct vty * vty)
 #endif /* NO_DEBUG */
 }
 
+DEFUN_NOSH (show_debugging_babel,
+	    show_debugging_babel_cmd,
+	    "show debugging [babel]",
+	    SHOW_STR
+	    DEBUG_STR
+	    "Babel")
+{
+	vty_out(vty, "BABEL debugging status\n");
+
+	debug_babel_config_write(vty);
+
+	return CMD_SUCCESS;
+}
+
 static void
 babel_zebra_connected (struct zclient *zclient)
 {
@@ -358,7 +238,7 @@ babel_zebra_connected (struct zclient *zclient)
 void babelz_zebra_init(void)
 {
     zclient = zclient_new(master);
-    zclient_init(zclient, ZEBRA_ROUTE_BABEL, 0);
+    zclient_init(zclient, ZEBRA_ROUTE_BABEL, 0, &babeld_privs);
 
     zclient->zebra_connected = babel_zebra_connected;
     zclient->interface_add = babel_interface_add;
@@ -367,35 +247,16 @@ void babelz_zebra_init(void)
     zclient->interface_down = babel_interface_down;
     zclient->interface_address_add = babel_interface_address_add;
     zclient->interface_address_delete = babel_interface_address_delete;
-    zclient->redistribute_route_ipv4_add = babel_zebra_read_ipv4;
-    zclient->redistribute_route_ipv4_del = babel_zebra_read_ipv4;
-    zclient->redistribute_route_ipv6_add = babel_zebra_read_ipv6;
-    zclient->redistribute_route_ipv6_del = babel_zebra_read_ipv6;
+    zclient->redistribute_route_add = babel_zebra_read_route;
+    zclient->redistribute_route_del = babel_zebra_read_route;
 
-    install_node (&zebra_node, zebra_config_write);
     install_element(BABEL_NODE, &babel_redistribute_type_cmd);
-    install_element(BABEL_NODE, &no_babel_redistribute_type_cmd);
     install_element(ENABLE_NODE, &debug_babel_cmd);
     install_element(ENABLE_NODE, &no_debug_babel_cmd);
     install_element(CONFIG_NODE, &debug_babel_cmd);
     install_element(CONFIG_NODE, &no_debug_babel_cmd);
-}
 
-static int
-zebra_config_write (struct vty *vty)
-{
-    if (! zclient->enable)
-    {
-        vty_out (vty, "no router zebra\n");
-        return 1;
-    }
-    else if (! vrf_bitmap_check (zclient->redist[AFI_IP][ZEBRA_ROUTE_BABEL], VRF_DEFAULT))
-    {
-        vty_out (vty, "router zebra\n");
-        vty_out (vty, " no redistribute babel\n");
-        return 1;
-    }
-    return 0;
+    install_element(VIEW_NODE, &show_debugging_babel_cmd);
 }
 
 void

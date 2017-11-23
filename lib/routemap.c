@@ -416,23 +416,25 @@ int generic_match_add(struct vty *vty, struct route_map_index *index,
 	int ret;
 
 	ret = route_map_add_match(index, command, arg);
-	if (ret) {
-		switch (ret) {
-		case RMAP_RULE_MISSING:
-			vty_out(vty, "%% [%s] Can't find rule.\n",
-				frr_protonameinst);
-			return CMD_WARNING_CONFIG_FAILED;
-		case RMAP_COMPILE_ERROR:
-			vty_out(vty,
-				"%% [%s] Argument form is unsupported or malformed.\n",
-				frr_protonameinst);
-			return CMD_WARNING_CONFIG_FAILED;
+	switch (ret) {
+	case RMAP_COMPILE_SUCCESS:
+		if (type != RMAP_EVENT_MATCH_ADDED) {
+			route_map_upd8_dependency(type, arg, index->map->name);
 		}
+		break;
+	case RMAP_RULE_MISSING:
+		vty_out(vty, "%% [%s] Can't find rule.\n",
+			frr_protonameinst);
+		return CMD_WARNING_CONFIG_FAILED;
+		break;
+	case RMAP_COMPILE_ERROR:
+		vty_out(vty,
+			"%% [%s] Argument form is unsupported or malformed.\n",
+			frr_protonameinst);
+		return CMD_WARNING_CONFIG_FAILED;
+		break;
 	}
 
-	if (type != RMAP_EVENT_MATCH_ADDED) {
-		route_map_upd8_dependency(type, arg, index->map->name);
-	}
 	return CMD_SUCCESS;
 }
 
@@ -441,6 +443,7 @@ int generic_match_delete(struct vty *vty, struct route_map_index *index,
 			 route_map_event_t type)
 {
 	int ret;
+	int retval = CMD_SUCCESS;
 	char *dep_name = NULL;
 	const char *tmpstr;
 	char *rmap_name = NULL;
@@ -459,34 +462,30 @@ int generic_match_delete(struct vty *vty, struct route_map_index *index,
 	}
 
 	ret = route_map_delete_match(index, command, dep_name);
-	if (ret) {
-		switch (ret) {
-		case RMAP_RULE_MISSING:
-			vty_out(vty, "%% [%s] Can't find rule.\n",
-				frr_protonameinst);
-			break;
-		case RMAP_COMPILE_ERROR:
-			vty_out(vty,
-				"%% [%s] Argument form is unsupported or malformed.\n",
-				frr_protonameinst);
-			break;
-		}
-		if (dep_name)
-			XFREE(MTYPE_ROUTE_MAP_RULE, dep_name);
-		if (rmap_name)
-			XFREE(MTYPE_ROUTE_MAP_NAME, rmap_name);
-		return CMD_WARNING_CONFIG_FAILED;
+	switch (ret) {
+	case RMAP_RULE_MISSING:
+		vty_out(vty, "%% [%s] Can't find rule.\n",
+			frr_protonameinst);
+		retval = CMD_WARNING_CONFIG_FAILED;
+		break;
+	case RMAP_COMPILE_ERROR:
+		vty_out(vty,
+			"%% [%s] Argument form is unsupported or malformed.\n",
+			frr_protonameinst);
+		retval = CMD_WARNING_CONFIG_FAILED;
+		break;
+	case RMAP_COMPILE_SUCCESS:
+		if (type != RMAP_EVENT_MATCH_DELETED && dep_name)
+			route_map_upd8_dependency(type, dep_name, rmap_name);
+		break;
 	}
-
-	if (type != RMAP_EVENT_MATCH_DELETED && dep_name)
-		route_map_upd8_dependency(type, dep_name, rmap_name);
 
 	if (dep_name)
 		XFREE(MTYPE_ROUTE_MAP_RULE, dep_name);
 	if (rmap_name)
 		XFREE(MTYPE_ROUTE_MAP_NAME, rmap_name);
 
-	return CMD_SUCCESS;
+	return retval;
 }
 
 int generic_set_add(struct vty *vty, struct route_map_index *index,
@@ -495,19 +494,22 @@ int generic_set_add(struct vty *vty, struct route_map_index *index,
 	int ret;
 
 	ret = route_map_add_set(index, command, arg);
-	if (ret) {
-		switch (ret) {
-		case RMAP_RULE_MISSING:
-			vty_out(vty, "%% [%s] Can't find rule.\n",
-				frr_protonameinst);
-			return CMD_WARNING_CONFIG_FAILED;
-		case RMAP_COMPILE_ERROR:
-			vty_out(vty,
-				"%% [%s] Argument form is unsupported or malformed.\n",
-				frr_protonameinst);
-			return CMD_WARNING_CONFIG_FAILED;
-		}
+	switch (ret) {
+	case RMAP_RULE_MISSING:
+		vty_out(vty, "%% [%s] Can't find rule.\n",
+			frr_protonameinst);
+		return CMD_WARNING_CONFIG_FAILED;
+		break;
+	case RMAP_COMPILE_ERROR:
+		vty_out(vty,
+			"%% [%s] Argument form is unsupported or malformed.\n",
+			frr_protonameinst);
+		return CMD_WARNING_CONFIG_FAILED;
+		break;
+	case RMAP_COMPILE_SUCCESS:
+		break;
 	}
+
 	return CMD_SUCCESS;
 }
 
@@ -517,19 +519,22 @@ int generic_set_delete(struct vty *vty, struct route_map_index *index,
 	int ret;
 
 	ret = route_map_delete_set(index, command, arg);
-	if (ret) {
-		switch (ret) {
-		case RMAP_RULE_MISSING:
-			vty_out(vty, "%% [%s] Can't find rule.\n",
-				frr_protonameinst);
-			return CMD_WARNING_CONFIG_FAILED;
-		case RMAP_COMPILE_ERROR:
-			vty_out(vty,
-				"%% [%s] Argument form is unsupported or malformed.\n",
-				frr_protonameinst);
-			return CMD_WARNING_CONFIG_FAILED;
-		}
+	switch (ret) {
+	case RMAP_RULE_MISSING:
+		vty_out(vty, "%% [%s] Can't find rule.\n",
+			frr_protonameinst);
+		return CMD_WARNING_CONFIG_FAILED;
+		break;
+	case RMAP_COMPILE_ERROR:
+		vty_out(vty,
+			"%% [%s] Argument form is unsupported or malformed.\n",
+			frr_protonameinst);
+		return CMD_WARNING_CONFIG_FAILED;
+		break;
+	case RMAP_COMPILE_SUCCESS:
+		break;
 	}
+
 	return CMD_SUCCESS;
 }
 
@@ -1217,7 +1222,7 @@ int route_map_add_match(struct route_map_index *index, const char *match_name,
 					      RMAP_EVENT_CALL_ADDED);
 	}
 
-	return 0;
+	return RMAP_COMPILE_SUCCESS;
 }
 
 /* Delete specified route match rule. */
@@ -1304,7 +1309,7 @@ int route_map_add_set(struct route_map_index *index, const char *set_name,
 		route_map_notify_dependencies(index->map->name,
 					      RMAP_EVENT_CALL_ADDED);
 	}
-	return 0;
+	return RMAP_COMPILE_SUCCESS;
 }
 
 /* Delete route map set rule. */
@@ -1576,8 +1581,10 @@ static void *route_map_dep_hash_alloc(void *p)
 
 	dep_entry = XCALLOC(MTYPE_ROUTE_MAP_DEP, sizeof(struct route_map_dep));
 	dep_entry->dep_name = XSTRDUP(MTYPE_ROUTE_MAP_NAME, dep_name);
-	dep_entry->dep_rmap_hash = hash_create(route_map_dep_hash_make_key,
-					       route_map_rmap_hash_cmp, NULL);
+	dep_entry->dep_rmap_hash = hash_create_size(8,
+						    route_map_dep_hash_make_key,
+						    route_map_rmap_hash_cmp,
+						    "Route Map Dep Hash");
 	dep_entry->this_hash = NULL;
 
 	return ((void *)dep_entry);
@@ -2194,24 +2201,24 @@ DEFUN (set_ip_nexthop,
 
 DEFUN (no_set_ip_nexthop,
        no_set_ip_nexthop_cmd,
-       "no set ip next-hop [<peer-address|A.B.C.D>]",
+       "no set ip next-hop [A.B.C.D]",
        NO_STR
        SET_STR
        IP_STR
        "Next hop address\n"
-       "Use peer address (for BGP only)\n"
        "IP address of next hop\n")
 {
-	int idx_peer = 4;
+	int idx = 0;
 	VTY_DECLVAR_CONTEXT(route_map_index, index);
+	const char *arg = NULL;
 
-	if (rmap_match_set_hook.no_set_ip_nexthop) {
-		if (argc <= idx_peer)
-			return rmap_match_set_hook.no_set_ip_nexthop(
-				vty, index, "ip next-hop", NULL);
+	if (argv_find(argv, argc, "A.B.C.D", &idx))
+		arg = argv[idx]->arg;
+
+	if (rmap_match_set_hook.no_set_ip_nexthop)
 		return rmap_match_set_hook.no_set_ip_nexthop(
-			vty, index, "ip next-hop", argv[idx_peer]->arg);
-	}
+			vty, index, "ip next-hop", arg);
+
 	return CMD_SUCCESS;
 }
 
@@ -2779,12 +2786,15 @@ void route_map_init(void)
 	route_match_vec = vector_init(1);
 	route_set_vec = vector_init(1);
 	route_map_master_hash =
-		hash_create(route_map_hash_key_make, route_map_hash_cmp, NULL);
+		hash_create_size(8, route_map_hash_key_make,
+				 route_map_hash_cmp,
+				 "Route Map Master Hash");
 
 	for (i = 1; i < ROUTE_MAP_DEP_MAX; i++)
 		route_map_dep_hash[i] =
-			hash_create(route_map_dep_hash_make_key,
-				    route_map_dep_hash_cmp, NULL);
+			hash_create_size(8, route_map_dep_hash_make_key,
+					 route_map_dep_hash_cmp,
+					 "Route Map Dep Hash");
 
 	cmd_variable_handler_register(rmap_var_handlers);
 

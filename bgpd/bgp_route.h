@@ -22,6 +22,7 @@
 #define _QUAGGA_BGP_ROUTE_H
 
 #include "queue.h"
+#include "nexthop.h"
 #include "bgp_table.h"
 
 struct bgp_nexthop_cache;
@@ -58,6 +59,11 @@ enum bgp_show_type {
 #define BGP_SHOW_OCODE_HEADER "Origin codes: i - IGP, e - EGP, ? - incomplete\n\n"
 #define BGP_SHOW_HEADER "   Network          Next Hop            Metric LocPrf Weight Path\n"
 
+/* Maximum number of labels we can process or send with a prefix. We
+ * really do only 1 for MPLS (BGP-LU) but we can do 2 for EVPN-VxLAN.
+ */
+#define BGP_MAX_LABELS 2
+
 /* Ancillary information to struct bgp_info,
  * used for uncommonly used data (aggregation, MPLS, etc.)
  * and lazily allocated to save memory.
@@ -72,8 +78,9 @@ struct bgp_info_extra {
 	/* Nexthop reachability check.  */
 	u_int32_t igpmetric;
 
-	/* MPLS label.  */
-	mpls_label_t label;
+	/* MPLS label(s) - VNI(s) for EVPN-VxLAN  */
+	mpls_label_t label[BGP_MAX_LABELS];
+	u_int32_t num_labels;
 
 #if ENABLE_BGP_VNC
 	union {
@@ -328,8 +335,7 @@ extern int bgp_nlri_parse_ip(struct peer *, struct attr *, struct bgp_nlri *);
 extern int bgp_maximum_prefix_overflow(struct peer *, afi_t, safi_t, int);
 
 extern void bgp_redistribute_add(struct bgp *, struct prefix *,
-				 const struct in_addr *,
-				 const struct in6_addr *, unsigned int ifindex,
+				 const union g_addr *, unsigned int ifindex,
 				 u_int32_t, u_char, u_short, route_tag_t);
 extern void bgp_redistribute_delete(struct bgp *, struct prefix *, u_char,
 				    u_short);
@@ -355,10 +361,10 @@ extern int bgp_static_unset_safi(afi_t afi, safi_t safi, struct vty *,
 /* this is primarily for MPLS-VPN */
 extern int bgp_update(struct peer *, struct prefix *, u_int32_t, struct attr *,
 		      afi_t, safi_t, int, int, struct prefix_rd *,
-		      mpls_label_t *, int, struct bgp_route_evpn *);
+		      mpls_label_t *, u_int32_t, int, struct bgp_route_evpn *);
 extern int bgp_withdraw(struct peer *, struct prefix *, u_int32_t,
 			struct attr *, afi_t, safi_t, int, int,
-			struct prefix_rd *, mpls_label_t *,
+			struct prefix_rd *, mpls_label_t *, u_int32_t,
 			struct bgp_route_evpn *);
 
 /* for bgp_nexthop and bgp_damp */
@@ -369,12 +375,11 @@ extern void bgp_process(struct bgp *, struct bgp_node *, afi_t, safi_t);
  * queue element with NULL bgp node.
  */
 extern void bgp_add_eoiu_mark(struct bgp *);
-extern int bgp_config_write_table_map(struct vty *, struct bgp *, afi_t, safi_t,
-				      int *);
-extern int bgp_config_write_network(struct vty *, struct bgp *, afi_t, safi_t,
-				    int *);
-extern int bgp_config_write_distance(struct vty *, struct bgp *, afi_t, safi_t,
-				     int *);
+extern void bgp_config_write_table_map(struct vty *, struct bgp *, afi_t,
+				       safi_t);
+extern void bgp_config_write_network(struct vty *, struct bgp *, afi_t, safi_t);
+extern void bgp_config_write_distance(struct vty *, struct bgp *, afi_t,
+				      safi_t);
 
 extern void bgp_aggregate_increment(struct bgp *, struct prefix *,
 				    struct bgp_info *, afi_t, safi_t);
@@ -425,6 +430,7 @@ extern void bgp_info_restore(struct bgp_node *, struct bgp_info *);
 extern int bgp_info_cmp_compatible(struct bgp *, struct bgp_info *,
 				   struct bgp_info *, char *pfx_buf, afi_t afi,
 				   safi_t safi);
+extern void bgp_attr_add_gshut_community(struct attr *attr);
 
 extern void bgp_best_selection(struct bgp *bgp, struct bgp_node *rn,
 			       struct bgp_maxpaths_cfg *mpath_cfg,
@@ -442,4 +448,8 @@ extern void route_vty_out_detail(struct vty *vty, struct bgp *bgp,
 				 struct prefix *p, struct bgp_info *binfo,
 				 afi_t afi, safi_t safi,
 				 json_object *json_paths);
+extern int bgp_show_table_rd(struct vty *vty, struct bgp *bgp, safi_t safi,
+			     struct bgp_table *table, struct prefix_rd *prd,
+			     enum bgp_show_type type, void *output_arg,
+			     u_char use_json);
 #endif /* _QUAGGA_BGP_ROUTE_H */

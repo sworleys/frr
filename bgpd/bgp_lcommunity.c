@@ -25,6 +25,8 @@
 #include "prefix.h"
 #include "command.h"
 #include "filter.h"
+#include "jhash.h"
+#include "stream.h"
 
 #include "bgpd/bgpd.h"
 #include "bgpd/bgp_lcommunity.h"
@@ -148,12 +150,11 @@ struct lcommunity *lcommunity_dup(struct lcommunity *lcom)
 {
 	struct lcommunity *new;
 
-	new = XCALLOC(MTYPE_LCOMMUNITY, sizeof(struct lcommunity));
+	new = lcommunity_new();
 	new->size = lcom->size;
 	if (new->size) {
-		new->val = XMALLOC(MTYPE_LCOMMUNITY_VAL,
-				   lcom->size * LCOMMUNITY_SIZE);
-		memcpy(new->val, lcom->val, lcom->size * LCOMMUNITY_SIZE);
+		new->val = XMALLOC(MTYPE_LCOMMUNITY_VAL, lcom_length(lcom));
+		memcpy(new->val, lcom->val, lcom_length(lcom));
 	} else
 		new->val = NULL;
 	return new;
@@ -175,14 +176,13 @@ struct lcommunity *lcommunity_merge(struct lcommunity *lcom1,
 	if (lcom1->val)
 		lcom1->val =
 			XREALLOC(MTYPE_LCOMMUNITY_VAL, lcom1->val,
-				 (lcom1->size + lcom2->size) * LCOMMUNITY_SIZE);
+				 lcom_length(lcom1) + lcom_length(lcom2));
 	else
 		lcom1->val =
 			XMALLOC(MTYPE_LCOMMUNITY_VAL,
-				(lcom1->size + lcom2->size) * LCOMMUNITY_SIZE);
+				lcom_length(lcom1) + lcom_length(lcom2));
 
-	memcpy(lcom1->val + (lcom1->size * LCOMMUNITY_SIZE), lcom2->val,
-	       lcom2->size * LCOMMUNITY_SIZE);
+	memcpy(lcom1->val + lcom_length(lcom1), lcom2->val, lcom_length(lcom2));
 	lcom1->size += lcom2->size;
 
 	return lcom1;
@@ -231,27 +231,9 @@ void lcommunity_unintern(struct lcommunity **lcom)
 unsigned int lcommunity_hash_make(void *arg)
 {
 	const struct lcommunity *lcom = arg;
-	int size = lcom->size * LCOMMUNITY_SIZE;
-	u_int8_t *pnt = lcom->val;
-	unsigned int key = 0;
-	int c;
+	int size = lcom_length(lcom);
 
-	for (c = 0; c < size; c += LCOMMUNITY_SIZE) {
-		key += pnt[c];
-		key += pnt[c + 1];
-		key += pnt[c + 2];
-		key += pnt[c + 3];
-		key += pnt[c + 4];
-		key += pnt[c + 5];
-		key += pnt[c + 6];
-		key += pnt[c + 7];
-		key += pnt[c + 8];
-		key += pnt[c + 9];
-		key += pnt[c + 10];
-		key += pnt[c + 11];
-	}
-
-	return key;
+	return jhash(lcom->val, size, 0xab125423);
 }
 
 /* Compare two Large Communities Attribute structure.  */
@@ -261,7 +243,7 @@ int lcommunity_cmp(const void *arg1, const void *arg2)
 	const struct lcommunity *lcom2 = arg2;
 
 	return (lcom1->size == lcom2->size
-		&& memcmp(lcom1->val, lcom2->val, lcom1->size * LCOMMUNITY_SIZE)
+		&& memcmp(lcom1->val, lcom2->val, lcom_length(lcom1))
 			   == 0);
 }
 
@@ -274,7 +256,9 @@ struct hash *lcommunity_hash(void)
 /* Initialize Large Comminities related hash. */
 void lcommunity_init(void)
 {
-	lcomhash = hash_create(lcommunity_hash_make, lcommunity_cmp, NULL);
+	lcomhash = hash_create(lcommunity_hash_make,
+			       lcommunity_cmp,
+			       "BGP lcommunity hash");
 }
 
 void lcommunity_finish(void)
@@ -400,9 +384,8 @@ int lcommunity_include(struct lcommunity *lcom, u_char *ptr)
 	int i;
 	u_char *lcom_ptr;
 
-	lcom_ptr = lcom->val;
 	for (i = 0; i < lcom->size; i++) {
-		lcom_ptr += (i * LCOMMUNITY_SIZE);
+		lcom_ptr = lcom->val + (i * LCOMMUNITY_SIZE);
 		if (memcmp(ptr, lcom_ptr, LCOMMUNITY_SIZE) == 0)
 			return 1;
 	}
@@ -447,22 +430,12 @@ char *lcommunity_lcom2str(struct lcommunity *lcom, int format)
 		if (!first)
 			str_buf[str_pnt++] = ' ';
 
-		pnt = lcom->val + (i * 12);
+		pnt = lcom->val + (i * LCOMMUNITY_SIZE);
 
-		globaladmin = (*pnt++ << 24);
-		globaladmin |= (*pnt++ << 16);
-		globaladmin |= (*pnt++ << 8);
-		globaladmin |= (*pnt++);
-
-		localdata1 = (*pnt++ << 24);
-		localdata1 |= (*pnt++ << 16);
-		localdata1 |= (*pnt++ << 8);
-		localdata1 |= (*pnt++);
-
-		localdata2 = (*pnt++ << 24);
-		localdata2 |= (*pnt++ << 16);
-		localdata2 |= (*pnt++ << 8);
-		localdata2 |= (*pnt++);
+		pnt = ptr_get_be32(pnt, &globaladmin);
+		pnt = ptr_get_be32(pnt, &localdata1);
+		pnt = ptr_get_be32(pnt, &localdata2);
+		(void)pnt; /* consume value */
 
 		len = sprintf(str_buf + str_pnt, "%u:%u:%u", globaladmin,
 			      localdata1, localdata2);
@@ -489,7 +462,7 @@ int lcommunity_match(const struct lcommunity *lcom1,
 
 	/* Every community on com2 needs to be on com1 for this to match */
 	while (i < lcom1->size && j < lcom2->size) {
-		if (memcmp(lcom1->val + (i * 12), lcom2->val + (j * 12),
+		if (memcmp(lcom1->val + (i * LCOMMUNITY_SIZE), lcom2->val + (j * LCOMMUNITY_SIZE),
 			   LCOMMUNITY_SIZE)
 		    == 0)
 			j++;
@@ -526,10 +499,10 @@ void lcommunity_del_val(struct lcommunity *lcom, u_char *ptr)
 
 			if (lcom->size > 0)
 				lcom->val =
-					XREALLOC(MTYPE_COMMUNITY_VAL, lcom->val,
+					XREALLOC(MTYPE_LCOMMUNITY_VAL, lcom->val,
 						 lcom_length(lcom));
 			else {
-				XFREE(MTYPE_COMMUNITY_VAL, lcom->val);
+				XFREE(MTYPE_LCOMMUNITY_VAL, lcom->val);
 				lcom->val = NULL;
 			}
 			return;

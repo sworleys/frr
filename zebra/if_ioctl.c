@@ -21,6 +21,8 @@
 
 #include <zebra.h>
 
+#ifdef OPEN_BSD
+
 #include "if.h"
 #include "sockunion.h"
 #include "prefix.h"
@@ -103,10 +105,7 @@ static int interface_list_ioctl(void)
 		unsigned int size;
 
 		ifreq = (struct ifreq *)((caddr_t)ifconf.ifc_req + n);
-		ifp = if_get_by_name_len(
-			ifreq->ifr_name,
-			strnlen(ifreq->ifr_name, sizeof(ifreq->ifr_name)),
-			VRF_DEFAULT, 0);
+		ifp = if_get_by_name(ifreq->ifr_name, VRF_DEFAULT, 0);
 		if_add_update(ifp);
 		size = ifreq->ifr_addr.sa_len;
 		if (size < sizeof(ifreq->ifr_addr))
@@ -116,10 +115,7 @@ static int interface_list_ioctl(void)
 	}
 #else
 	for (n = 0; n < ifconf.ifc_len; n += sizeof(struct ifreq)) {
-		ifp = if_get_by_name_len(
-			ifreq->ifr_name,
-			strnlen(ifreq->ifr_name, sizeof(ifreq->ifr_name)),
-			VRF_DEFAULT, 0);
+		ifp = if_get_by_name(ifreq->ifr_name, VRF_DEFAULT, 0);
 		if_add_update(ifp);
 		ifreq++;
 	}
@@ -135,7 +131,7 @@ end:
 /* Get interface's index by ioctl. */
 static int if_get_index(struct interface *ifp)
 {
-	ifp->ifindex = if_nametoindex(ifp->name);
+	if_set_index(ifp, if_nametoindex(ifp->name));
 	return ifp->ifindex;
 }
 
@@ -212,7 +208,7 @@ static int if_getaddrs(void)
 
 			dest_pnt = NULL;
 
-			if (ifap->ifa_dstaddr
+			if (if_is_pointopoint(ifp) && ifap->ifa_dstaddr
 			    && !IPV4_ADDR_SAME(&addr->sin_addr,
 					       &((struct sockaddr_in *)
 							 ifap->ifa_dstaddr)
@@ -237,34 +233,11 @@ static int if_getaddrs(void)
 		if (ifap->ifa_addr->sa_family == AF_INET6) {
 			struct sockaddr_in6 *addr;
 			struct sockaddr_in6 *mask;
-			struct sockaddr_in6 *dest;
-			struct in6_addr *dest_pnt;
 			int flags = 0;
 
 			addr = (struct sockaddr_in6 *)ifap->ifa_addr;
 			mask = (struct sockaddr_in6 *)ifap->ifa_netmask;
 			prefixlen = ip6_masklen(mask->sin6_addr);
-
-			dest_pnt = NULL;
-
-			if (ifap->ifa_dstaddr
-			    && !IPV6_ADDR_SAME(&addr->sin6_addr,
-					       &((struct sockaddr_in6 *)
-							 ifap->ifa_dstaddr)
-							->sin6_addr)) {
-				dest = (struct sockaddr_in6 *)ifap->ifa_dstaddr;
-				dest_pnt = &dest->sin6_addr;
-				flags = ZEBRA_IFA_PEER;
-			} else if (ifap->ifa_broadaddr
-				   && !IPV6_ADDR_SAME(
-					      &addr->sin6_addr,
-					      &((struct sockaddr_in6 *)
-							ifap->ifa_broadaddr)
-						       ->sin6_addr)) {
-				dest = (struct sockaddr_in6 *)
-					       ifap->ifa_broadaddr;
-				dest_pnt = &dest->sin6_addr;
-			}
 
 #if defined(KAME)
 			if (IN6_IS_ADDR_LINKLOCAL(&addr->sin6_addr)) {
@@ -277,7 +250,7 @@ static int if_getaddrs(void)
 #endif
 
 			connected_add_ipv6(ifp, flags, &addr->sin6_addr,
-					   prefixlen, dest_pnt, NULL);
+					   prefixlen, NULL);
 		}
 	}
 
@@ -289,10 +262,10 @@ static int if_getaddrs(void)
 /* Fetch interface information via ioctl(). */
 static void interface_info_ioctl()
 {
-	struct listnode *node, *nnode;
+	struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
 	struct interface *ifp;
 
-	for (ALL_LIST_ELEMENTS(vrf_iflist(VRF_DEFAULT), node, nnode, ifp)) {
+	FOR_ALL_INTERFACES (vrf, ifp) {
 		if_get_index(ifp);
 #ifdef SIOCGIFHWADDR
 		if_get_hwaddr(ifp);
@@ -328,3 +301,5 @@ void interface_list(struct zebra_ns *zns)
 	ifaddr_proc_ipv6();
 #endif /* HAVE_PROC_NET_IF_INET6 */
 }
+
+#endif /* OPEN_BSD */

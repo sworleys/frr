@@ -72,6 +72,11 @@ vtysh_b ()
 # returns:      0=ok, 1=error
 check_daemon()
 {
+        if [ $1 != "watchfrr" -a $1 != "vtysh_enable" ]; then
+          # check for daemon binary
+          if [ ! -x "$D_PATH/$1" ]; then return 1; fi
+        fi
+
         # If the integrated config file is used the others are not checked.
         if [ -r "$C_PATH/frr.conf" ]; then
           return 0
@@ -80,9 +85,6 @@ check_daemon()
         # vtysh_enable has no config file nor binary so skip check.
         # (Not sure why vtysh_enable is in this list but does not hurt)
         if [ $1 != "watchfrr" -a $1 != "vtysh_enable" ]; then
-          # check for daemon binary
-          if [ ! -x "$D_PATH/$1" ]; then return 1; fi
-
           # check for config file
           if [ -n "$2" ]; then
            if [ ! -r "$C_PATH/$1-$2.conf" ]; then
@@ -542,6 +544,12 @@ case "$1" in
 
         if [ -z "$dmn" -o "$dmn" = "zebra" ]; then
           echo "Removing all routes made by FRR."
+	  # Specific values for each proto can be found
+	  # in /etc/iproute2/rt_protos as well as FRR
+	  # specific ones in /etc/iproute2/rt_protos.d
+	  # Additionally if a new protocol is added
+	  # we need to add it here as well as
+	  # in rt_netlink.h( follow the directions! )
           ip route flush proto 186
           ip route flush proto 188
           ip route flush proto 4
@@ -550,8 +558,8 @@ case "$1" in
           ip route flush proto 11
           ip route flush proto 187
           ip route flush proto 192
-          ip route flush proto 194
-
+          ip route flush proto 42
+          ip route flush proto 191
        else
          [ -n "$dmn" ] && eval "${dmn/-/_}=0"
          start_watchfrr

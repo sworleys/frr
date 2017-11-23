@@ -141,7 +141,7 @@ DEFUN (grammar_test_complete,
 		vty_out(vty, "%% No match\n");
 
 	// free resources
-	list_delete(completions);
+	list_delete_and_null(&completions);
 	cmd_free_strvec(command);
 	XFREE(MTYPE_TMP, cmdstr);
 
@@ -185,7 +185,7 @@ DEFUN (grammar_test_match,
 
 		vty_out(vty, "func: %p\n", element->func);
 
-		list_delete(argvv);
+		list_delete_and_null(&argvv);
 	} else {
 		assert(MATCHER_ERROR(result));
 		switch (result) {
@@ -404,7 +404,8 @@ DEFUN (grammar_findambig,
 			nodegraph = cnode->cmdgraph;
 			if (!nodegraph)
 				continue;
-			vty_out(vty, "scanning node %d\n", scannode - 1);
+			vty_out(vty, "scanning node %d (%s)\n",
+				scannode - 1, node_names[scannode - 1]);
 		}
 
 		commands = cmd_graph_permutations(nodegraph);
@@ -425,7 +426,7 @@ DEFUN (grammar_findambig,
 			}
 			prev = cur;
 		}
-		list_delete(commands);
+		list_delete_and_null(&commands);
 
 		vty_out(vty, "\n");
 	} while (scan && scannode < LINK_PARAMS_NODE);
@@ -498,6 +499,8 @@ struct message tokennames[] = {item(WORD_TKN),	// words
 			       item(IPV4_PREFIX_TKN), // IPV4 network prefixes
 			       item(IPV6_TKN),	// IPV6 prefixes
 			       item(IPV6_PREFIX_TKN), // IPV6 network prefixes
+			       item(MAC_TKN),	 // MAC address
+			       item(MAC_PREFIX_TKN),  // MAC address w/ mask
 
 			       /* plumbing types */
 			       item(FORK_TKN),

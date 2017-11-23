@@ -128,6 +128,7 @@ void zclient_lookup_new(void)
 
 	zlookup->sock = -1;
 	zlookup->t_connect = NULL;
+	zlookup->privs = &pimd_privs;
 
 	zclient_lookup_sched_now(zlookup);
 
@@ -548,7 +549,7 @@ int pim_zlookup_sg_statistics(struct channel_oil *c_oil)
 	}
 
 	stream_get(&lastused, s, sizeof(lastused));
-	ret = stream_getl(s);
+	stream_getl(s);
 
 	c_oil->cc.lastused = lastused;
 

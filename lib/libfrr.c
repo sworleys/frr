@@ -19,9 +19,14 @@
  */
 
 #include <zebra.h>
+#include <sys/un.h>
+
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #include "libfrr.h"
 #include "getopt.h"
+#include "privs.h"
 #include "vty.h"
 #include "command.h"
 #include "version.h"
@@ -29,14 +34,17 @@
 #include "zclient.h"
 #include "log_int.h"
 #include "module.h"
+#include "network.h"
 
 DEFINE_HOOK(frr_late_init, (struct thread_master * tm), (tm))
+DEFINE_KOOH(frr_early_fini, (), ())
+DEFINE_KOOH(frr_fini, (), ())
 
 bool quagga_compat_mode = false;
 
-char frr_sysconfdir[] = FRR_CONFDIR;
-char frr_vtydir[] = DAEMON_VTY_DIR;
-char frr_moduledir[] = MODULE_PATH;
+const char frr_sysconfdir[] = FRR_CONFDIR;
+const char frr_vtydir[] = DAEMON_VTY_DIR;
+const char frr_moduledir[] = MODULE_PATH;
 
 char compat_indicator[MAXPATHLEN];
 
@@ -45,8 +53,11 @@ char frr_protonameinst[256] = "NONE";
 
 char config_default[256];
 char config_default_int[256];
+char frr_zclientpath[256];
 static char pidfile_default[256];
 static char vtypath_default[256];
+
+bool debug_memstats_at_exit = 0;
 
 static char comb_optstr[256];
 static struct option comb_lo[64];
@@ -95,13 +106,18 @@ static const struct optspec os_always = {
 static const struct option lo_cfg_pid_dry[] = {
 	{"pid_file", required_argument, NULL, 'i'},
 	{"config_file", required_argument, NULL, 'f'},
+	{"pathspace", required_argument, NULL, 'N'},
 	{"dryrun", no_argument, NULL, 'C'},
+	{"terminal", no_argument, NULL, 't'},
 	{NULL}};
 static const struct optspec os_cfg_pid_dry = {
-	"f:i:C",
+	"f:i:CtN:",
 	"  -f, --config_file  Set configuration file name\n"
 	"  -i, --pid_file     Set process identifier file name\n"
-	"  -C, --dryrun       Check configuration for validity and exit\n",
+	"  -N, --pathspace    Insert prefix into config & socket paths\n"
+	"  -C, --dryrun       Check configuration for validity and exit\n"
+	"  -t, --terminal     Open terminal session on stdio\n"
+	"  -d -t              Daemonize after terminal session ends\n",
 	lo_cfg_pid_dry};
 
 
@@ -136,6 +152,116 @@ static const struct option lo_quagga[] = {{"quagga", no_argument, NULL, 'q'},
 static const struct optspec os_quagga = {
 	"q", "  -q, --quagga       Enable Quagga compatibility mode\n",
 	lo_quagga};
+
+bool frr_zclient_addr(struct sockaddr_storage *sa, socklen_t *sa_len,
+		      const char *path)
+{
+	memset(sa, 0, sizeof(*sa));
+
+	if (!path)
+		path = ZEBRA_SERV_PATH;
+
+	if (!strncmp(path, ZAPI_TCP_PATHNAME, strlen(ZAPI_TCP_PATHNAME))) {
+		/* note: this functionality is disabled at bottom */
+		int af;
+		int port = ZEBRA_PORT;
+		char *err = NULL;
+		struct sockaddr_in *sin = NULL;
+		struct sockaddr_in6 *sin6 = NULL;
+
+		path += strlen(ZAPI_TCP_PATHNAME);
+
+		switch (path[0]) {
+		case '4':
+			path++;
+			af = AF_INET;
+			break;
+		case '6':
+			path++;
+			/* fallthrough */
+		default:
+			af = AF_INET6;
+			break;
+		}
+
+		switch (path[0]) {
+		case '\0':
+			break;
+		case ':':
+			path++;
+			port = strtoul(path, &err, 10);
+			if (*err || !*path)
+				return false;
+			break;
+		default:
+			return false;
+		}
+
+		sa->ss_family = af;
+		switch (af) {
+		case AF_INET:
+			sin = (struct sockaddr_in *)sa;
+			sin->sin_port = htons(port);
+			sin->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+			*sa_len = sizeof(struct sockaddr_in);
+#ifdef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
+			sin->sin_len = *sa_len;
+#endif
+			break;
+		case AF_INET6:
+			sin6 = (struct sockaddr_in6 *)sa;
+			sin6->sin6_port = htons(port);
+			inet_pton(AF_INET6, "::1", &sin6->sin6_addr);
+			*sa_len = sizeof(struct sockaddr_in6);
+#ifdef SIN6_LEN
+			sin6->sin6_len = *sa_len;
+#endif
+			break;
+		}
+
+#if 1
+		/* force-disable this path, because tcp-zebra is a
+		 * SECURITY ISSUE.  there are no checks at all against
+		 * untrusted users on the local system connecting on TCP
+		 * and injecting bogus routing data into the entire routing
+		 * domain.
+		 *
+		 * The functionality is only left here because it may be
+		 * useful during development, in order to be able to get
+		 * tcpdump or wireshark watching ZAPI as TCP.  If you want
+		 * to do that, flip the #if 1 above to #if 0. */
+		memset(sa, 0, sizeof(*sa));
+		return false;
+#endif
+	} else {
+		/* "sun" is a #define on solaris */
+		struct sockaddr_un *suna = (struct sockaddr_un *)sa;
+
+		suna->sun_family = AF_UNIX;
+		strlcpy(suna->sun_path, path, sizeof(suna->sun_path));
+#ifdef HAVE_STRUCT_SOCKADDR_UN_SUN_LEN
+		*sa_len = suna->sun_len = SUN_LEN(suna);
+#else
+		*sa_len = sizeof(suna->sun_family) + strlen(suna->sun_path);
+#endif /* HAVE_STRUCT_SOCKADDR_UN_SUN_LEN */
+#if 0
+		/* this is left here for future reference;  Linux abstract
+		 * socket namespace support can be enabled by replacing
+		 * above #if 0 with #ifdef GNU_LINUX.
+		 *
+		 * THIS IS A SECURITY ISSUE, the abstract socket namespace
+		 * does not have user/group permission control on sockets.
+		 * we'd need to implement SCM_CREDENTIALS support first to
+		 * check that only proper users can connect to abstract
+		 * sockets. (same problem as tcp-zebra, except there is a
+		 * fix with SCM_CREDENTIALS.  tcp-zebra has no such fix.)
+		 */
+		if (suna->sun_path[0] == '@')
+			suna->sun_path[0] = '\0';
+#endif
+	}
+	return true;
+}
 
 static struct frr_daemon_info *di = NULL;
 
@@ -175,6 +301,8 @@ void frr_preinit(struct frr_daemon_info *daemon, int argc, char **argv)
 
 	/* delete quagga compatibility mode indicator */
 	remove(compat_indicator);
+
+	strlcpy(frr_zclientpath, ZEBRA_SERV_PATH, sizeof(frr_zclientpath));
 }
 
 void frr_opt_add(const char *optstr, const struct option *longopts,
@@ -244,15 +372,37 @@ static int frr_opt(int opt)
 			return 1;
 		di->config_file = optarg;
 		break;
+	case 'N':
+		if (di->flags & FRR_NO_CFG_PID_DRY)
+			return 1;
+		if (di->pathspace) {
+			fprintf(stderr,
+				"-N/--pathspace option specified more than once!\n");
+			errors++;
+			break;
+		}
+		if (strchr(optarg, '/') || strchr(optarg, '.')) {
+			fprintf(stderr,
+				"slashes or dots are not permitted in the --pathspace option.\n");
+			errors++;
+			break;
+		}
+		di->pathspace = optarg;
+		break;
 	case 'C':
 		if (di->flags & FRR_NO_CFG_PID_DRY)
 			return 1;
 		di->dryrun = 1;
 		break;
+	case 't':
+		if (di->flags & FRR_NO_CFG_PID_DRY)
+			return 1;
+		di->terminal = 1;
+		break;
 	case 'z':
 		if (di->flags & FRR_NO_ZCLIENT)
 			return 1;
-		zclient_serv_path_set(optarg);
+		strlcpy(frr_zclientpath, optarg, sizeof(frr_zclientpath));
 		break;
 	case 'A':
 		if (di->flags & FRR_NO_TCPVTY)
@@ -314,15 +464,12 @@ static int frr_opt(int opt)
 		di->privs->group = optarg;
 		break;
 	case 'q':
+		/* touch file indicating we're in quagga compat mode */
 		{}
 		int f = open(compat_indicator, O_RDONLY | O_CREAT,
 			     S_IRUSR | S_IWUSR);
 		close(f);
 		quagga_compat_mode = true;
-		snprintf(config_default, sizeof(config_default), "%s/%s.conf",
-			 QUAGGA_CONFDIR, di->name);
-		snprintf(config_default_int, sizeof(config_default_int),
-			 "%s/%s", QUAGGA_CONFDIR, QUAGGA_INTCONF);
 		break;
 	default:
 		return 1;
@@ -350,26 +497,105 @@ int frr_getopt(int argc, char *const argv[], int *longindex)
 	return opt;
 }
 
+static void frr_mkdir(const char *path, bool strip)
+{
+	char buf[256];
+	mode_t prev;
+	int ret;
+	struct zprivs_ids_t ids;
+
+	if (strip) {
+		char *slash = strrchr(path, '/');
+		size_t plen;
+		if (!slash)
+			return;
+		plen = slash - path;
+		if (plen > sizeof(buf) - 1)
+			return;
+		memcpy(buf, path, plen);
+		buf[plen] = '\0';
+		path = buf;
+	}
+
+	/* o+rx (..5) is needed for the frrvty group to work properly;
+	 * without it, users in the frrvty group can't access the vty sockets.
+	 */
+	prev = umask(0022);
+	ret = mkdir(path, 0755);
+	umask(prev);
+
+	if (ret != 0) {
+		/* if EEXIST, return without touching the permissions,
+		 * so user-set custom permissions are left in place
+		 */
+		if (errno == EEXIST)
+			return;
+
+		zlog_warn("failed to mkdir \"%s\": %s", path, strerror(errno));
+		return;
+	}
+
+	zprivs_get_ids(&ids);
+	if (chown(path, ids.uid_normal, ids.gid_normal))
+		zlog_warn("failed to chown \"%s\": %s", path, strerror(errno));
+}
+
 static struct thread_master *master;
 struct thread_master *frr_init(void)
 {
 	struct option_chain *oc;
 	struct frrmod_runtime *module;
 	char moderr[256];
+	char p_instance[16] = "", p_pathspace[256] = "";
 	const char *dir;
 	dir = di->module_path ? di->module_path : frr_moduledir;
 
 	srandom(time(NULL));
 
-	if (di->instance)
+	if (di->instance) {
 		snprintf(frr_protonameinst, sizeof(frr_protonameinst), "%s[%u]",
 			 di->logname, di->instance);
+		snprintf(p_instance, sizeof(p_instance), "-%d", di->instance);
+	}
+	if (di->pathspace)
+		snprintf(p_pathspace, sizeof(p_pathspace), "/%s",
+			 di->pathspace);
+
+	const char *confdir =
+		quagga_compat_mode ? QUAGGA_CONFDIR : frr_sysconfdir;
+
+	snprintf(config_default, sizeof(config_default), "%s%s%s%s.conf",
+		 confdir, p_pathspace, di->name, p_instance);
+	snprintf(config_default_int, sizeof(config_default_int), "%s%s/%s",
+		 confdir, p_pathspace,
+		 quagga_compat_mode ? QUAGGA_INTCONF : FRR_INTCONF);
+	snprintf(pidfile_default, sizeof(pidfile_default), "%s%s/%s%s.pid",
+		 frr_vtydir, p_pathspace, di->name, p_instance);
+
+	zprivs_preinit(di->privs);
 
 	openzlog(di->progname, di->logname, di->instance,
 		 LOG_CONS | LOG_NDELAY | LOG_PID, LOG_DAEMON);
 #if defined(HAVE_CUMULUS)
 	zlog_set_level(ZLOG_DEST_SYSLOG, zlog_default->default_lvl);
 #endif
+
+	if (!frr_zclient_addr(&zclient_addr, &zclient_addr_len,
+			      frr_zclientpath)) {
+		fprintf(stderr, "Invalid zserv socket path: %s\n",
+			frr_zclientpath);
+		exit(1);
+	}
+
+	/* don't mkdir these as root... */
+	if (!(di->flags & FRR_NO_PRIVSEP)) {
+		if (!di->pid_file || !di->vty_path)
+			frr_mkdir(frr_vtydir, false);
+		if (di->pid_file)
+			frr_mkdir(di->pid_file, true);
+		if (di->vty_path)
+			frr_mkdir(di->vty_path, true);
+	}
 
 	frrmod_init(di->module);
 	while (modules) {
@@ -397,17 +623,140 @@ struct thread_master *frr_init(void)
 	return master;
 }
 
+static int rcvd_signal = 0;
+
+static void rcv_signal(int signum)
+{
+	rcvd_signal = signum;
+	/* poll() is interrupted by the signal; handled below */
+}
+
+static void frr_daemon_wait(int fd)
+{
+	struct pollfd pfd[1];
+	int ret;
+	pid_t exitpid;
+	int exitstat;
+	sigset_t sigs, prevsigs;
+
+	sigemptyset(&sigs);
+	sigaddset(&sigs, SIGTSTP);
+	sigaddset(&sigs, SIGQUIT);
+	sigaddset(&sigs, SIGINT);
+	sigprocmask(SIG_BLOCK, &sigs, &prevsigs);
+
+	struct sigaction sa = {
+		.sa_handler = rcv_signal, .sa_flags = SA_RESETHAND,
+	};
+	sigemptyset(&sa.sa_mask);
+	sigaction(SIGTSTP, &sa, NULL);
+	sigaction(SIGQUIT, &sa, NULL);
+	sigaction(SIGINT, &sa, NULL);
+
+	do {
+		char buf[1];
+		ssize_t nrecv;
+
+		pfd[0].fd = fd;
+		pfd[0].events = POLLIN;
+
+		rcvd_signal = 0;
+
+#if   defined(HAVE_PPOLL)
+		ret = ppoll(pfd, 1, NULL, &prevsigs);
+#elif defined(HAVE_POLLTS)
+		ret = pollts(pfd, 1, NULL, &prevsigs);
+#else
+		/* racy -- only used on FreeBSD 9 */
+		sigset_t tmpsigs;
+		sigprocmask(SIG_SETMASK, &prevsigs, &tmpsigs);
+		ret = poll(pfd, 1, -1);
+		sigprocmask(SIG_SETMASK, &tmpsigs, NULL);
+#endif
+		if (ret < 0 && errno != EINTR && errno != EAGAIN) {
+			perror("poll()");
+			exit(1);
+		}
+		switch (rcvd_signal) {
+		case SIGTSTP:
+			send(fd, "S", 1, 0);
+			do {
+				nrecv = recv(fd, buf, sizeof(buf), 0);
+			} while (nrecv == -1
+				 && (errno == EINTR || errno == EAGAIN));
+
+			raise(SIGTSTP);
+			sigaction(SIGTSTP, &sa, NULL);
+			send(fd, "R", 1, 0);
+			break;
+		case SIGINT:
+			send(fd, "I", 1, 0);
+			break;
+		case SIGQUIT:
+			send(fd, "Q", 1, 0);
+			break;
+		}
+	} while (ret <= 0);
+
+	exitpid = waitpid(-1, &exitstat, WNOHANG);
+	if (exitpid == 0)
+		/* child successfully went to main loop & closed socket */
+		exit(0);
+
+	/* child failed one way or another ... */
+	if (WIFEXITED(exitstat) && WEXITSTATUS(exitstat) == 0)
+		/* can happen in --terminal case if exit is fast enough */
+		(void)0;
+	else if (WIFEXITED(exitstat))
+		fprintf(stderr, "%s failed to start, exited %d\n", di->name,
+			WEXITSTATUS(exitstat));
+	else if (WIFSIGNALED(exitstat))
+		fprintf(stderr, "%s crashed in startup, signal %d\n", di->name,
+			WTERMSIG(exitstat));
+	else
+		fprintf(stderr, "%s failed to start, unknown problem\n",
+			di->name);
+	exit(1);
+}
+
+static int daemon_ctl_sock = -1;
+
+static void frr_daemonize(void)
+{
+	int fds[2];
+	pid_t pid;
+
+	if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds)) {
+		perror("socketpair() for daemon control");
+		exit(1);
+	}
+	set_cloexec(fds[0]);
+	set_cloexec(fds[1]);
+
+	pid = fork();
+	if (pid < 0) {
+		perror("fork()");
+		exit(1);
+	}
+	if (pid == 0) {
+		/* child */
+		close(fds[0]);
+		if (setsid() < 0) {
+			perror("setsid()");
+			exit(1);
+		}
+
+		daemon_ctl_sock = fds[1];
+		return;
+	}
+
+	close(fds[1]);
+	frr_daemon_wait(fds[0]);
+}
+
 void frr_config_fork(void)
 {
 	hook_call(frr_late_init, master);
-
-	if (di->instance) {
-		snprintf(config_default, sizeof(config_default),
-			 "%s/%s-%d.conf", frr_sysconfdir, di->name,
-			 di->instance);
-		snprintf(pidfile_default, sizeof(pidfile_default),
-			 "%s/%s-%d.pid", frr_vtydir, di->name, di->instance);
-	}
 
 	vty_read_config(di->config_file, config_default);
 
@@ -415,11 +764,8 @@ void frr_config_fork(void)
 	if (di->dryrun)
 		exit(0);
 
-	/* Daemonize. */
-	if (di->daemon_mode && daemon(0, 0) < 0) {
-		zlog_err("Zebra daemon failed: %s", strerror(errno));
-		exit(1);
-	}
+	if (di->daemon_mode || di->terminal)
+		frr_daemonize();
 
 	if (!di->pid_file)
 		di->pid_file = pidfile_default;
@@ -432,7 +778,13 @@ void frr_vty_serv(void)
 	 * (not currently set anywhere) */
 	if (!di->vty_path) {
 		const char *dir;
-		dir = di->vty_sock_path ? di->vty_sock_path : frr_vtydir;
+		char defvtydir[256];
+
+		snprintf(defvtydir, sizeof(defvtydir), "%s%s%s", frr_vtydir,
+			 di->pathspace ? "/" : "",
+			 di->pathspace ? di->pathspace : "");
+
+		dir = di->vty_sock_path ? di->vty_sock_path : defvtydir;
 
 		if (di->instance)
 			snprintf(vtypath_default, sizeof(vtypath_default),
@@ -445,6 +797,74 @@ void frr_vty_serv(void)
 	}
 
 	vty_serv_sock(di->vty_addr, di->vty_port, di->vty_path);
+}
+
+static void frr_terminal_close(int isexit)
+{
+	int nullfd;
+
+	if (daemon_ctl_sock != -1) {
+		close(daemon_ctl_sock);
+		daemon_ctl_sock = -1;
+	}
+
+	if (!di->daemon_mode || isexit) {
+		printf("\n%s exiting\n", di->name);
+		if (!isexit)
+			raise(SIGINT);
+		return;
+	} else {
+		printf("\n%s daemonizing\n", di->name);
+		fflush(stdout);
+	}
+
+	nullfd = open("/dev/null", O_RDONLY | O_NOCTTY);
+	if (nullfd == -1) {
+		zlog_err("%s: failed to open /dev/null: %s", __func__,
+			 safe_strerror(errno));
+	} else {
+		dup2(nullfd, 0);
+		dup2(nullfd, 1);
+		dup2(nullfd, 2);
+		close(nullfd);
+	}
+}
+
+static struct thread *daemon_ctl_thread = NULL;
+
+static int frr_daemon_ctl(struct thread *t)
+{
+	char buf[1];
+	ssize_t nr;
+
+	nr = recv(daemon_ctl_sock, buf, sizeof(buf), 0);
+	if (nr < 0 && (errno == EINTR || errno == EAGAIN))
+		goto out;
+	if (nr <= 0)
+		return 0;
+
+	switch (buf[0]) {
+	case 'S':	/* SIGTSTP */
+		vty_stdio_suspend();
+		send(daemon_ctl_sock, "s", 1, 0);
+		break;
+	case 'R':	/* SIGTCNT [implicit] */
+		vty_stdio_resume();
+		break;
+	case 'I':	/* SIGINT */
+		di->daemon_mode = false;
+		raise(SIGINT);
+		break;
+	case 'Q':	/* SIGQUIT */
+		di->daemon_mode = true;
+		vty_stdio_close();
+		break;
+	}
+
+out:
+	thread_add_read(master, frr_daemon_ctl, NULL, daemon_ctl_sock,
+			&daemon_ctl_thread);
+	return 0;
 }
 
 void frr_run(struct thread_master *master)
@@ -460,7 +880,82 @@ void frr_run(struct thread_master *master)
 	zlog_notice("%s %s starting: %svty@%d%s", di->name, FRR_VERSION,
 		    instanceinfo, di->vty_port, di->startinfo);
 
+	if (di->terminal) {
+		vty_stdio(frr_terminal_close);
+		if (daemon_ctl_sock != -1) {
+			set_nonblocking(daemon_ctl_sock);
+			thread_add_read(master, frr_daemon_ctl, NULL,
+					daemon_ctl_sock, &daemon_ctl_thread);
+		}
+	} else if (di->daemon_mode) {
+		int nullfd = open("/dev/null", O_RDONLY | O_NOCTTY);
+		if (nullfd == -1) {
+			zlog_err("%s: failed to open /dev/null: %s", __func__,
+				 safe_strerror(errno));
+		} else {
+			dup2(nullfd, 0);
+			dup2(nullfd, 1);
+			dup2(nullfd, 2);
+			close(nullfd);
+		}
+
+		if (daemon_ctl_sock != -1)
+			close(daemon_ctl_sock);
+		daemon_ctl_sock = -1;
+	}
+
+	/* end fixed stderr startup logging */
+	zlog_startup_stderr = false;
+
 	struct thread thread;
 	while (thread_fetch(master, &thread))
 		thread_call(&thread);
+}
+
+void frr_early_fini(void)
+{
+	hook_call(frr_early_fini);
+}
+
+void frr_fini(void)
+{
+	FILE *fp;
+	char filename[128];
+	int have_leftovers;
+
+	hook_call(frr_fini);
+
+	/* memory_init -> nothing needed */
+	vty_terminate();
+	cmd_terminate();
+	zprivs_terminate(di->privs);
+	/* signal_init -> nothing needed */
+	thread_master_free(master);
+	master = NULL;
+	closezlog();
+	/* frrmod_init -> nothing needed / hooks */
+
+	if (!debug_memstats_at_exit)
+		return;
+
+	have_leftovers = log_memstats(stderr, di->name);
+
+	/* in case we decide at runtime that we want exit-memstats for
+	 * a daemon, but it has no stderr because it's daemonized
+	 * (only do this if we actually have something to print though)
+	 */
+	if (!have_leftovers)
+		return;
+
+	snprintf(filename, sizeof(filename),
+		 "/tmp/frr-memstats-%s-%llu-%llu",
+		 di->name,
+		 (unsigned long long)getpid(),
+		 (unsigned long long)time(NULL));
+
+	fp = fopen(filename, "w");
+	if (fp) {
+		log_memstats(fp, di->name);
+		fclose(fp);
+	}
 }

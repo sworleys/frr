@@ -14,7 +14,7 @@ Add packages:
 
     apt-get install git autoconf automake libtool make gawk libreadline-dev \
        texinfo dejagnu pkg-config libpam0g-dev libjson-c-dev bison flex \
-       python-pytest libc-ares-dev python3-dev libsystemd-dev
+       python-pytest libc-ares-dev python3-dev libsystemd-dev python-ipaddr
 
 Get FRR, compile it and install it (from Git)
 ---------------------------------------------
@@ -54,9 +54,8 @@ an example.)
         --enable-configfile-mask=0640 \
         --enable-logfile-mask=0640 \
         --enable-rtadv \
-        --enable-tcp-zebra \
         --enable-fpm \
-	--enable-systemd=yes \
+        --enable-systemd=yes \
         --with-pkg-git-version \
         --with-pkg-extra-version=-MyOwnFRRVersion   
     make
@@ -79,7 +78,7 @@ an example.)
     sudo install -m 640 -o frr -g frr /dev/null /etc/frr/nhrpd.conf    
     sudo install -m 640 -o frr -g frrvty /dev/null /etc/frr/vtysh.conf
 
-### Enable IP & IPv6 forwarding
+### Enable IPv4 & IPv6 forwarding
 
 Edit `/etc/sysctl.conf` and uncomment the following values (ignore the 
 other settings)
@@ -114,7 +113,7 @@ Add the following lines to `/etc/modules-load.d/modules.conf`:
 **Reboot** or use `sysctl -p` to apply the same config to the running system
 
 
-### Install the systemd service
+### Install the systemd service (if rebooted from last step, change directory back to frr directory)
 
     sudo install -m 644 tools/frr.service /etc/systemd/system/frr.service
     sudo install -m 644 tools/etc/default/frr /etc/default/frr
@@ -136,7 +135,7 @@ For example.
     ripngd=yes
     isisd=yes
 
-### Enable the systemd serivce
+### Enable the systemd service
  - systemctl enable frr
 
 ### Start the systemd service

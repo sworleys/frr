@@ -100,6 +100,8 @@ static void sigint(void)
 {
 	zlog_notice("Terminating on signal");
 	eigrp_terminate();
+
+	exit(0);
 }
 
 /* SIGUSR1 handler. */
@@ -159,6 +161,8 @@ int main(int argc, char **argv, char **envp)
 		}
 	}
 
+	eigrp_sw_version_initialize();
+
 	/* EIGRP master init. */
 	eigrp_master_init();
 	eigrp_om->master = frr_init();
@@ -183,14 +187,14 @@ int main(int argc, char **argv, char **envp)
 #endif /* HAVE_SNMP */
 
 	/* Access list install. */
-	access_list_init ();
-	access_list_add_hook (eigrp_distribute_update_all_wrapper);
-	access_list_delete_hook (eigrp_distribute_update_all_wrapper);
+	access_list_init();
+	access_list_add_hook(eigrp_distribute_update_all_wrapper);
+	access_list_delete_hook(eigrp_distribute_update_all_wrapper);
 
 	/* Prefix list initialize.*/
-	prefix_list_init ();
-	prefix_list_add_hook (eigrp_distribute_update_all);
-	prefix_list_delete_hook (eigrp_distribute_update_all);
+	prefix_list_init();
+	prefix_list_add_hook(eigrp_distribute_update_all);
+	prefix_list_delete_hook(eigrp_distribute_update_all);
 
 	/*
 	 * XXX: This is just to get the CLI installed to suppress VTYSH errors.
@@ -198,18 +202,18 @@ int main(int argc, char **argv, char **envp)
 	 */
 	route_map_init();
 	/*eigrp_route_map_init();
-	 route_map_add_hook (eigrp_rmap_update);
-	 route_map_delete_hook (eigrp_rmap_update);*/
+	  route_map_add_hook (eigrp_rmap_update);
+	  route_map_delete_hook (eigrp_rmap_update);*/
 	/*if_rmap_init (EIGRP_NODE);
-	 if_rmap_hook_add (eigrp_if_rmap_update);
-	 if_rmap_hook_delete (eigrp_if_rmap_update);*/
+	  if_rmap_hook_add (eigrp_if_rmap_update);
+	  if_rmap_hook_delete (eigrp_if_rmap_update);*/
 
 	/* Distribute list install. */
-	distribute_list_init (EIGRP_NODE);
-	distribute_list_add_hook (eigrp_distribute_update);
-	distribute_list_delete_hook (eigrp_distribute_update);
+	distribute_list_init(EIGRP_NODE);
+	distribute_list_add_hook(eigrp_distribute_update);
+	distribute_list_delete_hook(eigrp_distribute_update);
 
-	frr_config_fork ();
+	frr_config_fork();
 	frr_run(master);
 
 	/* Not reached. */

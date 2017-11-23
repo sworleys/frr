@@ -43,7 +43,7 @@ static zebra_capabilities_t _caps_p [] = {
 	ZCAP_DAC_OVERRIDE,	/* for now needed to write to /proc/sys/net/ipv4/<if>/send_redirect */
 };
 
-static struct zebra_privs_t nhrpd_privs = {
+struct zebra_privs_t nhrpd_privs = {
 #if defined(FRR_USER) && defined(FRR_GROUP)
 	.user = FRR_USER,
 	.group = FRR_GROUP,
@@ -81,6 +81,7 @@ static void nhrp_sigusr1(void)
 static void nhrp_request_stop(void)
 {
 	debugf(NHRP_DEBUG_COMMON, "Exiting...");
+	frr_early_fini();
 
 	nhrp_shortcut_terminate();
 	nhrp_nhs_terminate();
@@ -89,15 +90,9 @@ static void nhrp_request_stop(void)
 	evmgr_terminate();
 	nhrp_vc_terminate();
 	vrf_terminate();
-	/* memory_terminate(); */
-	/* vty_terminate(); */
-	cmd_terminate();
-	/* signal_terminate(); */
-	zprivs_terminate(&nhrpd_privs);
 
 	debugf(NHRP_DEBUG_COMMON, "Done.");
-
-	closezlog();
+	frr_fini();
 
 	exit(0);
 }
@@ -128,8 +123,8 @@ int main(int argc, char **argv)
 
 	/* Library inits. */
 	master = frr_init();
-	nhrp_interface_init();
 	vrf_init(NULL, NULL, NULL, NULL);
+	nhrp_interface_init();
 	resolver_init();
 
 	/* Run with elevated capabilities, as for all netlink activity

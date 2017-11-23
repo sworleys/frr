@@ -21,6 +21,8 @@
 
 #include <zebra.h>
 
+#ifdef GNU_LINUX
+
 /* The following definition is to workaround an issue in the Linux kernel
  * header files with redefinition of 'struct in6_addr' in both
  * netinet/in.h and linux/in6.h.
@@ -91,7 +93,7 @@ static void set_ifindex(struct interface *ifp, ifindex_t ifi_index,
 			if_delete_update(oifp);
 		}
 	}
-	ifp->ifindex = ifi_index;
+	if_set_index(ifp, ifi_index);
 }
 
 /* Utility function to parse hardware link-layer address and update ifp */
@@ -391,7 +393,7 @@ static int get_iflink_speed(const char *ifname)
 	memset(&ifdata, 0, sizeof(ifdata));
 
 	/* set interface name */
-	strcpy(ifdata.ifr_name, ifname);
+	strlcpy(ifdata.ifr_name, ifname, sizeof(ifdata.ifr_name));
 
 	/* initialize ethtool interface */
 	memset(&ecmd, 0, sizeof(ecmd));
@@ -664,7 +666,7 @@ static int netlink_interface(struct sockaddr_nl *snl, struct nlmsghdr *h,
 		link_ifindex = *(ifindex_t *)RTA_DATA(tb[IFLA_LINK]);
 
 	/* Add interface. */
-	ifp = if_get_by_name(name, vrf_id);
+	ifp = if_get_by_name(name, vrf_id, 0);
 	set_ifindex(ifp, ifi->ifi_index, zns);
 	ifp->flags = ifi->ifi_flags & 0x0000fffff;
 	if (IS_ZEBRA_IF_VRF(ifp))
@@ -828,17 +830,23 @@ static int netlink_address(int cmd, int family, struct interface *ifp,
 	req.ifa.ifa_family = family;
 
 	req.ifa.ifa_index = ifp->ifindex;
-	req.ifa.ifa_prefixlen = p->prefixlen;
 
 	addattr_l(&req.n, sizeof req, IFA_LOCAL, &p->u.prefix, bytelen);
 
-	if (family == AF_INET && cmd == RTM_NEWADDR) {
-		if (!CONNECTED_PEER(ifc) && ifc->destination) {
+	if (family == AF_INET) {
+		if (CONNECTED_PEER(ifc)) {
+			p = ifc->destination;
+			addattr_l(&req.n, sizeof req, IFA_ADDRESS, &p->u.prefix,
+				  bytelen);
+		} else if (cmd == RTM_NEWADDR && ifc->destination) {
 			p = ifc->destination;
 			addattr_l(&req.n, sizeof req, IFA_BROADCAST,
 				  &p->u.prefix, bytelen);
 		}
 	}
+
+	/* p is now either ifc->address or ifc->destination */
+	req.ifa.ifa_prefixlen = p->prefixlen;
 
 	if (CHECK_FLAG(ifc->flags, ZEBRA_IFA_SECONDARY))
 		SET_FLAG(req.ifa.ifa_flags, IFA_F_SECONDARY);
@@ -991,14 +999,12 @@ int netlink_interface_addr(struct sockaddr_nl *snl, struct nlmsghdr *h,
 			 */
 			if (!(ifa->ifa_flags
 			      & (IFA_F_DADFAILED | IFA_F_TENTATIVE)))
-				connected_add_ipv6(
-					ifp, flags, (struct in6_addr *)addr,
-					ifa->ifa_prefixlen,
-					(struct in6_addr *)broad, label);
+				connected_add_ipv6(ifp, flags,
+						   (struct in6_addr *)addr,
+						   ifa->ifa_prefixlen, label);
 		} else
 			connected_delete_ipv6(ifp, (struct in6_addr *)addr,
-					      ifa->ifa_prefixlen,
-					      (struct in6_addr *)broad);
+					      ifa->ifa_prefixlen);
 	}
 
 	return 0;
@@ -1115,7 +1121,7 @@ int netlink_link_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 
 			if (ifp == NULL) {
 				/* unknown interface */
-				ifp = if_get_by_name(name, vrf_id);
+				ifp = if_get_by_name(name, vrf_id, 0);
 			} else {
 				/* pre-configured interface, learnt now */
 				if (ifp->vrf_id != vrf_id)
@@ -1250,3 +1256,5 @@ void interface_list(struct zebra_ns *zns)
 {
 	interface_lookup_netlink(zns);
 }
+
+#endif /* GNU_LINUX */

@@ -499,7 +499,8 @@ void bgp_cleanup_nexthops(struct bgp *bgp)
 
 		for (rn = bgp_table_top(bgp->nexthop_cache_table[afi]); rn;
 		     rn = bgp_route_next(rn)) {
-			if ((bnc = rn->info) == NULL)
+			bnc = rn->info;
+			if (!bnc)
 				continue;
 
 			/* Clear relevant flags. */
@@ -687,8 +688,7 @@ static void evaluate_paths(struct bgp_nexthop_cache *bnc)
 			buf, bnc->flags, bnc->change_flags);
 	}
 
-	LIST_FOREACH(path, &(bnc->paths), nh_thread)
-	{
+	LIST_FOREACH (path, &(bnc->paths), nh_thread) {
 		if (!(path->type == ZEBRA_ROUTE_BGP
 		      && ((path->sub_type == BGP_ROUTE_NORMAL)
 			  || (path->sub_type == BGP_ROUTE_STATIC))))

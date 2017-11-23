@@ -138,7 +138,7 @@ babel_interface_delete (int cmd, struct zclient *client, zebra_size_t length, vr
 
     /* To support pseudo interface do not free interface structure.  */
     /* if_delete(ifp); */
-    ifp->ifindex = IFINDEX_INTERNAL;
+    if_set_index(ifp, IFINDEX_INTERNAL);
 
     return 0;
 }
@@ -292,7 +292,7 @@ DEFUN (babel_network,
     if (ret < 0) {
         vty_out (vty, "There is same network configuration %s\n",
                    argv[1]->arg);
-        return CMD_WARNING_CONFIG_FAILED;
+        return CMD_WARNING;
     }
 
     return CMD_SUCCESS;
@@ -809,10 +809,10 @@ interface_reset(struct interface *ifp)
 void
 babel_interface_close_all(void)
 {
+    struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
     struct interface *ifp = NULL;
-    struct listnode *linklist_node = NULL;
 
-    FOR_ALL_INTERFACES(ifp, linklist_node) {
+    FOR_ALL_INTERFACES(vrf, ifp) {
         if(!if_up(ifp))
             continue;
         send_wildcard_retraction(ifp);
@@ -823,7 +823,7 @@ babel_interface_close_all(void)
         usleep(roughly(1000));
         gettime(&babel_now);
     }
-    FOR_ALL_INTERFACES(ifp, linklist_node) {
+    FOR_ALL_INTERFACES(vrf, ifp) {
         if(!if_up(ifp))
             continue;
         /* Make sure they got it. */
@@ -896,12 +896,12 @@ DEFUN (show_babel_interface,
        "Interface information\n"
        "Interface\n")
 {
+  struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
   struct interface *ifp;
-  struct listnode *node;
 
   if (argc == 3)
   {
-    for (ALL_LIST_ELEMENTS_RO (vrf_iflist(VRF_DEFAULT), node, ifp))
+    FOR_ALL_INTERFACES (vrf, ifp)
       show_babel_interface_sub (vty, ifp);
     return CMD_SUCCESS;
   }
@@ -1256,8 +1256,8 @@ void
 babel_if_init ()
 {
     /* initialize interface list */
-    if_add_hook (IF_NEW_HOOK,    babel_if_new_hook);
-    if_add_hook (IF_DELETE_HOOK, babel_if_delete_hook);
+    hook_register_prio(if_add, 0, babel_if_new_hook);
+    hook_register_prio(if_del, 0, babel_if_delete_hook);
 
     babel_enable_if = vector_init (1);
 
@@ -1316,12 +1316,12 @@ babeld-specific statement lines where appropriate. */
 static int
 interface_config_write (struct vty *vty)
 {
-    struct listnode *node;
+    struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
     struct interface *ifp;
     int write = 0;
 
-    for (ALL_LIST_ELEMENTS_RO (vrf_iflist(VRF_DEFAULT), node, ifp)) {
-        vty_out (vty, "interface %s\n",ifp->name);
+    FOR_ALL_INTERFACES (vrf, ifp) {
+        vty_frame (vty, "interface %s\n",ifp->name);
         if (ifp->desc)
             vty_out (vty, " description %s\n",ifp->desc);
         babel_interface_nfo *babel_ifp = babel_get_if_nfo (ifp);
@@ -1377,7 +1377,7 @@ interface_config_write (struct vty *vty)
                 write++;
             }
         }
-        vty_out (vty, "!\n");
+        vty_endframe (vty, "!\n");
         write++;
     }
     return write;

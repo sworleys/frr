@@ -5,7 +5,7 @@ usr/lib/
 tools/frr-reload.py usr/lib/frr/
 tools/frr usr/lib/frr
 usr/share/doc/frr/
-usr/share/cumulus/support
+tools/usr/share/cumulus/* usr/share/cumulus/
 usr/share/man/man1/vtysh.1
 usr/share/man/man1/frr.1
 usr/share/man/man8
@@ -17,6 +17,7 @@ usr/share/man/man8/ripngd.8
 usr/share/man/man8/zebra.8
 usr/share/man/man8/isisd.8
 usr/share/man/man8/watchfrr.8
+usr/share/man/man8/frr-args.8
 usr/share/snmp/mibs/
 tools/etc/* etc/
 tools/*.service    lib/systemd/system

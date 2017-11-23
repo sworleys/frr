@@ -42,6 +42,7 @@
 #include "pim_oil.h"
 #include "pim_upstream.h"
 #include "pim_ssm.h"
+#include "pim_rp.h"
 
 RB_GENERATE(pim_ifchannel_rb, pim_ifchannel,
 	    pim_ifp_rb, pim_ifchannel_compare);
@@ -114,7 +115,7 @@ static void pim_ifchannel_find_new_children(struct pim_ifchannel *ch)
 	    && (ch->sg.grp.s_addr == INADDR_ANY))
 		return;
 
-	RB_FOREACH(child, pim_ifchannel_rb, &pim_ifp->ifchannel_rb) {
+	RB_FOREACH (child, pim_ifchannel_rb, &pim_ifp->ifchannel_rb) {
 		if ((ch->sg.grp.s_addr != INADDR_ANY)
 		    && (child->sg.grp.s_addr == ch->sg.grp.s_addr)
 		    && (child != ch)) {
@@ -168,7 +169,7 @@ void pim_ifchannel_delete(struct pim_ifchannel *ch)
 	pim_ifchannel_remove_children(ch);
 
 	if (ch->sources)
-		list_delete(ch->sources);
+		list_delete_and_null(&ch->sources);
 
 	listnode_delete(ch->upstream->ifchannels, ch);
 
@@ -348,7 +349,7 @@ const char *pim_ifchannel_ifjoin_name(enum pim_ifjoin_state ifjoin_state,
 	switch (ifjoin_state) {
 	case PIM_IFJOIN_NOINFO:
 		if (PIM_IF_FLAG_TEST_S_G_RPT(flags))
-			return "SGRpt";
+			return "SGRpt(NI)";
 		else
 			return "NOINFO";
 		break;
@@ -356,16 +357,28 @@ const char *pim_ifchannel_ifjoin_name(enum pim_ifjoin_state ifjoin_state,
 		return "JOIN";
 		break;
 	case PIM_IFJOIN_PRUNE:
-		return "PRUNE";
+		if (PIM_IF_FLAG_TEST_S_G_RPT(flags))
+			return "SGRpt(P)";
+		else
+			return "PRUNE";
 		break;
 	case PIM_IFJOIN_PRUNE_PENDING:
-		return "PRUNEP";
+		if (PIM_IF_FLAG_TEST_S_G_RPT(flags))
+			return "SGRpt(PP)";
+		else
+			return "PRUNEP";
 		break;
 	case PIM_IFJOIN_PRUNE_TMP:
-		return "PRUNET";
+		if (PIM_IF_FLAG_TEST_S_G_RPT(flags))
+			return "SGRpt(P')";
+		else
+			return "PRUNET";
 		break;
 	case PIM_IFJOIN_PRUNE_PENDING_TMP:
-		return "PRUNEPT";
+		if (PIM_IF_FLAG_TEST_S_G_RPT(flags))
+			return "SGRpt(PP')";
+		else
+			return "PRUNEPT";
 		break;
 	}
 
@@ -456,7 +469,7 @@ void pim_ifchannel_membership_clear(struct interface *ifp)
 	pim_ifp = ifp->info;
 	zassert(pim_ifp);
 
-	RB_FOREACH(ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb)
+	RB_FOREACH (ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb)
 		ifmembership_set(ch, PIM_IFMEMBERSHIP_NOINFO);
 }
 
@@ -468,7 +481,7 @@ void pim_ifchannel_delete_on_noinfo(struct interface *ifp)
 	pim_ifp = ifp->info;
 	zassert(pim_ifp);
 
-	RB_FOREACH_SAFE(ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb, ch_tmp)
+	RB_FOREACH_SAFE (ch, pim_ifchannel_rb, &pim_ifp->ifchannel_rb, ch_tmp)
 		delete_on_noinfo(ch);
 }
 
@@ -558,7 +571,7 @@ struct pim_ifchannel *pim_ifchannel_add(struct interface *ifp,
 
 		pim_ifchannel_remove_children(ch);
 		if (ch->sources)
-			list_delete(ch->sources);
+			list_delete_and_null(&ch->sources);
 
 		THREAD_OFF(ch->t_ifjoin_expiry_timer);
 		THREAD_OFF(ch->t_ifjoin_prune_pending_timer);
@@ -628,33 +641,34 @@ static int on_ifjoin_prune_pending_timer(struct thread *t)
 	ch = THREAD_ARG(t);
 
 	if (ch->ifjoin_state == PIM_IFJOIN_PRUNE_PENDING) {
-		/* Send PruneEcho(S,G) ? */
 		ifp = ch->interface;
 		pim_ifp = ifp->info;
-		send_prune_echo = (listcount(pim_ifp->pim_neighbor_list) > 1);
+		if (!PIM_IF_FLAG_TEST_S_G_RPT(ch->flags)) {
+			/* Send PruneEcho(S,G) ? */
+			send_prune_echo =
+				(listcount(pim_ifp->pim_neighbor_list) > 1);
 
-		if (send_prune_echo) {
-			struct pim_rpf rpf;
+			if (send_prune_echo) {
+				struct pim_rpf rpf;
 
-			rpf.source_nexthop.interface = ifp;
-			rpf.rpf_addr.u.prefix4 = pim_ifp->primary_address;
-			pim_jp_agg_single_upstream_send(&rpf, ch->upstream, 0);
-		}
-		/* If SGRpt flag is set on ifchannel, Trigger SGRpt
-		   message on RP path upon prune timer expiry.
-		*/
-		if (PIM_IF_FLAG_TEST_S_G_RPT(ch->flags)) {
+				rpf.source_nexthop.interface = ifp;
+				rpf.rpf_addr.u.prefix4 =
+					pim_ifp->primary_address;
+				pim_jp_agg_single_upstream_send(&rpf,
+								ch->upstream,
+								0);
+			}
+
+			ifjoin_to_noinfo(ch, true);
+		} else {
+			/* If SGRpt flag is set on ifchannel, Trigger SGRpt
+			 *  message on RP path upon prune timer expiry.
+			 */
+			ch->ifjoin_state = PIM_IFJOIN_PRUNE;
 			if (ch->upstream)
 				pim_upstream_update_join_desired(pim_ifp->pim,
 								 ch->upstream);
-			/*
-			  ch->ifjoin_state transition to NOINFO state
-			  ch_del is set to 0 for not deleteing from here.
-			  Holdtime expiry (ch_del set to 1) delete the entry.
-			*/
-			ifjoin_to_noinfo(ch, false);
-		} else
-			ifjoin_to_noinfo(ch, true);
+		}
 		/* from here ch may have been deleted */
 	} else {
 		zlog_warn(
@@ -1104,7 +1118,6 @@ void pim_ifchannel_local_membership_del(struct interface *ifp,
 	orig = ch = pim_ifchannel_find(ifp, sg);
 	if (!ch)
 		return;
-
 	ifmembership_set(ch, PIM_IFMEMBERSHIP_NOINFO);
 
 	if (sg->src.s_addr == INADDR_ANY) {
@@ -1278,10 +1291,9 @@ void pim_ifchannel_scan_forward_start(struct interface *new_ifp)
 {
 	struct pim_interface *new_pim_ifp = new_ifp->info;
 	struct pim_instance *pim = new_pim_ifp->pim;
-	struct listnode *ifnode;
 	struct interface *ifp;
 
-	for (ALL_LIST_ELEMENTS_RO(vrf_iflist(pim->vrf_id), ifnode, ifp)) {
+	FOR_ALL_INTERFACES (pim->vrf, ifp) {
 		struct pim_interface *loop_pim_ifp = ifp->info;
 		struct pim_ifchannel *ch;
 
@@ -1291,7 +1303,7 @@ void pim_ifchannel_scan_forward_start(struct interface *new_ifp)
 		if (new_pim_ifp == loop_pim_ifp)
 			continue;
 
-		RB_FOREACH(ch, pim_ifchannel_rb, &loop_pim_ifp->ifchannel_rb) {
+		RB_FOREACH (ch, pim_ifchannel_rb, &loop_pim_ifp->ifchannel_rb) {
 			if (ch->ifjoin_state == PIM_IFJOIN_JOIN) {
 				struct pim_upstream *up = ch->upstream;
 				if ((!up->channel_oil)
@@ -1311,11 +1323,12 @@ void pim_ifchannel_scan_forward_start(struct interface *new_ifp)
  * we get End of Message
  */
 void pim_ifchannel_set_star_g_join_state(struct pim_ifchannel *ch, int eom,
-					 uint8_t source_flags, uint8_t join,
-					 uint8_t starg_alone)
+					 uint8_t join)
 {
 	struct pim_ifchannel *child;
-	struct listnode *ch_node;
+	struct listnode *ch_node, *nch_node;
+	struct pim_instance *pim =
+		((struct pim_interface *)ch->interface->info)->pim;
 
 	if (PIM_DEBUG_PIM_TRACE)
 		zlog_debug(
@@ -1325,34 +1338,7 @@ void pim_ifchannel_set_star_g_join_state(struct pim_ifchannel *ch, int eom,
 	if (!ch->sources)
 		return;
 
-	for (ALL_LIST_ELEMENTS_RO(ch->sources, ch_node, child)) {
-		/* Only *,G Join received and no (SG-RPT) prune.
-		   eom = 1, only (W,G) join_alone is true, WC and RPT are set.
-		   Scan all S,G associated to G and if any SG-RPT
-		   remove the SG-RPT flag.
-		*/
-		if (eom && starg_alone && (source_flags & PIM_RPT_BIT_MASK)
-		    && (source_flags & PIM_WILDCARD_BIT_MASK)) {
-			if (PIM_IF_FLAG_TEST_S_G_RPT(child->flags)) {
-				struct pim_upstream *up = child->upstream;
-
-				PIM_IF_FLAG_UNSET_S_G_RPT(child->flags);
-				if (up) {
-					if (PIM_DEBUG_TRACE)
-						zlog_debug(
-							"%s: SGRpt flag is cleared, add inherit oif to up %s",
-							__PRETTY_FUNCTION__,
-							up->sg_str);
-					pim_channel_add_oif(
-						up->channel_oil, ch->interface,
-						PIM_OIF_FLAG_PROTO_STAR);
-					pim_ifchannel_ifjoin_switch(
-						__PRETTY_FUNCTION__, child,
-						PIM_IFJOIN_JOIN);
-				}
-			}
-		}
-
+	for (ALL_LIST_ELEMENTS(ch->sources, ch_node, nch_node, child)) {
 		if (!PIM_IF_FLAG_TEST_S_G_RPT(child->flags))
 			continue;
 
@@ -1371,8 +1357,36 @@ void pim_ifchannel_set_star_g_join_state(struct pim_ifchannel *ch, int eom,
 			break;
 		case PIM_IFJOIN_PRUNE_TMP:
 		case PIM_IFJOIN_PRUNE_PENDING_TMP:
-			if (eom)
-				child->ifjoin_state = PIM_IFJOIN_NOINFO;
+			if (!eom)
+				break;
+
+			if (child->ifjoin_state == PIM_IFJOIN_PRUNE_PENDING_TMP)
+				THREAD_OFF(child->t_ifjoin_prune_pending_timer);
+			THREAD_OFF(child->t_ifjoin_expiry_timer);
+			struct pim_upstream *parent =
+				child->upstream->parent;
+
+			PIM_IF_FLAG_UNSET_S_G_RPT(child->flags);
+			child->ifjoin_state = PIM_IFJOIN_NOINFO;
+
+			if (I_am_RP(pim, child->sg.grp)) {
+				pim_channel_add_oif(
+					child->upstream->channel_oil,
+					ch->interface,
+					PIM_OIF_FLAG_PROTO_STAR);
+				pim_upstream_switch(
+					pim, child->upstream,
+					PIM_UPSTREAM_JOINED);
+				pim_jp_agg_single_upstream_send(
+					&child->upstream->rpf,
+					child->upstream, true);
+			}
+			if (parent)
+				pim_jp_agg_single_upstream_send(
+					&parent->rpf,
+					parent, true);
+
+			delete_on_noinfo(child);
 			break;
 		}
 	}

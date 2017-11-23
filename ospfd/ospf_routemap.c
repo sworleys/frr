@@ -45,38 +45,40 @@ static void ospf_route_map_update(const char *name)
 {
 	struct ospf *ospf;
 	int type;
+	struct listnode *n1 = NULL;
 
 	/* If OSPF instatnce does not exist, return right now. */
-	ospf = ospf_lookup();
-	if (ospf == NULL)
+	if (listcount(om->ospf) == 0)
 		return;
 
-	/* Update route-map */
-	for (type = 0; type <= ZEBRA_ROUTE_MAX; type++) {
-		struct list *red_list;
-		struct listnode *node;
-		struct ospf_redist *red;
+	for (ALL_LIST_ELEMENTS_RO(om->ospf, n1, ospf)) {
+		/* Update route-map */
+		for (type = 0; type <= ZEBRA_ROUTE_MAX; type++) {
+			struct list *red_list;
+			struct listnode *node;
+			struct ospf_redist *red;
 
-		red_list = ospf->redist[type];
-		if (!red_list)
-			continue;
+			red_list = ospf->redist[type];
+			if (!red_list)
+				continue;
 
-		for (ALL_LIST_ELEMENTS_RO(red_list, node, red)) {
-			if (ROUTEMAP_NAME(red)
-			    && strcmp(ROUTEMAP_NAME(red), name) == 0) {
-				/* Keep old route-map. */
-				struct route_map *old = ROUTEMAP(red);
+			for (ALL_LIST_ELEMENTS_RO(red_list, node, red)) {
+				if (ROUTEMAP_NAME(red)
+				    && strcmp(ROUTEMAP_NAME(red), name) == 0) {
+					/* Keep old route-map. */
+					struct route_map *old = ROUTEMAP(red);
 
-				/* Update route-map. */
-				ROUTEMAP(red) = route_map_lookup_by_name(
-					ROUTEMAP_NAME(red));
+					/* Update route-map. */
+					ROUTEMAP(red) = route_map_lookup_by_name(
+										 ROUTEMAP_NAME(red));
 
-				/* No update for this distribute type. */
-				if (old == NULL && ROUTEMAP(red) == NULL)
-					continue;
+					/* No update for this distribute type. */
+					if (old == NULL && ROUTEMAP(red) == NULL)
+						continue;
 
-				ospf_distribute_list_update(ospf, type,
-							    red->instance);
+					ospf_distribute_list_update(ospf, type,
+								    red->instance);
+				}
 			}
 		}
 	}
@@ -86,26 +88,24 @@ static void ospf_route_map_event(route_map_event_t event, const char *name)
 {
 	struct ospf *ospf;
 	int type;
+	struct listnode *n1 = NULL;
 
-	/* If OSPF instatnce does not exist, return right now. */
-	ospf = ospf_lookup();
-	if (ospf == NULL)
-		return;
+	for (ALL_LIST_ELEMENTS_RO(om->ospf, n1, ospf)) {
+		for (type = 0; type <= ZEBRA_ROUTE_MAX; type++) {
+			struct list *red_list;
+			struct listnode *node;
+			struct ospf_redist *red;
 
-	for (type = 0; type <= ZEBRA_ROUTE_MAX; type++) {
-		struct list *red_list;
-		struct listnode *node;
-		struct ospf_redist *red;
+			red_list = ospf->redist[type];
+			if (!red_list)
+				continue;
 
-		red_list = ospf->redist[type];
-		if (!red_list)
-			continue;
-
-		for (ALL_LIST_ELEMENTS_RO(red_list, node, red)) {
-			if (ROUTEMAP_NAME(red) && ROUTEMAP(red)
-			    && !strcmp(ROUTEMAP_NAME(red), name)) {
-				ospf_distribute_list_update(ospf, type,
-							    red->instance);
+			for (ALL_LIST_ELEMENTS_RO(red_list, node, red)) {
+				if (ROUTEMAP_NAME(red) && ROUTEMAP(red)
+				    && !strcmp(ROUTEMAP_NAME(red), name)) {
+					ospf_distribute_list_update(ospf, type,
+								red->instance);
+				}
 			}
 		}
 	}
@@ -285,7 +285,7 @@ static route_map_result_t route_match_interface(void *rule,
 
 	if (type == RMAP_OSPF) {
 		ei = object;
-		ifp = if_lookup_by_name((char *)rule, VRF_DEFAULT);
+		ifp = if_lookup_by_name_all_vrf((char *)rule);
 
 		if (ifp == NULL || ifp->ifindex != ei->ifindex)
 			return RMAP_NOMATCH;
@@ -336,6 +336,10 @@ static struct route_map_rule_cmd route_match_tag_cmd = {
 	route_map_rule_tag_free,
 };
 
+struct ospf_metric {
+	bool used;
+	u_int32_t metric;
+};
 
 /* `set metric METRIC' */
 /* Set metric to attribute. */
@@ -343,7 +347,7 @@ static route_map_result_t route_set_metric(void *rule, struct prefix *prefix,
 					   route_map_object_t type,
 					   void *object)
 {
-	u_int32_t *metric;
+	struct ospf_metric *metric;
 	struct external_info *ei;
 
 	if (type == RMAP_OSPF) {
@@ -352,7 +356,8 @@ static route_map_result_t route_set_metric(void *rule, struct prefix *prefix,
 		ei = object;
 
 		/* Set metric out value. */
-		ei->route_map_set.metric = *metric;
+		if (metric->used)
+			ei->route_map_set.metric = metric->metric;
 	}
 	return RMAP_OKAY;
 }
@@ -360,7 +365,10 @@ static route_map_result_t route_set_metric(void *rule, struct prefix *prefix,
 /* set metric compilation. */
 static void *route_set_metric_compile(const char *arg)
 {
-	u_int32_t *metric;
+	struct ospf_metric *metric;
+
+	metric = XCALLOC(MTYPE_ROUTE_MAP_COMPILED, sizeof(u_int32_t));
+	metric->used = false;
 
 	/* OSPF doesn't support the +/- in
 	   set metric <+/-metric> check
@@ -373,11 +381,12 @@ static void *route_set_metric_compile(const char *arg)
 			if (strmatch(arg, "+rtt") || strmatch(arg, "-rtt"))
 				zlog_warn(
 					"OSPF does not support 'set metric +rtt / -rtt'");
-			return NULL;
+
+			return metric;
 		}
 	}
-	metric = XCALLOC(MTYPE_ROUTE_MAP_COMPILED, sizeof(u_int32_t));
-	*metric = strtoul(arg, NULL, 10);
+	metric->metric = strtoul(arg, NULL, 10);
+	metric->used = true;
 
 	return metric;
 }

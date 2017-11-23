@@ -45,6 +45,8 @@
 #include "ospf6_asbr.h"
 #include "ospf6d.h"
 
+DEFINE_MTYPE_STATIC(OSPF6D, OSPF6_PLISTNAME, "Prefix list name")
+
 int ospf6_area_cmp(void *va, void *vb)
 {
 	struct ospf6_area *oa = (struct ospf6_area *)va;
@@ -232,6 +234,7 @@ struct ospf6_area *ospf6_area_create(u_int32_t area_id, struct ospf6 *o, int df)
 	oa->summary_prefix->scope = oa;
 	oa->summary_router = OSPF6_ROUTE_TABLE_CREATE(AREA, SUMMARY_ROUTERS);
 	oa->summary_router->scope = oa;
+	oa->router_lsa_size_limit = 1024 + 256;
 
 	/* set default options */
 	if (CHECK_FLAG(o->flag, OSPF6_STUB_ROUTER)) {
@@ -270,7 +273,7 @@ void ospf6_area_delete(struct ospf6_area *oa)
 	for (ALL_LIST_ELEMENTS_RO(oa->if_list, n, oi))
 		oi->area = NULL;
 
-	list_delete(oa->if_list);
+	list_delete_and_null(&oa->if_list);
 
 	ospf6_lsdb_delete(oa->lsdb);
 	ospf6_lsdb_delete(oa->lsdb_self);
@@ -579,17 +582,15 @@ DEFUN (area_filter_list,
 	plist = prefix_list_lookup(AFI_IP6, plistname);
 	if (strmatch(inout, "in")) {
 		PREFIX_LIST_IN(area) = plist;
-		if (PREFIX_NAME_IN(area))
-			free(PREFIX_NAME_IN(area));
-
-		PREFIX_NAME_IN(area) = strdup(plistname);
+		XFREE(MTYPE_OSPF6_PLISTNAME, PREFIX_NAME_IN(area));
+		PREFIX_NAME_IN(area) = XSTRDUP(MTYPE_OSPF6_PLISTNAME,
+					       plistname);
 		ospf6_abr_reimport(area);
 	} else {
 		PREFIX_LIST_OUT(area) = plist;
-		if (PREFIX_NAME_OUT(area))
-			free(PREFIX_NAME_OUT(area));
-
-		PREFIX_NAME_OUT(area) = strdup(plistname);
+		XFREE(MTYPE_OSPF6_PLISTNAME, PREFIX_NAME_OUT(area));
+		PREFIX_NAME_OUT(area) = XSTRDUP(MTYPE_OSPF6_PLISTNAME,
+						plistname);
 		ospf6_abr_enable_area(area);
 	}
 
@@ -622,25 +623,35 @@ DEFUN (no_area_filter_list,
 				return CMD_SUCCESS;
 
 		PREFIX_LIST_IN(area) = NULL;
-		if (PREFIX_NAME_IN(area))
-			free(PREFIX_NAME_IN(area));
-
-		PREFIX_NAME_IN(area) = NULL;
+		XFREE(MTYPE_OSPF6_PLISTNAME, PREFIX_NAME_IN(area));
 		ospf6_abr_reimport(area);
 	} else {
 		if (PREFIX_NAME_OUT(area))
 			if (!strmatch(PREFIX_NAME_OUT(area), plistname))
 				return CMD_SUCCESS;
 
-		PREFIX_LIST_OUT(area) = NULL;
-		if (PREFIX_NAME_OUT(area))
-			free(PREFIX_NAME_OUT(area));
-
-		PREFIX_NAME_OUT(area) = NULL;
+		XFREE(MTYPE_OSPF6_PLISTNAME, PREFIX_NAME_OUT(area));
 		ospf6_abr_enable_area(area);
 	}
 
 	return CMD_SUCCESS;
+}
+
+void ospf6_area_plist_update(struct prefix_list *plist, int add)
+{
+	struct ospf6_area *oa;
+	struct listnode *n;
+	const char *name = prefix_list_name(plist);
+
+	if (!ospf6)
+		return;
+
+	for (ALL_LIST_ELEMENTS_RO(ospf6->area_list, n, oa)) {
+		if (PREFIX_NAME_IN(oa) && !strcmp(PREFIX_NAME_IN(oa), name))
+			PREFIX_LIST_IN(oa) = add ? plist : NULL;
+		if (PREFIX_NAME_OUT(oa) && !strcmp(PREFIX_NAME_OUT(oa), name))
+			PREFIX_LIST_OUT(oa) = add ? plist : NULL;
+	}
 }
 
 DEFUN (area_import_list,

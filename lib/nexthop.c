@@ -36,7 +36,8 @@ DEFINE_MTYPE_STATIC(LIB, NEXTHOP, "Nexthop")
 DEFINE_MTYPE_STATIC(LIB, NH_LABEL, "Nexthop label")
 
 /* check if nexthops are same, non-recursive */
-int nexthop_same_no_recurse(struct nexthop *next1, struct nexthop *next2)
+int nexthop_same_no_recurse(const struct nexthop *next1,
+			    const struct nexthop *next2)
 {
 	if (next1->type != next2->type)
 		return 0;
@@ -59,6 +60,39 @@ int nexthop_same_no_recurse(struct nexthop *next1, struct nexthop *next2)
 		break;
 	case NEXTHOP_TYPE_IPV6_IFINDEX:
 		if (!IPV6_ADDR_SAME(&next1->gate.ipv6, &next2->gate.ipv6))
+			return 0;
+		if (next1->ifindex != next2->ifindex)
+			return 0;
+		break;
+	default:
+		/* do nothing */
+		break;
+	}
+	return 1;
+}
+
+int
+nexthop_same_firsthop (struct nexthop *next1, struct nexthop *next2)
+{
+	int type1 = NEXTHOP_FIRSTHOPTYPE(next1->type);
+	int type2 = NEXTHOP_FIRSTHOPTYPE(next2->type);
+
+	if (type1 != type2)
+		return 0;
+	switch (type1)
+	{
+	case NEXTHOP_TYPE_IPV4_IFINDEX:
+		if (! IPV4_ADDR_SAME (&next1->gate.ipv4, &next2->gate.ipv4))
+			return 0;
+		if (next1->ifindex != next2->ifindex)
+			return 0;
+		break;
+	case NEXTHOP_TYPE_IFINDEX:
+		if (next1->ifindex != next2->ifindex)
+			return 0;
+		break;
+	case NEXTHOP_TYPE_IPV6_IFINDEX:
+		if (! IPV6_ADDR_SAME (&next1->gate.ipv6, &next2->gate.ipv6))
 			return 0;
 		if (next1->ifindex != next2->ifindex)
 			return 0;
@@ -94,7 +128,7 @@ int nexthop_labels_match(struct nexthop *nh1, struct nexthop *nh2)
 
 	nhl1 = nh1->nh_label;
 	nhl2 = nh2->nh_label;
-	if ((nhl1 && !nhl2) || (!nhl1 && nhl2))
+	if (!nhl1 || !nhl2)
 		return 0;
 
 	if (nhl1->num_labels != nhl2->num_labels)

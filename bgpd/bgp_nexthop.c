@@ -90,8 +90,8 @@ static void bgp_nexthop_cache_reset(struct bgp_table *table)
 
 static void *bgp_tip_hash_alloc(void *p)
 {
-	const struct in_addr	*val = (const struct in_addr *)p;
-	struct tip_addr		*addr;
+	const struct in_addr *val = (const struct in_addr *)p;
+	struct tip_addr *addr;
 
 	addr = XMALLOC(MTYPE_TIP_ADDR, sizeof(struct tip_addr));
 	addr->refcnt = 0;
@@ -107,15 +107,15 @@ static void bgp_tip_hash_free(void *addr)
 
 static unsigned int bgp_tip_hash_key_make(void *p)
 {
-	const struct tip_addr	*addr = p;
+	const struct tip_addr *addr = p;
 
 	return jhash_1word(addr->addr.s_addr, 0);
 }
 
 static int bgp_tip_hash_cmp(const void *p1, const void *p2)
 {
-	const struct tip_addr	*addr1 = p1;
-	const struct tip_addr	*addr2 = p2;
+	const struct tip_addr *addr1 = p1;
+	const struct tip_addr *addr2 = p2;
 
 	return addr1->addr.s_addr == addr2->addr.s_addr;
 }
@@ -123,7 +123,8 @@ static int bgp_tip_hash_cmp(const void *p1, const void *p2)
 void bgp_tip_hash_init(struct bgp *bgp)
 {
 	bgp->tip_hash = hash_create(bgp_tip_hash_key_make,
-					bgp_tip_hash_cmp, NULL);
+				    bgp_tip_hash_cmp,
+				    "BGP TIP hash");
 }
 
 void bgp_tip_hash_destroy(struct bgp *bgp)
@@ -137,8 +138,8 @@ void bgp_tip_hash_destroy(struct bgp *bgp)
 
 void bgp_tip_add(struct bgp *bgp, struct in_addr *tip)
 {
-	struct tip_addr		tmp;
-	struct tip_addr		*addr;
+	struct tip_addr tmp;
+	struct tip_addr *addr;
 
 	tmp.addr = *tip;
 
@@ -151,8 +152,8 @@ void bgp_tip_add(struct bgp *bgp, struct in_addr *tip)
 
 void bgp_tip_del(struct bgp *bgp, struct in_addr *tip)
 {
-	struct tip_addr		tmp;
-	struct tip_addr		*addr;
+	struct tip_addr tmp;
+	struct tip_addr *addr;
 
 	tmp.addr = *tip;
 
@@ -204,7 +205,8 @@ static int bgp_address_hash_cmp(const void *p1, const void *p2)
 void bgp_address_init(struct bgp *bgp)
 {
 	bgp->address_hash = hash_create(bgp_address_hash_key_make,
-					bgp_address_hash_cmp, NULL);
+					bgp_address_hash_cmp,
+					"BGP Address Hash");
 }
 
 void bgp_address_destroy(struct bgp *bgp)
@@ -428,12 +430,101 @@ int bgp_multiaccess_check_v4(struct in_addr nexthop, struct peer *peer)
 	return (ret);
 }
 
+int bgp_subgrp_multiaccess_check_v4(struct in_addr nexthop,
+				    struct update_subgroup *subgrp)
+{
+	struct bgp_node *rn1, *rn2;
+	struct peer_af *paf;
+	struct prefix p, np;
+	struct bgp *bgp = NULL;
+
+	np.family = AF_INET;
+	np.prefixlen = IPV4_MAX_BITLEN;
+	np.u.prefix4 = nexthop;
+
+	p.family = AF_INET;
+	p.prefixlen = IPV4_MAX_BITLEN;
+
+	rn1 = rn2 = NULL;
+
+	bgp = SUBGRP_INST(subgrp);
+	rn1 = bgp_node_match(bgp->connected_table[AFI_IP],
+			     &np);
+	if (!rn1)
+		return 0;
+
+	SUBGRP_FOREACH_PEER(subgrp, paf) {
+		p.u.prefix4 = paf->peer->su.sin.sin_addr;
+
+		rn2 = bgp_node_match(bgp->connected_table[AFI_IP],
+				     &p);
+		if (rn1 == rn2) {
+			bgp_unlock_node(rn1);
+			bgp_unlock_node(rn2);
+			return 1;
+		}
+
+		if (rn2)
+			bgp_unlock_node(rn2);
+	}
+
+	bgp_unlock_node(rn1);
+	return 0;
+}
+
+static void bgp_show_nexthops_detail(struct vty *vty,
+				     struct bgp *bgp,
+				     struct bgp_nexthop_cache *bnc)
+{
+	char buf[PREFIX2STR_BUFFER];
+	struct nexthop *nexthop;
+
+	for (nexthop = bnc->nexthop; nexthop; nexthop = nexthop->next)
+		switch (nexthop->type) {
+		case NEXTHOP_TYPE_IPV6:
+			vty_out(vty, "  gate %s\n",
+				inet_ntop(AF_INET6, &nexthop->gate.ipv6,
+					  buf, sizeof(buf)));
+			break;
+		case NEXTHOP_TYPE_IPV6_IFINDEX:
+			vty_out(vty, "  gate %s, if %s\n",
+				inet_ntop(AF_INET6, &nexthop->gate.ipv6,
+					  buf, sizeof(buf)),
+				ifindex2ifname(nexthop->ifindex,
+					       bgp->vrf_id));
+			break;
+		case NEXTHOP_TYPE_IPV4:
+			vty_out(vty, "  gate %s\n",
+				inet_ntop(AF_INET, &nexthop->gate.ipv4,
+					  buf, sizeof(buf)));
+			break;
+		case NEXTHOP_TYPE_IFINDEX:
+			vty_out(vty, "  if %s\n",
+				ifindex2ifname(nexthop->ifindex,
+					       bgp->vrf_id));
+			break;
+		case NEXTHOP_TYPE_IPV4_IFINDEX:
+			vty_out(vty, "  gate %s, if %s\n",
+				inet_ntop(AF_INET, &nexthop->gate.ipv4,
+					  buf, sizeof(buf)),
+				ifindex2ifname(nexthop->ifindex,
+					       bgp->vrf_id));
+			break;
+		case NEXTHOP_TYPE_BLACKHOLE:
+			vty_out(vty, "  blackhole\n");
+			break;
+		default:
+			vty_out(vty,
+				"  invalid nexthop type %u\n",
+				nexthop->type);
+		}
+}
+
 static void bgp_show_nexthops(struct vty *vty, struct bgp *bgp, int detail)
 {
 	struct bgp_node *rn;
 	struct bgp_nexthop_cache *bnc;
 	char buf[PREFIX2STR_BUFFER];
-	struct nexthop *nexthop;
 	time_t tbuf;
 	afi_t afi;
 
@@ -452,70 +543,13 @@ static void bgp_show_nexthops(struct vty *vty, struct bgp *bgp, int detail)
 							  &rn->p.u.prefix, buf,
 							  sizeof(buf)),
 						bnc->metric, bnc->path_count);
-					if (detail)
-						for (nexthop = bnc->nexthop;
-						     nexthop;
-						     nexthop = nexthop->next)
-							switch (nexthop->type) {
-							case NEXTHOP_TYPE_IPV6:
-								vty_out(vty,
-									"  gate %s\n",
-									inet_ntop(
-										AF_INET6,
-										&nexthop->gate
-											 .ipv6,
-										buf,
-										sizeof(buf)));
-								break;
-							case NEXTHOP_TYPE_IPV6_IFINDEX:
-								vty_out(vty,
-									"  gate %s, if %s\n",
-									inet_ntop(
-										AF_INET6,
-										&nexthop->gate
-											 .ipv6,
-										buf,
-										sizeof(buf)),
-									ifindex2ifname(
-										nexthop->ifindex,
-										bgp->vrf_id));
-								break;
-							case NEXTHOP_TYPE_IPV4:
-								vty_out(vty,
-									"  gate %s\n",
-									inet_ntop(
-										AF_INET,
-										&nexthop->gate
-											 .ipv4,
-										buf,
-										sizeof(buf)));
-								break;
-							case NEXTHOP_TYPE_IFINDEX:
-								vty_out(vty,
-									"  if %s\n",
-									ifindex2ifname(
-										nexthop->ifindex,
-										bgp->vrf_id));
-								break;
-							case NEXTHOP_TYPE_IPV4_IFINDEX:
-								vty_out(vty,
-									"  gate %s, if %s\n",
-									inet_ntop(
-										AF_INET,
-										&nexthop->gate
-											 .ipv4,
-										buf,
-										sizeof(buf)),
-									ifindex2ifname(
-										nexthop->ifindex,
-										bgp->vrf_id));
-								break;
-							default:
-								vty_out(vty,
-									"  invalid nexthop type %u\n",
-									nexthop->type);
-							}
-				} else {
+
+					if (!detail)
+						continue;
+
+					bgp_show_nexthops_detail(vty, bgp, bnc);
+
+				} else{
 					vty_out(vty, " %s invalid\n",
 						inet_ntop(rn->p.family,
 							  &rn->p.u.prefix, buf,
@@ -578,7 +612,11 @@ DEFUN (show_ip_bgp_nexthop,
        "Show detailed information\n")
 {
 	int idx = 0;
-	char *vrf = argv_find(argv, argc, "WORD", &idx) ? argv[idx]->arg : NULL;
+	char *vrf = NULL;
+
+	if (argv_find(argv, argc, "view", &idx)
+	    || argv_find(argv, argc, "vrf", &idx))
+		vrf = argv[++idx]->arg;
 	int detail = argv_find(argv, argc, "detail", &idx) ? 1 : 0;
 	return show_ip_bgp_nexthop_table(vty, vrf, detail);
 }

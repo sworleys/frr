@@ -28,6 +28,7 @@ aclocal.m4
 Makefile.in
 *.tar.gz
 *.tar.gz.asc
+*.tar.?z
 .nfs*
 libtool
 .libs
@@ -62,6 +63,10 @@ debian/frr.substvars
 debian/frr/
 debian/tmp/
 *.pyc
+*.deb
+*.ddeb
+*.dsc
+*.changes
 *.swp
 cscope.*
 *.pb.h

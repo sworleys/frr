@@ -84,7 +84,7 @@ static zebra_capabilities_t _caps_p [] =
     ZCAP_BIND
 };
 
-static struct zebra_privs_t babeld_privs =
+struct zebra_privs_t babeld_privs =
 {
 #if defined(FRR_USER)
     .user = FRR_USER,
@@ -207,8 +207,6 @@ main(int argc, char **argv)
 
     schedule_neighbours_check(5000, 1);
 
-    zlog_notice ("BABELd %s starting: vty@%d", BABEL_VERSION, babel_vty_port);
-
     frr_config_fork();
     frr_run(master);
 
@@ -281,8 +279,7 @@ babel_load_state_file(void)
     if(fd >= 0 && rc < 0) {
         zlog_err("unlink(babel-state): %s", safe_strerror(errno));
         /* If we couldn't unlink it, it's probably stale. */
-        close(fd);
-        fd = -1;
+        goto fini;
     }
     if(fd >= 0) {
         char buf[100];
@@ -317,9 +314,12 @@ babel_load_state_file(void)
                 zlog_err("Couldn't parse babel-state.");
             }
         }
-        close(fd);
-        fd = -1;
+        goto fini;
     }
+fini:
+    if (fd >= 0)
+        close(fd);
+    return ;
 }
 
 static void
@@ -337,6 +337,7 @@ babel_exit_properly(void)
     babel_save_state_file();
     debugf(BABEL_DEBUG_COMMON, "Remove pid file.");
     debugf(BABEL_DEBUG_COMMON, "Done.");
+    frr_fini();
 
     exit(0);
 }

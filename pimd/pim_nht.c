@@ -194,7 +194,7 @@ int pim_find_or_track_nexthop(struct pim_instance *pim, struct prefix *addr,
 	}
 
 	if (up != NULL)
-		up = hash_get(pnc->upstream_hash, up, hash_alloc_intern);
+		hash_get(pnc->upstream_hash, up, hash_alloc_intern);
 
 	if (pnc && CHECK_FLAG(pnc->flags, PIM_NEXTHOP_VALID)) {
 		memcpy(out_pnc, pnc, sizeof(struct pim_nexthop_cache));
@@ -236,7 +236,7 @@ void pim_delete_tracked_nexthop(struct pim_instance *pim, struct prefix *addr,
 			pim_sendmsg_zebra_rnh(pim, zclient, pnc,
 					      ZEBRA_NEXTHOP_UNREGISTER);
 
-			list_delete(pnc->rp_list);
+			list_delete_and_null(&pnc->rp_list);
 			hash_free(pnc->upstream_hash);
 
 			hash_release(pim->rpf_hash, pnc);
@@ -410,12 +410,12 @@ static int pim_update_upstream_nh_helper(struct hash_backet *backet, void *arg)
 static int pim_update_upstream_nh(struct pim_instance *pim,
 				  struct pim_nexthop_cache *pnc)
 {
-	struct listnode *node, *ifnode;
+	struct listnode *node;
 	struct interface *ifp;
 
 	hash_walk(pnc->upstream_hash, pim_update_upstream_nh_helper, pim);
 
-	for (ALL_LIST_ELEMENTS_RO(vrf_iflist(pim->vrf_id), ifnode, ifp))
+	FOR_ALL_INTERFACES (pim->vrf, ifp)
 		if (ifp->info) {
 			struct pim_interface *pim_ifp = ifp->info;
 			struct pim_iface_upstream_switch *us;
@@ -646,11 +646,9 @@ int pim_parse_nexthop_update(int command, struct zclient *zclient,
 	struct pim_nexthop_cache *pnc = NULL;
 	struct pim_neighbor *nbr = NULL;
 	struct interface *ifp = NULL;
+	struct interface *ifp1 = NULL;
 	struct vrf *vrf = vrf_lookup_by_id(vrf_id);
 	struct pim_instance *pim = vrf->info;
-	struct interface *ifp1 = NULL;
-	struct pim_interface *pim_ifp = NULL;
-	char str[INET_ADDRSTRLEN];
 
 	s = zclient->ibuf;
 	memset(&p, 0, sizeof(struct prefix));
@@ -722,28 +720,9 @@ int pim_parse_nexthop_update(int command, struct zclient *zclient,
 							  pim->vrf_id);
 				nbr = pim_neighbor_find_if(ifp1);
 				/* Overwrite with Nbr address as NH addr */
-				if (nbr) {
+				if (nbr)
 					nexthop->gate.ipv4 = nbr->source_addr;
-					if (PIM_DEBUG_TRACE) {
-						pim_inet4_dump("<nht_nbr?>",
-							       nbr->source_addr,
-							       str,
-							       sizeof(str));
-						zlog_debug(
-							"%s: NHT using pim nbr addr %s interface %s as rpf",
-							__PRETTY_FUNCTION__,
-							str, ifp1->name);
-					}
-				} else {
-					if (PIM_DEBUG_TRACE) {
-						pim_ifp = ifp1->info;
-						zlog_debug(
-							"%s: NHT pim nbr not found on interface %s nbr count:%d ",
-							__PRETTY_FUNCTION__,
-							ifp1->name,
-							pim_ifp->pim_neighbor_list
-								->count);
-					}
+				else {
 					// Mark nexthop address to 0 until PIM
 					// Nbr is resolved.
 					nexthop->gate.ipv4.s_addr =

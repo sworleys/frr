@@ -88,6 +88,24 @@ static int no_password_check = 0;
 
 static int do_log_commands = 0;
 
+void vty_frame(struct vty *vty, const char *format, ...)
+{
+	va_list args;
+
+	va_start(args, format);
+	vsnprintf(vty->frame + vty->frame_pos,
+		  sizeof(vty->frame) - vty->frame_pos, format, args);
+	vty->frame_pos = strlen(vty->frame);
+	va_end(args);
+}
+
+void vty_endframe(struct vty *vty, const char *endtext)
+{
+	if (vty->frame_pos == 0 && endtext)
+		vty_out(vty, "%s", endtext);
+	vty->frame_pos = 0;
+}
+
 /* VTY standard output function. */
 int vty_out(struct vty *vty, const char *format, ...)
 {
@@ -96,6 +114,11 @@ int vty_out(struct vty *vty, const char *format, ...)
 	int size = 1024;
 	char buf[1024];
 	char *p = NULL;
+
+	if (vty->frame_pos) {
+		vty->frame_pos = 0;
+		vty_out(vty, "%s", vty->frame);
+	}
 
 	if (vty_shell(vty)) {
 		va_start(args, format);
@@ -247,16 +270,8 @@ void vty_hello(struct vty *vty)
 /* Put out prompt and wait input from user. */
 static void vty_prompt(struct vty *vty)
 {
-	struct utsname names;
-	const char *hostname;
-
 	if (vty->type == VTY_TERM) {
-		hostname = host.name;
-		if (!hostname) {
-			uname(&names);
-			hostname = names.nodename;
-		}
-		vty_out(vty, cmd_prompt(vty->node), hostname);
+		vty_out(vty, cmd_prompt(vty->node), cmd_hostname_get());
 	}
 }
 
@@ -303,6 +318,7 @@ struct vty *vty_new()
 {
 	struct vty *new = XCALLOC(MTYPE_VTY, sizeof(struct vty));
 
+	new->fd = new->wfd = -1;
 	new->obuf = buffer_new(0); /* Use default buffer size. */
 	new->buf = XCALLOC(MTYPE_VTY, VTY_BUFSIZ);
 	new->error_buf = XCALLOC(MTYPE_VTY, VTY_BUFSIZ);
@@ -680,6 +696,7 @@ static void vty_end_config(struct vty *vty)
 		break;
 	case CONFIG_NODE:
 	case INTERFACE_NODE:
+	case PW_NODE:
 	case ZEBRA_NODE:
 	case RIP_NODE:
 	case RIPNG_NODE:
@@ -1090,6 +1107,7 @@ static void vty_stop_input(struct vty *vty)
 		break;
 	case CONFIG_NODE:
 	case INTERFACE_NODE:
+	case PW_NODE:
 	case ZEBRA_NODE:
 	case RIP_NODE:
 	case RIPNG_NODE:
@@ -1657,24 +1675,82 @@ static struct vty *vty_create(int vty_sock, union sockunion *su)
 /* create vty for stdio */
 static struct termios stdio_orig_termios;
 static struct vty *stdio_vty = NULL;
-static void (*stdio_vty_atclose)(void);
+static bool stdio_termios = false;
+static void (*stdio_vty_atclose)(int isexit);
 
-static void vty_stdio_reset(void)
+static void vty_stdio_reset(int isexit)
 {
 	if (stdio_vty) {
-		tcsetattr(0, TCSANOW, &stdio_orig_termios);
+		if (stdio_termios)
+			tcsetattr(0, TCSANOW, &stdio_orig_termios);
+		stdio_termios = false;
+
 		stdio_vty = NULL;
 
 		if (stdio_vty_atclose)
-			stdio_vty_atclose();
+			stdio_vty_atclose(isexit);
 		stdio_vty_atclose = NULL;
 	}
 }
 
-struct vty *vty_stdio(void (*atclose)())
+static void vty_stdio_atexit(void)
+{
+	vty_stdio_reset(1);
+}
+
+void vty_stdio_suspend(void)
+{
+	if (!stdio_vty)
+		return;
+
+	if (stdio_vty->t_write)
+		thread_cancel(stdio_vty->t_write);
+	if (stdio_vty->t_read)
+		thread_cancel(stdio_vty->t_read);
+	if (stdio_vty->t_timeout)
+		thread_cancel(stdio_vty->t_timeout);
+
+	if (stdio_termios)
+		tcsetattr(0, TCSANOW, &stdio_orig_termios);
+	stdio_termios = false;
+}
+
+void vty_stdio_resume(void)
+{
+	if (!stdio_vty)
+		return;
+
+	if (!tcgetattr(0, &stdio_orig_termios)) {
+		struct termios termios;
+
+		termios = stdio_orig_termios;
+		termios.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR
+				     | IGNCR | ICRNL | IXON);
+		termios.c_oflag &= ~OPOST;
+		termios.c_lflag &= ~(ECHO | ECHONL | ICANON | IEXTEN);
+		termios.c_cflag &= ~(CSIZE | PARENB);
+		termios.c_cflag |= CS8;
+		tcsetattr(0, TCSANOW, &termios);
+		stdio_termios = true;
+	}
+
+	vty_prompt(stdio_vty);
+
+	/* Add read/write thread. */
+	vty_event(VTY_WRITE, 1, stdio_vty);
+	vty_event(VTY_READ, 0, stdio_vty);
+}
+
+void vty_stdio_close(void)
+{
+	if (!stdio_vty)
+		return;
+	vty_close(stdio_vty);
+}
+
+struct vty *vty_stdio(void (*atclose)(int isexit))
 {
 	struct vty *vty;
-	struct termios termios;
 
 	/* refuse creating two vtys on stdio */
 	if (stdio_vty)
@@ -1692,23 +1768,7 @@ struct vty *vty_stdio(void (*atclose)())
 	vty->v_timeout = 0;
 	strcpy(vty->address, "console");
 
-	if (!tcgetattr(0, &stdio_orig_termios)) {
-		termios = stdio_orig_termios;
-		termios.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR
-				     | IGNCR | ICRNL | IXON);
-		termios.c_oflag &= ~OPOST;
-		termios.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
-		termios.c_cflag &= ~(CSIZE | PARENB);
-		termios.c_cflag |= CS8;
-		tcsetattr(0, TCSANOW, &termios);
-	}
-
-	vty_prompt(vty);
-
-	/* Add read/write thread. */
-	vty_event(VTY_WRITE, 1, vty);
-	vty_event(VTY_READ, 0, vty);
-
+	vty_stdio_resume();
 	return vty;
 }
 
@@ -1807,7 +1867,7 @@ static void vty_serv_sock_addrinfo(const char *hostname, unsigned short port)
 	ret = getaddrinfo(hostname, port_str, &req, &ainfo);
 
 	if (ret != 0) {
-		fprintf(stderr, "getaddrinfo failed: %s\n", gai_strerror(ret));
+		zlog_err("getaddrinfo failed: %s", gai_strerror(ret));
 		exit(1);
 	}
 
@@ -2126,16 +2186,21 @@ void vty_close(struct vty *vty)
 			XFREE(MTYPE_VTY_HIST, vty->hist[i]);
 
 	/* Unset vector. */
-	vector_unset(vtyvec, vty->fd);
+	if (vty->fd != -1)
+		vector_unset(vtyvec, vty->fd);
 
 	if (vty->wfd > 0 && vty->type == VTY_FILE)
 		fsync(vty->wfd);
 
-	/* Close socket. */
-	if (vty->fd > 0) {
+	/* Close socket.
+	 * note check is for fd > STDERR_FILENO, not fd != -1.
+	 * We never close stdin/stdout/stderr here, because we may be
+	 * running in foreground mode with logging to stdout.  Also,
+	 * additionally, we'd need to replace these fds with /dev/null. */
+	if (vty->wfd > STDERR_FILENO && vty->wfd != vty->fd)
+		close(vty->wfd);
+	if (vty->fd > STDERR_FILENO) {
 		close(vty->fd);
-		if (vty->wfd > 0 && vty->wfd != vty->fd)
-			close(vty->wfd);
 	} else
 		was_stdio = true;
 
@@ -2152,7 +2217,7 @@ void vty_close(struct vty *vty)
 	XFREE(MTYPE_VTY, vty);
 
 	if (was_stdio)
-		vty_stdio_reset();
+		vty_stdio_reset(0);
 }
 
 /* When time out occur output message then close connection. */
@@ -2183,13 +2248,14 @@ static void vty_read_file(FILE *confp)
 	unsigned int line_num = 0;
 
 	vty = vty_new();
-	vty->wfd = dup(STDERR_FILENO); /* vty_close() will close this */
-	if (vty->wfd < 0) {
-		/* Fine, we couldn't make a new fd. vty_close doesn't close
-		 * stdout. */
-		vty->wfd = STDOUT_FILENO;
-	}
-	vty->fd = STDIN_FILENO;
+	/* vty_close won't close stderr;  if some config command prints
+	 * something it'll end up there.  (not ideal; it'd be beter if output
+	 * from a file-load went to logging instead.  Also note that if this
+	 * function is called after daemonizing, stderr will be /dev/null.)
+	 *
+	 * vty->fd will be -1 from vty_new()
+	 */
+	vty->wfd = STDERR_FILENO;
 	vty->type = VTY_FILE;
 	vty->node = CONFIG_NODE;
 
@@ -2197,27 +2263,26 @@ static void vty_read_file(FILE *confp)
 	ret = config_from_file(vty, confp, &line_num);
 
 	/* Flush any previous errors before printing messages below */
-	buffer_flush_all(vty->obuf, vty->fd);
+	buffer_flush_all(vty->obuf, vty->wfd);
 
 	if (!((ret == CMD_SUCCESS) || (ret == CMD_ERR_NOTHING_TODO))) {
 		const char *message = NULL;
+		char *nl;
+
 		switch (ret) {
 		case CMD_ERR_AMBIGUOUS:
-			message =
-				"*** Error reading config: Ambiguous command.";
+			message = "Ambiguous command";
 			break;
 		case CMD_ERR_NO_MATCH:
-			message =
-				"*** Error reading config: There is no such command.";
+			message = "No such command";
 			break;
 		}
-		fprintf(stderr, "%s\n", message);
-		zlog_err("%s", message);
-		fprintf(stderr,
-			"*** Error occurred processing line %u, below:\n%s\n",
-			line_num, vty->error_buf);
-		zlog_err("*** Error occurred processing line %u, below:\n%s",
-			 line_num, vty->error_buf);
+
+		nl = strchr(vty->error_buf, '\n');
+		if (nl)
+			*nl = '\0';
+		zlog_err("ERROR: %s on config line %u: %s",
+			 message, line_num, vty->error_buf);
 	}
 
 	vty_close(vty);
@@ -2289,8 +2354,7 @@ void vty_read_config(const char *config_file, char *config_default_dir)
 	if (config_file != NULL) {
 		if (!IS_DIRECTORY_SEP(config_file[0])) {
 			if (getcwd(cwd, MAXPATHLEN) == NULL) {
-				fprintf(stderr,
-					"Failure to determine Current Working Directory %d!\n",
+				zlog_err("Failure to determine Current Working Directory %d!",
 					errno);
 				exit(1);
 			}
@@ -2304,17 +2368,14 @@ void vty_read_config(const char *config_file, char *config_default_dir)
 		confp = fopen(fullpath, "r");
 
 		if (confp == NULL) {
-			fprintf(stderr,
-				"%s: failed to open configuration file %s: %s\n",
+			zlog_err("%s: failed to open configuration file %s: %s",
 				__func__, fullpath, safe_strerror(errno));
 
 			confp = vty_use_backup_config(fullpath);
 			if (confp)
-				fprintf(stderr,
-					"WARNING: using backup configuration file!\n");
+				zlog_warn("WARNING: using backup configuration file!");
 			else {
-				fprintf(stderr,
-					"can't open configuration file [%s]\n",
+				zlog_err("can't open configuration file [%s]",
 					config_file);
 				exit(1);
 			}
@@ -2349,19 +2410,16 @@ void vty_read_config(const char *config_file, char *config_default_dir)
 #endif /* VTYSH */
 		confp = fopen(config_default_dir, "r");
 		if (confp == NULL) {
-			fprintf(stderr,
-				"%s: failed to open configuration file %s: %s\n",
+			zlog_err("%s: failed to open configuration file %s: %s",
 				__func__, config_default_dir,
 				safe_strerror(errno));
 
 			confp = vty_use_backup_config(config_default_dir);
 			if (confp) {
-				fprintf(stderr,
-					"WARNING: using backup configuration file!\n");
+				zlog_warn("WARNING: using backup configuration file!");
 				fullpath = config_default_dir;
 			} else {
-				fprintf(stderr,
-					"can't open configuration file [%s]\n",
+				zlog_err("can't open configuration file [%s]",
 					config_default_dir);
 				goto tmp_free_and_out;
 			}
@@ -2871,12 +2929,12 @@ static void vty_save_cwd(void)
 		 * Hence not worrying about it too much.
 		 */
 		if (!chdir(SYSCONFDIR)) {
-			fprintf(stderr, "Failure to chdir to %s, errno: %d\n",
+			zlog_err("Failure to chdir to %s, errno: %d",
 				SYSCONFDIR, errno);
 			exit(-1);
 		}
 		if (getcwd(cwd, MAXPATHLEN) == NULL) {
-			fprintf(stderr, "Failure to getcwd, errno: %d\n",
+			zlog_err("Failure to getcwd, errno: %d",
 				errno);
 			exit(-1);
 		}
@@ -2916,7 +2974,7 @@ void vty_init(struct thread_master *master_thread)
 
 	vty_master = master_thread;
 
-	atexit(vty_stdio_reset);
+	atexit(vty_stdio_atexit);
 
 	/* Initilize server thread vector. */
 	Vvty_serv_thread = vector_init(VECTOR_MIN_SIZE);

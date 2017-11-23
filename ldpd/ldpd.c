@@ -206,7 +206,7 @@ main(int argc, char *argv[])
 	frr_preinit(&ldpd_di, argc, argv);
 	frr_opt_add("LEn:", longopts,
 		"      --ctl_socket   Override ctl socket path\n"
-		"-n,   --instance     Instance id\n");
+		"  -n, --instance     Instance id\n");
 
 	while (1) {
 		int opt;
@@ -256,11 +256,10 @@ main(int argc, char *argv[])
 	strlcpy(init.user, ldpd_privs.user, sizeof(init.user));
 	strlcpy(init.group, ldpd_privs.group, sizeof(init.group));
 	strlcpy(init.ctl_sock_path, ctl_sock_path, sizeof(init.ctl_sock_path));
-	strlcpy(init.zclient_serv_path, zclient_serv_path_get(),
+	strlcpy(init.zclient_serv_path, frr_zclientpath,
 	    sizeof(init.zclient_serv_path));
 
 	argc -= optind;
-	argv += optind;
 	if (argc > 0 || (lflag && eflag))
 		frr_help_exit(1);
 
@@ -370,9 +369,9 @@ main(int argc, char *argv[])
 
 	if (main_imsg_send_ipc_sockets(&iev_ldpe->ibuf, &iev_lde->ibuf))
 		fatal("could not establish imsg links");
-	main_imsg_compose_both(IMSG_INIT, &init, sizeof(init));
 	main_imsg_compose_both(IMSG_DEBUG_UPDATE, &ldp_debug,
 	    sizeof(ldp_debug));
+	main_imsg_compose_both(IMSG_INIT, &init, sizeof(init));
 	main_imsg_send_config(ldpd_conf);
 
 	if (ldpd_conf->ipv4.flags & F_LDPD_AF_ENABLED)
@@ -391,6 +390,8 @@ ldpd_shutdown(void)
 {
 	pid_t		 pid;
 	int		 status;
+
+	frr_early_fini();
 
 	/* close pipes */
 	msgbuf_clear(&iev_ldpe->ibuf.w);
@@ -423,13 +424,9 @@ ldpd_shutdown(void)
 
 	vrf_terminate();
 	access_list_reset();
-	cmd_terminate();
-	vty_terminate();
 	ldp_zebra_destroy();
-	zprivs_terminate(&ldpd_privs);
-	thread_master_free(master);
-	closezlog();
 
+	frr_fini();
 	exit(0);
 }
 
@@ -437,7 +434,7 @@ static pid_t
 start_child(enum ldpd_process p, char *argv0, int fd_async, int fd_sync)
 {
 	char	*argv[3];
-	int	 argc = 0;
+	int	 argc = 0, nullfd;
 	pid_t	 pid;
 
 	switch (pid = fork()) {
@@ -449,6 +446,17 @@ start_child(enum ldpd_process p, char *argv0, int fd_async, int fd_sync)
 		close(fd_async);
 		close(fd_sync);
 		return (pid);
+	}
+
+	nullfd = open("/dev/null", O_RDONLY | O_NOCTTY);
+	if (nullfd == -1) {
+		zlog_err("%s: failed to open /dev/null: %s", __func__,
+			 safe_strerror(errno));
+	} else {
+		dup2(nullfd, 0);
+		dup2(nullfd, 1);
+		dup2(nullfd, 2);
+		close(nullfd);
 	}
 
 	if (dup2(fd_async, LDPD_FD_ASYNC) == -1)
@@ -578,21 +586,36 @@ main_dispatch_lde(struct thread *thread)
 			if (kr_delete(imsg.data))
 				log_warnx("%s: error deleting route", __func__);
 			break;
-		case IMSG_KPWLABEL_CHANGE:
+		case IMSG_KPW_ADD:
+		case IMSG_KPW_DELETE:
+		case IMSG_KPW_SET:
+		case IMSG_KPW_UNSET:
 			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
-			    sizeof(struct kpw))
+			    sizeof(struct zapi_pw))
 				fatalx("invalid size of IMSG_KPWLABEL_CHANGE");
-			if (kmpw_set(imsg.data))
-				log_warnx("%s: error changing pseudowire",
-				    __func__);
-			break;
-		case IMSG_KPWLABEL_DELETE:
-			if (imsg.hdr.len - IMSG_HEADER_SIZE !=
-			    sizeof(struct kpw))
-				fatalx("invalid size of IMSG_KPWLABEL_DELETE");
-			if (kmpw_unset(imsg.data))
-				log_warnx("%s: error unsetting pseudowire",
-				    __func__);
+
+			switch (imsg.hdr.type) {
+			case IMSG_KPW_ADD:
+				if (kmpw_add(imsg.data))
+					log_warnx("%s: error adding "
+					    "pseudowire", __func__);
+				break;
+			case IMSG_KPW_DELETE:
+				if (kmpw_del(imsg.data))
+					log_warnx("%s: error deleting "
+					    "pseudowire", __func__);
+				break;
+			case IMSG_KPW_SET:
+				if (kmpw_set(imsg.data))
+					log_warnx("%s: error setting "
+					    "pseudowire", __func__);
+				break;
+			case IMSG_KPW_UNSET:
+				if (kmpw_unset(imsg.data))
+					log_warnx("%s: error unsetting "
+					    "pseudowire", __func__);
+				break;
+			}
 			break;
 		case IMSG_ACL_CHECK:
 			if (imsg.hdr.len != IMSG_HEADER_SIZE +

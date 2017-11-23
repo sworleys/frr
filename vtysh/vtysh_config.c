@@ -73,7 +73,7 @@ static int config_cmp(struct config *c1, struct config *c2)
 
 static void config_del(struct config *config)
 {
-	list_delete(config->line);
+	list_delete_and_null(&config->line);
 	if (config->name)
 		XFREE(MTYPE_VTYSH_CONFIG_LINE, config->name);
 	XFREE(MTYPE_VTYSH_CONFIG, config);
@@ -131,6 +131,20 @@ static void config_add_line_uniq(struct list *config, const char *line)
 	listnode_add_sort(config, XSTRDUP(MTYPE_VTYSH_CONFIG_LINE, line));
 }
 
+/*
+ * I want to explicitly move this command to the end of the line
+ */
+static void config_add_line_end(struct list *config, const char *line)
+{
+	struct listnode *node;
+	void *item = XSTRDUP(MTYPE_VTYSH_CONFIG_LINE, line);
+
+	listnode_add(config, item);
+	node = listnode_lookup(config, item);
+	if (node)
+		listnode_move_to_tail(config, node);
+}
+
 void vtysh_config_parse_line(void *arg, const char *line)
 {
 	char c;
@@ -161,6 +175,10 @@ void vtysh_config_parse_line(void *arg, const char *line)
 			    == 0) {
 				config_add_line(config->line, line);
 				config->index = LINK_PARAMS_NODE;
+			} else if (strncmp(line,
+					   " ip multicast boundary",
+					   strlen(" ip multicast boundary")) == 0) {
+				config_add_line_end(config->line, line);
 			} else if (config->index == LINK_PARAMS_NODE
 				   && strncmp(line, "  exit-link-params",
 					      strlen("  exit"))
@@ -181,6 +199,8 @@ void vtysh_config_parse_line(void *arg, const char *line)
 	default:
 		if (strncmp(line, "interface", strlen("interface")) == 0)
 			config = config_get(INTERFACE_NODE, line);
+		else if (strncmp(line, "pseudowire", strlen("pseudowire")) == 0)
+			config = config_get(PW_NODE, line);
 		else if (strncmp(line, "logical-router", strlen("ns")) == 0)
 			config = config_get(NS_NODE, line);
 		else if (strncmp(line, "vrf", strlen("vrf")) == 0)
@@ -243,7 +263,10 @@ void vtysh_config_parse_line(void *arg, const char *line)
 				 == 0
 			 || strncmp(line, "ip extcommunity-list",
 				    strlen("ip extcommunity-list"))
-				    == 0)
+				 == 0
+			 || strncmp(line, "ip large-community-list",
+				    strlen("ip large-community-list"))
+				 == 0)
 			config = config_get(COMMUNITY_LIST_NODE, line);
 		else if (strncmp(line, "ip route", strlen("ip route")) == 0)
 			config = config_get(IP_NODE, line);
@@ -360,7 +383,7 @@ void vtysh_config_dump(FILE *fp)
 
 	for (i = 0; i < vector_active(configvec); i++)
 		if ((master = vector_slot(configvec, i)) != NULL) {
-			list_delete(master);
+			list_delete_and_null(&master);
 			vector_slot(configvec, i) = NULL;
 		}
 	list_delete_all_node(config_top);
@@ -418,10 +441,9 @@ int vtysh_read_config(const char *config_default_dir)
 void vtysh_config_write()
 {
 	char line[81];
-	extern struct host host;
 
-	if (host.name) {
-		sprintf(line, "hostname %s", host.name);
+	if (cmd_hostname_get()) {
+		sprintf(line, "hostname %s", cmd_hostname_get());
 		vtysh_config_parse_line(NULL, line);
 	}
 	if (vtysh_write_integrated == WRITE_INTEGRATED_NO)

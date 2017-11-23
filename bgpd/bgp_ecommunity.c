@@ -26,6 +26,8 @@
 #include "command.h"
 #include "queue.h"
 #include "filter.h"
+#include "jhash.h"
+#include "stream.h"
 
 #include "bgpd/bgpd.h"
 #include "bgpd/bgp_ecommunity.h"
@@ -234,22 +236,8 @@ unsigned int ecommunity_hash_make(void *arg)
 {
 	const struct ecommunity *ecom = arg;
 	int size = ecom->size * ECOMMUNITY_SIZE;
-	u_int8_t *pnt = ecom->val;
-	unsigned int key = 0;
-	int c;
 
-	for (c = 0; c < size; c += ECOMMUNITY_SIZE) {
-		key += pnt[c];
-		key += pnt[c + 1];
-		key += pnt[c + 2];
-		key += pnt[c + 3];
-		key += pnt[c + 4];
-		key += pnt[c + 5];
-		key += pnt[c + 6];
-		key += pnt[c + 7];
-	}
-
-	return key;
+	return jhash(ecom->val, size, 0x564321ab);
 }
 
 /* Compare two Extended Communities Attribute structure.  */
@@ -272,7 +260,9 @@ int ecommunity_cmp(const void *arg1, const void *arg2)
 /* Initialize Extended Comminities related hash. */
 void ecommunity_init(void)
 {
-	ecomhash = hash_create(ecommunity_hash_make, ecommunity_cmp, NULL);
+	ecomhash = hash_create(ecommunity_hash_make,
+			       ecommunity_cmp,
+			       "BGP ecommunity hash");
 }
 
 void ecommunity_finish(void)
@@ -565,15 +555,8 @@ static int ecommunity_rt_soo_str(char *buf, u_int8_t *pnt, int type,
 	const char *prefix;
 
 	/* For parse Extended Community attribute tupple. */
-	struct ecommunity_as {
-		as_t as;
-		u_int32_t val;
-	} eas;
-
-	struct ecommunity_ip {
-		struct in_addr ip;
-		u_int16_t val;
-	} eip;
+	struct ecommunity_as eas;
+	struct ecommunity_ip eip;
 
 
 	/* Determine prefix for string, if any. */
@@ -594,10 +577,7 @@ static int ecommunity_rt_soo_str(char *buf, u_int8_t *pnt, int type,
 
 	/* Put string into buffer.  */
 	if (type == ECOMMUNITY_ENCODE_AS4) {
-		eas.as = (*pnt++ << 24);
-		eas.as |= (*pnt++ << 16);
-		eas.as |= (*pnt++ << 8);
-		eas.as |= (*pnt++);
+		pnt = ptr_get_be32(pnt, &eas.as);
 		eas.val = (*pnt++ << 8);
 		eas.val |= (*pnt++);
 
@@ -605,11 +585,7 @@ static int ecommunity_rt_soo_str(char *buf, u_int8_t *pnt, int type,
 	} else if (type == ECOMMUNITY_ENCODE_AS) {
 		eas.as = (*pnt++ << 8);
 		eas.as |= (*pnt++);
-
-		eas.val = (*pnt++ << 24);
-		eas.val |= (*pnt++ << 16);
-		eas.val |= (*pnt++ << 8);
-		eas.val |= (*pnt++);
+		pnt = ptr_get_be32(pnt, &eas.val);
 
 		len = sprintf(buf, "%s%u:%u", prefix, eas.as, eas.val);
 	} else if (type == ECOMMUNITY_ENCODE_IP) {
@@ -621,6 +597,7 @@ static int ecommunity_rt_soo_str(char *buf, u_int8_t *pnt, int type,
 		len = sprintf(buf, "%s%s:%u", prefix, inet_ntoa(eip.ip),
 			      eip.val);
 	}
+	(void)pnt; /* consume value */
 
 	return len;
 }
@@ -713,20 +690,27 @@ char *ecommunity_ecom2str(struct ecommunity *ecom, int format, int filter)
 				tunneltype = ntohs(tunneltype);
 				len = sprintf(str_buf + str_pnt, "ET:%d",
 					      tunneltype);
+			}  else if (*pnt == ECOMMUNITY_EVPN_SUBTYPE_DEF_GW) {
+				len = sprintf(str_buf + str_pnt,
+					      "Default Gateway");
 			} else
 				unk_ecom = 1;
 		} else if (type == ECOMMUNITY_ENCODE_EVPN) {
 			if (filter == ECOMMUNITY_ROUTE_TARGET)
 				continue;
-			if (*pnt == ECOMMUNITY_SITE_ORIGIN) {
-				char macaddr[6];
+			if (*pnt == ECOMMUNITY_EVPN_SUBTYPE_ROUTERMAC) {
+				struct ethaddr rmac;
 				pnt++;
-				memcpy(&macaddr, pnt, 6);
+				memcpy(&rmac, pnt, ETH_ALEN);
 				len = sprintf(
 					str_buf + str_pnt,
-					"EVPN:%02x:%02x:%02x:%02x:%02x:%02x",
-					macaddr[0], macaddr[1], macaddr[2],
-					macaddr[3], macaddr[4], macaddr[5]);
+					"Rmac:%02x:%02x:%02x:%02x:%02x:%02x",
+					(uint8_t)rmac.octet[0],
+					(uint8_t)rmac.octet[1],
+					(uint8_t)rmac.octet[2],
+					(uint8_t)rmac.octet[3],
+					(uint8_t)rmac.octet[4],
+					(uint8_t)rmac.octet[5]);
 			} else if (*pnt
 				   == ECOMMUNITY_EVPN_SUBTYPE_MACMOBILITY) {
 				u_int32_t seqnum;

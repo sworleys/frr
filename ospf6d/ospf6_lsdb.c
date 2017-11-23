@@ -83,8 +83,7 @@ static void _lsdb_count_assert(struct ospf6_lsdb *lsdb)
 	zlog_debug("PANIC !! lsdb[%p]->count = %d, real = %d", lsdb,
 		   lsdb->count, num);
 	for (ALL_LSDB(lsdb, debug))
-		zlog_debug("%p %p %s lsdb[%p]", debug->prev, debug->next,
-			   debug->name, debug->lsdb);
+		zlog_debug("%s lsdb[%p]", debug->name, debug->lsdb);
 	zlog_debug("DUMP END");
 
 	assert(num == lsdb->count);
@@ -139,8 +138,8 @@ void ospf6_lsdb_add(struct ospf6_lsa *lsa, struct ospf6_lsdb *lsdb)
 					(*lsdb->hook_add)(lsa);
 			}
 		}
-		route_unlock_node(
-			current); /* to free the lookup lock in node get*/
+		/* to free the lookup lock in node get*/
+		route_unlock_node(current);
 		ospf6_lsa_unlock(old);
 	}
 

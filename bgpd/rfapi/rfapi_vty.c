@@ -3092,7 +3092,7 @@ static int rfapiDeleteLocalPrefixesByRFD(struct rfapi_local_reg_delete_arg *cda,
 					if (memcmp(cda->l2o.o.macaddr.octet,
 						   adb->u.s.prefix_eth.u
 							   .prefix_eth.octet,
-						   ETHER_ADDR_LEN)) {
+						   ETH_ALEN)) {
 #if DEBUG_L2_EXTRA
 						vnc_zlog_debug_verbose(
 							"%s: adb=%p, macaddr doesn't match, skipping",
@@ -3211,7 +3211,7 @@ static int rfapiDeleteLocalPrefixesByRFD(struct rfapi_local_reg_delete_arg *cda,
 							   adb->u.s.prefix_eth.u
 								   .prefix_eth
 								   .octet,
-							   ETHER_ADDR_LEN)) {
+							   ETH_ALEN)) {
 
 							continue;
 						}
@@ -3274,7 +3274,7 @@ static int rfapiDeleteLocalPrefixesByRFD(struct rfapi_local_reg_delete_arg *cda,
 				}
 				list_delete_all_node(adb_delete_list);
 			}
-			list_delete(adb_delete_list);
+			list_delete_and_null(&adb_delete_list);
 		}
 
 
@@ -4074,12 +4074,11 @@ DEFUN (clear_vnc_mac_all_prefix,
 /* copied from rfp_vty.c */
 static int check_and_display_is_vnc_running(struct vty *vty)
 {
-	if (!bgp_rfapi_is_vnc_configured(NULL))
+	if (bgp_rfapi_is_vnc_configured(NULL) == 0)
 		return 1; /* is running */
 
 	if (vty) {
-		vty_out(vty,
-			"VNC is not configured. (There are no configured BGP VPN SAFI peers.)\n");
+		vty_out(vty, "VNC is not configured.\n");
 	}
 	return 0; /* not running */
 }
@@ -4089,7 +4088,7 @@ static int rfapi_vty_show_nve_summary(struct vty *vty,
 {
 	struct bgp *bgp_default = bgp_get_default();
 	struct rfapi *h;
-	int is_vnc_running = !bgp_rfapi_is_vnc_configured(bgp_default);
+	int is_vnc_running = (bgp_rfapi_is_vnc_configured(bgp_default) == 0);
 
 	int active_local_routes;
 	int active_remote_routes;
@@ -4671,7 +4670,7 @@ static int vnc_add_vrf_prefix(struct vty *vty, const char *arg_vrf,
 			arg_vrf);
 		return CMD_WARNING_CONFIG_FAILED;
 	}
-	if (!rfg->rd.family && !arg_rd) {
+	if (!rfg->rd.prefixlen && !arg_rd) {
 		vty_out(vty,
 			"VRF \"%s\" isn't configured with an RD, so RD must be provided.\n",
 			arg_vrf);
@@ -4791,7 +4790,7 @@ static int vnc_add_vrf_prefix(struct vty *vty, const char *arg_vrf,
 
 DEFUN (add_vrf_prefix_rd_label_pref,
        add_vrf_prefix_rd_label_pref_cmd,
-      "add vrf NAME prefix <A.B.C.D/M|X:X::X:X/M> [{rd ASN:nn_or_IP-address|label (0-1048575)|preference (0-4294967295)}]",
+      "add vrf NAME prefix <A.B.C.D/M|X:X::X:X/M> [{rd ASN:NN_OR_IP-ADDRESS|label (0-1048575)|preference (0-4294967295)}]",
        "Add\n"
        "To a VRF\n"
        "VRF name\n"
@@ -4914,7 +4913,7 @@ static int vnc_clear_vrf(struct vty *vty, struct bgp *bgp, const char *arg_vrf,
 
 DEFUN (clear_vrf_prefix_rd,
        clear_vrf_prefix_rd_cmd,
-       "clear vrf NAME [prefix <A.B.C.D/M|X:X::X:X/M>] [rd ASN:nn_or_IP-address]",
+       "clear vrf NAME [prefix <A.B.C.D/M|X:X::X:X/M>] [rd ASN:NN_OR_IP-ADDRESS]",
        "Clear stored data\n"
        "From a VRF\n"
        "VRF name\n"

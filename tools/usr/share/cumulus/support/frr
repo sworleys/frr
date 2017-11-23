@@ -15,12 +15,13 @@ jexec=
 
 func_frr()
 {
-    exec_cmd $jexec ospf vtysh -c "show ip ospf $json"
-    exec_cmd $jexec ospf.neighbor vtysh -c "show ip ospf neighbor $json"
-    exec_cmd $jexec ospf.interface vtysh -c "show ip ospf interface $json"
-    exec_cmd ospf.database vtysh -c "show ip ospf database"
-    exec_cmd ospf.borderrouters vtysh -c "show ip ospf border-routers"
-    exec_cmd ospf.database.router vtysh -c "show ip ospf database router"
+    exec_cmd $jexec ospf vtysh -c "show ip ospf vrf all $json"
+    exec_cmd $jexec ospf.neighbor vtysh -c "show ip ospf vrf all neighbor $json"
+    exec_cmd $jexec ospf.interface vtysh -c "show ip ospf vrf all interface $json"
+    exec_cmd ospf.database vtysh -c "show ip ospf vrf all database"
+    exec_cmd ospf.borderrouters vtysh -c "show ip ospf vrf all border-routers"
+    exec_cmd ospf.database.router vtysh -c "show ip ospf vrf all database router"
+    exec_cmd ospf.vrfs vtysh -c "show ip ospf vrfs"
     exec_cmd ospf.show_running vtysh -c "show running ospfd"
 
     exec_cmd ospf6 vtysh -c "show ipv6 ospf6"

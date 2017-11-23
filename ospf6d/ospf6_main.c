@@ -79,15 +79,17 @@ struct thread_master *master;
 
 static void __attribute__((noreturn)) ospf6_exit(int status)
 {
-	struct listnode *node;
+	struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
 	struct interface *ifp;
+
+	frr_early_fini();
 
 	if (ospf6)
 		ospf6_delete(ospf6);
 
 	bfd_gbl_exit();
 
-	for (ALL_LIST_ELEMENTS_RO(vrf_iflist(VRF_DEFAULT), node, ifp))
+	FOR_ALL_INTERFACES (vrf, ifp)
 		if (ifp->info != NULL)
 			ospf6_interface_delete(ifp->info);
 
@@ -96,19 +98,13 @@ static void __attribute__((noreturn)) ospf6_exit(int status)
 	ospf6_lsa_terminate();
 
 	vrf_terminate();
-	vty_terminate();
-	cmd_terminate();
 
 	if (zclient) {
 		zclient_stop(zclient);
 		zclient_free(zclient);
 	}
 
-	if (master)
-		thread_master_free(master);
-
-	closezlog();
-
+	frr_fini();
 	exit(status);
 }
 
@@ -129,7 +125,6 @@ static void sigint(void)
 static void sigterm(void)
 {
 	zlog_notice("Terminating on signal SIGTERM");
-	ospf6_clean();
 	ospf6_exit(0);
 }
 

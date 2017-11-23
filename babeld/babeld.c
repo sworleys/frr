@@ -76,6 +76,7 @@ static int
 babel_config_write (struct vty *vty)
 {
     int lines = 0;
+    int afi;
     int i;
 
     /* list enabled debug modes */
@@ -108,13 +109,17 @@ babel_config_write (struct vty *vty)
     /* list enabled interfaces */
     lines = 1 + babel_enable_if_config_write (vty);
     /* list redistributed protocols */
-    for (i = 0; i < ZEBRA_ROUTE_MAX; i++)
-        if (i != zclient->redist_default &&
-	    vrf_bitmap_check (zclient->redist[AFI_IP][i], VRF_DEFAULT))
-        {
-            vty_out (vty, " redistribute %s\n", zebra_route_string(i));
-            lines++;
+    for (afi = AFI_IP; afi <= AFI_IP6; afi++) {
+        for (i = 0; i < ZEBRA_ROUTE_MAX; i++) {
+            if (i != zclient->redist_default &&
+                vrf_bitmap_check (zclient->redist[afi][i], VRF_DEFAULT)) {
+                vty_out (vty, " redistribute %s %s\n",
+                         (afi == AFI_IP) ? "ipv4" : "ipv6",
+                         zebra_route_string(i));
+                lines++;
+            }
         }
+    }
 
     lines += config_write_distribute (vty);
 
@@ -159,9 +164,9 @@ static int
 babel_read_protocol (struct thread *thread)
 {
     int rc;
+    struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
     struct interface *ifp = NULL;
     struct sockaddr_in6 sin6;
-    struct listnode *linklist_node = NULL;
 
     assert(babel_routing_process != NULL);
     assert(protocol_socket >= 0);
@@ -174,7 +179,7 @@ babel_read_protocol (struct thread *thread)
             zlog_err("recv: %s", safe_strerror(errno));
         }
     } else {
-        FOR_ALL_INTERFACES(ifp, linklist_node) {
+        FOR_ALL_INTERFACES(vrf, ifp) {
             if(!if_up(ifp))
                 continue;
             if(ifp->ifindex == (ifindex_t)sin6.sin6_scope_id) {
@@ -209,8 +214,8 @@ babel_init_routing_process(struct thread *thread)
 static void
 babel_get_myid(void)
 {
+    struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
     struct interface *ifp = NULL;
-    struct listnode *linklist_node = NULL;
     int rc;
     int i;
 
@@ -219,7 +224,7 @@ babel_get_myid(void)
         return;
     }
 
-    FOR_ALL_INTERFACES(ifp, linklist_node) {
+    FOR_ALL_INTERFACES(vrf, ifp) {
         /* ifp->ifindex is not necessarily valid at this point */
         int ifindex = if_nametoindex(ifp->name);
         if(ifindex > 0) {
@@ -263,10 +268,10 @@ babel_get_myid(void)
 static void
 babel_initial_noise(void)
 {
+    struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
     struct interface *ifp = NULL;
-    struct listnode *linklist_node = NULL;
 
-    FOR_ALL_INTERFACES(ifp, linklist_node) {
+    FOR_ALL_INTERFACES(vrf, ifp) {
         if(!if_up(ifp))
             continue;
         /* Apply jitter before we send the first message. */
@@ -276,7 +281,7 @@ babel_initial_noise(void)
         send_wildcard_retraction(ifp);
     }
 
-    FOR_ALL_INTERFACES(ifp, linklist_node) {
+    FOR_ALL_INTERFACES(vrf, ifp) {
         if(!if_up(ifp))
             continue;
         usleep(roughly(10000));
@@ -314,8 +319,8 @@ static int
 babel_main_loop(struct thread *thread)
 {
     struct timeval tv;
+    struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
     struct interface *ifp = NULL;
-    struct listnode *linklist_node = NULL;
 
     while(1) {
         gettime(&babel_now);
@@ -326,8 +331,8 @@ babel_main_loop(struct thread *thread)
         /* if there is no timeout, we must wait. */
         if(timeval_compare(&tv, &babel_now) > 0) {
             timeval_minus(&tv, &tv, &babel_now);
-            debugf(BABEL_DEBUG_TIMEOUT, "babel main loop : timeout: %ld msecs",
-                   tv.tv_sec * 1000 + tv.tv_usec / 1000);
+            debugf(BABEL_DEBUG_TIMEOUT, "babel main loop : timeout: %lld msecs",
+                   (long long)tv.tv_sec * 1000 + tv.tv_usec / 1000);
             /* it happens often to have less than 1 ms, it's bad. */
             timeval_add_msec(&tv, &tv, 300);
             babel_set_timer(&tv);
@@ -356,7 +361,7 @@ babel_main_loop(struct thread *thread)
             source_expiry_time = babel_now.tv_sec + roughly(300);
         }
 
-        FOR_ALL_INTERFACES(ifp, linklist_node) {
+        FOR_ALL_INTERFACES(vrf, ifp) {
             babel_interface_nfo *babel_ifp = NULL;
             if(!if_up(ifp))
                 continue;
@@ -380,7 +385,7 @@ babel_main_loop(struct thread *thread)
                 flush_unicast(1);
         }
 
-        FOR_ALL_INTERFACES(ifp, linklist_node) {
+        FOR_ALL_INTERFACES(vrf, ifp) {
             babel_interface_nfo *babel_ifp = NULL;
             if(!if_up(ifp))
                 continue;
@@ -444,8 +449,8 @@ babel_fill_with_next_timeout(struct timeval *tv)
 #define printIfMin(a,b,c,d) \
   if (UNLIKELY(debug & BABEL_DEBUG_TIMEOUT)) {printIfMin(a,b,c,d);}
 
+    struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
     struct interface *ifp = NULL;
-    struct listnode *linklist_node = NULL;
 
     *tv = check_neighbours_timeout;
     printIfMin(tv, 0, "check_neighbours_timeout", NULL);
@@ -455,7 +460,7 @@ babel_fill_with_next_timeout(struct timeval *tv)
     printIfMin(tv, 1, "source_expiry_time", NULL);
     timeval_min(tv, &resend_time);
     printIfMin(tv, 1, "resend_time", NULL);
-    FOR_ALL_INTERFACES(ifp, linklist_node) {
+    FOR_ALL_INTERFACES(vrf, ifp) {
         babel_interface_nfo *babel_ifp = NULL;
         if(!if_up(ifp))
             continue;
@@ -573,10 +578,10 @@ babel_distribute_update_interface (struct interface *ifp)
 static void
 babel_distribute_update_all (struct prefix_list *notused)
 {
+    struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
     struct interface *ifp;
-    struct listnode *node;
 
-    for (ALL_LIST_ELEMENTS_RO (vrf_iflist(VRF_DEFAULT), node, ifp))
+    FOR_ALL_INTERFACES (vrf, ifp)
         babel_distribute_update_interface (ifp);
 }
 

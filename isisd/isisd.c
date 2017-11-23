@@ -49,7 +49,6 @@
 #include "isisd/isis_pdu.h"
 #include "isisd/isis_misc.h"
 #include "isisd/isis_constants.h"
-#include "isisd/isis_tlv.h"
 #include "isisd/isis_lsp.h"
 #include "isisd/isis_spf.h"
 #include "isisd/isis_route.h"
@@ -221,8 +220,7 @@ int isis_area_destroy(struct vty *vty, const char *area_tag)
 			circuit->ipv6_router = 0;
 			isis_csm_state_change(ISIS_DISABLE, circuit, area);
 		}
-		list_delete(area->circuit_list);
-		area->circuit_list = NULL;
+		list_delete_and_null(&area->circuit_list);
 	}
 
 	if (area->lspdb[0] != NULL) {
@@ -348,14 +346,14 @@ int area_net_title(struct vty *vty, const char *net_title)
 			"area address must be at least 8..20 octets long (%d)\n",
 			addr->addr_len);
 		XFREE(MTYPE_ISIS_AREA_ADDR, addr);
-		return CMD_ERR_AMBIGUOUS;
+		return CMD_WARNING_CONFIG_FAILED;
 	}
 
 	if (addr->area_addr[addr->addr_len - 1] != 0) {
 		vty_out(vty,
 			"nsel byte (last byte) in area address must be 0\n");
 		XFREE(MTYPE_ISIS_AREA_ADDR, addr);
-		return CMD_ERR_AMBIGUOUS;
+		return CMD_WARNING_CONFIG_FAILED;
 	}
 
 	if (isis->sysid_set == 0) {
@@ -375,7 +373,7 @@ int area_net_title(struct vty *vty, const char *net_title)
 			vty_out(vty,
 				"System ID must not change when defining additional area addresses\n");
 			XFREE(MTYPE_ISIS_AREA_ADDR, addr);
-			return CMD_ERR_AMBIGUOUS;
+			return CMD_WARNING_CONFIG_FAILED;
 		}
 
 		/* now we see that we don't already have this address */
@@ -420,7 +418,7 @@ int area_clear_net_title(struct vty *vty, const char *net_title)
 		vty_out(vty,
 			"Unsupported area address length %d, should be 8...20 \n",
 			addr.addr_len);
-		return CMD_ERR_AMBIGUOUS;
+		return CMD_WARNING_CONFIG_FAILED;
 	}
 
 	memcpy(addr.area_addr, buff, (int)addr.addr_len);
@@ -759,17 +757,18 @@ void print_debug(struct vty *vty, int flags, int onoff)
 		vty_out(vty, "IS-IS LSP scheduling debugging is %s\n", onoffs);
 }
 
-DEFUN (show_debugging,
-       show_debugging_isis_cmd,
-       "show debugging isis",
-       SHOW_STR
-       "State of each debugging option\n"
-       ISIS_STR)
+DEFUN_NOSH (show_debugging,
+	    show_debugging_isis_cmd,
+	    "show debugging [isis]",
+	    SHOW_STR
+	    "State of each debugging option\n"
+	    ISIS_STR)
 {
-	if (isis->debugs) {
-		vty_out(vty, "IS-IS:\n");
+	vty_out (vty, "IS-IS debugging status:\n");
+
+	if (isis->debugs)
 		print_debug(vty, isis->debugs, 1);
-	}
+
 	return CMD_SUCCESS;
 }
 
@@ -1232,27 +1231,6 @@ DEFUN (show_hostname,
 	return CMD_SUCCESS;
 }
 
-static void vty_out_timestr(struct vty *vty, time_t uptime)
-{
-	struct tm *tm;
-	time_t difftime = time(NULL);
-	difftime -= uptime;
-	tm = gmtime(&difftime);
-
-#define ONE_DAY_SECOND 60*60*24
-#define ONE_WEEK_SECOND 60*60*24*7
-	if (difftime < ONE_DAY_SECOND)
-		vty_out(vty, "%02d:%02d:%02d", tm->tm_hour, tm->tm_min,
-			tm->tm_sec);
-	else if (difftime < ONE_WEEK_SECOND)
-		vty_out(vty, "%dd%02dh%02dm", tm->tm_yday, tm->tm_hour,
-			tm->tm_min);
-	else
-		vty_out(vty, "%02dw%dd%02dh", tm->tm_yday / 7,
-			tm->tm_yday - ((tm->tm_yday / 7) * 7), tm->tm_hour);
-	vty_out(vty, " ago");
-}
-
 DEFUN (show_isis_spf_ietf,
        show_isis_spf_ietf_cmd,
        "show isis spf-delay-ietf",
@@ -1281,8 +1259,8 @@ DEFUN (show_isis_spf_ietf,
 			if (area->spf_timer[level - 1]) {
 				struct timeval remain = thread_timer_remain(
 					area->spf_timer[level - 1]);
-				vty_out(vty, "Pending, due in %ld msec\n",
-					remain.tv_sec * 1000
+				vty_out(vty, "Pending, due in %lld msec\n",
+					(long long)remain.tv_sec * 1000
 						+ remain.tv_usec / 1000);
 			} else {
 				vty_out(vty, "Not scheduled\n");
@@ -1309,7 +1287,6 @@ DEFUN (show_isis_summary,
 {
 	struct listnode *node, *node2;
 	struct isis_area *area;
-	struct isis_spftree *spftree;
 	int level;
 
 	if (isis == NULL) {
@@ -1350,7 +1327,6 @@ DEFUN (show_isis_summary,
 				continue;
 
 			vty_out(vty, "  Level-%d:\n", level);
-			spftree = area->spftree[level - 1];
 			if (area->spf_timer[level - 1])
 				vty_out(vty, "    SPF: (pending)\n");
 			else
@@ -1364,28 +1340,10 @@ DEFUN (show_isis_summary,
 			vty_out(vty, "\n");
 
 			vty_out(vty, "    IPv4 route computation:\n");
-			vty_out(vty, "      last run elapsed  : ");
-			vty_out_timestr(vty, spftree->last_run_timestamp);
-			vty_out(vty, "\n");
+			isis_spf_print(area->spftree[level - 1], vty);
 
-			vty_out(vty, "      last run duration : %u usec\n",
-				(u_int32_t)spftree->last_run_duration);
-
-			vty_out(vty, "      run count         : %d\n",
-				spftree->runcount);
-
-			spftree = area->spftree6[level - 1];
 			vty_out(vty, "    IPv6 route computation:\n");
-
-			vty_out(vty, "      last run elapsed  : ");
-			vty_out_timestr(vty, spftree->last_run_timestamp);
-			vty_out(vty, "\n");
-
-			vty_out(vty, "      last run duration : %llu msec\n",
-				(unsigned long long)spftree->last_run_duration);
-
-			vty_out(vty, "      run count         : %d\n",
-				spftree->runcount);
+			isis_spf_print(area->spftree6[level - 1], vty);
 		}
 	}
 	vty_out(vty, "\n");
@@ -1446,7 +1404,7 @@ static int show_isis_database(struct vty *vty, const char *argv, int ui_level)
 				(u_char)strtol((char *)number, NULL, 16);
 			pos -= 4;
 			if (strncmp(pos, ".", 1) != 0)
-				return CMD_ERR_AMBIGUOUS;
+				return CMD_WARNING;
 		}
 		if (strncmp(pos, ".", 1) == 0) {
 			memcpy(number, ++pos, 2);
@@ -1482,7 +1440,7 @@ static int show_isis_database(struct vty *vty, const char *argv, int ui_level)
 						lsp = lsp_search(
 							lspid,
 							area->lspdb[level]);
-					} else if (strncmp(unix_hostname(),
+					} else if (strncmp(cmd_hostname_get(),
 							   sysid, 15)
 						   == 0) {
 						memcpy(lspid, isis->sysid,
@@ -1551,7 +1509,7 @@ DEFUN_NOSH (router_isis,
        "router isis WORD",
        ROUTER_STR
        "ISO IS-IS\n"
-       "ISO Routing area tag")
+       "ISO Routing area tag\n")
 {
 	int idx_word = 2;
 	return isis_area_get(vty, argv[idx_word]->arg);
@@ -1611,16 +1569,16 @@ DEFUN (isis_topology,
 	if (area->oldmetric) {
 		vty_out(vty,
 			"Multi topology IS-IS can only be used with wide metrics\n");
-		return CMD_ERR_AMBIGUOUS;
+		return CMD_WARNING_CONFIG_FAILED;
 	}
 
 	if (mtid == (uint16_t)-1) {
 		vty_out(vty, "Don't know topology '%s'\n", arg);
-		return CMD_ERR_AMBIGUOUS;
+		return CMD_WARNING_CONFIG_FAILED;
 	}
 	if (mtid == ISIS_MT_IPV4_UNICAST) {
 		vty_out(vty, "Cannot configure IPv4 unicast topology\n");
-		return CMD_ERR_AMBIGUOUS;
+		return CMD_WARNING_CONFIG_FAILED;
 	}
 
 	area_set_mt_enabled(area, mtid, true);
@@ -1644,16 +1602,16 @@ DEFUN (no_isis_topology,
 	if (area->oldmetric) {
 		vty_out(vty,
 			"Multi topology IS-IS can only be used with wide metrics\n");
-		return CMD_ERR_AMBIGUOUS;
+		return CMD_WARNING_CONFIG_FAILED;
 	}
 
 	if (mtid == (uint16_t)-1) {
 		vty_out(vty, "Don't know topology '%s'\n", arg);
-		return CMD_ERR_AMBIGUOUS;
+		return CMD_WARNING_CONFIG_FAILED;
 	}
 	if (mtid == ISIS_MT_IPV4_UNICAST) {
 		vty_out(vty, "Cannot configure IPv4 unicast topology\n");
-		return CMD_ERR_AMBIGUOUS;
+		return CMD_WARNING_CONFIG_FAILED;
 	}
 
 	area_set_mt_enabled(area, mtid, false);

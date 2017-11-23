@@ -109,7 +109,8 @@ struct vrf *vrf_get(vrf_id_t vrf_id, const char *name)
 	if (vrf == NULL) {
 		vrf = XCALLOC(MTYPE_VRF, sizeof(struct vrf));
 		vrf->vrf_id = VRF_UNKNOWN;
-		if_init(&vrf->iflist);
+		RB_INIT(if_name_head, &vrf->ifaces_by_name);
+		RB_INIT(if_index_head, &vrf->ifaces_by_index);
 		QOBJ_REG(vrf, vrf);
 		new = 1;
 
@@ -153,7 +154,7 @@ void vrf_delete(struct vrf *vrf)
 		(*vrf_master.vrf_delete_hook)(vrf);
 
 	QOBJ_UNREG(vrf);
-	if_terminate(&vrf->iflist);
+	if_terminate(vrf);
 
 	if (vrf->vrf_id != VRF_UNKNOWN)
 		RB_REMOVE(vrf_id_head, &vrfs_by_id, vrf);
@@ -224,6 +225,17 @@ static void vrf_disable(struct vrf *vrf)
 		(*vrf_master.vrf_disable_hook)(vrf);
 }
 
+const char *vrf_id_to_name(vrf_id_t vrf_id)
+{
+	struct vrf *vrf;
+
+	vrf = vrf_lookup_by_id(vrf_id);
+	if (vrf)
+		return vrf->name;
+
+	return "n/a";
+}
+
 vrf_id_t vrf_name_to_id(const char *name)
 {
 	struct vrf *vrf;
@@ -249,20 +261,6 @@ void *vrf_info_lookup(vrf_id_t vrf_id)
 {
 	struct vrf *vrf = vrf_lookup_by_id(vrf_id);
 	return vrf ? vrf->info : NULL;
-}
-
-/* Look up the interface list in a VRF. */
-struct list *vrf_iflist(vrf_id_t vrf_id)
-{
-	struct vrf *vrf = vrf_lookup_by_id(vrf_id);
-	return vrf ? vrf->iflist : NULL;
-}
-
-/* Get the interface list of the specified VRF. Create one if not find. */
-struct list *vrf_iflist_get(vrf_id_t vrf_id)
-{
-	struct vrf *vrf = vrf_get(vrf_id, NULL);
-	return vrf->iflist;
 }
 
 /*
@@ -356,8 +354,7 @@ static void vrf_autocomplete(vector comps, struct cmd_token *token)
 {
 	struct vrf *vrf = NULL;
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	{
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
 		if (vrf->vrf_id != 0)
 			vector_set(comps, XSTRDUP(MTYPE_COMPLETION, vrf->name));
 	}

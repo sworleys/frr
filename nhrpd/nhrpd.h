@@ -35,7 +35,9 @@ enum {
 	NHRP_ERR_ENTRY_EXISTS,
 	NHRP_ERR_ENTRY_NOT_FOUND,
 	NHRP_ERR_PROTOCOL_ADDRESS_MISMATCH,
+	__NHRP_ERR_MAX
 };
+#define NHRP_ERR_MAX		(__NHRP_ERR_MAX - 1)
 
 struct notifier_block;
 
@@ -300,6 +302,8 @@ struct nhrp_interface {
 		struct list_head nhslist_head;
 	} afi[AFI_MAX];
 };
+
+extern struct zebra_privs_t nhrpd_privs;
 
 int sock_open_unix(const char *path);
 

@@ -89,7 +89,7 @@ int eigrp_hello_timer(struct thread *thread)
 
 	if (IS_DEBUG_EIGRP(0, TIMERS))
 		zlog_debug("Start Hello Timer (%s) Expire [%u]", IF_NAME(ei),
-			   EIGRP_IF_PARAM(ei, v_hello));
+			   ei->params.v_hello);
 
 	/* Sending hello packet. */
 	eigrp_hello_send(ei, EIGRP_HELLO_NORMAL, NULL);
@@ -97,7 +97,7 @@ int eigrp_hello_timer(struct thread *thread)
 	/* Hello timer set. */
 	ei->t_hello = NULL;
 	thread_add_timer(master, eigrp_hello_timer, ei,
-			 EIGRP_IF_PARAM(ei, v_hello), &ei->t_hello);
+			 ei->params.v_hello, &ei->t_hello);
 
 	return 0;
 }
@@ -405,6 +405,24 @@ void eigrp_hello_receive(struct eigrp *eigrp, struct ip *iph,
 			   inet_ntoa(nbr->src));
 }
 
+u_int32_t FRR_MAJOR;
+u_int32_t FRR_MINOR;
+
+void eigrp_sw_version_initialize(void)
+{
+	char ver_string[] = VERSION;
+	char *dash = strstr(ver_string, "-");
+	int ret;
+
+	if (dash)
+		dash[0] = '\0';
+
+	ret = sscanf(ver_string, "%d.%d", &FRR_MAJOR, &FRR_MINOR);
+	if (ret != 2)
+		zlog_err("Did not Properly parse %s, please fix VERSION string",
+			 VERSION);
+}
+
 /**
  * @fn eigrp_sw_version_encode
  *
@@ -425,10 +443,8 @@ static u_int16_t eigrp_sw_version_encode(struct stream *s)
 	stream_putw(s, EIGRP_TLV_SW_VERSION);
 	stream_putw(s, length);
 
-	// encode the version of quagga we're running
-	// DVS: need to figure out a cleaner way to do this
-	stream_putc(s, 0);  //!< major os version
-	stream_putc(s, 99); //!< minor os version
+	stream_putc(s, FRR_MAJOR);  //!< major os version
+	stream_putc(s, FRR_MINOR); //!< minor os version
 
 	/* and the core eigrp version */
 	stream_putc(s, EIGRP_MAJOR_VERSION);
@@ -584,7 +600,7 @@ static u_int16_t eigrp_hello_parameter_encode(struct eigrp_interface *ei,
 	}
 
 	// and set hold time value..
-	stream_putw(s, IF_DEF_PARAMS(ei->ifp)->v_wait);
+	stream_putw(s, ei->params.v_wait);
 
 	return length;
 }
@@ -614,19 +630,19 @@ static struct eigrp_packet *eigrp_hello_encode(struct eigrp_interface *ei,
 	u_int16_t length = EIGRP_HEADER_LEN;
 
 	// allocate a new packet to be sent
-	ep = eigrp_packet_new(ei->ifp->mtu);
+	ep = eigrp_packet_new(ei->ifp->mtu, NULL);
 
 	if (ep) {
 		// encode common header feilds
-		eigrp_packet_header_init(EIGRP_OPC_HELLO, ei, ep->s, 0, 0, ack);
+		eigrp_packet_header_init(EIGRP_OPC_HELLO, ei->eigrp, ep->s, 0, 0, ack);
 
 		// encode Authentication TLV
-		if ((IF_DEF_PARAMS(ei->ifp)->auth_type == EIGRP_AUTH_TYPE_MD5)
-		    && (IF_DEF_PARAMS(ei->ifp)->auth_keychain != NULL)) {
+		if ((ei->params.auth_type == EIGRP_AUTH_TYPE_MD5)
+		    && (ei->params.auth_keychain != NULL)) {
 			length += eigrp_add_authTLV_MD5_to_stream(ep->s, ei);
-		} else if ((IF_DEF_PARAMS(ei->ifp)->auth_type
+		} else if ((ei->params.auth_type
 			    == EIGRP_AUTH_TYPE_SHA256)
-			   && (IF_DEF_PARAMS(ei->ifp)->auth_keychain != NULL)) {
+			   && (ei->params.auth_keychain != NULL)) {
 			length += eigrp_add_authTLV_SHA256_to_stream(ep->s, ei);
 		}
 
@@ -660,13 +676,13 @@ static struct eigrp_packet *eigrp_hello_encode(struct eigrp_interface *ei,
 		// set soruce address for the hello packet
 		ep->dst.s_addr = addr;
 
-		if ((IF_DEF_PARAMS(ei->ifp)->auth_type == EIGRP_AUTH_TYPE_MD5)
-		    && (IF_DEF_PARAMS(ei->ifp)->auth_keychain != NULL)) {
+		if ((ei->params.auth_type == EIGRP_AUTH_TYPE_MD5)
+		    && (ei->params.auth_keychain != NULL)) {
 			eigrp_make_md5_digest(ei, ep->s,
 					      EIGRP_AUTH_BASIC_HELLO_FLAG);
-		} else if ((IF_DEF_PARAMS(ei->ifp)->auth_type
+		} else if ((ei->params.auth_type
 			    == EIGRP_AUTH_TYPE_SHA256)
-			   && (IF_DEF_PARAMS(ei->ifp)->auth_keychain != NULL)) {
+			   && (ei->params.auth_keychain != NULL)) {
 			eigrp_make_sha256_digest(ei, ep->s,
 						 EIGRP_AUTH_BASIC_HELLO_FLAG);
 		}
@@ -707,7 +723,7 @@ void eigrp_hello_send_ack(struct eigrp_neighbor *nbr)
 				   inet_ntoa(nbr->src));
 
 		/* Add packet to the top of the interface output queue*/
-		eigrp_fifo_push_head(nbr->ei->obuf, ep);
+		eigrp_fifo_push(nbr->ei->obuf, ep);
 
 		/* Hook thread to write packet. */
 		if (nbr->ei->on_write_q == 0) {
@@ -755,7 +771,7 @@ void eigrp_hello_send(struct eigrp_interface *ei, u_char flags,
 
 	if (ep) {
 		// Add packet to the top of the interface output queue
-		eigrp_fifo_push_head(ei->obuf, ep);
+		eigrp_fifo_push(ei->obuf, ep);
 
 		/* Hook thread to write packet. */
 		if (ei->on_write_q == 0) {

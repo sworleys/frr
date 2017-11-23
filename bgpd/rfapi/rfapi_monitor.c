@@ -805,7 +805,7 @@ void rfapiMonitorTimersRestart(struct rfapi_descriptor *rfd, struct prefix *p)
 						 (void **)&mon_eth, &cursor)) {
 
 			if (!memcmp(mon_eth->macaddr.octet,
-				    p->u.prefix_eth.octet, ETHER_ADDR_LEN)) {
+				    p->u.prefix_eth.octet, ETH_ALEN)) {
 
 				rfapiMonitorEthTimerRestart(mon_eth);
 			}
@@ -1117,7 +1117,7 @@ static int mon_eth_cmp(void *a, void *b)
 	/*
 	 * compare ethernet addresses
 	 */
-	for (i = 0; i < ETHER_ADDR_LEN; ++i) {
+	for (i = 0; i < ETH_ALEN; ++i) {
 		if (m1->macaddr.octet[i] != m2->macaddr.octet[i])
 			return (m1->macaddr.octet[i] - m2->macaddr.octet[i]);
 	}
@@ -1378,6 +1378,8 @@ struct route_node *rfapiMonitorEthAdd(struct bgp *bgp,
 #if DEBUG_L2_EXTRA
 	vnc_zlog_debug_verbose("%s: inserted rfd=%p mon_eth=%p, rc=%d",
 			       __func__, rfd, val, rc);
+#else
+	(void)rc;
 #endif
 
 	/*

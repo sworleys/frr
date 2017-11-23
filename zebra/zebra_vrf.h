@@ -23,6 +23,8 @@
 #define __ZEBRA_RIB_H__
 
 #include <zebra/zebra_ns.h>
+#include <zebra/zebra_pw.h>
+#include <lib/vxlan.h>
 
 /* MPLS (Segment Routing) global block */
 typedef struct mpls_srgb_t_ {
@@ -89,6 +91,10 @@ struct zebra_vrf {
 	/* MPLS Segment Routing Global block */
 	mpls_srgb_t mpls_srgb;
 
+	/* Pseudowires. */
+	struct zebra_pw_head pseudowires;
+	struct zebra_static_pw_head static_pseudowires;
+
 	/* MPLS processing flags */
 	u_int16_t mpls_flags;
 #define MPLS_FLAG_SCHEDULE_LSPS    (1 << 0)
@@ -108,6 +114,9 @@ struct zebra_vrf {
 	 * Only in default instance.
 	 */
 	int advertise_gw_macip;
+
+	/* l3-vni info */
+	vni_t l3vni;
 
 	/* Route Installs */
 	uint64_t installs;
@@ -131,7 +140,6 @@ struct route_table *zebra_vrf_table_with_table_id(afi_t afi, safi_t safi,
 						  vrf_id_t vrf_id,
 						  u_int32_t table_id);
 
-extern void zebra_vrf_static_route_interface_fixup(struct interface *ifp);
 extern void zebra_vrf_update_all(struct zserv *client);
 extern struct zebra_vrf *zebra_vrf_lookup_by_id(vrf_id_t vrf_id);
 extern struct zebra_vrf *zebra_vrf_lookup_by_name(const char *);

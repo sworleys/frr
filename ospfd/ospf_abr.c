@@ -76,6 +76,7 @@ static void ospf_area_range_add(struct ospf_area *area,
 	p.family = AF_INET;
 	p.prefixlen = range->masklen;
 	p.prefix = range->addr;
+	apply_mask_ipv4(&p);
 
 	rn = route_node_get(area->ranges, (struct prefix *)&p);
 	if (rn->info)
@@ -90,7 +91,7 @@ static void ospf_area_range_delete(struct ospf_area *area,
 	struct ospf_area_range *range = rn->info;
 
 	if (range->specifics != 0)
-		ospf_delete_discard_route(area->ospf->new_table,
+		ospf_delete_discard_route(area->ospf, area->ospf->new_table,
 					  (struct prefix_ipv4 *)&rn->p);
 
 	ospf_area_range_free(range);
@@ -123,6 +124,7 @@ struct ospf_area_range *ospf_area_range_lookup_next(struct ospf_area *area,
 	p.family = AF_INET;
 	p.prefixlen = IPV4_MAX_BITLEN;
 	p.prefix = *range_net;
+	apply_mask_ipv4(&p);
 
 	if (first)
 		rn = route_top(area->ranges);
@@ -1682,12 +1684,12 @@ static void ospf_abr_manage_discard_routes(struct ospf *ospf)
 				if (CHECK_FLAG(range->flags,
 					       OSPF_AREA_RANGE_ADVERTISE)) {
 					if (range->specifics)
-						ospf_add_discard_route(
+						ospf_add_discard_route(ospf,
 							ospf->new_table, area,
 							(struct prefix_ipv4
 								 *)&rn->p);
 					else
-						ospf_delete_discard_route(
+						ospf_delete_discard_route(ospf,
 							ospf->new_table,
 							(struct prefix_ipv4
 								 *)&rn->p);

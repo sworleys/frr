@@ -88,6 +88,7 @@ send_address(struct nbr *nbr, int af, struct if_addr_head *addr_list,
 		err |= gen_msg_hdr(buf, msg_type, size);
 		size -= LDP_MSG_SIZE;
 		err |= gen_address_list_tlv(buf, af, addr_list, tlv_addr_count);
+		(void)size;
 		if (err) {
 			address_list_clr(addr_list);
 			ibuf_free(buf);
@@ -98,6 +99,7 @@ send_address(struct nbr *nbr, int af, struct if_addr_head *addr_list,
 			log_msg_address(1, msg_type, nbr, af, &if_addr->addr);
 
 			LIST_REMOVE(if_addr, entry);
+			assert(if_addr != LIST_FIRST(addr_list));
 			free(if_addr);
 			if (--tlv_addr_count == 0)
 				break;
@@ -160,7 +162,7 @@ send_mac_withdrawal(struct nbr *nbr, struct map *fec, uint8_t *mac)
 	size = LDP_HDR_SIZE + LDP_MSG_SIZE + ADDR_LIST_SIZE + len_fec_tlv(fec) +
 	    TLV_HDR_SIZE;
 	if (mac)
-		size += ETHER_ADDR_LEN;
+		size += ETH_ALEN;
 
 	if ((buf = ibuf_open(size)) == NULL)
 		fatal(__func__);
@@ -168,7 +170,6 @@ send_mac_withdrawal(struct nbr *nbr, struct map *fec, uint8_t *mac)
 	err = gen_ldp_hdr(buf, size);
 	size -= LDP_HDR_SIZE;
 	err |= gen_msg_hdr(buf, MSG_TYPE_ADDRWITHDRAW, size);
-	size -= LDP_MSG_SIZE;
 	err |= gen_address_list_tlv(buf, AF_INET, NULL, 0);
 	err |= gen_fec_tlv(buf, fec);
 	err |= gen_mac_list_tlv(buf, mac);
@@ -372,10 +373,10 @@ gen_mac_list_tlv(struct ibuf *buf, uint8_t *mac)
 	memset(&tlv, 0, sizeof(tlv));
 	tlv.type = htons(TLV_TYPE_MAC_LIST);
 	if (mac)
-		tlv.length = htons(ETHER_ADDR_LEN);
+		tlv.length = htons(ETH_ALEN);
 	err = ibuf_add(buf, &tlv, sizeof(tlv));
 	if (mac)
-		err |= ibuf_add(buf, mac, ETHER_ADDR_LEN);
+		err |= ibuf_add(buf, mac, ETH_ALEN);
 
 	return (err);
 }
@@ -400,6 +401,7 @@ address_list_clr(struct if_addr_head *addr_list)
 
 	while ((if_addr = LIST_FIRST(addr_list)) != NULL) {
 		LIST_REMOVE(if_addr, entry);
+		assert(if_addr != LIST_FIRST(addr_list));
 		free(if_addr);
 	}
 }

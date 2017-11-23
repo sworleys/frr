@@ -530,8 +530,7 @@ static int pim_mroute_msg_wrvifwhole(int fd, struct interface *ifp,
 			return -2;
 		}
 		PIM_UPSTREAM_FLAG_SET_SRC_STREAM(up->flags);
-		pim_upstream_keep_alive_timer_start(
-			up, pim_ifp->pim->keep_alive_time);
+		pim_upstream_keep_alive_timer_start(up, pim_ifp->pim->keep_alive_time);
 		up->channel_oil = oil;
 		up->channel_oil->cc.pktcnt++;
 		pim_register_join(up);
@@ -714,20 +713,26 @@ int pim_mroute_socket_enable(struct pim_instance *pim)
 
 	fd = socket(AF_INET, SOCK_RAW, IPPROTO_IGMP);
 
-#ifdef SO_BINDTODEVICE
-	setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, pim->vrf->name,
-		   strlen(pim->vrf->name));
-#endif
-
-	if (pimd_privs.change(ZPRIVS_LOWER))
-		zlog_err("pim_mroute_socket_enable: could not lower privs, %s",
-			 safe_strerror(errno));
-
 	if (fd < 0) {
 		zlog_warn("Could not create mroute socket: errno=%d: %s", errno,
 			  safe_strerror(errno));
 		return -2;
 	}
+
+#ifdef SO_BINDTODEVICE
+	if (pim->vrf->vrf_id != VRF_DEFAULT &&
+	    setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, pim->vrf->name,
+		       strlen(pim->vrf->name))) {
+		zlog_warn("Could not setsockopt SO_BINDTODEVICE: %s",
+			  safe_strerror(errno));
+		close(fd);
+		return -3;
+	}
+#endif
+
+	if (pimd_privs.change(ZPRIVS_LOWER))
+		zlog_err("pim_mroute_socket_enable: could not lower privs, %s",
+			 safe_strerror(errno));
 
 	pim->mroute_socket = fd;
 	if (pim_mroute_set(pim, 1)) {

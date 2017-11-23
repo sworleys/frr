@@ -7,8 +7,9 @@
 ##
 AC_PREREQ(2.60)
 
-AC_INIT(frr, 3.1+cl3u3, [https://github.com/frrouting/frr/issues])
+AC_INIT(frr, 3.2+cl3u1, [https://github.com/frrouting/frr/issues])
 PACKAGE_URL="https://frrouting.org/"
+AC_SUBST(PACKAGE_URL)
 PACKAGE_FULLNAME="FRRouting"
 AC_SUBST(PACKAGE_FULLNAME)
 
@@ -46,12 +47,12 @@ AS_IF([test "$host" != "$build"], [
   AC_MSG_NOTICE([...])
 
   build_clippy="false"
-  CLIPPYDIR="hosttools/lib"
+  HOSTTOOLS="hosttools/"
 ], [
   build_clippy="true"
-  CLIPPYDIR="lib"
+  HOSTTOOLS=""
 ])
-AC_SUBST(CLIPPYDIR)
+AC_SUBST(HOSTTOOLS)
 AM_CONDITIONAL([BUILD_CLIPPY], [$build_clippy])
 
 # Disable portability warnings -- our automake code (in particular
@@ -75,14 +76,13 @@ AC_SUBST(exampledir)
 
 dnl default is to match previous behavior
 pkgsrcrcdir=""
-pkgsrcdir=""
 AC_ARG_ENABLE([pkgsrcrcdir],
 	  AS_HELP_STRING([--enable-pkgsrcrcdir],
 			 [specify directory for rc.d scripts]),
-			 pkgsrcrcdir="$enableval"; pkgsrcdir="pkgsrc",)
+			 pkgsrcrcdir="$enableval",)
 dnl XXX add --pkgsrcrcdir to autoconf standard directory list somehow
-AC_SUBST(pkgsrcdir)
 AC_SUBST(pkgsrcrcdir)
+AM_CONDITIONAL([PKGSRC], [test "x$pkgsrcrcdir" != "x"])
 
 AC_ARG_WITH([moduledir], [AS_HELP_STRING([--with-moduledir=DIR], [module directory (${libdir}/frr/modules)])], [
 	moduledir="$withval"
@@ -185,16 +185,26 @@ CC="${CC% -std=c99}"
 
 AC_C_FLAG([-std=gnu11], [CC="$ac_cc"], [CC="$CC -std=gnu11"])
 
-dnl if the user specified any CFLAGS, we don't add "-g -Os/-O2" here
-if test "z$orig_cflags" = "z"; then
-  AC_C_FLAG([-g])
-  AC_C_FLAG([-Os], [
-    AC_C_FLAG([-O2])
-  ])
+dnl if the user has specified any CFLAGS, override our settings
+if test "x${enable_dev_build}" = "xyes"; then
+   AC_DEFINE(DEV_BUILD,,Build for development)
+   if test "z$orig_cflags" = "z"; then
+      AC_C_FLAG([-g3])
+      AC_C_FLAG([-O0])
+   fi
+else
+   if test "z$orig_cflags" = "z"; then
+      AC_C_FLAG([-g])
+      AC_C_FLAG([-Os], [
+        AC_C_FLAG([-O2])
+      ])
+   fi
 fi
+AM_CONDITIONAL([DEV_BUILD], [test "x$enable_dev_build" = "xyes"])
 
 dnl always want these CFLAGS
 AC_C_FLAG([-fno-omit-frame-pointer])
+AC_C_FLAG([-funwind-tables])
 AC_C_FLAG([-Wall])
 AC_C_FLAG([-Wextra])
 AC_C_FLAG([-Wmissing-prototypes])
@@ -320,10 +330,10 @@ AC_ARG_WITH(rfp-path,
   AS_HELP_STRING([--with-rfp-path[=DIR]],[path to replaced stub RFP used with BGP VNC]))
 AC_ARG_ENABLE(snmp,
   AS_HELP_STRING([--enable-snmp=ARG], [enable SNMP support (smux or agentx)]))
+AC_ARG_ENABLE(zeromq,
+  AS_HELP_STRING([--enable-zeromq], [enable ZeroMQ handler (libfrrzmq)]))
 AC_ARG_WITH(libpam,
   AS_HELP_STRING([--with-libpam], [use libpam for PAM support in vtysh]))
-AC_ARG_ENABLE(tcp-zebra,
-  AS_HELP_STRING([--enable-tcp-zebra], [enable TCP/IP socket connection between zebra and protocol daemon]))
 AC_ARG_ENABLE(ospfapi,
   AS_HELP_STRING([--disable-ospfapi], [do not build OSPFAPI to access the OSPF LSA Database]))
 AC_ARG_ENABLE(ospfclient,
@@ -346,7 +356,7 @@ AC_ARG_ENABLE(shell_access,
 AC_ARG_ENABLE(rtadv,
   AS_HELP_STRING([--disable-rtadv], [disable IPV6 router advertisement feature]))
 AC_ARG_ENABLE(irdp,
-  AS_HELP_STRING([--enable-irdp], [enable IRDP server support in zebra]))
+  AS_HELP_STRING([--disable-irdp], [enable IRDP server support in zebra (default if supported)]))
 AC_ARG_ENABLE(capabilities,
   AS_HELP_STRING([--disable-capabilities], [disable using POSIX capabilities]))
 AC_ARG_ENABLE(rusage,
@@ -379,7 +389,7 @@ AC_ARG_ENABLE([oldvpn_commands],
   AS_HELP_STRING([--enable-oldvpn-commands], [Keep old vpn commands]))
 
 AC_CHECK_HEADERS(json-c/json.h)
-AC_CHECK_LIB(json-c, json_object_get, LIBS="$LIBS -ljson-c")
+AC_CHECK_LIB(json-c, json_object_get, LIBS="$LIBS -ljson-c", [], [-lm])
 if test $ac_cv_lib_json_c_json_object_get = no; then
   AC_CHECK_LIB(json, json_object_get, LIBS="$LIBS -ljson")
   if test $ac_cv_lib_json_json_object_get = no; then
@@ -415,26 +425,6 @@ if test "${enable_rr_semantics}" != "no" ; then
   AC_DEFINE(HAVE_V6_RR_SEMANTICS,, Compile in v6 Route Replacement Semantics)
 fi
 
-dnl ----------
-dnl MPLS check
-dnl ----------
-AC_MSG_CHECKING(whether this OS has MPLS stack)
-case "$host" in
-  *-linux*)
-      MPLS_METHOD="zebra_mpls_netlink.o"
-      AC_MSG_RESULT(Linux MPLS)
-  ;;
-  *-openbsd*)
-      MPLS_METHOD="zebra_mpls_openbsd.o"
-      AC_MSG_RESULT(OpenBSD MPLS)
-  ;;
-  *)
-      MPLS_METHOD="zebra_mpls_null.o"
-      AC_MSG_RESULT(Unsupported kernel)
-  ;;
-esac
-AC_SUBST(MPLS_METHOD)
-
 if test "${enable_datacenter}" = "yes" ; then
   AC_DEFINE(HAVE_DATACENTER,,Compile extensions for a DataCenter)
   DFLT_NAME="datacenter"
@@ -454,11 +444,6 @@ if test "${enable_shell_access}" = "yes"; then
 fi
 
 AM_CONDITIONAL([FPM], [test "x$enable_fpm" = "xyes"])
-
-if test "x${enable_dev_build}" = "xyes"; then
-   AC_DEFINE(DEV_BUILD,,Build for development)
-fi
-AM_CONDITIONAL([DEV_BUILD], [test "x$enable_dev_build" = "xyes"])
 
 #
 # Python for clippy
@@ -580,10 +565,6 @@ AM_CONDITIONAL([HAVE_PROTOBUF], [test "x$have_protobuf" = "xyes"])
 # End of logic for protobuf support.
 #
 
-if test "${enable_tcp_zebra}" = "yes"; then
-  AC_DEFINE(HAVE_TCP_ZEBRA,,Use TCP for zebra communication)
-fi
-
 if test "${enable_linux24_tcp_md5}" = "yes"; then
   AC_DEFINE(HAVE_TCP_MD5_LINUX24,,Old Linux 2.4 TCP MD5 Signature Patch)
 fi
@@ -594,10 +575,6 @@ if test "${enable_rtadv}" != "no"; then
   AC_DEFINE(HAVE_RTADV,,Enable IPv6 Routing Advertisement support)
 else
   AC_MSG_RESULT(no)
-fi
-
-if test "${enable_irdp}" = "yes"; then
-  AC_DEFINE(HAVE_IRDP,, IRDP )
 fi
 
 if test x"${enable_user}" = x"no"; then
@@ -850,51 +827,64 @@ FRR_INCLUDES
 
 dnl V6 headers are checked below, after we check for v6
 
-dnl Some systems (Solaris 2.x) require libnsl (Network Services Library)
-case "$host" in
-  [*-sunos5.[6-7]*] | [*-solaris2.[6-7]*])
-      opsys=sol2-6
-      AC_DEFINE(SUNOS_56, 1, SunOS 5.6 to 5.7)
-      AC_DEFINE(SUNOS_5, 1, SunOS 5)
-      AC_CHECK_LIB(xnet, main)
-      CURSES=-lcurses
-      SOLARIS="solaris"
-  ;;
-  [*-sunos5.[8-9]] \
-  | [*-sunos5.1[0-9]] \
-  | [*-sunos5.1[0-9].[0-9]] \
-  | [*-solaris2.[8-9]] \
-  | [*-solaris2.1[0-9]] \
-  | [*-solaris2.1[0-9].[0-9]])
-      opsys=sol8
-      AC_DEFINE(SUNOS_59, 1, [SunOS 5.8 up])
-      AC_DEFINE(SUNOS_5, 1, [SunOS 5])
-      AC_CHECK_LIB(socket, main)
-      AC_CHECK_LIB(nsl, main)
-      AC_CHECK_LIB(umem, main)
-      AC_CHECK_FUNCS([printstack],
-      	[AC_DEFINE([HAVE_PRINTSTACK],1,[Solaris printstack])
-      	 AC_DEFINE([HAVE_STACK_TRACE],1,[Stack symbols decode functionality])
-      	])
-      CURSES=-lcurses
-      SOLARIS="solaris"
-  ;;
-  *-sunos5* | *-solaris2*)
-      AC_DEFINE(SUNOS_5,,SunOS 5, Unknown SunOS)
-      AC_CHECK_LIB(socket, main)
-      AC_CHECK_LIB(nsl, main)
-      CURSES=-lcurses
-      SOLARIS="solaris"
-  ;;
-  *-linux*)
-      opsys=gnu-linux
-      AC_DEFINE(GNU_LINUX,,GNU Linux)
-  ;;
-  *-openbsd*)
-      opsys=openbsd
-      AC_DEFINE(OPEN_BSD,,OpenBSD)
-  ;;
+AC_MSG_CHECKING([which operating system interface to use])
+case "$host_os" in
+  sunos* | solaris2*)
+    AC_MSG_RESULT([Solaris])
+
+    AC_DEFINE(SUNOS_5, 1, [SunOS 5])
+    AC_DEFINE(SOLARIS_IPV6, 1, Solaris IPv6)
+
+    AC_CHECK_LIB(socket, main)
+    AC_CHECK_LIB(nsl, main)
+    AC_CHECK_LIB(umem, main)
+    AC_CHECK_FUNCS([printstack], [
+      AC_DEFINE([HAVE_PRINTSTACK],1,[Solaris printstack])
+      AC_DEFINE([HAVE_STACK_TRACE],1,[Stack symbols decode functionality])
+    ])
+    CURSES=-lcurses
+    SOLARIS="solaris"
+    ;;
+  linux*)
+    AC_MSG_RESULT([Linux])
+
+    AC_DEFINE(GNU_LINUX,,GNU Linux)
+    AC_DEFINE(HAVE_NETLINK,,netlink)
+    AC_DEFINE(LINUX_IPV6,1,Linux IPv6 stack)
+
+    dnl Linux has a compilation problem with mixing
+    dnl netinet/in.h and linux/in6.h they are not
+    dnl compatible.  There has been discussion on
+    dnl how to fix it but no real progress on implementation
+    dnl when they fix it, remove this
+    AC_DEFINE(IPV6_MINHOPCOUNT, 73, Linux ipv6 Min Hop Count)
+
+    AC_CHECK_DECLS([IFLA_INFO_SLAVE_KIND], [], [], [#include <linux/if_link.h>])
+    ;;
+  openbsd*)
+    AC_MSG_RESULT([OpenBSD])
+
+    AC_DEFINE(OPEN_BSD,,OpenBSD)
+    AC_DEFINE(KAME,1,KAME IPv6)
+
+    if test "x${enable_pimd}" != "xno"; then
+      case "$host_os" in
+      openbsd6.0)
+        ;;
+      openbsd[6-9]*)
+        AC_MSG_FAILURE([pimd cannot be enabled as PIM support has been removed from OpenBSD 6.1])
+        ;;
+      esac
+    fi
+    ;;
+  *)
+    AC_MSG_RESULT([BSD])
+
+    AC_DEFINE(HAVE_NET_RT_IFLIST,,NET_RT_IFLIST)
+    AC_DEFINE(KAME,1,KAME IPv6)
+    ;;
 esac
+AM_CONDITIONAL(SOLARIS, test "${SOLARIS}" = "solaris")
 
 AC_SYS_LARGEFILE
 
@@ -1034,6 +1024,13 @@ fi
 LIBS="$TMPLIBS"
 AC_SUBST(LIBM)
 
+AC_CHECK_FUNCS([ppoll], [
+  AC_DEFINE([HAVE_PPOLL], 1, [have Linux/BSD ppoll()])
+])
+AC_CHECK_FUNCS([pollts], [
+  AC_DEFINE([HAVE_POLLTS], 1, [have NetBSD pollts()])
+])
+
 dnl ---------------
 dnl other functions
 dnl ---------------
@@ -1049,26 +1046,6 @@ AC_CHECK_HEADER([asm-generic/unistd.h],
                  AC_CHECK_FUNCS(setns)]
                )
 
-dnl ------------------------------------
-dnl Determine routing get and set method
-dnl ------------------------------------
-AC_MSG_CHECKING(zebra between kernel interface method)
-if test x"$opsys" = x"gnu-linux"; then
-  AC_MSG_RESULT(netlink)
-  RT_METHOD=rt_netlink.o
-  KERNEL_METHOD=kernel_netlink.o
-  AC_DEFINE(HAVE_NETLINK,,netlink)
-  netlink=yes
-  AC_CHECK_DECLS([IFLA_INFO_SLAVE_KIND], [], [], [#include <linux/if_link.h>])
-else
-  AC_MSG_RESULT(Route socket)
-  KERNEL_METHOD="kernel_socket.o"
-  RT_METHOD="rt_socket.o"
-fi
-AC_SUBST(RT_METHOD)
-AC_SUBST(KERNEL_METHOD)
-AM_CONDITIONAL([HAVE_NETLINK], [test "x$netlink" = "xyes"])
-
 dnl --------------------------
 dnl Determine IS-IS I/O method
 dnl --------------------------
@@ -1078,27 +1055,35 @@ AC_DEFINE(ISIS_METHOD_BPF,	3, [ constant value for isis method bpf ])
 AC_CHECK_HEADER(net/bpf.h)
 AC_CHECK_HEADER(sys/dlpi.h)
 AC_MSG_CHECKING(zebra IS-IS I/O method)
-if test x"$opsys" = x"gnu-linux"; then
-  AC_MSG_RESULT(pfpacket)
-  ISIS_METHOD_MACRO="ISIS_METHOD_PFPACKET"
-elif test x"$opsys" = x"sol2-6" -o x"$opsys" = x"sol8"; then
-  AC_MSG_RESULT(DLPI)
-  ISIS_METHOD_MACRO="ISIS_METHOD_DLPI"
-else
-  if test $ac_cv_header_net_bpf_h = no; then
-    if test $ac_cv_header_sys_dlpi_h = no; then
-      AC_MSG_RESULT(none)
-      AC_MSG_WARN([*** IS-IS support will not be built ***])
-      ISISD=""
-    else
-      AC_MSG_RESULT(DLPI)
-    fi
+
+case "$host_os" in
+  linux*)
+    AC_MSG_RESULT(pfpacket)
+    ISIS_METHOD_MACRO="ISIS_METHOD_PFPACKET"
+    ;;
+  solaris* | sunos*)
+    AC_MSG_RESULT(DLPI)
     ISIS_METHOD_MACRO="ISIS_METHOD_DLPI"
-  else
-    AC_MSG_RESULT(BPF)
-    ISIS_METHOD_MACRO="ISIS_METHOD_BPF"
-  fi
-fi
+    ;;
+  *)
+    if test $ac_cv_header_net_bpf_h = no; then
+      if test $ac_cv_header_sys_dlpi_h = no; then
+        AC_MSG_RESULT(none)
+        if test "${enable_isisd}" = yes; then
+          AC_MSG_FAILURE([IS-IS support requested but no packet backend found])
+        fi
+        AC_MSG_WARN([*** IS-IS support will not be built ***])
+        enable_isisd="no"
+      else
+        AC_MSG_RESULT(DLPI)
+      fi
+      ISIS_METHOD_MACRO="ISIS_METHOD_DLPI"
+    else
+      AC_MSG_RESULT(BPF)
+      ISIS_METHOD_MACRO="ISIS_METHOD_BPF"
+    fi
+    ;;
+esac
 AC_DEFINE_UNQUOTED(ISIS_METHOD, $ISIS_METHOD_MACRO, [ selected method for isis, == one of the constants ])
 
 dnl ------------------------------------
@@ -1127,59 +1112,6 @@ main()
   exit (1);
 }]])],[AC_MSG_RESULT(yes - using workaround) AC_DEFINE(HAVE_BROKEN_CMSG_FIRSTHDR,,Broken CMSG_FIRSTHDR)],
 [AC_MSG_RESULT(no)],[AC_MSG_RESULT(no)])
-
-dnl ------------------------------
-dnl check kernel route read method
-dnl ------------------------------
-AC_CACHE_CHECK([route read method], [frr_cv_rtread_method],
-[if test "x$netlink" = xyes; then
-  frr_cv_rtread_method="netlink"
-else
-for frr_cv_rtread_method in /dev/ip /dev/null;
-do
-  test x`ls $frr_cv_rtread_method 2>/dev/null` = x"$frr_cv_rtread_method" && break
-done
-case $frr_cv_rtread_method in
-  "/dev/ip")
-                     case "$host" in
-                       *-freebsd*)    frr_cv_rtread_method="sysctl";;
-                       *)             frr_cv_rtread_method="getmsg";;
-                     esac;;
-	*)
-                     frr_cv_rtread_method="sysctl";;
-esac
-fi])
-RTREAD_METHOD=rtread_${frr_cv_rtread_method}.o
-AC_SUBST(RTREAD_METHOD)
-
-dnl -----------------------------
-dnl check interface lookup method
-dnl -----------------------------
-IOCTL_METHOD=ioctl.o
-AC_MSG_CHECKING(interface looking up method)
-if test "$netlink" = yes; then
-  AC_MSG_RESULT(netlink)
-  IF_METHOD=if_netlink.o
-elif test "$opsys" = "sol2-6";then
-  AC_MSG_RESULT(Solaris GIF)
-  IF_METHOD=if_ioctl.o
-elif test "$opsys" = "sol8";then
-  AC_MSG_RESULT(Solaris GLIF)
-  IF_METHOD=if_ioctl_solaris.o
-  IOCTL_METHOD=ioctl_solaris.o
-elif test "$opsys" = "openbsd";then
-  AC_MSG_RESULT(openbsd)
-  IF_METHOD=if_ioctl.o
-elif grep NET_RT_IFLIST /usr/include/sys/socket.h >/dev/null 2>&1; then
-  AC_MSG_RESULT(sysctl)
-    IF_METHOD=if_sysctl.o
-    AC_DEFINE(HAVE_NET_RT_IFLIST,,NET_RT_IFLIST)
-else
-    AC_MSG_RESULT(ioctl)
-    IF_METHOD=if_ioctl.o
-fi
-AC_SUBST(IF_METHOD)
-AC_SUBST(IOCTL_METHOD)
 
 dnl ---------------------------------------------------------------
 dnl figure out how to specify an interface in multicast sockets API
@@ -1276,70 +1208,10 @@ if test $ac_cv_have_decl_TCP_MD5SIG = no; then
        AC_CHECK_DECLS([TCP_MD5SIG], [], [], MD5_INCLUDES)])
 fi
 
-dnl -----------------------------
-dnl check ipforward detect method
-dnl -----------------------------
-AC_CACHE_CHECK([ipforward method], [frr_cv_ipforward_method],
-[if test x$cross_compiling = xyes; then
-  if test x"$opsys" = x"gnu-linux"; then
-    frr_cv_ipforward_method=/proc/net/snmp
-  else
-    frr_cv_ipforward_method=/dev/ip
-  fi
-else
-  for frr_cv_ipforward_method in /proc/net/snmp /dev/ip /dev/null;
-  do
-    test x`ls $frr_cv_ipforward_method 2>/dev/null` = x"$frr_cv_ipforward_method" && break
-  done
-fi
-case $frr_cv_ipforward_method in
-  "/proc/net/snmp")  frr_cv_ipforward_method="proc";;
-  "/dev/ip")         
-                     case "$host" in
-                       *-freebsd*)    frr_cv_ipforward_method="sysctl";;
-                       *)             frr_cv_ipforward_method="solaris";;
-                     esac;;
-  *)                 frr_cv_ipforward_method="sysctl";;
-esac])
-IPFORWARD=ipforward_${frr_cv_ipforward_method}.o
-AC_SUBST(IPFORWARD)
-
 dnl ----------------------------------------------------------------------------
 dnl figure out if domainname is available in the utsname struct (GNU extension).
 dnl ----------------------------------------------------------------------------
 AC_CHECK_MEMBERS([struct utsname.domainname], [], [], [#include <sys/utsname.h>])
-
-dnl ----------
-dnl IPv6 check
-dnl ----------
-AC_MSG_CHECKING(whether does this OS have IPv6 stack)
-dnl ---------
-dnl KAME IPv6
-dnl ---------
-  if grep WIDE /usr/include/netinet6/in6.h >/dev/null 2>&1; then
-    AC_DEFINE(KAME,1,KAME IPv6)
-    AC_MSG_RESULT(KAME)
-dnl ------------------------------------
-dnl Solaris 9, 10 and potentially higher
-dnl ------------------------------------
-  elif test x"$opsys" = x"sol8"; then
-    AC_DEFINE(SOLARIS_IPV6, 1, Solaris IPv6)
-    AC_MSG_RESULT(Solaris IPv6)
-dnl ----------
-dnl Linux IPv6
-dnl ----------
-  elif test x"$opsys" = x"gnu-linux"; then
-    AC_DEFINE(LINUX_IPV6,1,Linux IPv6 stack)
-    dnl Linux has a compilation problem with mixing
-    dnl netinet/in.h and linux/in6.h they are not
-    dnl compatible.  There has been discussion on
-    dnl how to fix it but no real progress on implementation
-    dnl when they fix it, remove this
-    AC_DEFINE(IPV6_MINHOPCOUNT, 73, Linux ipv6 Min Hop Count)
-    AC_MSG_RESULT(Linux IPv6)
-  else
-    AC_MSG_ERROR([Failed to detect IPv6 stack])
-  fi
 
 dnl ------------------
 dnl IPv6 header checks
@@ -1375,12 +1247,7 @@ fi
 dnl --------------------
 dnl Daemon disable check
 dnl --------------------
-if test "${enable_zebra}" = "no";then
-  ZEBRA=""
-else
-  ZEBRA="zebra"
-fi
-AM_CONDITIONAL(ZEBRA, test "x$ZEBRA" = "xzebra")
+AM_CONDITIONAL(ZEBRA, test "${enable_zebra}" != "no")
 
 if test "${enable_bgpd}" = "no";then
   BGPD=""
@@ -1389,46 +1256,30 @@ else
 fi
 AM_CONDITIONAL(BGPD, test "x$BGPD" = "xbgpd")
 
-if test "${enable_ripd}" = "no";then
-  RIPD=""
-else
-  RIPD="ripd"
-fi
-AM_CONDITIONAL(RIPD, test "x$RIPD" = "xripd")
+AM_CONDITIONAL(RIPD, test "${enable_ripd}" != "no")
+AM_CONDITIONAL(OSPFD, test "${enable_ospfd}" != "no")
+AM_CONDITIONAL(LDPD, test "${enable_ldpd}" != "no")
 
-if test "${enable_ospfd}" = "no";then
-  OSPFD=""
-else
-  OSPFD="ospfd"
-fi
-AM_CONDITIONAL(OSPFD, test "x$OSPFD" = "xospfd")
-
-if test "${enable_ldpd}" = "no";then
-  LDPD=""
-else
-  LDPD="ldpd"
+AS_IF([test "${enable_ldpd}" != "no"], [
   AC_DEFINE(HAVE_LDPD, 1, ldpd)
-fi
-AM_CONDITIONAL(LDPD, test "x$LDPD" = "xldpd")
+])
 
 NHRPD=""
-if test "$opsys" = "gnu-linux"; then
-  if test "${enable_nhrpd}" != "no"; then
-    NHRPD="nhrpd"
-  fi
-else
-  if test "${enable_nhrpd}" = "yes"; then
-    AC_MSG_ERROR([nhrpd requires kernel APIs that are only present on Linux.])
-  fi
-fi
+case "$host_os" in
+  linux*)
+    if test "${enable_nhrpd}" != "no"; then
+      NHRPD="nhrpd"
+    fi
+    ;;
+  *)
+    if test "${enable_nhrpd}" = "yes"; then
+      AC_MSG_ERROR([nhrpd requires kernel APIs that are only present on Linux.])
+    fi
+    ;;
+esac
 AM_CONDITIONAL(NHRPD, test "x$NHRPD" = "xnhrpd")
 
-if test "${enable_eigrpd}" = "no";then
-  EIGRPD=""
-else
-  EIGRPD="eigrpd"
-fi
-AM_CONDITIONAL(EIGRPD, test "x$EIGRPD" = "xeigrpd")
+AM_CONDITIONAL(EIGRPD, test "${enable_eigrpd}" != "no")
 
 if test "${enable_watchfrr}" = "no";then
   WATCHFRR=""
@@ -1447,36 +1298,11 @@ if test "${enable_ospfapi}" != "no";then
 fi
 
 AM_CONDITIONAL(OSPFCLIENT, test "x$OSPFCLIENT" = "xospfclient")
-
-case "${enable_ripngd}" in
-  "no" ) RIPNGD="";;
-  *    ) RIPNGD="ripngd";;
-esac
-AM_CONDITIONAL(RIPNGD, test "x$RIPNGD" = "xripngd")
-
-case "${enable_babeld}" in
-  "no" ) BABELD="";;
-  *    ) BABELD="babeld";;
-esac
-AM_CONDITIONAL(BABELD, test "x$BABELD" = "xbabeld")
-
-case "${enable_ospf6d}" in
-  "no" ) OSPF6D="";;
-  *    ) OSPF6D="ospf6d";;
-esac
-AM_CONDITIONAL(OSPF6D, test "x$OSPF6D" = "xospf6d")
-
-case "${enable_isisd}" in
-  "no" ) ISISD="";;
-  *    ) ISISD="isisd";;
-esac
-AM_CONDITIONAL(ISISD, test "x$ISISD" = "xisisd")
-
-case "${enable_pimd}" in
-  "no" ) PIMD="";;
-  *    ) PIMD="pimd";;
-esac
-AM_CONDITIONAL(PIMD, test "x$PIMD" = "xpimd")
+AM_CONDITIONAL(RIPNGD, test "${enable_ripngd}" != "no")
+AM_CONDITIONAL(BABELD, test "${enable_babeld}" != "no")
+AM_CONDITIONAL(OSPF6D, test "${enable_ospf6d}" != "no")
+AM_CONDITIONAL(ISISD, test "${enable_isisd}" != "no")
+AM_CONDITIONAL(PIMD, test "${enable_pimd}" != "no")
 
 if test "${enable_bgp_announce}" = "no";then
   AC_DEFINE(DISABLE_BGP_ANNOUNCE,1,Disable BGP installation to zebra)
@@ -1506,28 +1332,15 @@ fi
 AM_CONDITIONAL([ENABLE_BGP_VNC], [test x${enable_bgp_vnc} != xno])
 
 AC_SUBST(DOC)
-AC_SUBST(ZEBRA)
 AC_SUBST(RFPTEST)
 AC_SUBST(LIBRFP)
 AC_SUBST(RFPINC)
-AC_SUBST(BABELD)
 AC_SUBST(BGPD)
-AC_SUBST(RIPD)
-AC_SUBST(RIPNGD)
-AC_SUBST(OSPFD)
-AC_SUBST(OSPF6D)
-AC_SUBST(LDPD)
-AC_SUBST(NHRPD)
-AC_SUBST(EIGRPD)
-AC_SUBST(WATCHFRR)
-AC_SUBST(ISISD)
-AC_SUBST(PIMD)
 AC_SUBST(SOLARIS)
 AC_SUBST(VTYSH)
 AC_SUBST(CURSES)
-AC_SUBST(OSPFCLIENT)
-AC_SUBST(OSPFAPI)
-AC_CHECK_LIB(crypt, crypt)
+AC_CHECK_LIB(crypt, crypt, [],
+		    [AC_CHECK_LIB(crypto, DES_crypt)])
 AC_CHECK_LIB(resolv, res_init)
 
 dnl ---------------------------
@@ -1553,7 +1366,7 @@ fi
 dnl ------------------
 dnl check Net-SNMP library
 dnl ------------------
-if test "${enable_snmp}" != ""; then
+if test "${enable_snmp}" != "" -a "${enable_snmp}" != "no"; then
    AC_PATH_TOOL([NETSNMP_CONFIG], [net-snmp-config], [no])
    if test x"$NETSNMP_CONFIG" = x"no"; then
       AC_MSG_ERROR([--enable-snmp given but unable to find net-snmp-config])
@@ -1662,17 +1475,27 @@ AC_CHECK_MEMBERS([struct sockaddr.sa_len,
 dnl ---------------------------
 dnl IRDP/pktinfo/icmphdr checks
 dnl ---------------------------
-AC_CHECK_TYPES([struct in_pktinfo], 
- [AC_CHECK_TYPES([struct icmphdr],
-   [if test "${enable_irdp}" != "no"; then
-      AC_DEFINE(HAVE_IRDP,, IRDP)
-    fi],
-   [if test "${enable_irdp}" = "yes"; then
-      AC_MSG_ERROR(['IRDP requires in_pktinfo at the moment!'])
-    fi], [FRR_INCLUDES])],
- [if test "${enable_irdp}" = "yes"; then
-    AC_MSG_ERROR(['IRDP requires in_pktinfo at the moment!'])
-  fi], [FRR_INCLUDES])
+
+AC_CHECK_TYPES([struct in_pktinfo], [
+  AC_CHECK_TYPES([struct icmphdr], [
+    IRDP=true
+  ], [
+    IRDP=false
+  ], [FRR_INCLUDES])
+], [
+  IRDP=false
+], [FRR_INCLUDES])
+
+case "${enable_irdp}" in
+yes)
+  $IRDP || AC_MSG_ERROR(['IRDP requires in_pktinfo at the moment!'])
+  ;;
+no)
+  IRDP=false
+  ;;
+esac
+
+AM_CONDITIONAL(IRDP, $IRDP)
 
 dnl -----------------------
 dnl checking for IP_PKTINFO
@@ -1891,6 +1714,21 @@ AC_CHECK_HEADER([malloc.h],
   )
  ], [], FRR_INCLUDES)
 
+dnl ------
+dnl ZeroMQ
+dnl ------
+if test "x$enable_zeromq" != "xno"; then
+  PKG_CHECK_MODULES(ZEROMQ, [libzmq >= 4.0.0], [
+    AC_DEFINE(HAVE_ZEROMQ, 1, [Enable ZeroMQ support])
+    ZEROMQ=true
+  ], [
+    if test "x$enable_zeromq" = "xyes"; then
+      AC_MSG_ERROR([configuration specifies --enable-zeromq but libzmq was not found])
+    fi
+  ])
+fi
+AM_CONDITIONAL([ZEROMQ], test "x$ZEROMQ" = "xtrue")
+
 dnl ----------
 dnl configure date
 dnl ----------
@@ -1969,22 +1807,12 @@ AC_CACHE_VAL(ac_cv_htonl_works,
 )
 AC_MSG_RESULT($ac_cv_htonl_works)
 
-AC_CONFIG_FILES([Makefile lib/Makefile qpb/Makefile zebra/Makefile ripd/Makefile
-	  ripngd/Makefile bgpd/Makefile ospfd/Makefile watchfrr/Makefile
-	  ospf6d/Makefile ldpd/Makefile isisd/Makefile vtysh/Makefile
-	  doc/Makefile ospfclient/Makefile tests/Makefile m4/Makefile
+AC_CONFIG_FILES([Makefile
+	  bgpd/Makefile
+	  vtysh/Makefile
+	  doc/Makefile tests/Makefile
 	  bgpd/rfp-example/rfptest/Makefile bgpd/rfp-example/librfp/Makefile
-	  babeld/Makefile
-	  pimd/Makefile
-	  eigrpd/Makefile
-	  nhrpd/Makefile
-	  redhat/Makefile
-	  tools/Makefile
-	  pkgsrc/Makefile
-	  python/Makefile
-	  fpm/Makefile
 	  redhat/frr.spec
-	  snapcraft/Makefile
 	  snapcraft/snapcraft.yaml
 	  lib/version.h
 	  tests/lib/cli/test_cli.refout
@@ -2004,14 +1832,48 @@ AC_CONFIG_FILES([Makefile lib/Makefile qpb/Makefile zebra/Makefile ripd/Makefile
 	  doc/watchfrr.8
 	  doc/zebra.8
 	  doc/frr.1
+	  doc/frr-args.8
 	  pkgsrc/bgpd.sh pkgsrc/ospf6d.sh pkgsrc/ospfd.sh
 	  pkgsrc/ripd.sh pkgsrc/ripngd.sh pkgsrc/zebra.sh
 	  pkgsrc/eigrpd.sh])
 
+if test "${enable_bgp_vnc}" != "no"; then
+   if test "${with_rfp_path}" != "bgpd/rfp-example" ; then
+      AC_CONFIG_FILES([${with_rfp_path}/rfptest/Makefile ${with_rfp_path}/librfp/Makefile])
+   fi
+fi
 
 AC_CONFIG_FILES([solaris/Makefile])
 
 AC_CONFIG_FILES([vtysh/extract.pl],[chmod +x vtysh/extract.pl])
+
+AC_CONFIG_COMMANDS([lib/route_types.h], [
+	dst="${ac_abs_top_builddir}/lib/route_types.h"
+	${PERL} "${ac_abs_top_srcdir}/lib/route_types.pl" \
+		< "${ac_abs_top_srcdir}/lib/route_types.txt" \
+		> "${dst}.tmp"
+	test -f "${dst}" \
+		&& diff "${dst}.tmp" "${dst}" >/dev/null 2>/dev/null \
+		&& rm "${dst}.tmp" \
+		|| mv "${dst}.tmp" "${dst}"
+], [
+	PERL="$PERL"
+])
+
+AS_IF([test "x$with_pkg_git_version" = "xyes"], [
+    AC_CONFIG_COMMANDS([lib/gitversion.h], [
+	dst="${ac_abs_top_builddir}/lib/gitversion.h"
+	${PERL} "${ac_abs_top_srcdir}/lib/gitversion.pl" \
+		"${ac_abs_top_srcdir}" \
+		> "${dst}.tmp"
+	test -f "${dst}" \
+		&& diff "${dst}.tmp" "${dst}" >/dev/null 2>/dev/null \
+		&& rm "${dst}.tmp" \
+		|| mv "${dst}.tmp" "${dst}"
+    ], [
+	PERL="$PERL"
+    ])
+])
 
 ## Hack, but working solution to avoid rebuilding of frr.info.
 ## It's already in CVS until texinfo 4.7 is more common.

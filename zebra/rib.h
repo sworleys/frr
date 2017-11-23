@@ -45,9 +45,6 @@ struct route_entry {
 	/* Nexthop structure */
 	struct nexthop *nexthop;
 
-	/* Refrence count. */
-	unsigned long refcnt;
-
 	/* Tag */
 	route_tag_t tag;
 
@@ -74,7 +71,7 @@ struct route_entry {
 	u_int32_t nexthop_mtu;
 
 	/* Distance. */
-	u_char distance;
+	uint8_t distance;
 
 	/* Flags of this route.
 	 * This flag's definition is in lib/zebra.h ZEBRA_FLAG_* and is exposed
@@ -89,6 +86,7 @@ struct route_entry {
 #define ROUTE_ENTRY_NEXTHOPS_CHANGED 0x2
 #define ROUTE_ENTRY_CHANGED          0x4
 #define ROUTE_ENTRY_SELECTED_FIB     0x8
+#define ROUTE_ENTRY_LABELS_CHANGED   0x10
 
 	/* Nexthop information. */
 	u_char nexthop_num;
@@ -137,6 +135,8 @@ typedef struct rib_dest_t_ {
 } rib_dest_t;
 
 #define RIB_ROUTE_QUEUED(x)	(1 << (x))
+// If MQ_SIZE is modified this value needs to be updated.
+#define RIB_ROUTE_ANY_QUEUED    0x1F
 
 /*
  * The maximum qindex that can be used.
@@ -230,7 +230,8 @@ typedef enum {
 
 extern struct nexthop *route_entry_nexthop_ifindex_add(struct route_entry *,
 						       ifindex_t);
-extern struct nexthop *route_entry_nexthop_blackhole_add(struct route_entry *);
+extern struct nexthop *route_entry_nexthop_blackhole_add(struct route_entry *,
+							 enum blackhole_type);
 extern struct nexthop *route_entry_nexthop_ipv4_add(struct route_entry *,
 						    struct in_addr *,
 						    struct in_addr *);
@@ -293,17 +294,18 @@ extern int rib_uninstall_kernel(struct route_node *rn, struct route_entry *re);
  * also implicitly withdraw equal prefix of same type. */
 extern int rib_add(afi_t afi, safi_t safi, vrf_id_t vrf_id, int type,
 		   u_short instance, int flags, struct prefix *p,
-		   struct prefix_ipv6 *src_p, union g_addr *gate,
-		   union g_addr *src, ifindex_t ifindex, u_int32_t table_id,
-		   u_int32_t, u_int32_t, u_char);
+		   struct prefix_ipv6 *src_p, const struct nexthop *nh,
+		   u_int32_t table_id, u_int32_t metric, u_int32_t mtu,
+		   uint8_t distance);
 
 extern int rib_add_multipath(afi_t afi, safi_t safi, struct prefix *,
 			     struct prefix_ipv6 *src_p, struct route_entry *);
 
 extern void rib_delete(afi_t afi, safi_t safi, vrf_id_t vrf_id, int type,
 		       u_short instance, int flags, struct prefix *p,
-		       struct prefix_ipv6 *src_p, union g_addr *gate,
-		       ifindex_t ifindex, u_int32_t table_id);
+		       struct prefix_ipv6 *src_p, const struct nexthop *nh,
+		       u_int32_t table_id, u_int32_t metric, bool fromkernel,
+		       struct ethaddr *rmac);
 
 extern struct route_entry *rib_match(afi_t afi, safi_t safi, vrf_id_t,
 				     union g_addr *,
@@ -329,7 +331,7 @@ extern void rib_unlink(struct route_node *, struct route_entry *);
 extern int rib_gc_dest(struct route_node *rn);
 extern struct route_table *rib_tables_iter_next(rib_tables_iter_t *iter);
 
-extern u_char route_distance(int type);
+extern uint8_t route_distance(int type);
 
 /*
  * Inline functions.

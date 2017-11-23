@@ -90,7 +90,7 @@ struct access_master {
 	void (*delete_hook)(struct access_list *);
 };
 
-/* Static structure for IPv4 access_list's master. */
+/* Static structure for mac access_list's master. */
 static struct access_master access_master_mac = {
 	{NULL, NULL},
 	{NULL, NULL},
@@ -156,29 +156,6 @@ static const char *filter_type_str(struct filter *filter)
 	}
 }
 
-/*
- * mac filter match
- * n is of type struct prefix_eth
- * p can be of type struct ethaddr
- */
-static int mac_filter_match(struct prefix *n, struct ethaddr *p)
-{
-	if (!n && !p)
-		return 1;
-
-	if (!n || !p)
-		return 0;
-
-	/* check if we are matching on any mac */
-	if (is_zero_mac(&(n->u.prefix_eth)))
-		return 1;
-
-	if (memcmp(&(n->u.prefix), p, sizeof(struct ethaddr)) == 0)
-		return 1;
-
-	return 0;
-}
-
 /* If filter match to the prefix then return 1. */
 static int filter_match_cisco(struct filter *mfilter, struct prefix *p)
 {
@@ -204,37 +181,22 @@ static int filter_match_cisco(struct filter *mfilter, struct prefix *p)
 }
 
 /* If filter match to the prefix then return 1. */
-static int filter_match_zebra(struct filter *mfilter, void *obj)
+static int filter_match_zebra(struct filter *mfilter, struct prefix *p)
 {
 	struct filter_zebra *filter = NULL;
 
 	filter = &mfilter->u.zfilter;
 
-	if (filter->prefix.family == AF_ETHERNET) {
-		struct ethaddr *p = NULL;
-
-		p = (struct ethaddr *)obj;
-		return mac_filter_match(&filter->prefix, p);
-	}
-
-	if (filter->prefix.family == AF_INET
-	    || filter->prefix.family == AF_INET6) {
-		struct prefix *p = NULL;
-
-		p = (struct prefix *)obj;
-		if (filter->prefix.family == p->family) {
-			if (filter->exact) {
-				if (filter->prefix.prefixlen == p->prefixlen)
-					return prefix_match(&filter->prefix, p);
-				else
-					return 0;
-			} else
+	if (filter->prefix.family == p->family) {
+		if (filter->exact) {
+			if (filter->prefix.prefixlen == p->prefixlen)
 				return prefix_match(&filter->prefix, p);
+			else
+				return 0;
 		} else
-			return 0;
-	}
-
-	return 0;
+			return prefix_match(&filter->prefix, p);
+	} else
+		return 0;
 }
 
 /* Allocate new access list structure. */
@@ -413,9 +375,7 @@ static struct access_list *access_list_get(afi_t afi, const char *name)
 enum filter_type access_list_apply(struct access_list *access, void *object)
 {
 	struct filter *filter;
-	struct prefix *p;
-
-	p = (struct prefix *)object;
+	struct prefix *p = (struct prefix *)object;
 
 	if (access == NULL)
 		return FILTER_DENY;
@@ -425,7 +385,7 @@ enum filter_type access_list_apply(struct access_list *access, void *object)
 			if (filter_match_cisco(filter, p))
 				return filter->type;
 		} else {
-			if (filter_match_zebra(filter, object))
+			if (filter_match_zebra(filter, p))
 				return filter->type;
 		}
 	}
@@ -566,16 +526,8 @@ static struct filter *filter_lookup_zebra(struct access_list *access,
 
 		if (filter->exact == new->exact
 		    && mfilter->type == mnew->type) {
-			if (new->prefix.family == AF_ETHERNET) {
-				if (prefix_eth_same(
-					    (struct prefix_eth *)&filter
-						    ->prefix,
-					    (struct prefix_eth *)&new->prefix))
-					return mfilter;
-			} else {
-				if (prefix_same(&filter->prefix, &new->prefix))
-					return mfilter;
-			}
+			if (prefix_same(&filter->prefix, &new->prefix))
+				return mfilter;
 		}
 	}
 	return NULL;
@@ -1314,7 +1266,6 @@ static int filter_set_zebra(struct vty *vty, const char *name_str,
 		ret = str2prefix_eth(prefix_str, (struct prefix_eth *)&p);
 		if (ret <= 0) {
 			vty_out(vty, "MAC address is malformed\n");
-
 			return CMD_WARNING;
 		}
 	} else
@@ -1788,15 +1739,15 @@ static int filter_show(struct vty *vty, const char *name, afi_t afi)
 			filter = &mfilter->u.cfilter;
 
 			if (write) {
-				vty_out(vty, "%s IP%s access list %s\n",
+				vty_out(vty, "%s %s access list %s\n",
 					mfilter->cisco ? (filter->extended
 								  ? "Extended"
 								  : "Standard")
 						       : "Zebra",
 					(afi == AFI_IP)
-						? ("")
-						: ((afi == AFI_IP6) ? ("ipv6 ")
-								    : ("mac ")),
+						? ("IP")
+						: ((afi == AFI_IP6) ? ("IPv6 ")
+								    : ("MAC ")),
 					access->name);
 				write = 0;
 			}
@@ -1835,15 +1786,15 @@ static int filter_show(struct vty *vty, const char *name, afi_t afi)
 			filter = &mfilter->u.cfilter;
 
 			if (write) {
-				vty_out(vty, "%s IP%s access list %s\n",
+				vty_out(vty, "%s %s access list %s\n",
 					mfilter->cisco ? (filter->extended
 								  ? "Extended"
 								  : "Standard")
 						       : "Zebra",
 					(afi == AFI_IP)
-						? ("")
-						: ((afi == AFI_IP6) ? ("ipv6 ")
-								    : ("mac ")),
+						? ("IP")
+						: ((afi == AFI_IP6) ? ("IPv6 ")
+								    : ("MAC ")),
 					access->name);
 				write = 0;
 			}
@@ -1999,7 +1950,7 @@ void config_write_access_zebra(struct vty *vty, struct filter *mfilter)
 			inet_ntop(p->family, &p->u.prefix, buf, BUFSIZ),
 			p->prefixlen, filter->exact ? " exact-match" : "");
 	else if (p->family == AF_ETHERNET) {
-		if (is_zero_mac(&(p->u.prefix_eth)))
+		if (p->prefixlen == 0)
 			vty_out(vty, " any");
 		else
 			vty_out(vty, " %s", prefix_mac2str(&(p->u.prefix_eth),

@@ -58,8 +58,6 @@ const struct message ri_version_msg[] = {{RI_RIP_VERSION_1, "1"},
 					 {RI_RIP_VERSION_NONE, "none"},
 					 {0}};
 
-extern struct zebra_privs_t ripd_privs;
-
 /* RIP enabled network vector. */
 vector rip_enable_interface;
 
@@ -336,10 +334,10 @@ static int rip_if_ipv4_address_check(struct interface *ifp)
 /* Does this address belongs to me ? */
 int if_check_address(struct in_addr addr)
 {
-	struct listnode *node;
+	struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
 	struct interface *ifp;
 
-	for (ALL_LIST_ELEMENTS_RO(vrf_iflist(VRF_DEFAULT), node, ifp)) {
+	FOR_ALL_INTERFACES (vrf, ifp) {
 		struct listnode *cnode;
 		struct connected *connected;
 
@@ -471,7 +469,7 @@ int rip_interface_delete(int command, struct zclient *zclient,
 
 	/* To support pseudo interface do not free interface structure.  */
 	/* if_delete(ifp); */
-	ifp->ifindex = IFINDEX_DELETED;
+	if_set_index(ifp, IFINDEX_INTERNAL);
 
 	return 0;
 }
@@ -490,10 +488,10 @@ static void rip_interface_clean(struct rip_interface *ri)
 
 void rip_interfaces_clean(void)
 {
-	struct listnode *node;
+	struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
 	struct interface *ifp;
 
-	for (ALL_LIST_ELEMENTS_RO(vrf_iflist(VRF_DEFAULT), node, ifp))
+	FOR_ALL_INTERFACES (vrf, ifp)
 		rip_interface_clean(ifp->info);
 }
 
@@ -542,10 +540,10 @@ static void rip_interface_reset(struct rip_interface *ri)
 
 void rip_interfaces_reset(void)
 {
-	struct listnode *node;
+	struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
 	struct interface *ifp;
 
-	for (ALL_LIST_ELEMENTS_RO(vrf_iflist(VRF_DEFAULT), node, ifp))
+	FOR_ALL_INTERFACES (vrf, ifp)
 		rip_interface_reset(ifp->info);
 }
 
@@ -583,10 +581,10 @@ int rip_if_down(struct interface *ifp)
 /* Needed for stop RIP process. */
 void rip_if_down_all()
 {
+	struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
 	struct interface *ifp;
-	struct listnode *node, *nnode;
 
-	for (ALL_LIST_ELEMENTS(vrf_iflist(VRF_DEFAULT), node, nnode, ifp))
+	FOR_ALL_INTERFACES (vrf, ifp)
 		rip_if_down(ifp);
 }
 
@@ -977,11 +975,11 @@ void rip_enable_apply(struct interface *ifp)
 /* Apply network configuration to all interface. */
 void rip_enable_apply_all()
 {
+	struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
 	struct interface *ifp;
-	struct listnode *node, *nnode;
 
 	/* Check each interface. */
-	for (ALL_LIST_ELEMENTS(vrf_iflist(VRF_DEFAULT), node, nnode, ifp))
+	FOR_ALL_INTERFACES (vrf, ifp)
 		rip_enable_apply(ifp);
 }
 
@@ -1091,10 +1089,10 @@ void rip_passive_interface_apply(struct interface *ifp)
 
 static void rip_passive_interface_apply_all(void)
 {
+	struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
 	struct interface *ifp;
-	struct listnode *node, *nnode;
 
-	for (ALL_LIST_ELEMENTS(vrf_iflist(VRF_DEFAULT), node, nnode, ifp))
+	FOR_ALL_INTERFACES (vrf, ifp)
 		rip_passive_interface_apply(ifp);
 }
 
@@ -1728,14 +1726,11 @@ DEFUN (no_rip_passive_interface,
 /* Write rip configuration of each interface. */
 static int rip_interface_config_write(struct vty *vty)
 {
-	struct listnode *node;
+	struct vrf *vrf = vrf_lookup_by_id(VRF_DEFAULT);
 	struct interface *ifp;
 
-	for (ALL_LIST_ELEMENTS_RO(vrf_iflist(VRF_DEFAULT), node, ifp)) {
+	FOR_ALL_INTERFACES (vrf, ifp) {
 		struct rip_interface *ri;
-
-		if (ifp->ifindex == IFINDEX_DELETED)
-			continue;
 
 		ri = ifp->info;
 
@@ -1751,7 +1746,7 @@ static int rip_interface_config_write(struct vty *vty)
 		    && (!ri->auth_str) && (!ri->key_chain))
 			continue;
 
-		vty_out(vty, "interface %s\n", ifp->name);
+		vty_frame(vty, "interface %s\n", ifp->name);
 
 		if (ifp->desc)
 			vty_out(vty, " description %s\n", ifp->desc);
@@ -1807,7 +1802,7 @@ static int rip_interface_config_write(struct vty *vty)
 			vty_out(vty, " ip rip authentication key-chain %s\n",
 				ri->key_chain);
 
-		vty_out(vty, "!\n");
+		vty_endframe(vty, "!\n");
 	}
 	return 0;
 }
@@ -1877,8 +1872,8 @@ static int rip_interface_delete_hook(struct interface *ifp)
 void rip_if_init(void)
 {
 	/* Default initial size of interface vector. */
-	if_add_hook(IF_NEW_HOOK, rip_interface_new_hook);
-	if_add_hook(IF_DELETE_HOOK, rip_interface_delete_hook);
+	hook_register_prio(if_add, 0, rip_interface_new_hook);
+	hook_register_prio(if_del, 0, rip_interface_delete_hook);
 
 	/* RIP network init. */
 	rip_enable_interface = vector_init(1);

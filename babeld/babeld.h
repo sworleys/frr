@@ -90,7 +90,6 @@ THE SOFTWARE.
 
 #define BABEL_VTY_PORT 2609
 #define BABEL_DEFAULT_CONFIG "babeld.conf"
-#define BABEL_VERSION "0.1 for quagga"
 
 /* Values in milliseconds */
 #define BABEL_DEFAULT_HELLO_INTERVAL 4000
@@ -113,6 +112,8 @@ struct babel
     struct thread *t_read;    /* on Babel protocol's socket */
     struct thread *t_update;  /* timers */
 };
+
+extern struct zebra_privs_t babeld_privs;
 
 extern void babeld_quagga_init(void);
 extern int input_filter(const unsigned char *id,

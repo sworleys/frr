@@ -111,6 +111,8 @@
 */
 
 struct irdp_interface {
+	bool started;
+
 	unsigned long MaxAdvertInterval;
 	unsigned long MinAdvertInterval;
 	unsigned long Preference;
@@ -138,10 +140,9 @@ struct Adv {
 	int pref;
 };
 
-extern void irdp_init(void);
+extern void irdp_if_init(void);
 extern int irdp_sock_init(void);
-extern void irdp_finish(void);
-extern void irdp_config_write(struct vty *, struct interface *);
+extern int irdp_config_write(struct vty *, struct interface *);
 extern int irdp_send_thread(struct thread *t_advert);
 extern void irdp_advert_off(struct interface *ifp);
 extern void process_solicit(struct interface *ifp);

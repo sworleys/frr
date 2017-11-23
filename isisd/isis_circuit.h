@@ -26,11 +26,15 @@
 #include "vty.h"
 #include "if.h"
 #include "qobj.h"
+#include "prefix.h"
+#include "ferr.h"
 
 #include "isis_constants.h"
 #include "isis_common.h"
 
 #define CIRCUIT_MAX 255
+
+struct isis_lsp;
 
 struct password {
 	struct password *next;
@@ -77,8 +81,10 @@ struct isis_circuit {
 	struct thread *t_read;
 	struct thread *t_send_csnp[2];
 	struct thread *t_send_psnp[2];
+	struct thread *t_send_lsp;
 	struct list *lsp_queue;	/* LSPs to be txed (both levels) */
-	time_t lsp_queue_last_cleared; /* timestamp used to enforce transmit
+	struct isis_lsp_hash *lsp_hash; /* Hashtable synchronized with lsp_queue */
+	time_t lsp_queue_last_push;    /* timestamp used to enforce transmit
 					* interval;
 					* for scalability, use one timestamp per
 					* circuit, instead of one per lsp per
@@ -177,20 +183,26 @@ struct isis_circuit *isis_circuit_create(struct isis_area *area,
 					 struct interface *ifp);
 void isis_circuit_af_set(struct isis_circuit *circuit, bool ip_router,
 			 bool ipv6_router);
-int isis_circuit_passive_set(struct isis_circuit *circuit, bool passive);
+ferr_r isis_circuit_passive_set(struct isis_circuit *circuit, bool passive);
 void isis_circuit_is_type_set(struct isis_circuit *circuit, int is_type);
-int isis_circuit_circ_type_set(struct isis_circuit *circuit, int circ_type);
+ferr_r isis_circuit_circ_type_set (struct isis_circuit *circuit, int circ_type);
 
-int isis_circuit_metric_set(struct isis_circuit *circuit, int level,
-			    int metric);
+ferr_r isis_circuit_metric_set(struct isis_circuit *circuit, int level,
+			       int metric);
 
-int isis_circuit_passwd_unset(struct isis_circuit *circuit);
-int isis_circuit_passwd_cleartext_set(struct isis_circuit *circuit,
-				      const char *passwd);
-int isis_circuit_passwd_hmac_md5_set(struct isis_circuit *circuit,
-				     const char *passwd);
+ferr_r isis_circuit_passwd_unset(struct isis_circuit *circuit);
+ferr_r isis_circuit_passwd_cleartext_set(struct isis_circuit *circuit,
+					 const char *passwd);
+ferr_r isis_circuit_passwd_hmac_md5_set(struct isis_circuit *circuit,
+					const char *passwd);
 
 int isis_circuit_mt_enabled_set(struct isis_circuit *circuit, uint16_t mtid,
 				bool enabled);
 
+void isis_circuit_schedule_lsp_send(struct isis_circuit *circuit);
+void isis_circuit_queue_lsp(struct isis_circuit *circuit, struct isis_lsp *lsp);
+void isis_circuit_lsp_queue_clean(struct isis_circuit *circuit);
+void isis_circuit_cancel_queued_lsp(struct isis_circuit *circuit,
+				    struct isis_lsp *lsp);
+struct isis_lsp *isis_circuit_lsp_queue_pop(struct isis_circuit *circuit);
 #endif /* _ZEBRA_ISIS_CIRCUIT_H */

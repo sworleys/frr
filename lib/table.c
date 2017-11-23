@@ -27,25 +27,11 @@
 #include "table.h"
 #include "memory.h"
 #include "sockunion.h"
-#include "jhash.h"
 
 DEFINE_MTYPE(LIB, ROUTE_TABLE, "Route table")
 DEFINE_MTYPE(LIB, ROUTE_NODE, "Route node")
 
-static void route_node_delete(struct route_node *);
 static void route_table_free(struct route_table *);
-
-static unsigned route_table_hash_key(void *pp)
-{
-	struct prefix copy;
-
-	/* make sure *all* unused bits are zero, particularly including
-	 * alignment /
-	 * padding and unused prefix bytes. */
-	memset(&copy, 0, sizeof(copy));
-	prefix_copy(&copy, (struct prefix *)pp);
-	return jhash(&copy, sizeof(copy), 0x55aa5a5a);
-}
 
 static int route_table_hash_cmp(const void *a, const void *b)
 {
@@ -63,7 +49,7 @@ route_table_init_with_delegate(route_table_delegate_t *delegate)
 
 	rt = XCALLOC(MTYPE_ROUTE_TABLE, sizeof(struct route_table));
 	rt->delegate = delegate;
-	rt->hash = hash_create(route_table_hash_key, route_table_hash_cmp,
+	rt->hash = hash_create(prefix_hash_key, route_table_hash_cmp,
 			       "route table hash");
 	return rt;
 }
@@ -88,7 +74,6 @@ static struct route_node *route_node_set(struct route_table *table,
 	node = route_node_new(table);
 
 	prefix_copy(&node->p, prefix);
-	apply_mask(&node->p);
 	node->table = table;
 
 	inserted = hash_get(node->table->hash, node, hash_alloc_intern);
@@ -198,23 +183,6 @@ static void set_link(struct route_node *node, struct route_node *new)
 
 	node->link[bit] = new;
 	new->parent = node;
-}
-
-/* Lock node. */
-struct route_node *route_lock_node(struct route_node *node)
-{
-	node->lock++;
-	return node;
-}
-
-/* Unlock node. */
-void route_unlock_node(struct route_node *node)
-{
-	assert(node->lock > 0);
-	node->lock--;
-
-	if (node->lock == 0)
-		route_node_delete(node);
 }
 
 /* Find matched prefix. */
@@ -362,7 +330,7 @@ struct route_node *route_node_get(struct route_table *const table,
 }
 
 /* Delete node from the routing table. */
-static void route_node_delete(struct route_node *node)
+void route_node_delete(struct route_node *node)
 {
 	struct route_node *child;
 	struct route_node *parent;

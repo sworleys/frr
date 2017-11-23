@@ -43,6 +43,8 @@
 #include "zebra/zebra_static.h"
 #include "lib/json.h"
 #include "zebra/zebra_vxlan.h"
+#include "zebra/zebra_vty_clippy.c"
+#include "zebra/zebra_vxlan_private.h"
 
 extern int allow_delete;
 
@@ -54,47 +56,70 @@ static int do_show_ip_route(struct vty *vty, const char *vrf_name, afi_t afi,
 static void vty_show_ip_route_detail(struct vty *vty, struct route_node *rn,
 				     int mcast);
 
-#define ONE_DAY_SECOND 60*60*24
-#define ONE_WEEK_SECOND 60*60*24*7
+/*
+ * special macro to allow us to get the correct zebra_vrf
+ */
+#define ZEBRA_DECLVAR_CONTEXT(A, B)			\
+	struct vrf *A = VTY_GET_CONTEXT(vrf);		\
+	struct zebra_vrf *B =				\
+		(vrf) ? vrf->info : NULL;		\
 
 /* VNI range as per RFC 7432 */
 #define CMD_VNI_RANGE "(1-16777215)"
 
 /* General function for static route. */
-int zebra_static_ipv4(struct vty *vty, safi_t safi, int add_cmd,
-		      const char *dest_str, const char *mask_str,
-		      const char *gate_str, const char *flag_str,
-		      const char *tag_str, const char *distance_str,
-		      const char *vrf_id_str, const char *label_str)
+static int zebra_static_route(struct vty *vty, afi_t afi, safi_t safi,
+			      const char *negate, const char *dest_str,
+			      const char *mask_str, const char *src_str,
+			      const char *gate_str, const char *ifname,
+			      const char *flag_str, const char *tag_str,
+			      const char *distance_str, const char *vrf_id_str,
+			      const char *label_str)
 {
 	int ret;
 	u_char distance;
-	struct prefix p;
-	struct in_addr gate;
+	struct prefix p, src;
+	struct prefix_ipv6 *src_p = NULL;
+	union g_addr gate;
+	union g_addr *gatep = NULL;
 	struct in_addr mask;
-	u_char flag = 0;
+	enum static_blackhole_type bh_type = 0;
 	route_tag_t tag = 0;
-	struct zebra_vrf *zvrf = NULL;
-	unsigned int ifindex = 0;
-	const char *ifname = NULL;
-	u_char type = STATIC_BLACKHOLE;
+	struct zebra_vrf *zvrf;
+	u_char type;
 	struct static_nh_label snh_label;
 
-	memset(&snh_label, 0, sizeof(struct static_nh_label));
 	ret = str2prefix(dest_str, &p);
 	if (ret <= 0) {
 		vty_out(vty, "%% Malformed address\n");
 		return CMD_WARNING_CONFIG_FAILED;
 	}
 
-	/* Cisco like mask notation. */
-	if (mask_str) {
-		ret = inet_aton(mask_str, &mask);
-		if (ret == 0) {
-			vty_out(vty, "%% Malformed address\n");
-			return CMD_WARNING_CONFIG_FAILED;
+	switch (afi) {
+	case AFI_IP:
+		/* Cisco like mask notation. */
+		if (mask_str) {
+			ret = inet_aton(mask_str, &mask);
+			if (ret == 0) {
+				vty_out(vty, "%% Malformed address\n");
+				return CMD_WARNING_CONFIG_FAILED;
+			}
+			p.prefixlen = ip_masklen(mask);
 		}
-		p.prefixlen = ip_masklen(mask);
+		break;
+	case AFI_IP6:
+		/* srcdest routing */
+		if (src_str) {
+			ret = str2prefix(src_str, &src);
+			if (ret <= 0 || src.family != AF_INET6) {
+				vty_out(vty, "%% Malformed source address\n");
+				return CMD_WARNING_CONFIG_FAILED;
+			}
+			src_p = (struct prefix_ipv6 *)&src;
+		}
+		break;
+	default:
+		break;
 	}
 
 	/* Apply mask for given prefix. */
@@ -119,6 +144,7 @@ int zebra_static_ipv4(struct vty *vty, safi_t safi, int add_cmd,
 	}
 
 	/* Labels */
+	memset(&snh_label, 0, sizeof(struct static_nh_label));
 	if (label_str) {
 		if (!mpls_enabled) {
 			vty_out(vty,
@@ -149,34 +175,26 @@ int zebra_static_ipv4(struct vty *vty, safi_t safi, int add_cmd,
 	}
 
 	/* Null0 static route.  */
-	if ((gate_str != NULL)
-	    && (strncasecmp(gate_str, "Null0", strlen(gate_str)) == 0)) {
-		if (flag_str) {
-			vty_out(vty, "%% can not have flag %s with Null0\n",
-				flag_str);
+	if (ifname != NULL) {
+		if (strncasecmp(ifname, "Null0", strlen(ifname)) == 0 ||
+		    strncasecmp(ifname, "reject", strlen(ifname)) == 0 ||
+		    strncasecmp(ifname, "blackhole", strlen(ifname)) == 0) {
+			vty_out(vty, "%% Nexthop interface cannot be Null0, reject or blackhole\n");
 			return CMD_WARNING_CONFIG_FAILED;
 		}
-		if (add_cmd)
-			static_add_route(AFI_IP, safi, type, &p, NULL, NULL,
-					 ifindex, ifname, ZEBRA_FLAG_BLACKHOLE,
-					 tag, distance, zvrf, &snh_label);
-		else
-			static_delete_route(AFI_IP, safi, type, &p, NULL, NULL,
-					    ifindex, tag, distance, zvrf,
-					    &snh_label);
-		return CMD_SUCCESS;
 	}
 
 	/* Route flags */
 	if (flag_str) {
 		switch (flag_str[0]) {
 		case 'r':
-		case 'R': /* XXX */
-			SET_FLAG(flag, ZEBRA_FLAG_REJECT);
+			bh_type = STATIC_BLACKHOLE_REJECT;
 			break;
 		case 'b':
-		case 'B': /* XXX */
-			SET_FLAG(flag, ZEBRA_FLAG_BLACKHOLE);
+			bh_type = STATIC_BLACKHOLE_DROP;
+			break;
+		case 'N':
+			bh_type = STATIC_BLACKHOLE_NULL;
 			break;
 		default:
 			vty_out(vty, "%% Malformed flag %s \n", flag_str);
@@ -184,70 +202,45 @@ int zebra_static_ipv4(struct vty *vty, safi_t safi, int add_cmd,
 		}
 	}
 
-	if (gate_str == NULL) {
-		if (add_cmd)
-			static_add_route(AFI_IP, safi, type, &p, NULL, NULL,
-					 ifindex, ifname, flag, tag, distance,
-					 zvrf, &snh_label);
-		else
-			static_delete_route(AFI_IP, safi, type, &p, NULL, NULL,
-					    ifindex, tag, distance, zvrf,
-					    &snh_label);
-
-		return CMD_SUCCESS;
+	if (gate_str) {
+		if (inet_pton(afi2family(afi), gate_str, &gate) != 1) {
+			vty_out(vty, "%% Malformed nexthop address %s\n",
+				gate_str);
+			return CMD_WARNING_CONFIG_FAILED;
+		}
+		gatep = &gate;
 	}
 
-	/* When gateway is A.B.C.D format, gate is treated as nexthop
-	   address other case gate is treated as interface name. */
-	ret = inet_aton(gate_str, &gate);
-	if (!ret) {
-		struct interface *ifp =
-			if_lookup_by_name(gate_str, zvrf_id(zvrf));
-		if (!ifp) {
-			vty_out(vty, "%% Unknown interface: %s\n", gate_str);
-			ifindex = IFINDEX_DELETED;
-		} else
-			ifindex = ifp->ifindex;
-		ifname = gate_str;
-		type = STATIC_IFINDEX;
-	} else
-		type = STATIC_IPV4_GATEWAY;
+	if (gate_str == NULL && ifname == NULL)
+		type = STATIC_BLACKHOLE;
+	else if (gate_str && ifname) {
+		if (afi == AFI_IP)
+			type = STATIC_IPV4_GATEWAY_IFNAME;
+		else
+			type = STATIC_IPV6_GATEWAY_IFNAME;
+	} else if (ifname)
+		type = STATIC_IFNAME;
+	else {
+		if (afi == AFI_IP)
+			type = STATIC_IPV4_GATEWAY;
+		else
+			type = STATIC_IPV6_GATEWAY;
+	}
 
-	if (add_cmd)
-		static_add_route(AFI_IP, safi, type, &p, NULL,
-				 ifindex ? NULL : (union g_addr *)&gate,
-				 ifindex, ifname, flag, tag, distance, zvrf,
-				 &snh_label);
+	if (!negate)
+		static_add_route(afi, safi, type, &p, src_p, gatep, ifname,
+				 bh_type, tag, distance, zvrf, &snh_label);
 	else
-		static_delete_route(AFI_IP, safi, type, &p, NULL,
-				    ifindex ? NULL : (union g_addr *)&gate,
-				    ifindex, tag, distance, zvrf, &snh_label);
+		static_delete_route(afi, safi, type, &p, src_p, gatep, ifname,
+				    tag, distance, zvrf, &snh_label);
 
 	return CMD_SUCCESS;
 }
 
 /* Static unicast routes for multicast RPF lookup. */
-DEFUN (ip_mroute_dist,
+DEFPY (ip_mroute_dist,
        ip_mroute_dist_cmd,
-       "ip mroute A.B.C.D/M <A.B.C.D|INTERFACE> [(1-255)]",
-       IP_STR
-       "Configure static unicast route into MRIB for multicast RPF lookup\n"
-       "IP destination prefix (e.g. 10.0.0.0/8)\n"
-       "Nexthop address\n"
-       "Nexthop interface name\n"
-       "Distance\n")
-{
-	char *destprefix = argv[2]->arg;
-	char *nexthop = argv[3]->arg;
-	char *distance = (argc == 5) ? argv[4]->arg : NULL;
-
-	return zebra_static_ipv4(vty, SAFI_MULTICAST, 1, destprefix, NULL,
-				 nexthop, NULL, NULL, distance, NULL, NULL);
-}
-
-DEFUN (no_ip_mroute_dist,
-       no_ip_mroute_dist_cmd,
-       "no ip mroute A.B.C.D/M <A.B.C.D|INTERFACE> [(1-255)]",
+       "[no] ip mroute A.B.C.D/M$prefix <A.B.C.D$gate|INTERFACE$ifname> [(1-255)$distance]",
        NO_STR
        IP_STR
        "Configure static unicast route into MRIB for multicast RPF lookup\n"
@@ -256,12 +249,9 @@ DEFUN (no_ip_mroute_dist,
        "Nexthop interface name\n"
        "Distance\n")
 {
-	char *destprefix = argv[3]->arg;
-	char *nexthop = argv[4]->arg;
-	char *distance = (argc == 6) ? argv[5]->arg : NULL;
-
-	return zebra_static_ipv4(vty, SAFI_MULTICAST, 0, destprefix, NULL,
-				 nexthop, NULL, NULL, distance, NULL, NULL);
+	return zebra_static_route(vty, AFI_IP, SAFI_MULTICAST, no, prefix_str,
+				  NULL, NULL, gate_str, ifname, NULL, NULL,
+				  distance_str, NULL, NULL);
 }
 
 DEFUN (ip_multicast_mode,
@@ -357,270 +347,94 @@ DEFUN (show_ip_rpf_addr,
 	return CMD_SUCCESS;
 }
 
-static void zebra_vty_ip_route_tdv_helper(int argc, struct cmd_token *argv[],
-					  int idx_curr, char **tag,
-					  char **distance, char **vrf,
-					  char **labels)
-{
-	*distance = NULL;
-	while (idx_curr < argc) {
-		if (strmatch(argv[idx_curr]->text, "tag")) {
-			if (tag)
-				*tag = argv[idx_curr + 1]->arg;
-			idx_curr += 2;
-		} else if (strmatch(argv[idx_curr]->text, "vrf")) {
-			if (vrf)
-				*vrf = argv[idx_curr + 1]->arg;
-			idx_curr += 2;
-		} else if (strmatch(argv[idx_curr]->text, "label")) {
-			if (labels)
-				*labels = argv[idx_curr + 1]->arg;
-			idx_curr += 2;
-		} else {
-			if (distance)
-				*distance = argv[idx_curr]->arg;
-			idx_curr++;
-		}
-	}
-
-	return;
-}
-
 /* Static route configuration.  */
-DEFUN (ip_route,
-       ip_route_cmd,
-       "ip route A.B.C.D/M <A.B.C.D|INTERFACE|null0> [tag (1-4294967295)] [(1-255)] [vrf NAME]",
-       IP_STR
-       "Establish static routes\n"
-       "IP destination prefix (e.g. 10.0.0.0/8)\n"
-       "IP gateway address\n"
-       "IP gateway interface name\n"
-       "Null interface\n"
-       "Set tag for this route\n"
-       "Tag value\n"
-       "Distance value for this route\n"
-       VRF_CMD_HELP_STR)
+DEFPY(ip_route_blackhole,
+      ip_route_blackhole_cmd,
+      "[no] ip route\
+	<A.B.C.D/M$prefix|A.B.C.D$prefix A.B.C.D$mask>                        \
+	<Null0|reject|blackhole>$flag \
+	[{                                                                    \
+	  tag (1-4294967295)                                                  \
+	  |(1-255)$distance                                                   \
+	  |vrf NAME                                                           \
+	  |label WORD                                                         \
+          }]",
+      NO_STR IP_STR
+      "Establish static routes\n"
+      "IP destination prefix (e.g. 10.0.0.0/8)\n"
+      "IP destination prefix\n"
+      "IP destination prefix mask\n"
+      "Null interface\n"
+      "Emit an ICMP unreachable when matched\n"
+      "Silently discard pkts when matched\n"
+      "Set tag for this route\n"
+      "Tag value\n"
+      "Distance value for this route\n"
+      VRF_CMD_HELP_STR
+      MPLS_LABEL_HELPSTR)
 {
-	int idx_ipv4_prefixlen = 2;
-	int idx_ipv4_ifname_null = 3;
-	int idx_curr = 4;
-	char *tag, *distance, *vrf;
-
-	tag = distance = vrf = NULL;
-	zebra_vty_ip_route_tdv_helper(argc, argv, idx_curr, &tag, &distance,
-				      &vrf, NULL);
-
-	return zebra_static_ipv4(vty, SAFI_UNICAST, 1,
-				 argv[idx_ipv4_prefixlen]->arg, NULL,
-				 argv[idx_ipv4_ifname_null]->arg, NULL, tag,
-				 distance, vrf, NULL);
+	return zebra_static_route(vty, AFI_IP, SAFI_UNICAST, no, prefix,
+				  mask_str, NULL, NULL, NULL, flag,
+				  tag_str, distance_str, vrf, label);
 }
 
-DEFUN (ip_route_flags,
-       ip_route_flags_cmd,
-       "ip route A.B.C.D/M <reject|blackhole> [tag (1-4294967295)] [(1-255)] [vrf NAME]",
-       IP_STR
-       "Establish static routes\n"
-       "IP destination prefix (e.g. 10.0.0.0/8)\n"
-       "Emit an ICMP unreachable when matched\n"
-       "Silently discard pkts when matched\n"
-       "Set tag for this route\n"
-       "Tag value\n"
-       "Distance value for this route\n"
-       VRF_CMD_HELP_STR)
+DEFPY(ip_route_address_interface,
+      ip_route_address_interface_cmd,
+      "[no] ip route\
+	<A.B.C.D/M$prefix|A.B.C.D$prefix A.B.C.D$mask> \
+	A.B.C.D$gate                                   \
+	INTERFACE$ifname                               \
+	[{                                             \
+	  tag (1-4294967295)                           \
+	  |(1-255)$distance                            \
+	  |vrf NAME                                    \
+	  |label WORD                                  \
+          }]",
+      NO_STR IP_STR
+      "Establish static routes\n"
+      "IP destination prefix (e.g. 10.0.0.0/8)\n"
+      "IP destination prefix\n"
+      "IP destination prefix mask\n"
+      "IP gateway address\n"
+      "IP gateway interface name\n"
+      "Set tag for this route\n"
+      "Tag value\n"
+      "Distance value for this route\n"
+      VRF_CMD_HELP_STR
+      MPLS_LABEL_HELPSTR)
 {
-	int idx_ipv4_prefixlen = 2;
-	int idx_reject_blackhole = 3;
-	int idx_curr = 4;
-	char *tag, *distance, *vrf;
-
-	tag = distance = vrf = NULL;
-	zebra_vty_ip_route_tdv_helper(argc, argv, idx_curr, &tag, &distance,
-				      &vrf, NULL);
-
-	return zebra_static_ipv4(
-		vty, SAFI_UNICAST, 1, argv[idx_ipv4_prefixlen]->arg, NULL, NULL,
-		argv[idx_reject_blackhole]->arg, tag, distance, vrf, NULL);
+	return zebra_static_route(vty, AFI_IP, SAFI_UNICAST, no, prefix,
+				  mask_str, NULL, gate_str, ifname, NULL,
+				  tag_str, distance_str, vrf, label);
 }
 
-/* Mask as A.B.C.D format.  */
-DEFUN_HIDDEN (ip_route_mask,
-              ip_route_mask_cmd,
-              "ip route A.B.C.D A.B.C.D <A.B.C.D|INTERFACE|null0> [tag (1-4294967295)] [(1-255)] [vrf NAME]",
-              IP_STR
-              "Establish static routes\n"
-              "IP destination prefix\n"
-              "IP destination prefix mask\n"
-              "IP gateway address\n"
-              "IP gateway interface name\n"
-              "Null interface\n"
-              "Set tag for this route\n"
-              "Tag value\n"
-              "Distance value for this route\n"
-              VRF_CMD_HELP_STR)
+DEFPY(ip_route,
+      ip_route_cmd,
+      "[no] ip route\
+	<A.B.C.D/M$prefix|A.B.C.D$prefix A.B.C.D$mask> \
+	<A.B.C.D$gate|INTERFACE$ifname>                \
+	[{                                             \
+	  tag (1-4294967295)                           \
+	  |(1-255)$distance                            \
+	  |vrf NAME                                    \
+	  |label WORD                                  \
+          }]",
+      NO_STR IP_STR
+      "Establish static routes\n"
+      "IP destination prefix (e.g. 10.0.0.0/8)\n"
+      "IP destination prefix\n"
+      "IP destination prefix mask\n"
+      "IP gateway address\n"
+      "IP gateway interface name\n"
+      "Set tag for this route\n"
+      "Tag value\n"
+      "Distance value for this route\n"
+      VRF_CMD_HELP_STR
+      MPLS_LABEL_HELPSTR)
 {
-	int idx_ipv4 = 2;
-	int idx_ipv4_2 = 3;
-	int idx_ipv4_ifname_null = 4;
-	int idx_curr = 5;
-	char *tag, *distance, *vrf;
-
-	tag = distance = vrf = NULL;
-	zebra_vty_ip_route_tdv_helper(argc, argv, idx_curr, &tag, &distance,
-				      &vrf, NULL);
-
-	return zebra_static_ipv4(vty, SAFI_UNICAST, 1, argv[idx_ipv4]->arg,
-				 argv[idx_ipv4_2]->arg,
-				 argv[idx_ipv4_ifname_null]->arg, NULL, tag,
-				 distance, vrf, NULL);
-}
-
-DEFUN_HIDDEN (ip_route_mask_flags,
-              ip_route_mask_flags_cmd,
-              "ip route A.B.C.D A.B.C.D <reject|blackhole> [tag (1-4294967295)] [(1-255)] [vrf NAME]",
-              IP_STR
-              "Establish static routes\n"
-              "IP destination prefix\n"
-              "IP destination prefix mask\n"
-              "Emit an ICMP unreachable when matched\n"
-              "Silently discard pkts when matched\n"
-              "Set tag for this route\n"
-              "Tag value\n"
-              "Distance value for this route\n"
-              VRF_CMD_HELP_STR)
-{
-	int idx_ipv4 = 2;
-	int idx_ipv4_2 = 3;
-	int idx_reject_blackhole = 4;
-	int idx_curr = 5;
-	char *tag, *distance, *vrf;
-
-	tag = distance = vrf = NULL;
-	zebra_vty_ip_route_tdv_helper(argc, argv, idx_curr, &tag, &distance,
-				      &vrf, NULL);
-
-	return zebra_static_ipv4(vty, SAFI_UNICAST, 1, argv[idx_ipv4]->arg,
-				 argv[idx_ipv4_2]->arg, NULL,
-				 argv[idx_reject_blackhole]->arg, tag, distance,
-				 vrf, NULL);
-}
-
-DEFUN (no_ip_route,
-       no_ip_route_cmd,
-       "no ip route A.B.C.D/M <A.B.C.D|INTERFACE|null0> [tag (1-4294967295)] [(1-255)] [vrf NAME]",
-       NO_STR
-       IP_STR
-       "Establish static routes\n"
-       "IP destination prefix (e.g. 10.0.0.0/8)\n"
-       "IP gateway address\n"
-       "IP gateway interface name\n"
-       "Null interface\n"
-       "Tag of this route\n"
-       "Tag value\n"
-       "Distance value for this route\n"
-       VRF_CMD_HELP_STR)
-{
-	int idx_ipv4_prefixlen = 3;
-	int idx_ipv4_ifname_null = 4;
-	int idx_curr = 5;
-	char *tag, *distance, *vrf;
-
-	tag = distance = vrf = NULL;
-	zebra_vty_ip_route_tdv_helper(argc, argv, idx_curr, &tag, &distance,
-				      &vrf, NULL);
-
-	return zebra_static_ipv4(vty, SAFI_UNICAST, 0,
-				 argv[idx_ipv4_prefixlen]->arg, NULL,
-				 argv[idx_ipv4_ifname_null]->arg, NULL, tag,
-				 distance, vrf, NULL);
-}
-
-DEFUN (no_ip_route_flags,
-       no_ip_route_flags_cmd,
-       "no ip route A.B.C.D/M <reject|blackhole> [tag (1-4294967295)] [(1-255)] [vrf NAME]",
-       NO_STR
-       IP_STR
-       "Establish static routes\n"
-       "IP destination prefix (e.g. 10.0.0.0/8)\n"
-       "Emit an ICMP unreachable when matched\n"
-       "Silently discard pkts when matched\n"
-       "Tag of this route\n"
-       "Tag value\n"
-       "Distance value for this route\n"
-       VRF_CMD_HELP_STR)
-{
-	int idx_ipv4_prefixlen = 3;
-	int idx_curr = 5;
-	char *tag, *distance, *vrf;
-
-	tag = distance = vrf = NULL;
-	zebra_vty_ip_route_tdv_helper(argc, argv, idx_curr, &tag, &distance,
-				      &vrf, NULL);
-
-	return zebra_static_ipv4(vty, SAFI_UNICAST, 0,
-				 argv[idx_ipv4_prefixlen]->arg, NULL, NULL,
-				 NULL, tag, distance, vrf, NULL);
-}
-
-DEFUN_HIDDEN (no_ip_route_mask,
-              no_ip_route_mask_cmd,
-              "no ip route A.B.C.D A.B.C.D <A.B.C.D|INTERFACE|null0> [tag (1-4294967295)] [(1-255)] [vrf NAME]",
-              NO_STR
-              IP_STR
-              "Establish static routes\n"
-              "IP destination prefix\n"
-              "IP destination prefix mask\n"
-              "IP gateway address\n"
-              "IP gateway interface name\n"
-              "Null interface\n"
-              "Tag of this route\n"
-              "Tag value\n"
-              "Distance value for this route\n"
-              VRF_CMD_HELP_STR)
-{
-	int idx_ipv4 = 3;
-	int idx_ipv4_2 = 4;
-	int idx_ipv4_ifname_null = 5;
-	int idx_curr = 6;
-	char *tag, *distance, *vrf;
-
-	tag = distance = vrf = NULL;
-	zebra_vty_ip_route_tdv_helper(argc, argv, idx_curr, &tag, &distance,
-				      &vrf, NULL);
-
-	return zebra_static_ipv4(vty, SAFI_UNICAST, 0, argv[idx_ipv4]->arg,
-				 argv[idx_ipv4_2]->arg,
-				 argv[idx_ipv4_ifname_null]->arg, NULL, tag,
-				 distance, vrf, NULL);
-}
-
-DEFUN_HIDDEN (no_ip_route_mask_flags,
-              no_ip_route_mask_flags_cmd,
-              "no ip route A.B.C.D A.B.C.D <reject|blackhole> [tag (1-4294967295)] [(1-255)] [vrf NAME]",
-              NO_STR
-              IP_STR
-              "Establish static routes\n"
-              "IP destination prefix\n"
-              "IP destination prefix mask\n"
-              "Emit an ICMP unreachable when matched\n"
-              "Silently discard pkts when matched\n"
-              "Tag of this route\n"
-              "Tag value\n"
-              "Distance value for this route\n"
-              VRF_CMD_HELP_STR)
-{
-	int idx_ipv4 = 3;
-	int idx_ipv4_2 = 4;
-	int idx_curr = 6;
-	char *tag, *distance, *vrf;
-
-	tag = distance = vrf = NULL;
-	zebra_vty_ip_route_tdv_helper(argc, argv, idx_curr, &tag, &distance,
-				      &vrf, NULL);
-
-	return zebra_static_ipv4(vty, SAFI_UNICAST, 0, argv[idx_ipv4]->arg,
-				 argv[idx_ipv4_2]->arg, NULL, NULL, tag,
-				 distance, vrf, NULL);
+	return zebra_static_route(vty, AFI_IP, SAFI_UNICAST, no, prefix,
+				  mask_str, NULL, gate_str, ifname, NULL,
+				  tag_str, distance_str, vrf, label);
 }
 
 /* New RIB.  Detailed information for IPv4 route. */
@@ -632,8 +446,7 @@ static void vty_show_ip_route_detail(struct vty *vty, struct route_node *rn,
 	char buf[SRCDEST2STR_BUFFER];
 	struct zebra_vrf *zvrf;
 
-	RNODE_FOREACH_RE(rn, re)
-	{
+	RNODE_FOREACH_RE (rn, re) {
 		const char *mcast_info = "";
 		if (mcast) {
 			rib_table_info_t *info = srcdest_rnode_table_info(rn);
@@ -651,7 +464,7 @@ static void vty_show_ip_route_detail(struct vty *vty, struct route_node *rn,
 		vty_out(vty, ", distance %u, metric %u", re->distance,
 			re->metric);
 		if (re->tag)
-			vty_out(vty, ", tag %d", re->tag);
+			vty_out(vty, ", tag %u", re->tag);
 		if (re->mtu)
 			vty_out(vty, ", mtu %u", re->mtu);
 		if (re->vrf_id != VRF_DEFAULT) {
@@ -660,47 +473,36 @@ static void vty_show_ip_route_detail(struct vty *vty, struct route_node *rn,
 		}
 		if (CHECK_FLAG(re->flags, ZEBRA_FLAG_SELECTED))
 			vty_out(vty, ", best");
-		if (re->refcnt)
-			vty_out(vty, ", refcnt %ld", re->refcnt);
-		if (CHECK_FLAG(re->flags, ZEBRA_FLAG_BLACKHOLE))
-			vty_out(vty, ", blackhole");
-		if (CHECK_FLAG(re->flags, ZEBRA_FLAG_REJECT))
-			vty_out(vty, ", reject");
 		vty_out(vty, "\n");
 
-		if (re->type == ZEBRA_ROUTE_RIP || re->type == ZEBRA_ROUTE_OSPF
-		    || re->type == ZEBRA_ROUTE_ISIS
-		    || re->type == ZEBRA_ROUTE_NHRP
-		    || re->type == ZEBRA_ROUTE_TABLE
-		    || re->type == ZEBRA_ROUTE_BGP) {
-			time_t uptime;
-			struct tm *tm;
+		time_t uptime;
+		struct tm *tm;
 
-			uptime = time(NULL);
-			uptime -= re->uptime;
-			tm = gmtime(&uptime);
+		uptime = time(NULL);
+		uptime -= re->uptime;
+		tm = gmtime(&uptime);
 
-			vty_out(vty, "  Last update ");
+		vty_out(vty, "  Last update ");
 
-			if (uptime < ONE_DAY_SECOND)
-				vty_out(vty, "%02d:%02d:%02d", tm->tm_hour,
-					tm->tm_min, tm->tm_sec);
-			else if (uptime < ONE_WEEK_SECOND)
-				vty_out(vty, "%dd%02dh%02dm", tm->tm_yday,
-					tm->tm_hour, tm->tm_min);
-			else
-				vty_out(vty, "%02dw%dd%02dh", tm->tm_yday / 7,
-					tm->tm_yday - ((tm->tm_yday / 7) * 7),
-					tm->tm_hour);
-			vty_out(vty, " ago\n");
-		}
+		if (uptime < ONE_DAY_SECOND)
+			vty_out(vty, "%02d:%02d:%02d", tm->tm_hour,
+				tm->tm_min, tm->tm_sec);
+		else if (uptime < ONE_WEEK_SECOND)
+			vty_out(vty, "%dd%02dh%02dm", tm->tm_yday,
+				tm->tm_hour, tm->tm_min);
+		else
+			vty_out(vty, "%02dw%dd%02dh", tm->tm_yday / 7,
+				tm->tm_yday - ((tm->tm_yday / 7) * 7),
+				tm->tm_hour);
+		vty_out(vty, " ago\n");
 
 		for (ALL_NEXTHOPS(re->nexthop, nexthop)) {
 			char addrstr[32];
 
 			vty_out(vty, "  %c%s",
 				CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB)
-					? '*'
+					? CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_DUPLICATE)
+						? ' ' : '*'
 					: ' ',
 				nexthop->rparent ? "  " : "");
 
@@ -730,11 +532,28 @@ static void vty_show_ip_route_detail(struct vty *vty, struct route_node *rn,
 						       re->vrf_id));
 				break;
 			case NEXTHOP_TYPE_BLACKHOLE:
-				vty_out(vty, " directly connected, Null0");
+				vty_out(vty, " unreachable");
+				switch (nexthop->bh_type) {
+				case BLACKHOLE_REJECT:
+					vty_out(vty, " (ICMP unreachable)");
+					break;
+				case BLACKHOLE_ADMINPROHIB:
+					vty_out(vty,
+						" (ICMP admin-prohibited)");
+					break;
+				case BLACKHOLE_NULL:
+					vty_out(vty, " (blackhole)");
+					break;
+				case BLACKHOLE_UNSPEC:
+					break;
+				}
 				break;
 			default:
 				break;
 			}
+			if (CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_DUPLICATE))
+				vty_out(vty, " (duplicate nexthop removed)");
+
 			if (!CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_ACTIVE))
 				vty_out(vty, " inactive");
 
@@ -770,6 +589,9 @@ static void vty_show_ip_route_detail(struct vty *vty, struct route_node *rn,
 				break;
 			}
 
+			if (re->nexthop_mtu)
+				vty_out(vty, ", mtu %u", re->nexthop_mtu);
+
 			/* Label information */
 			if (nexthop->nh_label
 			    && nexthop->nh_label->num_labels) {
@@ -796,6 +618,12 @@ static void vty_show_ip_route(struct vty *vty, struct route_node *rn,
 	json_object *json_nexthop = NULL;
 	json_object *json_route = NULL;
 	json_object *json_labels = NULL;
+	time_t uptime;
+	struct tm *tm;
+
+	uptime = time(NULL);
+	uptime -= re->uptime;
+	tm = gmtime(&uptime);
 
 	if (json) {
 		json_route = json_object_new_object();
@@ -816,47 +644,31 @@ static void vty_show_ip_route(struct vty *vty, struct route_node *rn,
 		if (CHECK_FLAG(re->flags, ZEBRA_FLAG_SELECTED))
 			json_object_boolean_true_add(json_route, "selected");
 
-		if (re->type != ZEBRA_ROUTE_CONNECT
-		    && re->type != ZEBRA_ROUTE_KERNEL) {
+		if (re->type != ZEBRA_ROUTE_CONNECT) {
 			json_object_int_add(json_route, "distance",
 					    re->distance);
 			json_object_int_add(json_route, "metric", re->metric);
 		}
 
-		if (CHECK_FLAG(re->flags, ZEBRA_FLAG_BLACKHOLE))
-			json_object_boolean_true_add(json_route, "blackhole");
+		if (uptime < ONE_DAY_SECOND)
+			sprintf(buf, "%02d:%02d:%02d", tm->tm_hour,
+				tm->tm_min, tm->tm_sec);
+		else if (uptime < ONE_WEEK_SECOND)
+			sprintf(buf, "%dd%02dh%02dm", tm->tm_yday,
+				tm->tm_hour, tm->tm_min);
+		else
+			sprintf(buf, "%02dw%dd%02dh", tm->tm_yday / 7,
+				tm->tm_yday - ((tm->tm_yday / 7) * 7),
+				tm->tm_hour);
 
-		if (CHECK_FLAG(re->flags, ZEBRA_FLAG_REJECT))
-			json_object_boolean_true_add(json_route, "reject");
-
-		if (re->type == ZEBRA_ROUTE_RIP || re->type == ZEBRA_ROUTE_OSPF
-		    || re->type == ZEBRA_ROUTE_ISIS
-		    || re->type == ZEBRA_ROUTE_NHRP
-		    || re->type == ZEBRA_ROUTE_TABLE
-		    || re->type == ZEBRA_ROUTE_BGP) {
-			time_t uptime;
-			struct tm *tm;
-
-			uptime = time(NULL);
-			uptime -= re->uptime;
-			tm = gmtime(&uptime);
-
-			if (uptime < ONE_DAY_SECOND)
-				sprintf(buf, "%02d:%02d:%02d", tm->tm_hour,
-					tm->tm_min, tm->tm_sec);
-			else if (uptime < ONE_WEEK_SECOND)
-				sprintf(buf, "%dd%02dh%02dm", tm->tm_yday,
-					tm->tm_hour, tm->tm_min);
-			else
-				sprintf(buf, "%02dw%dd%02dh", tm->tm_yday / 7,
-					tm->tm_yday - ((tm->tm_yday / 7) * 7),
-					tm->tm_hour);
-
-			json_object_string_add(json_route, "uptime", buf);
-		}
+		json_object_string_add(json_route, "uptime", buf);
 
 		for (ALL_NEXTHOPS(re->nexthop, nexthop)) {
 			json_nexthop = json_object_new_object();
+
+			if (CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_DUPLICATE))
+				json_object_boolean_true_add(json_nexthop,
+							     "duplicate");
 
 			if (CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB))
 				json_object_boolean_true_add(json_nexthop,
@@ -914,11 +726,32 @@ static void vty_show_ip_route(struct vty *vty, struct route_node *rn,
 				break;
 			case NEXTHOP_TYPE_BLACKHOLE:
 				json_object_boolean_true_add(json_nexthop,
-							     "blackhole");
+							     "unreachable");
+				switch (nexthop->bh_type) {
+				case BLACKHOLE_REJECT:
+					json_object_boolean_true_add(
+						json_nexthop, "reject");
+					break;
+				case BLACKHOLE_ADMINPROHIB:
+					json_object_boolean_true_add(
+						json_nexthop,
+						"admin-prohibited");
+					break;
+				case BLACKHOLE_NULL:
+					json_object_boolean_true_add(
+						json_nexthop, "blackhole");
+					break;
+				case BLACKHOLE_UNSPEC:
+					break;
+				}
 				break;
 			default:
 				break;
 			}
+
+			if (CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_DUPLICATE))
+				json_object_boolean_true_add(json_nexthop,
+							     "duplicate");
 
 			if (CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_ACTIVE))
 				json_object_boolean_true_add(json_nexthop,
@@ -1004,16 +837,17 @@ static void vty_show_ip_route(struct vty *vty, struct route_node *rn,
 				srcdest_rnode2str(rn, buf, sizeof buf));
 
 			/* Distance and metric display. */
-			if (re->type != ZEBRA_ROUTE_CONNECT
-			    && re->type != ZEBRA_ROUTE_KERNEL)
-				len += vty_out(vty, " [%d/%d]", re->distance,
+			if (re->type != ZEBRA_ROUTE_CONNECT)
+				len += vty_out(vty, " [%u/%u]", re->distance,
 					       re->metric);
-		} else
+		} else {
 			vty_out(vty, "  %c%*c",
 				CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB)
-					? '*'
+					? CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_DUPLICATE)
+						? ' ' : '*'
 					: ' ',
 				len - 3 + (2 * nexthop_level(nexthop)), ' ');
+		}
 
 		switch (nexthop->type) {
 		case NEXTHOP_TYPE_IPV4:
@@ -1040,7 +874,20 @@ static void vty_show_ip_route(struct vty *vty, struct route_node *rn,
 				ifindex2ifname(nexthop->ifindex, re->vrf_id));
 			break;
 		case NEXTHOP_TYPE_BLACKHOLE:
-			vty_out(vty, " is directly connected, Null0");
+			vty_out(vty, " unreachable");
+			switch (nexthop->bh_type) {
+			case BLACKHOLE_REJECT:
+				vty_out(vty, " (ICMP unreachable)");
+				break;
+			case BLACKHOLE_ADMINPROHIB:
+				vty_out(vty, " (ICMP admin-prohibited)");
+				break;
+			case BLACKHOLE_NULL:
+				vty_out(vty, " (blackhole)");
+				break;
+			case BLACKHOLE_UNSPEC:
+				break;
+			}
 			break;
 		default:
 			break;
@@ -1083,34 +930,16 @@ static void vty_show_ip_route(struct vty *vty, struct route_node *rn,
 					       sizeof buf, 1));
 		}
 
-		if (CHECK_FLAG(re->flags, ZEBRA_FLAG_BLACKHOLE))
-			vty_out(vty, ", bh");
-		if (CHECK_FLAG(re->flags, ZEBRA_FLAG_REJECT))
-			vty_out(vty, ", rej");
-
-		if (re->type == ZEBRA_ROUTE_RIP || re->type == ZEBRA_ROUTE_OSPF
-		    || re->type == ZEBRA_ROUTE_ISIS
-		    || re->type == ZEBRA_ROUTE_NHRP
-		    || re->type == ZEBRA_ROUTE_TABLE
-		    || re->type == ZEBRA_ROUTE_BGP) {
-			time_t uptime;
-			struct tm *tm;
-
-			uptime = time(NULL);
-			uptime -= re->uptime;
-			tm = gmtime(&uptime);
-
-			if (uptime < ONE_DAY_SECOND)
-				vty_out(vty, ", %02d:%02d:%02d", tm->tm_hour,
-					tm->tm_min, tm->tm_sec);
-			else if (uptime < ONE_WEEK_SECOND)
-				vty_out(vty, ", %dd%02dh%02dm", tm->tm_yday,
-					tm->tm_hour, tm->tm_min);
-			else
-				vty_out(vty, ", %02dw%dd%02dh", tm->tm_yday / 7,
-					tm->tm_yday - ((tm->tm_yday / 7) * 7),
-					tm->tm_hour);
-		}
+		if (uptime < ONE_DAY_SECOND)
+			vty_out(vty, ", %02d:%02d:%02d", tm->tm_hour,
+				tm->tm_min, tm->tm_sec);
+		else if (uptime < ONE_WEEK_SECOND)
+			vty_out(vty, ", %dd%02dh%02dm", tm->tm_yday,
+				tm->tm_hour, tm->tm_min);
+		else
+			vty_out(vty, ", %02dw%dd%02dh", tm->tm_yday / 7,
+				tm->tm_yday - ((tm->tm_yday / 7) * 7),
+				tm->tm_hour);
 		vty_out(vty, "\n");
 	}
 }
@@ -1164,8 +993,7 @@ static int do_show_ip_route(struct vty *vty, const char *vrf_name, afi_t afi,
 
 	/* Show all routes. */
 	for (rn = route_top(table); rn; rn = route_next(rn)) {
-		RNODE_FOREACH_RE(rn, re)
-		{
+		RNODE_FOREACH_RE (rn, re) {
 			if (use_fib
 			    && !CHECK_FLAG(re->status,
 					   ROUTE_ENTRY_SELECTED_FIB))
@@ -1269,12 +1097,12 @@ DEFUN (show_ip_nht_vrf_all,
 	struct vrf *vrf;
 	struct zebra_vrf *zvrf;
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	if ((zvrf = vrf->info) != NULL) {
-		vty_out(vty, "\nVRF %s:\n", zvrf_name(zvrf));
-		zebra_print_rnh_table(zvrf_id(zvrf), AF_INET, vty,
-				      RNH_NEXTHOP_TYPE);
-	}
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name)
+		if ((zvrf = vrf->info) != NULL) {
+			vty_out(vty, "\nVRF %s:\n", zvrf_name(zvrf));
+			zebra_print_rnh_table(zvrf_id(zvrf), AF_INET, vty,
+					      RNH_NEXTHOP_TYPE);
+		}
 
 	return CMD_SUCCESS;
 }
@@ -1309,12 +1137,12 @@ DEFUN (show_ipv6_nht_vrf_all,
 	struct vrf *vrf;
 	struct zebra_vrf *zvrf;
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	if ((zvrf = vrf->info) != NULL) {
-		vty_out(vty, "\nVRF %s:\n", zvrf_name(zvrf));
-		zebra_print_rnh_table(zvrf_id(zvrf), AF_INET6, vty,
-				      RNH_NEXTHOP_TYPE);
-	}
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name)
+		if ((zvrf = vrf->info) != NULL) {
+			vty_out(vty, "\nVRF %s:\n", zvrf_name(zvrf));
+			zebra_print_rnh_table(zvrf_id(zvrf), AF_INET6, vty,
+					      RNH_NEXTHOP_TYPE);
+		}
 
 	return CMD_SUCCESS;
 }
@@ -1425,7 +1253,10 @@ DEFUN (show_ip_route,
 		tag = strtoul(argv[idx + 1]->arg, NULL, 10);
 
 	else if (argv_find(argv, argc, "A.B.C.D/M", &idx)) {
-		str2prefix(argv[idx]->arg, &p);
+		if (str2prefix(argv[idx]->arg, &p) <= 0) {
+			vty_out(vty, "%% Malformed prefix\n");
+			return CMD_WARNING;
+		}
 		longer_prefixes = true;
 	}
 
@@ -1470,8 +1301,7 @@ DEFUN (show_ip_route,
 	}
 
 	if (vrf_all) {
-		RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-		{
+		RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
 			if ((zvrf = vrf->info) == NULL
 			    || (table = zvrf->table[AFI_IP][SAFI_UNICAST])
 				       == NULL)
@@ -1595,8 +1425,7 @@ static void vty_show_ip_route_summary(struct vty *vty,
 	memset(&rib_cnt, 0, sizeof(rib_cnt));
 	memset(&fib_cnt, 0, sizeof(fib_cnt));
 	for (rn = route_top(table); rn; rn = srcdest_route_next(rn))
-		RNODE_FOREACH_RE(rn, re)
-		{
+		RNODE_FOREACH_RE (rn, re) {
 			is_ibgp = (re->type == ZEBRA_ROUTE_BGP
 				   && CHECK_FLAG(re->flags, ZEBRA_FLAG_IBGP));
 
@@ -1665,8 +1494,7 @@ static void vty_show_ip_route_summary_prefix(struct vty *vty,
 	memset(&rib_cnt, 0, sizeof(rib_cnt));
 	memset(&fib_cnt, 0, sizeof(fib_cnt));
 	for (rn = route_top(table); rn; rn = srcdest_route_next(rn))
-		RNODE_FOREACH_RE(rn, re)
-		{
+		RNODE_FOREACH_RE (rn, re) {
 
 			/*
 			 * In case of ECMP, count only once.
@@ -1795,8 +1623,7 @@ DEFUN (show_ip_route_vrf_all_addr,
 		return CMD_WARNING;
 	}
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	{
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
 		if ((zvrf = vrf->info) == NULL
 		    || (table = zvrf->table[AFI_IP][SAFI_UNICAST]) == NULL)
 			continue;
@@ -1836,8 +1663,7 @@ DEFUN (show_ip_route_vrf_all_prefix,
 		return CMD_WARNING;
 	}
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	{
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
 		if ((zvrf = vrf->info) == NULL
 		    || (table = zvrf->table[AFI_IP][SAFI_UNICAST]) == NULL)
 			continue;
@@ -1870,10 +1696,10 @@ DEFUN (show_ip_route_vrf_all_summary,
 	struct vrf *vrf;
 	struct zebra_vrf *zvrf;
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	if ((zvrf = vrf->info) != NULL)
-		vty_show_ip_route_summary(vty,
-					  zvrf->table[AFI_IP][SAFI_UNICAST]);
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name)
+		if ((zvrf = vrf->info) != NULL)
+			vty_show_ip_route_summary(
+				vty, zvrf->table[AFI_IP][SAFI_UNICAST]);
 
 	return CMD_SUCCESS;
 }
@@ -1891,10 +1717,10 @@ DEFUN (show_ip_route_vrf_all_summary_prefix,
 	struct vrf *vrf;
 	struct zebra_vrf *zvrf;
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	if ((zvrf = vrf->info) != NULL)
-		vty_show_ip_route_summary_prefix(
-			vty, zvrf->table[AFI_IP][SAFI_UNICAST]);
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name)
+		if ((zvrf = vrf->info) != NULL)
+			vty_show_ip_route_summary_prefix(
+				vty, zvrf->table[AFI_IP][SAFI_UNICAST]);
 
 	return CMD_SUCCESS;
 }
@@ -1911,8 +1737,7 @@ static int static_config(struct vty *vty, afi_t afi, safi_t safi,
 	char buf[SRCDEST2STR_BUFFER];
 	int write = 0;
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	{
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
 		if (!(zvrf = vrf->info))
 			continue;
 		if ((stable = zvrf->stable[afi][safi]) == NULL)
@@ -1934,37 +1759,37 @@ static int static_config(struct vty *vty, afi_t afi, safi_t safi,
 							  &si->addr.ipv6, buf,
 							  sizeof buf));
 					break;
-				case STATIC_IFINDEX:
+				case STATIC_IFNAME:
 					vty_out(vty, " %s", si->ifname);
 					break;
 				/* blackhole and Null0 mean the same thing */
 				case STATIC_BLACKHOLE:
-					if (CHECK_FLAG(si->flags, ZEBRA_FLAG_REJECT))
-						vty_out(vty, " reject");
-					else
+					switch (si->bh_type) {
+					case STATIC_BLACKHOLE_DROP:
+						vty_out(vty, " blackhole");
+						break;
+					case STATIC_BLACKHOLE_NULL:
 						vty_out(vty, " Null0");
+						break;
+					case STATIC_BLACKHOLE_REJECT:
+						vty_out(vty, " reject");
+						break;
+					}
 					break;
-				case STATIC_IPV6_GATEWAY_IFINDEX:
+				case STATIC_IPV4_GATEWAY_IFNAME:
+					vty_out(vty, " %s %s",
+						inet_ntop(AF_INET,
+							  &si->addr.ipv4, buf,
+							  sizeof buf),
+						si->ifname);
+					break;
+				case STATIC_IPV6_GATEWAY_IFNAME:
 					vty_out(vty, " %s %s",
 						inet_ntop(AF_INET6,
 							  &si->addr.ipv6, buf,
 							  sizeof buf),
-						ifindex2ifname(si->ifindex,
-							       si->vrf_id));
+						si->ifname);
 					break;
-				}
-
-				/* flags are incompatible with STATIC_BLACKHOLE
-				 */
-				if (si->type != STATIC_BLACKHOLE) {
-					if (CHECK_FLAG(si->flags,
-						       ZEBRA_FLAG_REJECT))
-						vty_out(vty, " %s", "reject");
-
-					if (CHECK_FLAG(si->flags,
-						       ZEBRA_FLAG_BLACKHOLE))
-						vty_out(vty, " %s",
-							"blackhole");
 				}
 
 				if (si->tag)
@@ -1996,532 +1821,93 @@ static int static_config(struct vty *vty, afi_t afi, safi_t safi,
 	return write;
 }
 
-/* General fucntion for IPv6 static route. */
-int static_ipv6_func(struct vty *vty, int add_cmd, const char *dest_str,
-		     const char *src_str, const char *gate_str,
-		     const char *ifname, const char *flag_str,
-		     const char *tag_str, const char *distance_str,
-		     const char *vrf_id_str, const char *label_str)
+DEFPY(ipv6_route_blackhole,
+      ipv6_route_blackhole_cmd,
+      "[no] ipv6 route X:X::X:X/M$prefix [from X:X::X:X/M] \
+          <Null0|reject|blackhole>$flag                    \
+          [{                                               \
+            tag (1-4294967295)                             \
+            |(1-255)$distance                              \
+            |vrf NAME                                      \
+            |label WORD                                    \
+          }]",
+      NO_STR
+      IPV6_STR
+      "Establish static routes\n"
+      "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
+      "IPv6 source-dest route\n"
+      "IPv6 source prefix\n"
+      "Null interface\n"
+      "Emit an ICMP unreachable when matched\n"
+      "Silently discard pkts when matched\n"
+      "Set tag for this route\n"
+      "Tag value\n"
+      "Distance value for this prefix\n"
+      VRF_CMD_HELP_STR
+      MPLS_LABEL_HELPSTR)
 {
-	int ret;
-	u_char distance;
-	struct prefix p, src;
-	struct prefix_ipv6 *src_p = NULL;
-	struct in6_addr *gate = NULL;
-	struct in6_addr gate_addr;
-	u_char type = STATIC_BLACKHOLE;
-	u_char flag = 0;
-	route_tag_t tag = 0;
-	unsigned int ifindex = 0;
-	struct interface *ifp = NULL;
-	struct zebra_vrf *zvrf;
-	struct static_nh_label snh_label;
-
-	ret = str2prefix(dest_str, &p);
-	if (ret <= 0) {
-		vty_out(vty, "%% Malformed address\n");
-		return CMD_WARNING_CONFIG_FAILED;
-	}
-
-	if (src_str) {
-		ret = str2prefix(src_str, &src);
-		if (ret <= 0 || src.family != AF_INET6) {
-			vty_out(vty, "%% Malformed source address\n");
-			return CMD_WARNING_CONFIG_FAILED;
-		}
-		src_p = (struct prefix_ipv6 *)&src;
-	}
-
-	/* Apply mask for given prefix. */
-	apply_mask(&p);
-
-	/* Administrative distance. */
-	if (distance_str)
-		distance = atoi(distance_str);
-	else
-		distance = ZEBRA_STATIC_DISTANCE_DEFAULT;
-
-	/* tag */
-	if (tag_str)
-		tag = strtoul(tag_str, NULL, 10);
-
-	/* When gateway is valid IPv6 addrees, then gate is treated as
-	   nexthop address other case gate is treated as interface name. */
-	ret = inet_pton(AF_INET6, gate_str, &gate_addr);
-
-	/* VRF id */
-	zvrf = zebra_vrf_lookup_by_name(vrf_id_str);
-
-	if (!zvrf) {
-		vty_out(vty, "%% vrf %s is not defined\n", vrf_id_str);
-		return CMD_WARNING_CONFIG_FAILED;
-	}
-
-	/* Labels */
-	memset(&snh_label, 0, sizeof(struct static_nh_label));
-	if (label_str) {
-		if (!mpls_enabled) {
-			vty_out(vty,
-				"%% MPLS not turned on in kernel, ignoring command\n");
-			return CMD_WARNING_CONFIG_FAILED;
-		}
-		int rc = mpls_str2label(label_str, &snh_label.num_labels,
-					snh_label.label);
-		if (rc < 0) {
-			switch (rc) {
-			case -1:
-				vty_out(vty, "%% Malformed label(s)\n");
-				break;
-			case -2:
-				vty_out(vty,
-					"%% Cannot use reserved label(s) (%d-%d)\n",
-					MPLS_MIN_RESERVED_LABEL,
-					MPLS_MAX_RESERVED_LABEL);
-				break;
-			case -3:
-				vty_out(vty,
-					"%% Too many labels. Enter %d or fewer\n",
-					MPLS_MAX_LABELS);
-				break;
-			}
-			return CMD_WARNING_CONFIG_FAILED;
-		}
-	}
-
-	/* Null0 static route.  */
-	if ((gate_str != NULL)
-	    && (strncasecmp(gate_str, "Null0", strlen(gate_str)) == 0)) {
-		if (flag_str) {
-			vty_out(vty, "%% can not have flag %s with Null0\n",
-				flag_str);
-			return CMD_WARNING_CONFIG_FAILED;
-		}
-		if (add_cmd)
-			static_add_route(AFI_IP6, SAFI_UNICAST, type, &p, src_p,
-					 NULL, ifindex, ifname,
-					 ZEBRA_FLAG_BLACKHOLE, tag, distance,
-					 zvrf, &snh_label);
-		else
-			static_delete_route(AFI_IP6, SAFI_UNICAST, type, &p,
-					    src_p, NULL, ifindex, tag, distance,
-					    zvrf, &snh_label);
-		return CMD_SUCCESS;
-	}
-
-	/* Route flags */
-	if (flag_str) {
-		switch (flag_str[0]) {
-		case 'r':
-		case 'R': /* XXX */
-			SET_FLAG(flag, ZEBRA_FLAG_REJECT);
-			break;
-		case 'b':
-		case 'B': /* XXX */
-			SET_FLAG(flag, ZEBRA_FLAG_BLACKHOLE);
-			break;
-		default:
-			vty_out(vty, "%% Malformed flag %s \n", flag_str);
-			return CMD_WARNING_CONFIG_FAILED;
-		}
-	}
-
-	if (ifname) {
-		/* When ifname is specified.  It must be come with gateway
-		   address. */
-		if (ret != 1) {
-			vty_out(vty, "%% Malformed address\n");
-			return CMD_WARNING_CONFIG_FAILED;
-		}
-		type = STATIC_IPV6_GATEWAY_IFINDEX;
-		gate = &gate_addr;
-		ifp = if_lookup_by_name(ifname, zvrf_id(zvrf));
-		if (!ifp) {
-			vty_out(vty, "%% Malformed Interface name %s\n",
-				ifname);
-			return CMD_WARNING_CONFIG_FAILED;
-		}
-		ifindex = ifp->ifindex;
-	} else {
-		if (ret == 1) {
-			type = STATIC_IPV6_GATEWAY;
-			gate = &gate_addr;
-		} else {
-			type = STATIC_IFINDEX;
-			ifp = if_lookup_by_name(gate_str, zvrf_id(zvrf));
-			if (!ifp) {
-				vty_out(vty, "%% Malformed Interface name %s\n",
-					gate_str);
-				ifindex = IFINDEX_DELETED;
-			} else
-				ifindex = ifp->ifindex;
-			ifname = gate_str;
-		}
-	}
-
-	if (add_cmd)
-		static_add_route(AFI_IP6, SAFI_UNICAST, type, &p, src_p,
-				 (union g_addr *)gate, ifindex, ifname, flag,
-				 tag, distance, zvrf, &snh_label);
-	else
-		static_delete_route(AFI_IP6, SAFI_UNICAST, type, &p, src_p,
-				    (union g_addr *)gate, ifindex, tag,
-				    distance, zvrf, &snh_label);
-
-	return CMD_SUCCESS;
+	return zebra_static_route(vty, AFI_IP6, SAFI_UNICAST, no, prefix_str,
+				  NULL, from_str, NULL, NULL, flag,
+				  tag_str, distance_str, vrf, label);
 }
 
-DEFUN (ipv6_route,
-       ipv6_route_cmd,
-       "ipv6 route X:X::X:X/M [from X:X::X:X/M] <X:X::X:X|INTERFACE|null0> [tag (1-4294967295)] [(1-255)] [vrf NAME]",
-       IP_STR
-       "Establish static routes\n"
-       "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
-       "IPv6 source-dest route\n"
-       "IPv6 source prefix\n"
-       "IPv6 gateway address\n"
-       "IPv6 gateway interface name\n"
-       "Null interface\n"
-       "Set tag for this route\n"
-       "Tag value\n"
-       "Distance value for this prefix\n"
-       VRF_CMD_HELP_STR)
+DEFPY(ipv6_route_address_interface,
+      ipv6_route_address_interface_cmd,
+      "[no] ipv6 route X:X::X:X/M$prefix [from X:X::X:X/M] \
+          X:X::X:X$gate                                    \
+          INTERFACE$ifname                                 \
+          [{                                               \
+            tag (1-4294967295)                             \
+            |(1-255)$distance                              \
+            |vrf NAME                                      \
+            |label WORD                                    \
+          }]",
+      NO_STR
+      IPV6_STR
+      "Establish static routes\n"
+      "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
+      "IPv6 source-dest route\n"
+      "IPv6 source prefix\n"
+      "IPv6 gateway address\n"
+      "IPv6 gateway interface name\n"
+      "Set tag for this route\n"
+      "Tag value\n"
+      "Distance value for this prefix\n"
+      VRF_CMD_HELP_STR
+      MPLS_LABEL_HELPSTR)
 {
-	int idx_ipv6_prefixlen = 2;
-	int idx_ipv6_ifname;
-	int idx_curr;
-	char *src, *tag, *distance, *vrf;
-
-	if (strmatch(argv[3]->text, "from")) {
-		src = argv[4]->arg;
-		idx_ipv6_ifname = 5;
-		idx_curr = 6;
-	} else {
-		src = NULL;
-		idx_ipv6_ifname = 3;
-		idx_curr = 4;
-	}
-
-	tag = distance = vrf = NULL;
-	zebra_vty_ip_route_tdv_helper(argc, argv, idx_curr, &tag, &distance,
-				      &vrf, NULL);
-
-	return static_ipv6_func(vty, 1, argv[idx_ipv6_prefixlen]->arg, src,
-				argv[idx_ipv6_ifname]->arg, NULL, NULL, tag,
-				distance, vrf, NULL);
+	return zebra_static_route(vty, AFI_IP6, SAFI_UNICAST, no, prefix_str,
+				  NULL, from_str, gate_str, ifname, NULL,
+				  tag_str, distance_str, vrf, label);
 }
 
-DEFUN (ipv6_route_flags,
-       ipv6_route_flags_cmd,
-       "ipv6 route X:X::X:X/M [from X:X::X:X/M] <X:X::X:X|INTERFACE> <reject|blackhole> [tag (1-4294967295)] [(1-255)] [vrf NAME]",
-       IP_STR
-       "Establish static routes\n"
-       "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
-       "IPv6 source-dest route\n"
-       "IPv6 source prefix\n"
-       "IPv6 gateway address\n"
-       "IPv6 gateway interface name\n"
-       "Emit an ICMP unreachable when matched\n"
-       "Silently discard pkts when matched\n"
-       "Set tag for this route\n"
-       "Tag value\n"
-       "Distance value for this prefix\n"
-       VRF_CMD_HELP_STR)
+DEFPY(ipv6_route,
+      ipv6_route_cmd,
+      "[no] ipv6 route X:X::X:X/M$prefix [from X:X::X:X/M] \
+          <X:X::X:X$gate|INTERFACE$ifname>                 \
+          [{                                               \
+            tag (1-4294967295)                             \
+            |(1-255)$distance                              \
+            |vrf NAME                                      \
+            |label WORD                                    \
+          }]",
+      NO_STR
+      IPV6_STR
+      "Establish static routes\n"
+      "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
+      "IPv6 source-dest route\n"
+      "IPv6 source prefix\n"
+      "IPv6 gateway address\n"
+      "IPv6 gateway interface name\n"
+      "Set tag for this route\n"
+      "Tag value\n"
+      "Distance value for this prefix\n"
+      VRF_CMD_HELP_STR
+      MPLS_LABEL_HELPSTR)
 {
-	int idx_ipv6_prefixlen = 2;
-	int idx_ipv6_ifname;
-	int idx_reject_blackhole;
-	int idx_curr;
-	char *src, *tag, *distance, *vrf;
-
-	if (strmatch(argv[3]->text, "from")) {
-		src = argv[4]->arg;
-		idx_ipv6_ifname = 5;
-		idx_reject_blackhole = 6;
-		idx_curr = 7;
-	} else {
-		src = NULL;
-		idx_ipv6_ifname = 3;
-		idx_reject_blackhole = 4;
-		idx_curr = 5;
-	}
-
-	tag = distance = vrf = NULL;
-	zebra_vty_ip_route_tdv_helper(argc, argv, idx_curr, &tag, &distance,
-				      &vrf, NULL);
-
-	return static_ipv6_func(vty, 1, argv[idx_ipv6_prefixlen]->arg, src,
-				argv[idx_ipv6_ifname]->arg, NULL,
-				argv[idx_reject_blackhole]->arg, tag, distance,
-				vrf, NULL);
-}
-
-DEFUN (ipv6_route_ifname,
-       ipv6_route_ifname_cmd,
-       "ipv6 route X:X::X:X/M [from X:X::X:X/M] X:X::X:X INTERFACE [tag (1-4294967295)] [(1-255)] [vrf NAME]",
-       IP_STR
-       "Establish static routes\n"
-       "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
-       "IPv6 source-dest route\n"
-       "IPv6 source prefix\n"
-       "IPv6 gateway address\n"
-       "IPv6 gateway interface name\n"
-       "Set tag for this route\n"
-       "Tag value\n"
-       "Distance value for this prefix\n"
-       VRF_CMD_HELP_STR)
-{
-	int idx_ipv6_prefixlen = 2;
-	int idx_ipv6 = 3;
-	int idx_interface = 4;
-	int idx_curr = 5;
-	char *src, *tag, *distance, *vrf;
-
-	if (strmatch(argv[3]->text, "from")) {
-		src = argv[4]->arg;
-		idx_ipv6 = 5;
-		idx_interface = 6;
-		idx_curr = 7;
-	} else {
-		src = NULL;
-		idx_ipv6 = 3;
-		idx_interface = 4;
-		idx_curr = 5;
-	}
-
-	tag = distance = vrf = NULL;
-	zebra_vty_ip_route_tdv_helper(argc, argv, idx_curr, &tag, &distance,
-				      &vrf, NULL);
-
-	return static_ipv6_func(vty, 1, argv[idx_ipv6_prefixlen]->arg, src,
-				argv[idx_ipv6]->arg, argv[idx_interface]->arg,
-				NULL, tag, distance, vrf, NULL);
-}
-
-DEFUN (ipv6_route_ifname_flags,
-       ipv6_route_ifname_flags_cmd,
-       "ipv6 route X:X::X:X/M [from X:X::X:X/M] X:X::X:X INTERFACE <reject|blackhole> [tag (1-4294967295)] [(1-255)] [vrf NAME]",
-       IP_STR
-       "Establish static routes\n"
-       "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
-       "IPv6 source-dest route\n"
-       "IPv6 source prefix\n"
-       "IPv6 gateway address\n"
-       "IPv6 gateway interface name\n"
-       "Emit an ICMP unreachable when matched\n"
-       "Silently discard pkts when matched\n"
-       "Set tag for this route\n"
-       "Tag value\n"
-       "Distance value for this prefix\n"
-       VRF_CMD_HELP_STR)
-{
-	int idx_ipv6_prefixlen = 2;
-	int idx_ipv6;
-	int idx_interface;
-	int idx_reject_blackhole;
-	int idx_curr;
-	char *src, *tag, *distance, *vrf;
-
-	if (strmatch(argv[3]->text, "from")) {
-		src = argv[4]->arg;
-		idx_ipv6 = 5;
-		idx_interface = 6;
-		idx_reject_blackhole = 7;
-		idx_curr = 8;
-	} else {
-		src = NULL;
-		idx_ipv6 = 3;
-		idx_interface = 4;
-		idx_reject_blackhole = 5;
-		idx_curr = 6;
-	}
-
-	tag = distance = vrf = NULL;
-	zebra_vty_ip_route_tdv_helper(argc, argv, idx_curr, &tag, &distance,
-				      &vrf, NULL);
-
-	return static_ipv6_func(vty, 1, argv[idx_ipv6_prefixlen]->arg, src,
-				argv[idx_ipv6]->arg, argv[idx_interface]->arg,
-				argv[idx_reject_blackhole]->arg, tag, distance,
-				vrf, NULL);
-}
-
-DEFUN (no_ipv6_route,
-       no_ipv6_route_cmd,
-       "no ipv6 route X:X::X:X/M [from X:X::X:X/M] <X:X::X:X|INTERFACE|null0> [tag (1-4294967295)] [(1-255)] [vrf NAME]",
-       NO_STR
-       IP_STR
-       "Establish static routes\n"
-       "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
-       "IPv6 source-dest route\n"
-       "IPv6 source prefix\n"
-       "IPv6 gateway address\n"
-       "IPv6 gateway interface name\n"
-       "Null interface\n"
-       "Set tag for this route\n"
-       "Tag value\n"
-       "Distance value for this prefix\n"
-       VRF_CMD_HELP_STR)
-{
-	int idx_ipv6_prefixlen = 3;
-	int idx_ipv6_ifname;
-	int idx_curr;
-	char *src, *tag, *distance, *vrf;
-
-	if (strmatch(argv[4]->text, "from")) {
-		src = argv[5]->arg;
-		idx_ipv6_ifname = 6;
-		idx_curr = 7;
-	} else {
-		src = NULL;
-		idx_ipv6_ifname = 4;
-		idx_curr = 5;
-	}
-
-	tag = distance = vrf = NULL;
-	zebra_vty_ip_route_tdv_helper(argc, argv, idx_curr, &tag, &distance,
-				      &vrf, NULL);
-
-	return static_ipv6_func(vty, 0, argv[idx_ipv6_prefixlen]->arg, src,
-				argv[idx_ipv6_ifname]->arg, NULL, NULL, tag,
-				distance, vrf, NULL);
-}
-
-DEFUN (no_ipv6_route_flags,
-       no_ipv6_route_flags_cmd,
-       "no ipv6 route X:X::X:X/M [from X:X::X:X/M] <X:X::X:X|INTERFACE> <reject|blackhole> [tag (1-4294967295)] [(1-255)] [vrf NAME]",
-       NO_STR
-       IP_STR
-       "Establish static routes\n"
-       "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
-       "IPv6 source-dest route\n"
-       "IPv6 source prefix\n"
-       "IPv6 gateway address\n"
-       "IPv6 gateway interface name\n"
-       "Emit an ICMP unreachable when matched\n"
-       "Silently discard pkts when matched\n"
-       "Set tag for this route\n"
-       "Tag value\n"
-       "Distance value for this prefix\n"
-       VRF_CMD_HELP_STR)
-{
-	int idx_ipv6_prefixlen = 3;
-	int idx_ipv6_ifname;
-	int idx_reject_blackhole;
-	int idx_curr;
-	char *src, *tag, *distance, *vrf;
-
-	if (strmatch(argv[4]->text, "from")) {
-		src = argv[5]->arg;
-		idx_ipv6_ifname = 6;
-		idx_reject_blackhole = 7;
-		idx_curr = 8;
-	} else {
-		src = NULL;
-		idx_ipv6_ifname = 4;
-		idx_reject_blackhole = 5;
-		idx_curr = 6;
-	}
-
-	tag = distance = vrf = NULL;
-	zebra_vty_ip_route_tdv_helper(argc, argv, idx_curr, &tag, &distance,
-				      &vrf, NULL);
-
-	return static_ipv6_func(vty, 0, argv[idx_ipv6_prefixlen]->arg, src,
-				argv[idx_ipv6_ifname]->arg, NULL,
-				argv[idx_reject_blackhole]->arg, tag, distance,
-				vrf, NULL);
-}
-
-DEFUN (no_ipv6_route_ifname,
-       no_ipv6_route_ifname_cmd,
-       "no ipv6 route X:X::X:X/M [from X:X::X:X/M] X:X::X:X INTERFACE [tag (1-4294967295)] [(1-255)] [vrf NAME]",
-       NO_STR
-       IP_STR
-       "Establish static routes\n"
-       "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
-       "IPv6 source-dest route\n"
-       "IPv6 source prefix\n"
-       "IPv6 gateway address\n"
-       "IPv6 gateway interface name\n"
-       "Set tag for this route\n"
-       "Tag value\n"
-       "Distance value for this prefix\n"
-       VRF_CMD_HELP_STR)
-{
-	int idx_ipv6_prefixlen = 3;
-	int idx_ipv6;
-	int idx_interface;
-	int idx_curr;
-	char *src, *tag, *distance, *vrf;
-
-	if (strmatch(argv[4]->text, "from")) {
-		src = argv[5]->arg;
-		idx_ipv6 = 6;
-		idx_interface = 7;
-		idx_curr = 8;
-	} else {
-		src = NULL;
-		idx_ipv6 = 4;
-		idx_interface = 5;
-		idx_curr = 6;
-	}
-
-	tag = distance = vrf = NULL;
-	zebra_vty_ip_route_tdv_helper(argc, argv, idx_curr, &tag, &distance,
-				      &vrf, NULL);
-
-	return static_ipv6_func(vty, 0, argv[idx_ipv6_prefixlen]->arg, src,
-				argv[idx_ipv6]->arg, argv[idx_interface]->arg,
-				NULL, tag, distance, vrf, NULL);
-}
-
-DEFUN (no_ipv6_route_ifname_flags,
-       no_ipv6_route_ifname_flags_cmd,
-       "no ipv6 route X:X::X:X/M [from X:X::X:X/M] X:X::X:X INTERFACE <reject|blackhole> [tag (1-4294967295)] [(1-255)] [vrf NAME]",
-       NO_STR
-       IP_STR
-       "Establish static routes\n"
-       "IPv6 destination prefix (e.g. 3ffe:506::/32)\n"
-       "IPv6 source-dest route\n"
-       "IPv6 source prefix\n"
-       "IPv6 gateway address\n"
-       "IPv6 gateway interface name\n"
-       "Emit an ICMP unreachable when matched\n"
-       "Silently discard pkts when matched\n"
-       "Set tag for this route\n"
-       "Tag value\n"
-       "Distance value for this prefix\n"
-       VRF_CMD_HELP_STR)
-{
-	int idx_ipv6_prefixlen = 3;
-	int idx_ipv6;
-	int idx_interface;
-	int idx_reject_blackhole;
-	int idx_curr;
-	char *src, *tag, *distance, *vrf;
-
-	if (strmatch(argv[4]->text, "from")) {
-		src = argv[5]->arg;
-		idx_ipv6 = 6;
-		idx_interface = 7;
-		idx_reject_blackhole = 8;
-		idx_curr = 9;
-	} else {
-		src = NULL;
-		idx_ipv6 = 4;
-		idx_interface = 5;
-		idx_reject_blackhole = 6;
-		idx_curr = 7;
-	}
-
-	tag = distance = vrf = NULL;
-	zebra_vty_ip_route_tdv_helper(argc, argv, idx_curr, &tag, &distance,
-				      &vrf, NULL);
-
-	return static_ipv6_func(vty, 0, argv[idx_ipv6_prefixlen]->arg, src,
-				argv[idx_ipv6]->arg, argv[idx_interface]->arg,
-				argv[idx_reject_blackhole]->arg, tag, distance,
-				vrf, NULL);
+	return zebra_static_route(vty, AFI_IP6, SAFI_UNICAST, no, prefix_str,
+				  NULL, from_str, gate_str, ifname, NULL,
+				  tag_str, distance_str, vrf, label);
 }
 
 DEFUN (show_ipv6_route,
@@ -2564,7 +1950,10 @@ DEFUN (show_ipv6_route,
 		tag = strtoul(argv[idx + 1]->arg, NULL, 10);
 
 	else if (argv_find(argv, argc, "X:X::X:X/M", &idx)) {
-		str2prefix(argv[idx]->arg, &p);
+		if (str2prefix(argv[idx]->arg, &p) <= 0) {
+			vty_out(vty, "%% Malformed prefix\n");
+			return CMD_WARNING;
+		}
 		longer_prefixes = true;
 	}
 
@@ -2599,8 +1988,7 @@ DEFUN (show_ipv6_route,
 	}
 
 	if (vrf_all) {
-		RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-		{
+		RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
 			if ((zvrf = vrf->info) == NULL
 			    || (table = zvrf->table[AFI_IP6][SAFI_UNICAST])
 				       == NULL)
@@ -2788,8 +2176,7 @@ DEFUN (show_ipv6_mroute,
 
 	/* Show all IPv6 route. */
 	for (rn = route_top(table); rn; rn = srcdest_route_next(rn))
-		RNODE_FOREACH_RE(rn, re)
-		{
+		RNODE_FOREACH_RE (rn, re) {
 			if (first) {
 				vty_out(vty, SHOW_ROUTE_V6_HEADER);
 				first = 0;
@@ -2822,8 +2209,7 @@ DEFUN (show_ipv6_route_vrf_all_addr,
 		return CMD_WARNING;
 	}
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	{
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
 		if ((zvrf = vrf->info) == NULL
 		    || (table = zvrf->table[AFI_IP6][SAFI_UNICAST]) == NULL)
 			continue;
@@ -2863,8 +2249,7 @@ DEFUN (show_ipv6_route_vrf_all_prefix,
 		return CMD_WARNING;
 	}
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	{
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
 		if ((zvrf = vrf->info) == NULL
 		    || (table = zvrf->table[AFI_IP6][SAFI_UNICAST]) == NULL)
 			continue;
@@ -2897,10 +2282,10 @@ DEFUN (show_ipv6_route_vrf_all_summary,
 	struct vrf *vrf;
 	struct zebra_vrf *zvrf;
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	if ((zvrf = vrf->info) != NULL)
-		vty_show_ip_route_summary(vty,
-					  zvrf->table[AFI_IP6][SAFI_UNICAST]);
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name)
+		if ((zvrf = vrf->info) != NULL)
+			vty_show_ip_route_summary(
+				vty, zvrf->table[AFI_IP6][SAFI_UNICAST]);
 
 	return CMD_SUCCESS;
 }
@@ -2920,16 +2305,14 @@ DEFUN (show_ipv6_mroute_vrf_all,
 	struct zebra_vrf *zvrf;
 	int first = 1;
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	{
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
 		if ((zvrf = vrf->info) == NULL
 		    || (table = zvrf->table[AFI_IP6][SAFI_MULTICAST]) == NULL)
 			continue;
 
 		/* Show all IPv6 route. */
 		for (rn = route_top(table); rn; rn = srcdest_route_next(rn))
-			RNODE_FOREACH_RE(rn, re)
-			{
+			RNODE_FOREACH_RE (rn, re) {
 				if (first) {
 					vty_out(vty, SHOW_ROUTE_V6_HEADER);
 					first = 0;
@@ -2953,10 +2336,10 @@ DEFUN (show_ipv6_route_vrf_all_summary_prefix,
 	struct vrf *vrf;
 	struct zebra_vrf *zvrf;
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	if ((zvrf = vrf->info) != NULL)
-		vty_show_ip_route_summary_prefix(
-			vty, zvrf->table[AFI_IP6][SAFI_UNICAST]);
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name)
+		if ((zvrf = vrf->info) != NULL)
+			vty_show_ip_route_summary_prefix(
+				vty, zvrf->table[AFI_IP6][SAFI_UNICAST]);
 
 	return CMD_SUCCESS;
 }
@@ -2992,8 +2375,7 @@ DEFUN (show_vrf,
 	struct vrf *vrf;
 	struct zebra_vrf *zvrf;
 
-	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name)
-	{
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
 		if (!(zvrf = vrf->info))
 			continue;
 		if (!zvrf_id(zvrf))
@@ -3011,13 +2393,163 @@ DEFUN (show_vrf,
 	return CMD_SUCCESS;
 }
 
+DEFUN (default_vrf_vni_mapping,
+       default_vrf_vni_mapping_cmd,
+       "vni " CMD_VNI_RANGE,
+       "VNI corresponding to the DEFAULT VRF\n"
+       "VNI-ID\n")
+{
+	int ret = 0;
+	char err[ERR_STR_SZ];
+	struct zebra_vrf *zvrf = NULL;
+	vni_t vni = strtoul(argv[1]->arg, NULL, 10);
+
+	zvrf = vrf_info_lookup(VRF_DEFAULT);
+	if (!zvrf)
+		return CMD_WARNING;
+
+	ret = zebra_vxlan_process_vrf_vni_cmd(zvrf, vni, err, 1);
+	if (ret != 0) {
+		vty_out(vty, "%s\n", err);
+		return CMD_WARNING;
+	}
+
+	return CMD_SUCCESS;
+}
+
+DEFUN (no_default_vrf_vni_mapping,
+       no_default_vrf_vni_mapping_cmd,
+       "no vni " CMD_VNI_RANGE,
+       NO_STR
+       "VNI corresponding to DEFAULT VRF\n"
+       "VNI-ID")
+{
+	int ret = 0;
+	char err[ERR_STR_SZ];
+	vni_t vni = strtoul(argv[2]->arg, NULL, 10);
+	struct zebra_vrf *zvrf = NULL;
+
+	zvrf = vrf_info_lookup(VRF_DEFAULT);
+	if (!zvrf)
+		return CMD_WARNING;
+
+	ret = zebra_vxlan_process_vrf_vni_cmd(zvrf, vni, err, 0);
+	if (ret != 0) {
+		vty_out(vty, "%s\n", err);
+		return CMD_WARNING;
+	}
+
+	return CMD_SUCCESS;
+}
+
+DEFUN (vrf_vni_mapping,
+       vrf_vni_mapping_cmd,
+       "vni " CMD_VNI_RANGE,
+       "VNI corresponding to tenant VRF\n"
+       "VNI-ID\n")
+{
+	int ret = 0;
+
+	ZEBRA_DECLVAR_CONTEXT(vrf, zvrf);
+	vni_t vni = strtoul(argv[1]->arg, NULL, 10);
+	char err[ERR_STR_SZ];
+
+	assert(vrf);
+	assert(zvrf);
+
+	ret = zebra_vxlan_process_vrf_vni_cmd(zvrf, vni, err, 1);
+	if (ret != 0) {
+		vty_out(vty, "%s\n", err);
+		return CMD_WARNING;
+	}
+
+	return CMD_SUCCESS;
+}
+
+DEFUN (no_vrf_vni_mapping,
+       no_vrf_vni_mapping_cmd,
+       "no vni " CMD_VNI_RANGE,
+       NO_STR
+       "VNI corresponding to tenant VRF\n"
+       "VNI-ID")
+{
+	int ret = 0;
+	char err[ERR_STR_SZ];
+	vni_t vni = strtoul(argv[2]->arg, NULL, 10);
+
+	ZEBRA_DECLVAR_CONTEXT(vrf, zvrf);
+
+	assert(vrf);
+	assert(zvrf);
+
+	ret = zebra_vxlan_process_vrf_vni_cmd(zvrf, vni, err, 0);
+	if (ret != 0) {
+		vty_out(vty, "%s\n", err);
+		return CMD_WARNING;
+	}
+
+	return CMD_SUCCESS;
+}
+
+/* show vrf */
+DEFUN (show_vrf_vni,
+       show_vrf_vni_cmd,
+       "show vrf vni [json]",
+       SHOW_STR
+       "VRF\n"
+       "VNI\n"
+       JSON_STR)
+{
+	struct vrf *vrf;
+	struct zebra_vrf *zvrf;
+	json_object *json = NULL;
+	json_object *json_vrfs = NULL;
+	u_char uj = use_json(argc, argv);
+
+	if (uj) {
+		json = json_object_new_object();
+		json_vrfs = json_object_new_array();
+	}
+
+	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name) {
+		zvrf = vrf->info;
+		if (!zvrf)
+			continue;
+
+		if (!uj) {
+			vty_out(vty, "vrf: %s VNI: %u",
+				zvrf_name(zvrf),
+				zvrf->l3vni);
+			vty_out(vty, "\n");
+		} else {
+			json_object *json_vrf = NULL;
+
+			json_vrf = json_object_new_object();
+			json_object_string_add(json_vrf, "vrf",
+					       zvrf_name(zvrf));
+			json_object_int_add(json_vrf, "l3vni",
+					    zvrf->l3vni);
+			json_object_array_add(json_vrfs, json_vrf);
+		}
+	}
+
+	if (uj) {
+		json_object_object_add(json, "vrfs", json_vrfs);
+		vty_out(vty, "%s\n", json_object_to_json_string_ext(
+					     json, JSON_C_TO_STRING_PRETTY));
+		json_object_free(json);
+	}
+
+	return CMD_SUCCESS;
+}
+
 DEFUN (show_evpn_vni,
        show_evpn_vni_cmd,
        "show evpn vni [json]",
        SHOW_STR
        "EVPN\n"
        "VxLAN information\n"
-       "JavaScript Object Notation\n")
+       JSON_STR)
 {
 	struct zebra_vrf *zvrf;
 	u_char uj = use_json(argc, argv);
@@ -3034,7 +2566,7 @@ DEFUN (show_evpn_vni_vni,
        "EVPN\n"
        "VxLAN Network Identifier\n"
        "VNI number\n"
-       "JavaScript Object Notation\n")
+       JSON_STR)
 {
 	struct zebra_vrf *zvrf;
 	vni_t vni;
@@ -3046,6 +2578,161 @@ DEFUN (show_evpn_vni_vni,
 	return CMD_SUCCESS;
 }
 
+DEFUN (show_evpn_l3vni,
+       show_evpn_l3vni_cmd,
+       "show evpn l3vni [json]",
+       SHOW_STR
+       "EVPN\n"
+       "L3 VNI\n"
+       JSON_STR)
+{
+	u_char uj = use_json(argc, argv);
+
+	zebra_vxlan_print_l3vnis(vty, uj);
+	return CMD_SUCCESS;
+}
+
+DEFUN (show_evpn_l3vni_vni,
+       show_evpn_l3vni_vni_cmd,
+       "show evpn l3vni " CMD_VNI_RANGE "[json]",
+       SHOW_STR
+       "EVPN\n"
+       "L3 VxLAN Network Identifier\n"
+       "VNI number\n"
+       JSON_STR)
+{
+	vni_t vni;
+	u_char uj = use_json(argc, argv);
+
+	vni = strtoul(argv[3]->arg, NULL, 10);
+	zebra_vxlan_print_l3vni(vty, vni, uj);
+	return CMD_SUCCESS;
+}
+
+DEFUN (show_evpn_rmac_l3vni_mac,
+       show_evpn_rmac_l3vni_mac_cmd,
+       "show evpn rmac l3vni " CMD_VNI_RANGE " mac WORD [json]",
+       SHOW_STR
+       "EVPN\n"
+       "RMAC\n"
+       "L3-VNI\n"
+       "VNI number\n"
+       "MAC\n"
+       "mac-address (e.g. 0a:0a:0a:0a:0a:0a)\n"
+       JSON_STR)
+{
+	vni_t l3vni = 0;
+	struct ethaddr mac;
+	u_char uj = use_json(argc, argv);
+
+	l3vni = strtoul(argv[4]->arg, NULL, 10);
+	if (!prefix_str2mac(argv[6]->arg, &mac)) {
+		vty_out(vty, "%% Malformed MAC address\n");
+		return CMD_WARNING;
+	}
+	zebra_vxlan_print_specific_rmac_l3vni(vty, l3vni, &mac, uj);
+	return CMD_SUCCESS;
+}
+
+DEFUN (show_evpn_rmac_l3vni,
+       show_evpn_rmac_l3vni_cmd,
+       "show evpn rmac l3vni " CMD_VNI_RANGE "[json]",
+       SHOW_STR
+       "EVPN\n"
+       "RMAC\n"
+       "L3-VNI\n"
+       "VNI number\n"
+       JSON_STR)
+{
+	vni_t l3vni = 0;
+	u_char uj = use_json(argc, argv);
+
+	l3vni = strtoul(argv[4]->arg, NULL, 10);
+	zebra_vxlan_print_rmacs_l3vni(vty, l3vni, uj);
+
+	return CMD_SUCCESS;
+}
+
+DEFUN (show_evpn_rmac_l3vni_all,
+       show_evpn_rmac_l3vni_all_cmd,
+       "show evpn rmac l3vni all [json]",
+       SHOW_STR
+       "EVPN\n"
+       "RMAC addresses\n"
+       "L3-VNI\n"
+       "All VNIs\n"
+       JSON_STR)
+{
+	u_char uj = use_json(argc, argv);
+
+	zebra_vxlan_print_rmacs_all_l3vni(vty, uj);
+
+	return CMD_SUCCESS;
+}
+
+DEFUN (show_evpn_nh_l3vni_ip,
+       show_evpn_nh_l3vni_ip_cmd,
+       "show evpn next-hops l3vni " CMD_VNI_RANGE " ip WORD [json]",
+       SHOW_STR
+       "EVPN\n"
+       "Remote Vteps\n"
+       "L3-VNI\n"
+       "VNI number\n"
+       "Ip address\n"
+       "Host address (ipv4 or ipv6)\n"
+       JSON_STR)
+{
+	vni_t l3vni;
+	struct ipaddr ip;
+	u_char uj = use_json(argc, argv);
+
+	l3vni = strtoul(argv[4]->arg, NULL, 10);
+	if (str2ipaddr(argv[6]->arg, &ip) != 0) {
+		if (!uj)
+			vty_out(vty, "%% Malformed Neighbor address\n");
+		return CMD_WARNING;
+	}
+	zebra_vxlan_print_specific_nh_l3vni(vty, l3vni, &ip, uj);
+
+	return CMD_SUCCESS;
+}
+
+DEFUN (show_evpn_nh_l3vni,
+       show_evpn_nh_l3vni_cmd,
+       "show evpn next-hops l3vni " CMD_VNI_RANGE "[json]",
+       SHOW_STR
+       "EVPN\n"
+       "Remote Vteps\n"
+       "L3-VNI\n"
+       "VNI number\n"
+       JSON_STR)
+{
+	vni_t l3vni;
+	u_char uj = use_json(argc, argv);
+
+	l3vni = strtoul(argv[4]->arg, NULL, 10);
+	zebra_vxlan_print_nh_l3vni(vty, l3vni, uj);
+
+	return CMD_SUCCESS;
+}
+
+DEFUN (show_evpn_nh_l3vni_all,
+       show_evpn_nh_l3vni_all_cmd,
+       "show evpn next-hops l3vni all [json]",
+       SHOW_STR
+       "EVPN\n"
+       "Remote VTEPs\n"
+       "L3-VNI\n"
+       "All VNIs\n"
+       JSON_STR)
+{
+	u_char uj = use_json(argc, argv);
+
+	zebra_vxlan_print_nh_all_l3vni(vty, uj);
+
+	return CMD_SUCCESS;
+}
+
 DEFUN (show_evpn_mac_vni,
        show_evpn_mac_vni_cmd,
        "show evpn mac vni " CMD_VNI_RANGE "[json]",
@@ -3054,7 +2741,7 @@ DEFUN (show_evpn_mac_vni,
        "MAC addresses\n"
        "VxLAN Network Identifier\n"
        "VNI number\n"
-       "JavaScript Object Notation\n")
+       JSON_STR)
 {
 	struct zebra_vrf *zvrf;
 	vni_t vni;
@@ -3074,7 +2761,7 @@ DEFUN (show_evpn_mac_vni_all,
        "MAC addresses\n"
        "VxLAN Network Identifier\n"
        "All VNIs\n"
-       "JavaScript Object Notation\n")
+       JSON_STR)
 {
 	struct zebra_vrf *zvrf;
 	u_char uj = use_json(argc, argv);
@@ -3094,7 +2781,7 @@ DEFUN (show_evpn_mac_vni_all_vtep,
        "All VNIs\n"
        "Remote VTEP\n"
        "Remote VTEP IP address\n"
-       "JavaScript Object Notation\n")
+       JSON_STR)
 {
 	struct zebra_vrf *zvrf;
 	struct in_addr vtep_ip;
@@ -3147,7 +2834,7 @@ DEFUN (show_evpn_mac_vni_vtep,
        "VNI number\n"
        "Remote VTEP\n"
        "Remote VTEP IP address\n"
-       "JavaScript Object Notation\n")
+       JSON_STR)
 {
 	struct zebra_vrf *zvrf;
 	vni_t vni;
@@ -3174,7 +2861,7 @@ DEFUN (show_evpn_neigh_vni,
        "ARP and ND cache\n"
        "VxLAN Network Identifier\n"
        "VNI number\n"
-       "JavaScript Object Notation\n")
+       JSON_STR)
 {
 	struct zebra_vrf *zvrf;
 	vni_t vni;
@@ -3194,7 +2881,7 @@ DEFUN (show_evpn_neigh_vni_all,
        "ARP and ND cache\n"
        "VxLAN Network Identifier\n"
        "All VNIs\n"
-       "JavaScript Object Notation\n")
+       JSON_STR)
 {
 	struct zebra_vrf *zvrf;
 	u_char uj = use_json(argc, argv);
@@ -3214,7 +2901,7 @@ DEFUN (show_evpn_neigh_vni_neigh,
        "VNI number\n"
        "Neighbor\n"
        "Neighbor address (IPv4 or IPv6 address)\n"
-       "JavaScript Object Notation\n")
+       JSON_STR)
 {
 	struct zebra_vrf *zvrf;
 	vni_t vni;
@@ -3242,7 +2929,7 @@ DEFUN (show_evpn_neigh_vni_vtep,
        "VNI number\n"
        "Remote VTEP\n"
        "Remote VTEP IP address\n"
-       "JavaScript Object Notation\n")
+       JSON_STR)
 {
 	struct zebra_vrf *zvrf;
 	vni_t vni;
@@ -3302,6 +2989,8 @@ DEFUN (ip_zebra_import_table_distance,
 		vty_out(vty,
 			"Invalid routing table ID, %d. Must be in range 1-252\n",
 			table_id);
+		if (rmap)
+			XFREE(MTYPE_ROUTE_MAP_NAME, rmap);
 		return CMD_WARNING;
 	}
 
@@ -3309,6 +2998,8 @@ DEFUN (ip_zebra_import_table_distance,
 		vty_out(vty,
 			"Invalid routing table ID, %d. Must be non-default table\n",
 			table_id);
+		if (rmap)
+			XFREE(MTYPE_ROUTE_MAP_NAME, rmap);
 		return CMD_WARNING;
 	}
 
@@ -3398,19 +3089,16 @@ void zebra_vty_init(void)
 	install_element(CONFIG_NODE, &allow_external_route_update_cmd);
 	install_element(CONFIG_NODE, &no_allow_external_route_update_cmd);
 	install_element(CONFIG_NODE, &ip_mroute_dist_cmd);
-	install_element(CONFIG_NODE, &no_ip_mroute_dist_cmd);
 	install_element(CONFIG_NODE, &ip_multicast_mode_cmd);
 	install_element(CONFIG_NODE, &no_ip_multicast_mode_cmd);
+	install_element(CONFIG_NODE, &ip_route_blackhole_cmd);
+	install_element(CONFIG_NODE, &ip_route_address_interface_cmd);
 	install_element(CONFIG_NODE, &ip_route_cmd);
-	install_element(CONFIG_NODE, &ip_route_flags_cmd);
-	install_element(CONFIG_NODE, &ip_route_mask_cmd);
-	install_element(CONFIG_NODE, &ip_route_mask_flags_cmd);
-	install_element(CONFIG_NODE, &no_ip_route_cmd);
-	install_element(CONFIG_NODE, &no_ip_route_mask_cmd);
 	install_element(CONFIG_NODE, &ip_zebra_import_table_distance_cmd);
 	install_element(CONFIG_NODE, &no_ip_zebra_import_table_cmd);
 
 	install_element(VIEW_NODE, &show_vrf_cmd);
+	install_element(VIEW_NODE, &show_vrf_vni_cmd);
 	install_element(VIEW_NODE, &show_ip_route_cmd);
 	install_element(VIEW_NODE, &show_ip_nht_cmd);
 	install_element(VIEW_NODE, &show_ip_nht_vrf_all_cmd);
@@ -3424,24 +3112,14 @@ void zebra_vty_init(void)
 	install_element(VIEW_NODE, &show_ip_rpf_cmd);
 	install_element(VIEW_NODE, &show_ip_rpf_addr_cmd);
 
-	/* Commands for VRF */
-
-	install_element(CONFIG_NODE, &no_ip_route_flags_cmd);
-	install_element(CONFIG_NODE, &no_ip_route_mask_flags_cmd);
-
 	install_element(VIEW_NODE, &show_ip_route_vrf_all_addr_cmd);
 	install_element(VIEW_NODE, &show_ip_route_vrf_all_prefix_cmd);
 	install_element(VIEW_NODE, &show_ip_route_vrf_all_summary_cmd);
 	install_element(VIEW_NODE, &show_ip_route_vrf_all_summary_prefix_cmd);
 
+	install_element(CONFIG_NODE, &ipv6_route_blackhole_cmd);
+	install_element(CONFIG_NODE, &ipv6_route_address_interface_cmd);
 	install_element(CONFIG_NODE, &ipv6_route_cmd);
-	install_element(CONFIG_NODE, &ipv6_route_flags_cmd);
-	install_element(CONFIG_NODE, &ipv6_route_ifname_cmd);
-	install_element(CONFIG_NODE, &ipv6_route_ifname_flags_cmd);
-	install_element(CONFIG_NODE, &no_ipv6_route_cmd);
-	install_element(CONFIG_NODE, &no_ipv6_route_flags_cmd);
-	install_element(CONFIG_NODE, &no_ipv6_route_ifname_cmd);
-	install_element(CONFIG_NODE, &no_ipv6_route_ifname_flags_cmd);
 	install_element(CONFIG_NODE, &ip_nht_default_route_cmd);
 	install_element(CONFIG_NODE, &no_ip_nht_default_route_cmd);
 	install_element(CONFIG_NODE, &ipv6_nht_default_route_cmd);
@@ -3463,6 +3141,14 @@ void zebra_vty_init(void)
 
 	install_element(VIEW_NODE, &show_evpn_vni_cmd);
 	install_element(VIEW_NODE, &show_evpn_vni_vni_cmd);
+	install_element(VIEW_NODE, &show_evpn_l3vni_cmd);
+	install_element(VIEW_NODE, &show_evpn_l3vni_vni_cmd);
+	install_element(VIEW_NODE, &show_evpn_rmac_l3vni_mac_cmd);
+	install_element(VIEW_NODE, &show_evpn_rmac_l3vni_cmd);
+	install_element(VIEW_NODE, &show_evpn_rmac_l3vni_all_cmd);
+	install_element(VIEW_NODE, &show_evpn_nh_l3vni_ip_cmd);
+	install_element(VIEW_NODE, &show_evpn_nh_l3vni_cmd);
+	install_element(VIEW_NODE, &show_evpn_nh_l3vni_all_cmd);
 	install_element(VIEW_NODE, &show_evpn_mac_vni_cmd);
 	install_element(VIEW_NODE, &show_evpn_mac_vni_all_cmd);
 	install_element(VIEW_NODE, &show_evpn_mac_vni_all_vtep_cmd);
@@ -3472,4 +3158,10 @@ void zebra_vty_init(void)
 	install_element(VIEW_NODE, &show_evpn_neigh_vni_all_cmd);
 	install_element(VIEW_NODE, &show_evpn_neigh_vni_neigh_cmd);
 	install_element(VIEW_NODE, &show_evpn_neigh_vni_vtep_cmd);
+
+	install_element(CONFIG_NODE, &default_vrf_vni_mapping_cmd);
+	install_element(CONFIG_NODE, &no_default_vrf_vni_mapping_cmd);
+	install_element(VRF_NODE, &vrf_vni_mapping_cmd);
+	install_element(VRF_NODE, &no_vrf_vni_mapping_cmd);
+
 }

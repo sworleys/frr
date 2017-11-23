@@ -550,6 +550,8 @@ static int bgp_update_source(struct peer *peer)
 /* BGP try to connect to the peer.  */
 int bgp_connect(struct peer *peer)
 {
+	assert(!CHECK_FLAG(peer->thread_flags, PEER_THREAD_WRITES_ON));
+	assert(!CHECK_FLAG(peer->thread_flags, PEER_THREAD_READS_ON));
 	ifindex_t ifindex = 0;
 
 	if (peer->conf_if && BGP_PEER_SU_UNSPEC(peer)) {
@@ -675,7 +677,7 @@ static int bgp_listener(int sock, struct sockaddr *sa, socklen_t salen)
 		return ret;
 	}
 
-	ret = listen(sock, 3);
+	ret = listen(sock, SOMAXCONN);
 	if (ret < 0) {
 		zlog_err("listen: %s", safe_strerror(errno));
 		return ret;

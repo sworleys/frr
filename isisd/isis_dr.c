@@ -42,7 +42,6 @@
 #include "isisd/isis_adjacency.h"
 #include "isisd/isis_constants.h"
 #include "isisd/isis_pdu.h"
-#include "isisd/isis_tlv.h"
 #include "isisd/isis_lsp.h"
 #include "isisd/isis_dr.h"
 #include "isisd/isis_events.h"
@@ -136,7 +135,7 @@ int isis_dr_elect(struct isis_circuit *circuit, int level)
 
 	if (!adjdb) {
 		zlog_warn("isis_dr_elect() adjdb == NULL");
-		list_delete(list);
+		list_delete_and_null(&list);
 		return ISIS_WARNING;
 	}
 	isis_adj_build_up_list(adjdb, list);
@@ -178,7 +177,7 @@ int isis_dr_elect(struct isis_circuit *circuit, int level)
 		 */
 		if (circuit->u.bc.is_dr[level - 1])
 			retval = isis_dr_resign(circuit, level);
-		list_delete(list);
+		list_delete_and_null(&list);
 		return retval;
 	}
 
@@ -218,7 +217,7 @@ int isis_dr_elect(struct isis_circuit *circuit, int level)
 		if (circuit->u.bc.is_dr[level - 1])
 			retval = isis_dr_resign(circuit, level);
 	}
-	list_delete(list);
+	list_delete_and_null(&list);
 	return retval;
 }
 
