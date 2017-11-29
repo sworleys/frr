@@ -306,6 +306,59 @@ int bgp_nlri_parse(struct peer *peer, struct attr *attr,
 	return -1;
 }
 
+/* The next action for the peer from a write perspective */
+static void bgp_write_proceed_actions(struct peer *peer)
+{
+	afi_t afi;
+	safi_t safi;
+	struct peer_af *paf;
+	struct bpacket *next_pkt;
+	struct update_subgroup *subgrp;
+
+	for (afi = AFI_IP; afi < AFI_MAX; afi++)
+		for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++) {
+			paf = peer_af_find(peer, afi, safi);
+			if (!paf)
+				continue;
+			subgrp = paf->subgroup;
+			if (!subgrp)
+				continue;
+
+			next_pkt = paf->next_pkt_to_send;
+			if (next_pkt && next_pkt->buffer) {
+				BGP_TIMER_ON(peer->t_generate_updgrp_packets,
+					     bgp_generate_updgrp_packets, 0);
+				return;
+			}
+
+			/* No packets readily available for AFI/SAFI, are there
+			 * subgroup packets
+			 * that need to be generated? */
+			if (bpacket_queue_is_full(SUBGRP_INST(subgrp),
+						  SUBGRP_PKTQ(subgrp))
+			    || subgroup_packets_to_build(subgrp)) {
+				BGP_TIMER_ON(peer->t_generate_updgrp_packets,
+					     bgp_generate_updgrp_packets, 0);
+				return;
+			}
+
+			/* No packets to send, see if EOR is pending */
+			if (CHECK_FLAG(peer->cap, PEER_CAP_RESTART_RCV)) {
+				if (!subgrp->t_coalesce
+				    && peer->afc_nego[afi][safi]
+				    && peer->synctime
+				    && !CHECK_FLAG(peer->af_sflags[afi][safi],
+						   PEER_STATUS_EOR_SEND)
+				    && safi != SAFI_MPLS_VPN) {
+					BGP_TIMER_ON(
+						peer->t_generate_updgrp_packets,
+						bgp_generate_updgrp_packets, 0);
+					return;
+				}
+			}
+		}
+}
+
 /**
  * Enqueue onto the peer's output buffer any packets which are pending for the
  * update group it is a member of.
@@ -319,8 +372,13 @@ int bgp_generate_updgrp_packets(struct thread *thread)
 	struct stream *s;
 	struct peer_af *paf;
 	struct bpacket *next_pkt;
+	uint32_t wpq;
+	uint32_t generated = 0;
 	afi_t afi;
 	safi_t safi;
+
+	wpq = atomic_load_explicit(&peer->bgp->wpkt_quanta,
+				   memory_order_relaxed);
 
 	/*
 	 * The code beyond this part deals with update packets, proceed only
@@ -406,7 +464,9 @@ int bgp_generate_updgrp_packets(struct thread *thread)
 				bgp_writes_on(peer);
 				bpacket_queue_advance_peer(paf);
 			}
-	} while (s);
+	} while (s && (++generated < wpq));
+
+	bgp_write_proceed_actions(peer);
 
 	return 0;
 }
@@ -2091,8 +2151,22 @@ int bgp_process_packet(struct thread *thread)
 	int mprc;		  // message processing return code
 
 	peer = THREAD_ARG(thread);
+/*
+ * This functionality is presently disabled. Unfortunately due to the
+ * way bgpd is structured, reading more than one packet per input cycle
+ * severely impacts convergence time. This is because advancing the
+ * state of the routing table based on prefixes learned from one peer
+ * prior to all (or at least most) peers being established and placed
+ * into an update-group will make UPDATE generation starve
+ * bgp_accept(), delaying convergence. This is a deficiency that needs
+ * to be fixed elsewhere in the codebase, but for now our hand is
+ * forced.
+ */
+#if 0
 	rpkt_quanta_old = atomic_load_explicit(&peer->bgp->rpkt_quanta,
 					       memory_order_relaxed);
+#endif
+	rpkt_quanta_old = 1;
 	fsm_update_result = 0;
 
 	/* Guard against scheduled events that occur after peer deletion. */
@@ -2219,8 +2293,9 @@ int bgp_process_packet(struct thread *thread)
 		{
 			// more work to do, come back later
 			if (peer->ibuf->count > 0)
-				thread_add_event(bm->master, bgp_process_packet,
-						 peer, 0, NULL);
+				thread_add_timer_msec(
+					bm->master, bgp_process_packet, peer, 0,
+					&peer->t_process_packet);
 		}
 		pthread_mutex_unlock(&peer->io_mtx);
 	}
