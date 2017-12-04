@@ -9635,7 +9635,7 @@ const char *ospf_int_type_str[] = {"unknown", /* should never be used. */
 				   "virtual-link", /* should never be used. */
 				   "loopback"};
 
-static int config_write_interface_one(struct vty *vty, struct ospf *ospf)
+static int config_write_interface_one(struct vty *vty)
 {
 	struct vrf *vrf = NULL;
 	struct listnode *node;
@@ -9644,6 +9644,7 @@ static int config_write_interface_one(struct vty *vty, struct ospf *ospf)
 	struct route_node *rn = NULL;
 	struct ospf_if_params *params;
 	int write = 0;
+	struct ospf *ospf = NULL;
 
 	/* Display all VRF aware OSPF interface configuration */
 	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
@@ -9664,6 +9665,8 @@ static int config_write_interface_one(struct vty *vty, struct ospf *ospf)
 			write++;
 
 			params = IF_DEF_PARAMS(ifp);
+
+			ospf = ospf_lookup_by_vrf_id(ifp->vrf_id);
 
 			do {
 				/* Interface Network print. */
@@ -9830,7 +9833,7 @@ static int config_write_interface_one(struct vty *vty, struct ospf *ospf)
 
 				/* Area  print. */
 				if (OSPF_IF_PARAM_CONFIGURED(params, if_area)) {
-					if (ospf->instance)
+					if (ospf && ospf->instance)
 						vty_out(vty, " ip ospf %d",
 							ospf->instance);
 					else
@@ -9897,10 +9900,9 @@ static int config_write_interface_one(struct vty *vty, struct ospf *ospf)
 static int config_write_interface(struct vty *vty)
 {
 	int write = 0;
-	struct ospf *ospf = ospf_lookup_by_vrf_id(VRF_DEFAULT);
 
 	/* Pass Default ospf instances to display MI-OSPF instance id */
-	write += config_write_interface_one(vty, ospf);
+	write += config_write_interface_one(vty);
 
 	return write;
 }
