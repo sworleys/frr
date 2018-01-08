@@ -6,6 +6,7 @@ frr (3.2+cl3u2) RELEASED; urgency=medium
   * Fixes: CM-19131 bgpd: Fix display for type-5 route
   * Fixes: CM-19206 bgpd: Fix failure to delete type-5 route when vrf/32 withdrawn
   * Fixes: CM-19053 pimd: Fix error reported for non-error commands in msdp
+  * Fixes: CM-19365 ospfd: Fix no passive interface command parsing
 
  -- dev-support <dev-support@cumulusnetworks.com>  Thu, 4 Jan 2018 06:42:22 -0500
 
