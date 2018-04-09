@@ -355,7 +355,8 @@ static int zebra_rnh_apply_nht_rmap(int family, struct route_node *prn,
 	rmap_family = (family == AF_INET) ? AFI_IP : AFI_IP6;
 
 	if (prn && re) {
-		for (nexthop = re->nexthop; nexthop; nexthop = nexthop->next) {
+		for (nexthop = re->ng.nexthop; nexthop;
+		     nexthop = nexthop->next) {
 			ret = zebra_nht_route_map_check(rmap_family, proto,
 							&prn->p, re, nexthop);
 			if (ret != RMAP_DENYMATCH) {
@@ -430,7 +431,7 @@ static void zebra_rnh_eval_import_check_entry(vrf_id_t vrfid, int family,
 	struct nexthop *nexthop;
 
 	if (re && (rnh->state == NULL)) {
-		for (ALL_NEXTHOPS(re->nexthop, nexthop))
+		for (ALL_NEXTHOPS(re->ng, nexthop))
 			if (CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB)) {
 				state_changed = 1;
 				break;
@@ -515,6 +516,61 @@ static void zebra_rnh_notify_protocol_clients(vrf_id_t vrfid, int family,
 	}
 }
 
+static void zebra_rnh_process_pbr_tables(int family,
+					 struct route_node *nrn,
+					 struct rnh *rnh,
+					 struct route_node *prn,
+					 struct route_entry *re)
+{
+	struct zebra_ns_table *znst;
+	struct route_entry *o_re;
+	struct route_node *o_rn;
+	struct listnode *node;
+	struct zserv *client;
+	struct zebra_ns *zns;
+	afi_t afi = AFI_IP;
+
+	if (family == AF_INET6)
+		afi = AFI_IP6;
+
+	/*
+	 * We are only concerned about nexthops that change for
+	 * anyone using PBR
+	 */
+	for (ALL_LIST_ELEMENTS_RO(rnh->client_list, node, client)) {
+		if (client->proto == ZEBRA_ROUTE_PBR)
+			break;
+	}
+
+	if (!client)
+		return;
+
+	zns = zebra_ns_lookup(NS_DEFAULT);
+	RB_FOREACH (znst, zebra_ns_table_head, &zns->ns_tables) {
+		if (afi != znst->afi)
+			continue;
+
+		for (o_rn = route_top(znst->table);
+		     o_rn; o_rn = srcdest_route_next(o_rn)) {
+			RNODE_FOREACH_RE (o_rn, o_re) {
+				if (o_re->type == ZEBRA_ROUTE_PBR)
+					break;
+
+			}
+
+			/*
+			 * If we have a PBR route and a nexthop changes
+			 * just rethink it.  Yes this is a hammer, but
+			 * a small one
+			 */
+			if (o_re) {
+				SET_FLAG(o_re->status, ROUTE_ENTRY_CHANGED);
+				rib_queue_add(o_rn);
+			}
+		}
+	}
+}
+
 static void zebra_rnh_process_static_routes(vrf_id_t vrfid, int family,
 					    struct route_node *nrn,
 					    struct rnh *rnh,
@@ -561,7 +617,7 @@ static void zebra_rnh_process_static_routes(vrf_id_t vrfid, int family,
 			 * be having multiple. We care here only about
 			 * registered nexthops.
 			 */
-			for (nexthop = sre->nexthop; nexthop;
+			for (nexthop = sre->ng.nexthop; nexthop;
 			     nexthop = nexthop->next) {
 				switch (nexthop->type) {
 				case NEXTHOP_TYPE_IPV4:
@@ -659,7 +715,7 @@ static struct route_entry *zebra_rnh_resolve_nexthop_entry(vrf_id_t vrfid,
 		 * match route to be exact if so specified
 		 */
 		if (is_default_prefix(&rn->p) &&
-		    !nh_resolve_via_default(rn->p.family))
+		    !rnh_resolve_via_default(rn->p.family))
 			return NULL;
 
 		/* Identify appropriate route entry. */
@@ -676,8 +732,7 @@ static struct route_entry *zebra_rnh_resolve_nexthop_entry(vrf_id_t vrfid,
 				if (re->type == ZEBRA_ROUTE_NHRP) {
 					struct nexthop *nexthop;
 
-					for (nexthop = re->nexthop;
-					     nexthop;
+					for (nexthop = re->ng.nexthop; nexthop;
 					     nexthop = nexthop->next)
 						if (nexthop->type
 						     == NEXTHOP_TYPE_IFINDEX)
@@ -754,6 +809,9 @@ static void zebra_rnh_eval_nexthop_entry(vrf_id_t vrfid, int family, int force,
 		/* Process static routes attached to this nexthop */
 		zebra_rnh_process_static_routes(vrfid, family, nrn, rnh, prn,
 						rnh->state);
+
+		zebra_rnh_process_pbr_tables(family, nrn, rnh, prn,
+					     rnh->state);
 
 		/* Process pseudowires attached to this nexthop */
 		zebra_rnh_process_pseudowires(vrfid, rnh);
@@ -929,8 +987,8 @@ static void free_state(vrf_id_t vrf_id, struct route_entry *re,
 		return;
 
 	/* free RE and nexthops */
-	zebra_deregister_rnh_static_nexthops(vrf_id, re->nexthop, rn);
-	nexthops_free(re->nexthop);
+	zebra_deregister_rnh_static_nexthops(vrf_id, re->ng.nexthop, rn);
+	nexthops_free(re->ng.nexthop);
 	XFREE(MTYPE_RE, re);
 }
 
@@ -951,8 +1009,9 @@ static void copy_state(struct rnh *rnh, struct route_entry *re,
 	state->type = re->type;
 	state->distance = re->distance;
 	state->metric = re->metric;
+	state->vrf_id = re->vrf_id;
 
-	route_entry_copy_nexthops(state, re->nexthop);
+	route_entry_copy_nexthops(state, re->ng.nexthop);
 	rnh->state = state;
 }
 
@@ -988,7 +1047,7 @@ static int send_client(struct rnh *rnh, struct zserv *client, rnh_type_t type,
 	struct route_entry *re;
 	unsigned long nump;
 	u_char num;
-	struct nexthop *nexthop;
+	struct nexthop *nh;
 	struct route_node *rn;
 	int cmd = (type == RNH_IMPORT_CHECK_TYPE) ? ZEBRA_IMPORT_CHECK_UPDATE
 						  : ZEBRA_NEXTHOP_UPDATE;
@@ -1000,7 +1059,7 @@ static int send_client(struct rnh *rnh, struct zserv *client, rnh_type_t type,
 	s = client->obuf;
 	stream_reset(s);
 
-	zserv_create_header(s, cmd, vrf_id);
+	zclient_create_header(s, cmd, vrf_id);
 
 	stream_putw(s, rn->p.family);
 	switch (rn->p.family) {
@@ -1023,39 +1082,40 @@ static int send_client(struct rnh *rnh, struct zserv *client, rnh_type_t type,
 		num = 0;
 		nump = stream_get_endp(s);
 		stream_putc(s, 0);
-		for (nexthop = re->nexthop; nexthop; nexthop = nexthop->next)
-			if ((CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB)
-			     || CHECK_FLAG(nexthop->flags,
-					   NEXTHOP_FLAG_RECURSIVE))
-			    && CHECK_FLAG(nexthop->flags,
-					  NEXTHOP_FLAG_ACTIVE)) {
-				stream_putc(s, nexthop->type);
-				switch (nexthop->type) {
+		for (nh = re->ng.nexthop; nh; nh = nh->next)
+			if ((CHECK_FLAG(nh->flags, NEXTHOP_FLAG_FIB)
+			     || CHECK_FLAG(nh->flags, NEXTHOP_FLAG_RECURSIVE))
+			    && CHECK_FLAG(nh->flags, NEXTHOP_FLAG_ACTIVE)) {
+				stream_putc(s, nh->type);
+				switch (nh->type) {
 				case NEXTHOP_TYPE_IPV4:
-					stream_put_in_addr(s,
-							   &nexthop->gate.ipv4);
-					stream_putl(s, nexthop->ifindex);
+				case NEXTHOP_TYPE_IPV4_IFINDEX:
+					stream_put_in_addr(s, &nh->gate.ipv4);
+					stream_putl(s, nh->ifindex);
 					break;
 				case NEXTHOP_TYPE_IFINDEX:
-					stream_putl(s, nexthop->ifindex);
-					break;
-				case NEXTHOP_TYPE_IPV4_IFINDEX:
-					stream_put_in_addr(s,
-							   &nexthop->gate.ipv4);
-					stream_putl(s, nexthop->ifindex);
+					stream_putl(s, nh->ifindex);
 					break;
 				case NEXTHOP_TYPE_IPV6:
-					stream_put(s, &nexthop->gate.ipv6, 16);
-					stream_putl(s, nexthop->ifindex);
-					break;
 				case NEXTHOP_TYPE_IPV6_IFINDEX:
-					stream_put(s, &nexthop->gate.ipv6, 16);
-					stream_putl(s, nexthop->ifindex);
+					stream_put(s, &nh->gate.ipv6, 16);
+					stream_putl(s, nh->ifindex);
 					break;
 				default:
 					/* do nothing */
 					break;
 				}
+				if (nh->nh_label) {
+					stream_putc(s,
+						    nh->nh_label->num_labels);
+					if (nh->nh_label->num_labels)
+						stream_put(
+							s,
+							&nh->nh_label->label[0],
+							nh->nh_label->num_labels
+								* sizeof(mpls_label_t));
+				} else
+					stream_putc(s, 0);
 				num++;
 			}
 		stream_putc_at(s, nump, num);
@@ -1121,7 +1181,7 @@ static void print_rnh(struct route_node *rn, struct vty *vty)
 	if (rnh->state) {
 		vty_out(vty, " resolved via %s\n",
 			zebra_route_string(rnh->state->type));
-		for (nexthop = rnh->state->nexthop; nexthop;
+		for (nexthop = rnh->state->ng.nexthop; nexthop;
 		     nexthop = nexthop->next)
 			print_nh(nexthop, vty);
 	} else

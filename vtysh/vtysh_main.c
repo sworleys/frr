@@ -533,7 +533,7 @@ int main(int argc, char **argv, char **env)
 	homedir = vtysh_get_home();
 	if (homedir) {
 		snprintf(history_file, sizeof(history_file),
-			 "%s/.history_quagga", homedir);
+			 "%s/.history_frr", homedir);
 		if (read_history(history_file) != 0) {
 			int fp;
 
@@ -649,6 +649,8 @@ int main(int argc, char **argv, char **env)
 	/* Main command loop. */
 	while (vtysh_rl_gets())
 		vtysh_execute(line_read);
+
+	vtysh_uninit();
 
 	history_truncate_file(history_file, 1000);
 	printf("\n");

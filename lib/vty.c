@@ -716,6 +716,7 @@ static void vty_end_config(struct vty *vty)
 	case BGP_EVPN_NODE:
 	case BGP_IPV6L_NODE:
 	case RMAP_NODE:
+	case PBRMAP_NODE:
 	case OSPF_NODE:
 	case OSPF6_NODE:
 	case LDP_NODE:
@@ -729,7 +730,6 @@ static void vty_end_config(struct vty *vty)
 	case KEYCHAIN_NODE:
 	case KEYCHAIN_KEY_NODE:
 	case MASC_NODE:
-	case PIM_NODE:
 	case VTY_NODE:
 	case BGP_EVPN_VNI_NODE:
 		vty_config_unlock(vty);
@@ -1114,6 +1114,7 @@ static void vty_stop_input(struct vty *vty)
 	case EIGRP_NODE:
 	case BGP_NODE:
 	case RMAP_NODE:
+	case PBRMAP_NODE:
 	case OSPF_NODE:
 	case OSPF6_NODE:
 	case LDP_NODE:
@@ -1127,7 +1128,6 @@ static void vty_stop_input(struct vty *vty)
 	case KEYCHAIN_NODE:
 	case KEYCHAIN_KEY_NODE:
 	case MASC_NODE:
-	case PIM_NODE:
 	case VTY_NODE:
 		vty_config_unlock(vty);
 		vty->node = ENABLE_NODE;
@@ -2275,6 +2275,21 @@ static void vty_read_file(FILE *confp)
 			break;
 		case CMD_ERR_NO_MATCH:
 			message = "No such command";
+			break;
+		case CMD_WARNING:
+			message = "Command returned Warning";
+			break;
+		case CMD_WARNING_CONFIG_FAILED:
+			message = "Command returned Warning Config Failed";
+			break;
+		case CMD_ERR_INCOMPLETE:
+			message = "Command returned Incomplete";
+			break;
+		case CMD_ERR_EXEED_ARGC_MAX:
+			message = "Command exceeded maximum number of Arguments";
+			break;
+		default:
+			message = "Command returned unhandled error message";
 			break;
 		}
 

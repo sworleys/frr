@@ -21,7 +21,7 @@ V_PATH=/var/run/frr
 # Local Daemon selection may be done by using /etc/frr/daemons.
 # See /usr/share/doc/frr/README.Debian.gz for further information.
 # Keep zebra first and do not list watchfrr!
-DAEMONS="zebra bgpd ripd ripngd ospfd ospf6d isisd babeld pimd ldpd nhrpd eigrpd"
+DAEMONS="zebra bgpd ripd ripngd ospfd ospf6d isisd babeld pimd ldpd nhrpd eigrpd sharpd pbrd"
 MAX_INSTANCES=5
 RELOAD_SCRIPT=/usr/lib/frr/frr-reload.py
 
@@ -187,7 +187,7 @@ stop()
     else
         PIDFILE=`pidfile $inst`
         PID=`cat $PIDFILE 2>/dev/null`
-        ${SSD} --stop --quiet --retry=TERM/30/KILL/5 --oknodo --pidfile "$PIDFILE" --exec "$D_PATH/$1"
+        kill -2 $PID 2>/dev/null
         #
         #       Now we have to wait until $DAEMON has _really_ stopped.
         #

@@ -57,7 +57,28 @@ DEFINE_HOOK(zebra_if_extra_info, (struct vty *vty, struct interface *ifp),
 DEFINE_HOOK(zebra_if_config_wr, (struct vty *vty, struct interface *ifp),
 				(vty, ifp))
 
+
 static void if_down_del_nbr_connected(struct interface *ifp);
+
+static int if_zebra_speed_update(struct thread *thread)
+{
+	struct interface *ifp = THREAD_ARG(thread);
+	struct zebra_if *zif = ifp->info;
+	uint32_t new_speed;
+
+	zif->speed_update = NULL;
+
+	new_speed = kernel_get_speed(ifp);
+	if (new_speed != ifp->speed) {
+		zlog_info("%s: %s old speed: %u new speed: %u",
+			  __PRETTY_FUNCTION__, ifp->name,
+			  ifp->speed, new_speed);
+		ifp->speed = new_speed;
+		if_add_update(ifp);
+	}
+
+	return 1;
+}
 
 static void zebra_if_node_destroy(route_table_delegate_t *delegate,
 				  struct route_table *table,
@@ -119,6 +140,16 @@ static int if_zebra_new_hook(struct interface *ifp)
 		route_table_init_with_delegate(&zebra_if_table_delegate);
 
 	ifp->info = zebra_if;
+
+	/*
+	 * Some platforms are telling us that the interface is
+	 * up and ready to go.  When we check the speed we
+	 * sometimes get the wrong value.  Wait a couple
+	 * of seconds and ask again.  Hopefully it's all settled
+	 * down upon startup.
+	 */
+	thread_add_timer(zebrad.master, if_zebra_speed_update,
+			 ifp, 15, &zebra_if->speed_update);
 	return 0;
 }
 
@@ -140,6 +171,8 @@ static int if_zebra_delete_hook(struct interface *ifp)
 		rtadv = &zebra_if->rtadv;
 		list_delete_and_null(&rtadv->AdvPrefixList);
 #endif /* HAVE_RTADV */
+
+		THREAD_OFF(zebra_if->speed_update);
 
 		XFREE(MTYPE_TMP, zebra_if);
 	}
@@ -479,9 +512,15 @@ static void if_addr_wakeup(struct interface *ifp)
 void if_add_update(struct interface *ifp)
 {
 	struct zebra_if *if_data;
+	struct zebra_ns *zns;
+	struct zebra_vrf *zvrf = vrf_info_lookup(ifp->vrf_id);
 
-	if_link_per_ns(zebra_ns_lookup(NS_DEFAULT), ifp);
-
+	/* case interface populate before vrf enabled */
+	if (zvrf->zns)
+		zns = zvrf->zns;
+	else
+		zns = zebra_ns_lookup(NS_DEFAULT);
+	if_link_per_ns(zns, ifp);
 	if_data = ifp->info;
 	assert(if_data);
 
@@ -561,33 +600,35 @@ static void if_delete_connected(struct interface *ifp)
 	struct prefix cp;
 	struct route_node *rn;
 	struct zebra_if *zebra_if;
+	struct listnode *node;
+	struct listnode *last = NULL;
 
 	zebra_if = ifp->info;
 
-	if (ifp->connected) {
-		struct listnode *node;
-		struct listnode *last = NULL;
+	if (!ifp->connected)
+		return;
 
-		while ((node = (last ? last->next
-				     : listhead(ifp->connected)))) {
-			ifc = listgetdata(node);
+	while ((node = (last ? last->next
+			: listhead(ifp->connected)))) {
+		ifc = listgetdata(node);
 
-			cp = *CONNECTED_PREFIX(ifc);
-			apply_mask(&cp);
+		cp = *CONNECTED_PREFIX(ifc);
+		apply_mask(&cp);
 
-			if (cp.family == AF_INET
-			    && (rn = route_node_lookup(zebra_if->ipv4_subnets,
-						       &cp))) {
-				struct listnode *anode;
-				struct listnode *next;
-				struct listnode *first;
-				struct list *addr_list;
+		if (cp.family == AF_INET
+		    && (rn = route_node_lookup(zebra_if->ipv4_subnets,
+					       &cp))) {
+			struct listnode *anode;
+			struct listnode *next;
+			struct listnode *first;
+			struct list *addr_list;
 
-				route_unlock_node(rn);
-				addr_list = (struct list *)rn->info;
+			route_unlock_node(rn);
+			addr_list = (struct list *)rn->info;
 
-				/* Remove addresses, secondaries first. */
-				first = listhead(addr_list);
+			/* Remove addresses, secondaries first. */
+			first = listhead(addr_list);
+			if (first)
 				for (anode = first->next; anode || first;
 				     anode = next) {
 					if (!anode) {
@@ -626,27 +667,26 @@ static void if_delete_connected(struct interface *ifp)
 						last = node;
 				}
 
-				/* Free chain list and respective route node. */
-				list_delete_and_null(&addr_list);
-				rn->info = NULL;
-				route_unlock_node(rn);
-			} else if (cp.family == AF_INET6) {
-				connected_down(ifp, ifc);
+			/* Free chain list and respective route node. */
+			list_delete_and_null(&addr_list);
+			rn->info = NULL;
+			route_unlock_node(rn);
+		} else if (cp.family == AF_INET6) {
+			connected_down(ifp, ifc);
 
-				zebra_interface_address_delete_update(ifp, ifc);
+			zebra_interface_address_delete_update(ifp, ifc);
 
-				UNSET_FLAG(ifc->conf, ZEBRA_IFC_REAL);
-				UNSET_FLAG(ifc->conf, ZEBRA_IFC_QUEUED);
+			UNSET_FLAG(ifc->conf, ZEBRA_IFC_REAL);
+			UNSET_FLAG(ifc->conf, ZEBRA_IFC_QUEUED);
 
-				if (CHECK_FLAG(ifc->conf, ZEBRA_IFC_CONFIGURED))
-					last = node;
-				else {
-					listnode_delete(ifp->connected, ifc);
-					connected_free(ifc);
-				}
-			} else {
+			if (CHECK_FLAG(ifc->conf, ZEBRA_IFC_CONFIGURED))
 				last = node;
+			else {
+				listnode_delete(ifp->connected, ifc);
+				connected_free(ifc);
 			}
+		} else {
+			last = node;
 		}
 	}
 }
@@ -763,24 +803,37 @@ void if_nbr_ipv6ll_to_ipv4ll_neigh_update(struct interface *ifp,
 					  struct in6_addr *address, int add)
 {
 	struct zebra_vrf *zvrf = vrf_info_lookup(ifp->vrf_id);
+	struct zebra_if *zif = ifp->info;
 	char buf[16] = "169.254.0.1";
 	struct in_addr ipv4_ll;
 	char mac[6];
+	ns_id_t ns_id;
 
 	inet_pton(AF_INET, buf, &ipv4_ll);
 
 	ipv6_ll_address_to_mac(address, (u_char *)mac);
+	ns_id = zvrf->zns->ns_id;
 
 	/*
-	* Remove existed arp record for the interface as netlink
-	* protocol does not have update message types
-	*
-	* supported message types are RTM_NEWNEIGH and RTM_DELNEIGH
-	*/
-	kernel_neigh_update (0, ifp->ifindex, ipv4_ll.s_addr, mac, 6);
+	 * Remove existed arp record for the interface as netlink
+	 * protocol does not have update message types
+	 *
+	 * supported message types are RTM_NEWNEIGH and RTM_DELNEIGH
+	 */
+	kernel_neigh_update(0, ifp->ifindex, ipv4_ll.s_addr, mac, 6, ns_id);
 
 	/* Add arp record */
-	kernel_neigh_update (add, ifp->ifindex, ipv4_ll.s_addr, mac, 6);
+	kernel_neigh_update(add, ifp->ifindex, ipv4_ll.s_addr, mac, 6, ns_id);
+
+	/*
+	 * We need to note whether or not we originated a v6
+	 * neighbor entry for this interface.  So that when
+	 * someone unwisely accidently deletes this entry
+	 * we can shove it back in.
+	 */
+	zif->v6_2_v4_ll_neigh_entry = !!add;
+	memcpy(&zif->v6_2_v4_ll_addr6, address, sizeof(*address));
+
 	zvrf->neigh_updates++;
 }
 
@@ -1375,7 +1428,7 @@ DEFUN (show_interface_name_vrf,
 	int idx_ifname = 2;
 	int idx_name = 4;
 	struct interface *ifp;
-	vrf_id_t vrf_id = VRF_DEFAULT;
+	vrf_id_t vrf_id;
 
 	interface_update_stats();
 

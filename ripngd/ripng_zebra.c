@@ -57,6 +57,7 @@ static void ripng_zebra_ipv6_send(struct route_node *rp, u_char cmd)
 		if (count >= MULTIPATH_NUM)
 			break;
 		api_nh = &api.nexthops[count];
+		api_nh->vrf_id = VRF_DEFAULT;
 		api_nh->gate.ipv6 = rinfo->nexthop;
 		api_nh->ifindex = rinfo->ifindex;
 		api_nh->type = NEXTHOP_TYPE_IPV6_IFINDEX;
@@ -413,7 +414,7 @@ static void ripng_zebra_connected(struct zclient *zclient)
 void zebra_init(struct thread_master *master)
 {
 	/* Allocate zebra structure. */
-	zclient = zclient_new(master);
+	zclient = zclient_new_notify(master, &zclient_options_default);
 	zclient_init(zclient, ZEBRA_ROUTE_RIPNG, 0, &ripngd_privs);
 
 	zclient->zebra_connected = ripng_zebra_connected;

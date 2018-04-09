@@ -58,6 +58,7 @@
 #include "bgpd/bgp_evpn.h"
 #include "bgpd/bgp_evpn_private.h"
 #include "bgpd/bgp_evpn_vty.h"
+#include "bgpd/bgp_mplsvpn.h"
 
 #if ENABLE_BGP_VNC
 #include "bgpd/rfapi/bgp_rfapi_cfg.h"
@@ -595,6 +596,24 @@ struct route_map_rule_cmd route_match_ip_route_source_prefix_list_cmd = {
 	route_match_ip_route_source_prefix_list_compile,
 	route_match_ip_route_source_prefix_list_free};
 
+/* `match evpn default-route' */
+
+/* Match function should return 1 if match is success else 0 */
+static route_map_result_t route_match_evpn_default_route(void *rule,
+							 struct prefix *p,
+							 route_map_object_t
+							 type, void *object)
+{
+	if (type == RMAP_BGP && is_evpn_prefix_default(p))
+		return RMAP_MATCH;
+
+	return RMAP_NOMATCH;
+}
+
+/* Route map commands for default-route matching. */
+struct route_map_rule_cmd route_match_evpn_default_route_cmd = {
+	"evpn default-route", route_match_evpn_default_route, NULL, NULL};
+
 /* `match mac address MAC_ACCESS_LIST' */
 
 /* Match function should return 1 if match is success else return
@@ -619,8 +638,7 @@ static route_map_result_t route_match_mac_address(void *rule,
 		p.prefixlen = ETH_ALEN * 8;
 		p.u.prefix_eth = prefix->u.prefix_evpn.mac;
 
-		return (access_list_apply(alist, &p)
-					== FILTER_DENY
+		return (access_list_apply(alist, &p) == FILTER_DENY
 				? RMAP_NOMATCH
 				: RMAP_MATCH);
 	}
@@ -696,6 +714,56 @@ static void route_match_vni_free(void *rule)
 struct route_map_rule_cmd route_match_evpn_vni_cmd = {
 	"evpn vni", route_match_vni, route_match_vni_compile,
 	route_match_vni_free};
+
+/* `match evpn route-type' */
+
+/* Match function should return 1 if match is success else return
+   zero. */
+static route_map_result_t route_match_evpn_route_type(void *rule,
+						      struct prefix *prefix,
+						      route_map_object_t type,
+						      void *object)
+{
+	u_char route_type = 0;
+
+	if (type == RMAP_BGP) {
+		route_type = *((u_char *)rule);
+
+		if (route_type == prefix->u.prefix_evpn.route_type)
+			return RMAP_MATCH;
+	}
+
+	return RMAP_NOMATCH;
+}
+
+/* Route map `route-type' match statement. */
+static void *route_match_evpn_route_type_compile(const char *arg)
+{
+	u_char *route_type = NULL;
+
+	route_type = XMALLOC(MTYPE_ROUTE_MAP_COMPILED, sizeof(u_char));
+
+	if (strncmp(arg, "ma", 2) == 0)
+		*route_type = BGP_EVPN_MAC_IP_ROUTE;
+	else if (strncmp(arg, "mu", 2) == 0)
+		*route_type = BGP_EVPN_IMET_ROUTE;
+	else
+		*route_type = BGP_EVPN_IP_PREFIX_ROUTE;
+
+	return route_type;
+}
+
+/* Free route map's compiled `route-type' value. */
+static void route_match_evpn_route_type_free(void *rule)
+{
+	XFREE(MTYPE_ROUTE_MAP_COMPILED, rule);
+}
+
+/* Route map commands for evpn route-type  matching. */
+struct route_map_rule_cmd route_match_evpn_route_type_cmd = {
+	"evpn route-type", route_match_evpn_route_type,
+	route_match_evpn_route_type_compile,
+	route_match_evpn_route_type_free};
 
 /* `match local-preference LOCAL-PREF' */
 
@@ -2083,7 +2151,10 @@ static void *route_set_aggregator_as_compile(const char *arg)
 
 	aggregator =
 		XCALLOC(MTYPE_ROUTE_MAP_COMPILED, sizeof(struct aggregator));
-	sscanf(arg, "%s %s", as, address);
+	if (sscanf(arg, "%s %s", as, address) != 2) {
+		XFREE(MTYPE_ROUTE_MAP_COMPILED, aggregator);
+		return NULL;
+	}
 
 	aggregator->as = strtoul(as, NULL, 10);
 	ret = inet_aton(address, &aggregator->address);
@@ -2882,25 +2953,23 @@ static void bgp_route_map_update_peer_group(const char *rmap_name,
 	/* All the peers have been updated correctly already. This is
 	 * just updating the placeholder data. No real update required.
 	 */
-	for (ALL_LIST_ELEMENTS(bgp->group, node, nnode, group))
-		for (afi = AFI_IP; afi < AFI_MAX; afi++)
-			for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++) {
-				filter = &group->conf->filter[afi][safi];
+	for (ALL_LIST_ELEMENTS(bgp->group, node, nnode, group)) {
+		FOREACH_AFI_SAFI (afi, safi) {
+			filter = &group->conf->filter[afi][safi];
 
-				for (direct = RMAP_IN; direct < RMAP_MAX;
-				     direct++) {
-					if ((filter->map[direct].name)
-					    && (strcmp(rmap_name,
-						       filter->map[direct].name)
-						== 0))
-						filter->map[direct].map = map;
-				}
-
-				if (filter->usmap.name
-				    && (strcmp(rmap_name, filter->usmap.name)
+			for (direct = RMAP_IN; direct < RMAP_MAX; direct++) {
+				if ((filter->map[direct].name)
+				    && (strcmp(rmap_name,
+					       filter->map[direct].name)
 					== 0))
-					filter->usmap.map = map;
+					filter->map[direct].map = map;
 			}
+
+			if (filter->usmap.name
+			    && (strcmp(rmap_name, filter->usmap.name) == 0))
+				filter->usmap.map = map;
+		}
+	}
 }
 
 /*
@@ -2931,14 +3000,12 @@ static void bgp_route_map_process_update(struct bgp *bgp, const char *rmap_name,
 		if (CHECK_FLAG(peer->sflags, PEER_STATUS_GROUP))
 			continue;
 
-		for (afi = AFI_IP; afi < AFI_MAX; afi++)
-			for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++) {
-				/* process in/out/import/export/default-orig
-				 * route-maps */
-				bgp_route_map_process_peer(rmap_name, map, peer,
-							   afi, safi,
-							   route_update);
-			}
+		FOREACH_AFI_SAFI (afi, safi) {
+			/* process in/out/import/export/default-orig
+			 * route-maps */
+			bgp_route_map_process_peer(rmap_name, map, peer, afi,
+						   safi, route_update);
+		}
 	}
 
 	/* for outbound/default-orig route-maps, process for groups */
@@ -2948,62 +3015,55 @@ static void bgp_route_map_process_update(struct bgp *bgp, const char *rmap_name,
 	/* update peer-group config (template) */
 	bgp_route_map_update_peer_group(rmap_name, map, bgp);
 
-	for (afi = AFI_IP; afi < AFI_MAX; afi++)
-		for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++) {
-			/* For table route-map updates. */
-			if (!bgp_fibupd_safi(safi))
-				continue;
+	FOREACH_AFI_SAFI (afi, safi) {
+		/* For table route-map updates. */
+		if (!bgp_fibupd_safi(safi))
+			continue;
 
-			if (bgp->table_map[afi][safi].name
-			    && (strcmp(rmap_name,
-				       bgp->table_map[afi][safi].name)
-				== 0)) {
-				bgp->table_map[afi][safi].map = map;
+		if (bgp->table_map[afi][safi].name
+		    && (strcmp(rmap_name, bgp->table_map[afi][safi].name)
+			== 0)) {
+			bgp->table_map[afi][safi].map = map;
 
-				if (BGP_DEBUG(zebra, ZEBRA))
-					zlog_debug(
-						"Processing route_map %s update on "
-						"table map",
-						rmap_name);
-				if (route_update)
-					bgp_zebra_announce_table(bgp, afi,
-								 safi);
-			}
-
-			/* For network route-map updates. */
-			for (bn = bgp_table_top(bgp->route[afi][safi]); bn;
-			     bn = bgp_route_next(bn))
-				if ((bgp_static = bn->info) != NULL) {
-					if (bgp_static->rmap.name
-					    && (strcmp(rmap_name,
-						       bgp_static->rmap.name)
-						== 0)) {
-						bgp_static->rmap.map = map;
-
-						if (route_update)
-							if (!bgp_static
-								     ->backdoor) {
-								if (bgp_debug_zebra(
-									    &bn->p))
-									zlog_debug(
-										"Processing route_map %s update on "
-										"static route %s",
-										rmap_name,
-										inet_ntop(
-											bn->p.family,
-											&bn->p.u.prefix,
-											buf,
-											INET6_ADDRSTRLEN));
-								bgp_static_update(
-									bgp,
-									&bn->p,
-									bgp_static,
-									afi,
-									safi);
-							}
-					}
-				}
+			if (BGP_DEBUG(zebra, ZEBRA))
+				zlog_debug(
+					"Processing route_map %s update on "
+					"table map",
+					rmap_name);
+			if (route_update)
+				bgp_zebra_announce_table(bgp, afi, safi);
 		}
+
+		/* For network route-map updates. */
+		for (bn = bgp_table_top(bgp->route[afi][safi]); bn;
+		     bn = bgp_route_next(bn))
+			if ((bgp_static = bn->info) != NULL) {
+				if (bgp_static->rmap.name
+				    && (strcmp(rmap_name, bgp_static->rmap.name)
+					== 0)) {
+					bgp_static->rmap.map = map;
+
+					if (route_update)
+						if (!bgp_static->backdoor) {
+							if (bgp_debug_zebra(
+								    &bn->p))
+								zlog_debug(
+									"Processing route_map %s update on "
+									"static route %s",
+									rmap_name,
+									inet_ntop(
+										bn->p.family,
+										&bn->p.u.prefix,
+										buf,
+										INET6_ADDRSTRLEN));
+							bgp_static_update(
+								bgp, &bn->p,
+								bgp_static, afi,
+								safi);
+						}
+				}
+			}
+	}
 
 	/* For redistribute route-map updates. */
 	for (afi = AFI_IP; afi < AFI_MAX; afi++)
@@ -3036,6 +3096,19 @@ static void bgp_route_map_process_update(struct bgp *bgp, const char *rmap_name,
 				}
 			}
 		}
+
+	/* for type5 command route-maps */
+	FOREACH_AFI_SAFI (afi, safi) {
+		if (bgp->adv_cmd_rmap[afi][safi].name &&
+		    strcmp(rmap_name, bgp->adv_cmd_rmap[afi][safi].name) == 0) {
+			if (BGP_DEBUG(zebra, ZEBRA))
+				zlog_debug(
+					   "Processing route_map %s update on advertise type5 route command",
+					   rmap_name);
+			bgp_evpn_withdraw_type5_routes(bgp, afi, safi);
+			bgp_evpn_advertise_type5_routes(bgp, afi, safi);
+		}
+	}
 }
 
 static int bgp_route_map_process_update_cb(char *rmap_name)
@@ -3043,13 +3116,17 @@ static int bgp_route_map_process_update_cb(char *rmap_name)
 	struct listnode *node, *nnode;
 	struct bgp *bgp;
 
-	for (ALL_LIST_ELEMENTS(bm->bgp, node, nnode, bgp))
+	for (ALL_LIST_ELEMENTS(bm->bgp, node, nnode, bgp)) {
 		bgp_route_map_process_update(bgp, rmap_name, 1);
 
 #if ENABLE_BGP_VNC
-	zlog_debug("%s: calling vnc_routemap_update", __func__);
-	vnc_routemap_update(bgp, __func__);
+		/* zlog_debug("%s: calling vnc_routemap_update", __func__); */
+		vnc_routemap_update(bgp, __func__);
 #endif
+	}
+
+	vpn_policy_routemap_event(rmap_name);
+
 	return 0;
 }
 
@@ -3141,6 +3218,36 @@ DEFUN (no_match_mac_address,
 				      RMAP_EVENT_FILTER_DELETED);
 }
 
+DEFUN (match_evpn_route_type,
+       match_evpn_route_type_cmd,
+       "match evpn route-type <macip | multicast | prefix>",
+       MATCH_STR
+       EVPN_HELP_STR
+       "Match route-type\n"
+       "mac-ip route\n"
+       "IMET route\n"
+       "prefix route\n")
+{
+	return bgp_route_match_add(vty, "evpn route-type", argv[3]->arg,
+				   RMAP_EVENT_MATCH_ADDED);
+}
+
+DEFUN (no_match_evpn_route_type,
+       no_match_evpn_route_type_cmd,
+       "no match evpn route-type <macip | multicast | prefix>",
+       NO_STR
+       MATCH_STR
+       EVPN_HELP_STR
+       "Match route-type\n"
+       "mac-ip route\n"
+       "IMET route\n"
+       "prefix route\n")
+{
+	return bgp_route_match_delete(vty, "evpn route-type", argv[4]->arg,
+				      RMAP_EVENT_MATCH_DELETED);
+}
+
+
 DEFUN (match_evpn_vni,
        match_evpn_vni_cmd,
        "match evpn vni (1-16777215)",
@@ -3163,6 +3270,29 @@ DEFUN (no_match_evpn_vni,
        "VNI ID\n")
 {
 	return bgp_route_match_delete(vty, "evpn vni", argv[4]->arg,
+				      RMAP_EVENT_MATCH_DELETED);
+}
+
+DEFUN (match_evpn_default_route,
+       match_evpn_default_route_cmd,
+       "match evpn default-route",
+       MATCH_STR
+       EVPN_HELP_STR
+       "default EVPN type-5 route\n")
+{
+	return bgp_route_match_add(vty, "evpn default-route", NULL,
+				   RMAP_EVENT_MATCH_ADDED);
+}
+
+DEFUN (no_match_evpn_default_route,
+       no_match_evpn_default_route_cmd,
+       "no match evpn default-route",
+       NO_STR
+       MATCH_STR
+       EVPN_HELP_STR
+       "default EVPN type-5 route\n")
+{
+	return bgp_route_match_delete(vty, "evpn default-route", NULL,
 				      RMAP_EVENT_MATCH_DELETED);
 }
 
@@ -3528,9 +3658,9 @@ DEFUN (set_ip_nexthop_peer,
        "Use peer address (for BGP only)\n")
 {
 	int (*func)(struct vty *, struct route_map_index *, const char *,
-		     const char *) = strmatch(argv[0]->text, "no")
-					     ? generic_set_delete
-					     : generic_set_add;
+		    const char *) = strmatch(argv[0]->text, "no")
+					    ? generic_set_delete
+					    : generic_set_add;
 
 	return func(vty, VTY_GET_CONTEXT(route_map_index), "ip next-hop",
 		    "peer-address");
@@ -3546,9 +3676,9 @@ DEFUN (set_ip_nexthop_unchanged,
        "Don't modify existing Next hop address\n")
 {
 	int (*func)(struct vty *, struct route_map_index *, const char *,
-		     const char *) = strmatch(argv[0]->text, "no")
-					     ? generic_set_delete
-					     : generic_set_add;
+		    const char *) = strmatch(argv[0]->text, "no")
+					    ? generic_set_delete
+					    : generic_set_add;
 
 	return func(vty, VTY_GET_CONTEXT(route_map_index), "ip next-hop",
 		    "unchanged");
@@ -3789,7 +3919,8 @@ DEFUN (set_community,
 			buffer_putstr(b, "no-export");
 			continue;
 		}
-		if (strncmp(argv[i]->arg, "graceful-shutdown", strlen(argv[i]->arg))
+		if (strncmp(argv[i]->arg, "graceful-shutdown",
+			    strlen(argv[i]->arg))
 		    == 0) {
 			buffer_putstr(b, "graceful-shutdown");
 			continue;
@@ -3814,7 +3945,7 @@ DEFUN (set_community,
 	}
 
 	/* Set communites attribute string.  */
-	str = community_str(com);
+	str = community_str(com, false);
 
 	if (additive) {
 		argstr = XCALLOC(MTYPE_TMP,
@@ -4543,6 +4674,8 @@ void bgp_route_map_init(void)
 	route_map_install_match(&route_match_tag_cmd);
 	route_map_install_match(&route_match_mac_address_cmd);
 	route_map_install_match(&route_match_evpn_vni_cmd);
+	route_map_install_match(&route_match_evpn_route_type_cmd);
+	route_map_install_match(&route_match_evpn_default_route_cmd);
 
 	route_map_install_set(&route_set_ip_nexthop_cmd);
 	route_map_install_set(&route_set_local_pref_cmd);
@@ -4577,6 +4710,10 @@ void bgp_route_map_init(void)
 	install_element(RMAP_NODE, &no_match_mac_address_cmd);
 	install_element(RMAP_NODE, &match_evpn_vni_cmd);
 	install_element(RMAP_NODE, &no_match_evpn_vni_cmd);
+	install_element(RMAP_NODE, &match_evpn_route_type_cmd);
+	install_element(RMAP_NODE, &no_match_evpn_route_type_cmd);
+	install_element(RMAP_NODE, &match_evpn_default_route_cmd);
+	install_element(RMAP_NODE, &no_match_evpn_default_route_cmd);
 
 	install_element(RMAP_NODE, &match_aspath_cmd);
 	install_element(RMAP_NODE, &no_match_aspath_cmd);

@@ -116,6 +116,30 @@ struct bgp_info_extra {
 	/* For imported routes into a VNI (or VRF), this points to the parent.
 	 */
 	void *parent;
+
+	/*
+	 * Some tunnelish parameters follow. Maybe consolidate into an
+	 * internal tunnel structure?
+	 */
+
+	/*
+	 * Original bgp instance for imported routes. Needed for:
+	 * 1. Find all routes from a specific vrf for deletion
+	 * 2. vrf context of original nexthop
+	 *
+	 * Store pointer to bgp instance rather than bgp->vrf_id because
+	 * bgp->vrf_id is not always valid (or may change?).
+	 *
+	 * Set to NULL if route is not imported from another bgp instance.
+	 */
+	struct bgp *bgp_orig;
+
+	/*
+	 * Nexthop in context of original bgp instance. Needed
+	 * for label resolution of core mpls routes exported to a vrf.
+	 * Set nexthop_orig.family to 0 if not valid.
+	 */
+	struct prefix nexthop_orig;
 };
 
 struct bgp_info {
@@ -181,6 +205,7 @@ struct bgp_info {
 #ifdef ENABLE_BGP_VNC
 # define BGP_ROUTE_RFP          4 
 #endif
+#define BGP_ROUTE_IMPORTED     5        /* from another bgp instance/safi */
 
 	u_short instance;
 
@@ -334,9 +359,11 @@ extern int bgp_nlri_parse_ip(struct peer *, struct attr *, struct bgp_nlri *);
 
 extern int bgp_maximum_prefix_overflow(struct peer *, afi_t, safi_t, int);
 
-extern void bgp_redistribute_add(struct bgp *, struct prefix *,
-				 const union g_addr *, unsigned int ifindex,
-				 u_int32_t, u_char, u_short, route_tag_t);
+extern void bgp_redistribute_add(struct bgp *bgp, struct prefix *p,
+				 const union g_addr *nexthop, ifindex_t ifindex,
+				 enum nexthop_types_t nhtype, uint32_t metric,
+				 u_char type, u_short instance,
+				 route_tag_t tag);
 extern void bgp_redistribute_delete(struct bgp *, struct prefix *, u_char,
 				    u_short);
 extern void bgp_redistribute_withdraw(struct bgp *, afi_t, int, u_short);
@@ -419,8 +446,6 @@ extern void bgp_peer_clear_node_queue_drain_immediate(struct peer *peer);
 extern void bgp_process_queues_drain_immediate(void);
 
 /* for encap/vpn */
-extern struct bgp_node *bgp_afi_node_get(struct bgp_table *, afi_t, safi_t,
-					 struct prefix *, struct prefix_rd *);
 extern struct bgp_node *bgp_afi_node_lookup(struct bgp_table *table, afi_t afi,
 					    safi_t safi, struct prefix *p,
 					    struct prefix_rd *prd);

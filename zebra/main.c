@@ -34,6 +34,7 @@
 #include "privs.h"
 #include "sigevent.h"
 #include "vrf.h"
+#include "logicalrouter.h"
 #include "libfrr.h"
 
 #include "zebra/rib.h"
@@ -47,12 +48,14 @@
 #include "zebra/redistribute.h"
 #include "zebra/zebra_mpls.h"
 #include "zebra/label_manager.h"
+#include "zebra/zebra_netns_notify.h"
 
 #define ZEBRA_PTM_SUPPORT
 
 /* Zebra instance */
 struct zebra_t zebrad = {
 	.rtm_table_default = 0,
+	.packets_to_process = ZEBRA_ZAPI_PACKETS_TO_PROCESS,
 };
 
 /* process id. */
@@ -84,6 +87,7 @@ struct option longopts[] = {{"batch", no_argument, NULL, 'b'},
 			    {"label_socket", no_argument, NULL, 'l'},
 			    {"retain", no_argument, NULL, 'r'},
 #ifdef HAVE_NETLINK
+			    {"vrfwnetns", no_argument, NULL, 'n'},
 			    {"nl-bufsize", required_argument, NULL, 's'},
 #endif /* HAVE_NETLINK */
 			    {0}};
@@ -121,7 +125,6 @@ static void sigint(void)
 {
 	struct vrf *vrf;
 	struct zebra_vrf *zvrf;
-	struct zebra_ns *zns;
 
 	zlog_notice("Terminating on signal");
 
@@ -136,19 +139,19 @@ static void sigint(void)
 			if (zvrf)
 				SET_FLAG(zvrf->flags, ZEBRA_VRF_RETAIN);
 		}
+	if (zebrad.lsp_process_q)
+		work_queue_free_and_null(&zebrad.lsp_process_q);
 	vrf_terminate();
 
-	zns = zebra_ns_lookup(NS_DEFAULT);
-	zebra_ns_disable(0, (void **)&zns);
+	ns_walk_func(zebra_ns_disabled);
+	zebra_ns_notify_close();
 
 	access_list_reset();
 	prefix_list_reset();
 	route_map_finish();
 
 	list_delete_and_null(&zebrad.client_list);
-	work_queue_free(zebrad.ribq);
-	if (zebrad.lsp_process_q)
-		work_queue_free(zebrad.lsp_process_q);
+	work_queue_free_and_null(&zebrad.ribq);
 	meta_queue_free(zebrad.mq);
 
 	frr_fini();
@@ -200,13 +203,23 @@ int main(int argc, char **argv)
 	char *lblmgr_path = NULL;
 	struct sockaddr_storage dummy;
 	socklen_t dummylen;
+#if defined(HANDLE_ZAPI_FUZZING)
+	char *fuzzing = NULL;
+#endif
+
+	vrf_configure_backend(VRF_BACKEND_VRF_LITE);
+	logicalrouter_configure_backend(
+			 LOGICALROUTER_BACKEND_NETNS);
 
 	frr_preinit(&zebra_di, argc, argv);
 
 	frr_opt_add(
 		"bakz:e:l:r"
 #ifdef HAVE_NETLINK
-		"s:"
+		"s:n"
+#endif
+#if defined(HANDLE_ZAPI_FUZZING)
+		"c:"
 #endif
 		,
 		longopts,
@@ -218,8 +231,12 @@ int main(int argc, char **argv)
 		"  -k, --keep_kernel  Don't delete old routes which installed by zebra.\n"
 		"  -r, --retain       When program terminates, retain added route by zebra.\n"
 #ifdef HAVE_NETLINK
+		"  -n, --vrfwnetns    Set VRF with NetNS\n"
 		"  -s, --nl-bufsize   Set netlink receive buffer size\n"
 #endif /* HAVE_NETLINK */
+#if defined(HANDLE_ZAPI_FUZZING)
+		"  -c <file>          Bypass normal startup use this file for tetsting of zapi"
+#endif
 		);
 
 	while (1) {
@@ -269,7 +286,17 @@ int main(int argc, char **argv)
 		case 's':
 			nl_rcvbufsize = atoi(optarg);
 			break;
+		case 'n':
+			vrf_configure_backend(VRF_BACKEND_NETNS);
+			logicalrouter_configure_backend(
+					LOGICALROUTER_BACKEND_OFF);
+			break;
 #endif /* HAVE_NETLINK */
+#if defined(HANDLE_ZAPI_FUZZING)
+		case 'c':
+			fuzzing = optarg;
+			break;
+#endif
 		default:
 			frr_help_exit(1);
 			break;
@@ -280,11 +307,18 @@ int main(int argc, char **argv)
 	zebrad.master = frr_init();
 
 	/* Zebra related initialize. */
-	zebra_init();
+	zserv_init();
 	rib_init();
 	zebra_if_init();
 	zebra_debug_init();
 	router_id_cmd_init();
+
+	/*
+	 * Initialize NS( and implicitly the VRF module), and make kernel
+	 * routing socket. */
+	zebra_ns_init();
+
+	zebra_vty_init();
 	access_list_init();
 	prefix_list_init();
 #if defined(HAVE_RTADV)
@@ -302,13 +336,12 @@ int main(int argc, char **argv)
 	/* For debug purpose. */
 	/* SET_FLAG (zebra_debug_event, ZEBRA_DEBUG_EVENT); */
 
-	/* Initialize NS( and implicitly the VRF module), and make kernel
-	 * routing socket. */
-	zebra_ns_init();
-
-	/* Initialize show/config command after the vrf initialization is
-	 * complete */
-	zebra_vty_init();
+#if defined(HANDLE_ZAPI_FUZZING)
+	if (fuzzing) {
+		zserv_read_file(fuzzing);
+		exit(0);
+	}
+#endif
 
 	/* Process the configuration file. Among other configuration
 	*  directives we can meet those installing static routes. Such
@@ -318,9 +351,6 @@ int main(int argc, char **argv)
 	*  to that after daemon() completes (if ever called).
 	*/
 	frr_config_fork();
-
-	/* Clean up rib -- before fork (?) */
-	/* rib_weed_tables (); */
 
 	/* After we have successfully acquired the pidfile, we can be sure
 	*  about being the only copy of zebra process, which is submitting

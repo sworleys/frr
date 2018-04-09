@@ -695,6 +695,7 @@ void ospf6_abr_examin_summary(struct ospf6_lsa *lsa, struct ospf6_area *oa)
 	int is_debug = 0;
 	struct ospf6_inter_prefix_lsa *prefix_lsa = NULL;
 	struct ospf6_inter_router_lsa *router_lsa = NULL;
+	struct ospf6_path *path;
 
 	if (oa->running_ospf6_abr_examin_summary)
 		return;
@@ -920,6 +921,10 @@ void ospf6_abr_examin_summary(struct ospf6_lsa *lsa, struct ospf6_area *oa)
 
 	ospf6_route_copy_nexthops(route, abr_entry);
 
+	path = ospf6_path_dup(&route->path);
+	ospf6_copy_nexthops(path->nh_list, abr_entry->nh_list);
+	listnode_add_sort(route->paths, path);
+
 	/* (7) If the routes are identical, copy the next hops over to existing
 	   route. ospf6's route table implementation will otherwise string both
 	   routes, but keep the older one as the best route since the routes
@@ -929,6 +934,13 @@ void ospf6_abr_examin_summary(struct ospf6_lsa *lsa, struct ospf6_area *oa)
 
 	if (old && (ospf6_route_cmp(route, old) == 0)) {
 		ospf6_route_merge_nexthops(old, route);
+
+		if (is_debug)
+			zlog_debug("%s: Update route: %s old cost %u new cost %u nh count %u",
+				   __PRETTY_FUNCTION__,
+				   buf, old->path.cost, route->path.cost,
+				   listcount(route->nh_list));
+
 		/* Update RIB/FIB */
 		if (table->hook_add)
 			(*table->hook_add)(old);
@@ -937,7 +949,9 @@ void ospf6_abr_examin_summary(struct ospf6_lsa *lsa, struct ospf6_area *oa)
 		ospf6_route_delete(route);
 	} else {
 		if (is_debug)
-			zlog_debug("Install route: %s", buf);
+			zlog_debug("%s: Install route: %s cost %u nh count %u",
+				   __PRETTY_FUNCTION__, buf, route->path.cost,
+				   listcount(route->nh_list));
 		/* ospf6_ia_add_nw_route (table, &prefix, route); */
 		ospf6_route_add(route, table);
 	}

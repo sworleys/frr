@@ -53,6 +53,8 @@ DEFINE_QOBJ_TYPE(ospf6)
 
 /* global ospf6d variable */
 struct ospf6 *ospf6;
+static struct ospf6_master ospf6_master;
+struct ospf6_master *om6;
 
 static void ospf6_disable(struct ospf6 *o);
 
@@ -72,7 +74,7 @@ static void ospf6_top_lsdb_hook_remove(struct ospf6_lsa *lsa)
 {
 	switch (ntohs(lsa->header->type)) {
 	case OSPF6_LSTYPE_AS_EXTERNAL:
-		ospf6_asbr_lsa_remove(lsa);
+		ospf6_asbr_lsa_remove(lsa, NULL);
 		break;
 
 	default:
@@ -95,6 +97,18 @@ static void ospf6_top_route_hook_remove(struct ospf6_route *route)
 
 static void ospf6_top_brouter_hook_add(struct ospf6_route *route)
 {
+	if (IS_OSPF6_DEBUG_EXAMIN(AS_EXTERNAL)) {
+		uint32_t brouter_id;
+		char brouter_name[16];
+
+		brouter_id = ADV_ROUTER_IN_PREFIX(&route->prefix);
+		inet_ntop(AF_INET, &brouter_id, brouter_name,
+			  sizeof(brouter_name));
+		zlog_debug("%s: brouter %s add with adv router %x nh count %u",
+			   __PRETTY_FUNCTION__, brouter_name,
+			   route->path.origin.adv_router,
+			   listcount(route->nh_list));
+	}
 	ospf6_abr_examin_brouter(ADV_ROUTER_IN_PREFIX(&route->prefix));
 	ospf6_asbr_lsentry_add(route);
 	ospf6_abr_originate_summary(route);
@@ -102,6 +116,17 @@ static void ospf6_top_brouter_hook_add(struct ospf6_route *route)
 
 static void ospf6_top_brouter_hook_remove(struct ospf6_route *route)
 {
+	if (IS_OSPF6_DEBUG_EXAMIN(AS_EXTERNAL)) {
+		uint32_t brouter_id;
+		char brouter_name[16];
+
+		brouter_id = ADV_ROUTER_IN_PREFIX(&route->prefix);
+		inet_ntop(AF_INET, &brouter_id, brouter_name,
+			  sizeof(brouter_name));
+		zlog_debug("%s: brouter %s del with nh count %u",
+			   __PRETTY_FUNCTION__, brouter_name,
+			   listcount(route->nh_list));
+	}
 	route->flag |= OSPF6_ROUTE_REMOVE;
 	ospf6_abr_examin_brouter(ADV_ROUTER_IN_PREFIX(&route->prefix));
 	ospf6_asbr_lsentry_remove(route);
@@ -166,6 +191,8 @@ void ospf6_delete(struct ospf6 *o)
 	struct ospf6_area *oa;
 
 	QOBJ_UNREG(o);
+
+	ospf6_flush_self_originated_lsas_now();
 	ospf6_disable(ospf6);
 
 	for (ALL_LIST_ELEMENTS(o->area_list, node, nnode, oa))
@@ -210,7 +237,15 @@ static void ospf6_disable(struct ospf6 *o)
 		THREAD_OFF(o->maxage_remover);
 		THREAD_OFF(o->t_spf_calc);
 		THREAD_OFF(o->t_ase_calc);
+		THREAD_OFF(o->t_distribute_update);
 	}
+}
+
+void ospf6_master_init(void)
+{
+	memset(&ospf6_master, 0, sizeof(struct ospf6_master));
+
+	om6 = &ospf6_master;
 }
 
 static int ospf6_maxage_remover(struct thread *thread)
@@ -268,6 +303,17 @@ void ospf6_maxage_remove(struct ospf6 *o)
 				 &o->maxage_remover);
 }
 
+void ospf6_router_id_update(void)
+{
+	if (!ospf6)
+		return;
+
+	if (ospf6->router_id_static != 0)
+		ospf6->router_id = ospf6->router_id_static;
+	else
+		ospf6->router_id = om6->zebra_router_id;
+}
+
 /* start ospf6 */
 DEFUN_NOSH (router_ospf6,
        router_ospf6_cmd,
@@ -275,9 +321,11 @@ DEFUN_NOSH (router_ospf6,
        ROUTER_STR
        OSPF6_STR)
 {
-	if (ospf6 == NULL)
+	if (ospf6 == NULL) {
 		ospf6 = ospf6_create();
-
+		if (ospf6->router_id == 0)
+			ospf6_router_id_update();
+	}
 	/* set current ospf point. */
 	VTY_PUSH_CONTEXT(OSPF6_NODE, ospf6);
 
@@ -318,6 +366,8 @@ DEFUN(ospf6_router_id,
 	int ret;
 	const char *router_id_str;
 	u_int32_t router_id;
+	struct ospf6_area *oa;
+	struct listnode *node;
 
 	argv_find(argv, argc, "A.B.C.D", &idx);
 	router_id_str = argv[idx]->arg;
@@ -329,8 +379,17 @@ DEFUN(ospf6_router_id,
 	}
 
 	o->router_id_static = router_id;
-	if (o->router_id == 0)
-		o->router_id = router_id;
+
+	for (ALL_LIST_ELEMENTS_RO(o->area_list, node, oa)) {
+		if (oa->full_nbrs) {
+			vty_out(vty,
+				"For this router-id change to take effect,"
+				" save config and restart ospf6d\n");
+			return CMD_SUCCESS;
+		}
+	}
+
+	o->router_id = router_id;
 
 	return CMD_SUCCESS;
 }
@@ -343,8 +402,22 @@ DEFUN(no_ospf6_router_id,
       V4NOTATION_STR)
 {
 	VTY_DECLVAR_CONTEXT(ospf6, o);
+	struct ospf6_area *oa;
+	struct listnode *node;
+
 	o->router_id_static = 0;
+
+	for (ALL_LIST_ELEMENTS_RO(o->area_list, node, oa)) {
+		if (oa->full_nbrs) {
+			vty_out(vty,
+				"For this router-id change to take effect,"
+				" save config and restart ospf6d\n");
+			return CMD_SUCCESS;
+		}
+	}
 	o->router_id = 0;
+	if (o->router_id_zebra.s_addr)
+		o->router_id = (uint32_t)o->router_id_zebra.s_addr;
 
 	return CMD_SUCCESS;
 }
@@ -505,6 +578,10 @@ DEFUN (ospf6_distance_ospf6,
 {
 	VTY_DECLVAR_CONTEXT(ospf6, o);
 	int idx = 0;
+
+	o->distance_intra = 0;
+	o->distance_inter = 0;
+	o->distance_external = 0;
 
 	if (argv_find(argv, argc, "intra-area", &idx))
 		o->distance_intra = atoi(argv[idx + 1]->arg);

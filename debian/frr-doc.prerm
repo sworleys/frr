@@ -1,2 +1,0 @@
-# These exist so that no DEBHELPER is generated for this package
-# We don't want to stop frr.service when frr-dbg is removed or upgraded

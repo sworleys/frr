@@ -280,6 +280,7 @@ static void isis_zebra_route_add_route(struct prefix *prefix,
 			if (count >= MULTIPATH_NUM)
 				break;
 			api_nh = &api.nexthops[count];
+			api_nh->vrf_id = VRF_DEFAULT;
 			/* FIXME: can it be ? */
 			if (nexthop->ip.s_addr != INADDR_ANY) {
 				api_nh->type = NEXTHOP_TYPE_IPV4_IFINDEX;
@@ -302,6 +303,7 @@ static void isis_zebra_route_add_route(struct prefix *prefix,
 			}
 
 			api_nh = &api.nexthops[count];
+			api_nh->vrf_id = VRF_DEFAULT;
 			api_nh->gate.ipv6 = nexthop6->ip6;
 			api_nh->ifindex = nexthop6->ifindex;
 			api_nh->type = NEXTHOP_TYPE_IPV6_IFINDEX;
@@ -411,7 +413,7 @@ static void isis_zebra_connected(struct zclient *zclient)
 
 void isis_zebra_init(struct thread_master *master)
 {
-	zclient = zclient_new(master);
+	zclient = zclient_new_notify(master, &zclient_options_default);
 	zclient_init(zclient, ZEBRA_ROUTE_ISIS, 0, &isisd_privs);
 	zclient->zebra_connected = isis_zebra_connected;
 	zclient->router_id_update = isis_router_id_update_zebra;

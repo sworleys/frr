@@ -76,16 +76,21 @@ l2vpn_del(struct l2vpn *l2vpn)
 	struct l2vpn_if		*lif;
 	struct l2vpn_pw		*pw;
 
-	while ((lif = RB_ROOT(l2vpn_if_head, &l2vpn->if_tree)) != NULL) {
+	while (!RB_EMPTY(l2vpn_if_head, &l2vpn->if_tree)) {
+		lif = RB_ROOT(l2vpn_if_head, &l2vpn->if_tree);
+
 		RB_REMOVE(l2vpn_if_head, &l2vpn->if_tree, lif);
 		free(lif);
 	}
-	while ((pw = RB_ROOT(l2vpn_pw_head, &l2vpn->pw_tree)) != NULL) {
+	while (!RB_EMPTY(l2vpn_pw_head, &l2vpn->pw_tree)) {
+		pw = RB_ROOT(l2vpn_pw_head, &l2vpn->pw_tree);
+
 		RB_REMOVE(l2vpn_pw_head, &l2vpn->pw_tree, pw);
 		free(pw);
 	}
-	while ((pw = RB_ROOT(l2vpn_pw_head,
-	    &l2vpn->pw_inactive_tree)) != NULL) {
+	while (!RB_EMPTY(l2vpn_pw_head, &l2vpn->pw_inactive_tree)) {
+		pw = RB_ROOT(l2vpn_pw_head, &l2vpn->pw_inactive_tree);
+
 		RB_REMOVE(l2vpn_pw_head, &l2vpn->pw_inactive_tree, pw);
 		free(pw);
 	}
@@ -239,13 +244,13 @@ l2vpn_pw_init(struct l2vpn_pw *pw)
 
 	l2vpn_pw_reset(pw);
 
+	pw2zpw(pw, &zpw);
+	lde_imsg_compose_parent(IMSG_KPW_ADD, 0, &zpw, sizeof(zpw));
+
 	l2vpn_pw_fec(pw, &fec);
 	lde_kernel_insert(&fec, AF_INET, (union ldpd_addr*)&pw->lsr_id, 0, 0,
 	    0, (void *)pw);
 	lde_kernel_update(&fec);
-
-	pw2zpw(pw, &zpw);
-	lde_imsg_compose_parent(IMSG_KPW_ADD, 0, &zpw, sizeof(zpw));
 }
 
 void
@@ -295,17 +300,26 @@ int
 l2vpn_pw_ok(struct l2vpn_pw *pw, struct fec_nh *fnh)
 {
 	/* check for a remote label */
-	if (fnh->remote_label == NO_LABEL)
+	if (fnh->remote_label == NO_LABEL) {
+		log_warnx("%s: pseudowire %s: no remote label", __func__,
+			  pw->ifname);
 		return (0);
+	}
 
 	/* MTUs must match */
-	if (pw->l2vpn->mtu != pw->remote_mtu)
+	if (pw->l2vpn->mtu != pw->remote_mtu) {
+		log_warnx("%s: pseudowire %s: MTU mismatch detected", __func__,
+			  pw->ifname);
 		return (0);
+	}
 
 	/* check pw status if applicable */
 	if ((pw->flags & F_PW_STATUSTLV) &&
-	    pw->remote_status != PW_FORWARDING)
+	    pw->remote_status != PW_FORWARDING) {
+		log_warnx("%s: pseudowire %s: remote end is down", __func__,
+			  pw->ifname);
 		return (0);
+	}
 
 	return (1);
 }
@@ -550,7 +564,8 @@ l2vpn_pw_ctl(pid_t pid)
 			    sizeof(pwctl.ifname));
 			pwctl.pwid = pw->pwid;
 			pwctl.lsr_id = pw->lsr_id;
-			if (pw->local_status == PW_FORWARDING &&
+			if (pw->enabled &&
+			    pw->local_status == PW_FORWARDING &&
 			    pw->remote_status == PW_FORWARDING)
 				pwctl.status = 1;
 

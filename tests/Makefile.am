@@ -17,6 +17,7 @@ if BGPD
 TESTS_BGPD = \
 	bgpd/test_aspath \
 	bgpd/test_capability \
+	bgpd/test_packet \
 	bgpd/test_ecommunity \
 	bgpd/test_mp_attr \
 	bgpd/test_mpath
@@ -63,6 +64,7 @@ check_PROGRAMS = \
 	lib/test_memory \
 	lib/test_nexthop_iter \
 	lib/test_privs \
+	lib/test_ringbuf \
 	lib/test_srcdest_table \
 	lib/test_segv \
 	lib/test_sig \
@@ -115,6 +117,7 @@ lib_test_nexthop_iter_SOURCES = lib/test_nexthop_iter.c helpers/c/prng.c
 lib_test_privs_SOURCES = lib/test_privs.c
 lib_test_srcdest_table_SOURCES = lib/test_srcdest_table.c \
                                  helpers/c/prng.c
+lib_test_ringbuf_SOURCES = lib/test_ringbuf.c
 lib_test_segv_SOURCES = lib/test_segv.c
 lib_test_sig_SOURCES = lib/test_sig.c
 lib_test_stream_SOURCES = lib/test_stream.c
@@ -132,6 +135,7 @@ lib_cli_test_commands_SOURCES = lib/cli/test_commands_defun.c \
                                 helpers/c/prng.c
 bgpd_test_aspath_SOURCES = bgpd/test_aspath.c
 bgpd_test_capability_SOURCES = bgpd/test_capability.c
+bgpd_test_packet_SOURCES = bgpd/test_packet.c
 bgpd_test_ecommunity_SOURCES = bgpd/test_ecommunity.c
 bgpd_test_mp_attr_SOURCES = bgpd/test_mp_attr.c
 bgpd_test_mpath_SOURCES = bgpd/test_mpath.c
@@ -154,6 +158,7 @@ lib_test_heavy_LDADD = $(ALL_TESTS_LDADD) -lm
 lib_test_memory_LDADD = $(ALL_TESTS_LDADD)
 lib_test_nexthop_iter_LDADD = $(ALL_TESTS_LDADD)
 lib_test_privs_LDADD = $(ALL_TESTS_LDADD)
+lib_test_ringbuf_LDADD = $(ALL_TESTS_LDADD)
 lib_test_srcdest_table_LDADD = $(ALL_TESTS_LDADD)
 lib_test_segv_LDADD = $(ALL_TESTS_LDADD)
 lib_test_sig_LDADD = $(ALL_TESTS_LDADD)
@@ -167,6 +172,7 @@ lib_cli_test_cli_LDADD = $(ALL_TESTS_LDADD)
 lib_cli_test_commands_LDADD = $(ALL_TESTS_LDADD)
 bgpd_test_aspath_LDADD = $(BGP_TEST_LDADD)
 bgpd_test_capability_LDADD = $(BGP_TEST_LDADD)
+bgpd_test_packet_LDADD = $(BGP_TEST_LDADD)
 bgpd_test_ecommunity_LDADD = $(BGP_TEST_LDADD)
 bgpd_test_mp_attr_LDADD = $(BGP_TEST_LDADD)
 bgpd_test_mpath_LDADD = $(BGP_TEST_LDADD)
@@ -193,6 +199,7 @@ EXTRA_DIST = \
     lib/cli/test_cli.py \
     lib/cli/test_cli.refout \
     lib/test_nexthop_iter.py \
+    lib/test_ringbuf.py \
     lib/test_srcdest_table.py \
     lib/test_stream.py \
     lib/test_stream.refout \

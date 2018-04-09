@@ -7,7 +7,7 @@
 ##
 AC_PREREQ(2.60)
 
-AC_INIT(frr, 3.2+cl3u6, [https://github.com/frrouting/frr/issues])
+AC_INIT(frr, 4.0+cl3u1, [https://github.com/frrouting/frr/issues])
 PACKAGE_URL="https://frrouting.org/"
 AC_SUBST(PACKAGE_URL)
 PACKAGE_FULLNAME="FRRouting"
@@ -40,7 +40,7 @@ AS_IF([test "$host" != "$build"], [
   ( CPPFLAGS="$HOST_CPPFLAGS"; \
     CFLAGS="$HOST_CFLAGS"; \
     LDFLAGS="$HOST_LDFLAGS"; \
-    cd hosttools; "${abssrc}/configure" "--host=$build" "--build=$build"; )
+    cd hosttools; "${abssrc}/configure" "--host=$build" "--build=$build" "--enable-clippy-only" "--disable-nhrpd" "--disable-vtysh"; )
 
   AC_MSG_NOTICE([...])
   AC_MSG_NOTICE([... cross-compilation: finished self-configuring for build platform tools])
@@ -201,6 +201,7 @@ else
    fi
 fi
 AM_CONDITIONAL([DEV_BUILD], [test "x$enable_dev_build" = "xyes"])
+AM_CONDITIONAL([SHARPD], [test "x$enable_dev_build" = "xyes"])
 
 dnl always want these CFLAGS
 AC_C_FLAG([-fno-omit-frame-pointer])
@@ -353,6 +354,8 @@ AC_ARG_ENABLE(logfile_mask,
   AS_HELP_STRING([--enable-logfile-mask=ARG], [set mask for log files]))
 AC_ARG_ENABLE(shell_access,
   AS_HELP_STRING([--enable-shell-access], [Allow users to access shell/telnet/ssh]))
+AC_ARG_ENABLE(realms,
+  AS_HELP_STRING([--enable-realms], [enable REALMS support under Linux]))
 AC_ARG_ENABLE(rtadv,
   AS_HELP_STRING([--disable-rtadv], [disable IPV6 router advertisement feature]))
 AC_ARG_ENABLE(irdp,
@@ -381,13 +384,20 @@ AC_ARG_ENABLE(cumulus,
   AS_HELP_STRING([--enable-cumulus], [enable Cumulus Switch Special Extensions]))
 AC_ARG_ENABLE(datacenter,
   AS_HELP_STRING([--enable-datacenter], [enable Compilation for Data Center Extensions]))
+AC_ARG_ENABLE(fuzzing,
+  AS_HELP_STRING([--enable-fuzzing], [enable ability to fuzz various parts of FRR]))
 AC_ARG_ENABLE(rr-semantics,
   AS_HELP_STRING([--disable-rr-semantics], [disable the v6 Route Replace semantics]))
 AC_ARG_ENABLE([protobuf],
   AS_HELP_STRING([--enable-protobuf], [Enable experimental protobuf support]))
 AC_ARG_ENABLE([oldvpn_commands],
   AS_HELP_STRING([--enable-oldvpn-commands], [Keep old vpn commands]))
+AC_ARG_ENABLE(rpki,
+  AS_HELP_STRING([--enable-rpki], [enable RPKI prefix validation support]))
+AC_ARG_ENABLE([clippy-only],
+  AS_HELP_STRING([--enable-clippy-only], [Only build clippy]))
 
+AS_IF([test "${enable_clippy_only}" != "yes"], [
 AC_CHECK_HEADERS(json-c/json.h)
 AC_CHECK_LIB(json-c, json_object_get, LIBS="$LIBS -ljson-c", [], [-lm])
 if test $ac_cv_lib_json_c_json_object_get = no; then
@@ -396,6 +406,7 @@ if test $ac_cv_lib_json_c_json_object_get = no; then
       AC_MSG_ERROR([lib json is needed to compile])
   fi
 fi
+])
 
 AC_ARG_ENABLE([dev_build],
     AS_HELP_STRING([--enable-dev-build], [build for development]))
@@ -430,6 +441,10 @@ if test "${enable_datacenter}" = "yes" ; then
   DFLT_NAME="datacenter"
 else
   DFLT_NAME="traditional"
+fi
+
+if test "${enable_fuzzing}" = "yes" ; then
+  AC_DEFINE(HANDLE_ZAPI_FUZZING,,Compile extensions to use with a fuzzer)
 fi
 
 if test "${enable_cumulus}" = "yes" ; then
@@ -866,6 +881,7 @@ case "$host_os" in
 
     AC_DEFINE(OPEN_BSD,,OpenBSD)
     AC_DEFINE(KAME,1,KAME IPv6)
+    AC_DEFINE(BSD_V6_SYSCTL,1,BSD v6 sysctl to turn on and off forwarding)
 
     if test "x${enable_pimd}" != "xno"; then
       case "$host_os" in
@@ -882,11 +898,28 @@ case "$host_os" in
 
     AC_DEFINE(HAVE_NET_RT_IFLIST,,NET_RT_IFLIST)
     AC_DEFINE(KAME,1,KAME IPv6)
+    AC_DEFINE(BSD_V6_SYSCTL,1,BSD v6 sysctl to turn on and off forwarding)
     ;;
 esac
 AM_CONDITIONAL(SOLARIS, test "${SOLARIS}" = "solaris")
 
 AC_SYS_LARGEFILE
+
+dnl ------------------------
+dnl Integrated REALMS option
+dnl ------------------------
+if test "${enable_realms}" = "yes"; then
+    case "$host_os" in
+      linux*)
+       AC_DEFINE(SUPPORT_REALMS,, Realms support)
+       ;;
+      *)
+       echo "Sorry, only Linux has REALMS support"
+       exit 1
+       ;;
+    esac
+fi
+AM_CONDITIONAL([SUPPORT_REALMS], [test "${enable_realms}" = "yes"])
 
 dnl ---------------------
 dnl Integrated VTY option
@@ -1303,6 +1336,7 @@ AM_CONDITIONAL(BABELD, test "${enable_babeld}" != "no")
 AM_CONDITIONAL(OSPF6D, test "${enable_ospf6d}" != "no")
 AM_CONDITIONAL(ISISD, test "${enable_isisd}" != "no")
 AM_CONDITIONAL(PIMD, test "${enable_pimd}" != "no")
+AM_CONDITIONAL(PBRD, test "${enable_pbrd}" != "no")
 
 if test "${enable_bgp_announce}" = "no";then
   AC_DEFINE(DISABLE_BGP_ANNOUNCE,1,Disable BGP installation to zebra)
@@ -1341,7 +1375,7 @@ AC_SUBST(VTYSH)
 AC_SUBST(CURSES)
 AC_CHECK_LIB(crypt, crypt, [],
 		    [AC_CHECK_LIB(crypto, DES_crypt)])
-AC_CHECK_LIB(resolv, res_init)
+AC_CHECK_LIB(resolv, res_mkquery)
 
 dnl ---------------------------
 dnl check system has PCRE regexp
@@ -1796,6 +1830,30 @@ AC_SUBST(CFG_STATE)
 AC_SUBST(CFG_MODULE)
 AC_DEFINE_UNQUOTED(MODULE_PATH, "$CFG_MODULE", path to modules)
 
+dnl ------------------------------------
+dnl Enable RPKI and add librtr to libs
+dnl ------------------------------------
+if test "${enable_rpki}" = "yes"; then
+  PKG_CHECK_MODULES(RTRLIB,[rtrlib >= 0.5.0],
+      [AC_DEFINE(HAVE_RPKI,1,Enable RPKI prefix validation for BGP)
+      RPKI=true],
+      [RPKI=false
+      AC_MSG_ERROR([rtrlib was not found on your system or is too old.])]
+  )
+fi
+AM_CONDITIONAL([RPKI], test "x$RPKI" = "xtrue")
+
+dnl ------------------------------------------
+dnl Check whether rtrlib was build with ssh support
+dnl ------------------------------------------
+AC_MSG_CHECKING([whether the RTR Library is compiled with SSH])
+AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include "rtrlib/rtrlib.h"]],
+			[[struct tr_ssh_config config;]])],
+	[AC_MSG_RESULT(yes)
+	AC_DEFINE(FOUND_SSH,,found_ssh)],
+	AC_MSG_RESULT(no)
+)
+
 dnl ---------------------------
 dnl Check htonl works correctly
 dnl ---------------------------
@@ -1813,6 +1871,7 @@ AC_CONFIG_FILES([Makefile
 	  doc/Makefile tests/Makefile
 	  bgpd/rfp-example/rfptest/Makefile bgpd/rfp-example/librfp/Makefile
 	  redhat/frr.spec
+	  debian/Makefile
 	  snapcraft/snapcraft.yaml
 	  lib/version.h
 	  tests/lib/cli/test_cli.refout
@@ -1827,6 +1886,7 @@ AC_CONFIG_FILES([Makefile
 	  doc/eigrpd.8
 	  doc/ripngd.8
 	  doc/pimd.8
+	  doc/mtracebis.8
 	  doc/nhrpd.8
 	  doc/vtysh.1
 	  doc/watchfrr.8

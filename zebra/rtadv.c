@@ -34,6 +34,7 @@
 #include "command.h"
 #include "privs.h"
 #include "vrf.h"
+#include "ns.h"
 
 #include "zebra/interface.h"
 #include "zebra/rtadv.h"
@@ -621,7 +622,7 @@ static int rtadv_read(struct thread *thread)
 	return 0;
 }
 
-static int rtadv_make_socket(void)
+static int rtadv_make_socket(ns_id_t ns_id)
 {
 	int sock;
 	int ret = 0;
@@ -631,7 +632,7 @@ static int rtadv_make_socket(void)
 		zlog_err("rtadv_make_socket: could not raise privs, %s",
 			 safe_strerror(errno));
 
-	sock = socket(AF_INET6, SOCK_RAW, IPPROTO_ICMPV6);
+	sock = ns_socket(AF_INET6, SOCK_RAW, IPPROTO_ICMPV6, ns_id);
 
 	if (zserv_privs.change(ZPRIVS_LOWER))
 		zlog_err("rtadv_make_socket: could not lower privs, %s",
@@ -804,7 +805,7 @@ void zebra_interface_radv_set(struct zserv *client, u_short length,
 			      struct zebra_vrf *zvrf, int enable)
 {
 	struct stream *s;
-	unsigned int ifindex;
+	ifindex_t ifindex;
 	struct interface *ifp;
 	struct zebra_if *zif;
 	int ra_interval;
@@ -812,8 +813,8 @@ void zebra_interface_radv_set(struct zserv *client, u_short length,
 	s = client->ibuf;
 
 	/* Get interface index and RA interval. */
-	ifindex = stream_getl(s);
-	ra_interval = stream_getl(s);
+	STREAM_GETL(s, ifindex);
+	STREAM_GETL(s, ra_interval);
 
 	if (IS_ZEBRA_DEBUG_EVENT)
 		zlog_debug("%u: IF %u RA %s from client %s, interval %ds",
@@ -838,17 +839,24 @@ void zebra_interface_radv_set(struct zserv *client, u_short length,
 
 	zif = ifp->info;
 	if (enable) {
+		SET_FLAG(zif->rtadv.ra_configured, BGP_RA_CONFIGURED);
 		ipv6_nd_suppress_ra_set(ifp, RA_ENABLE);
 		if (ra_interval
-		    && (ra_interval * 1000) < zif->rtadv.MaxRtrAdvInterval)
+			&& (ra_interval * 1000) < zif->rtadv.MaxRtrAdvInterval
+			&& !CHECK_FLAG(zif->rtadv.ra_configured,
+				VTY_RA_INTERVAL_CONFIGURED))
 			zif->rtadv.MaxRtrAdvInterval = ra_interval * 1000;
 	} else {
-		if (!zif->rtadv.configured) {
+		UNSET_FLAG(zif->rtadv.ra_configured, BGP_RA_CONFIGURED);
+		if (!CHECK_FLAG(zif->rtadv.ra_configured,
+				VTY_RA_INTERVAL_CONFIGURED))
 			zif->rtadv.MaxRtrAdvInterval =
 				RTADV_MAX_RTR_ADV_INTERVAL;
+		if (!CHECK_FLAG(zif->rtadv.ra_configured, VTY_RA_CONFIGURED))
 			ipv6_nd_suppress_ra_set(ifp, RA_SUPPRESS);
-		}
 	}
+stream_failure:
+	return;
 }
 
 DEFUN (ipv6_nd_suppress_ra,
@@ -868,8 +876,10 @@ DEFUN (ipv6_nd_suppress_ra,
 		return CMD_WARNING_CONFIG_FAILED;
 	}
 
-	ipv6_nd_suppress_ra_set(ifp, RA_SUPPRESS);
-	zif->rtadv.configured = 0;
+	if (!CHECK_FLAG(zif->rtadv.ra_configured, BGP_RA_CONFIGURED))
+		ipv6_nd_suppress_ra_set(ifp, RA_SUPPRESS);
+
+	UNSET_FLAG(zif->rtadv.ra_configured, VTY_RA_CONFIGURED);
 	return CMD_SUCCESS;
 }
 
@@ -892,7 +902,7 @@ DEFUN (no_ipv6_nd_suppress_ra,
 	}
 
 	ipv6_nd_suppress_ra_set(ifp, RA_ENABLE);
-	zif->rtadv.configured = 1;
+	SET_FLAG(zif->rtadv.ra_configured, VTY_RA_CONFIGURED);
 	return CMD_SUCCESS;
 }
 
@@ -927,6 +937,7 @@ DEFUN (ipv6_nd_ra_interval_msec,
 	if (interval % 1000)
 		zns->rtadv.adv_msec_if_count++;
 
+	SET_FLAG(zif->rtadv.ra_configured, VTY_RA_INTERVAL_CONFIGURED);
 	zif->rtadv.MaxRtrAdvInterval = interval;
 	zif->rtadv.MinRtrAdvInterval = 0.33 * interval;
 	zif->rtadv.AdvIntervalTimer = 0;
@@ -964,6 +975,7 @@ DEFUN (ipv6_nd_ra_interval,
 	/* convert to milliseconds */
 	interval = interval * 1000;
 
+	SET_FLAG(zif->rtadv.ra_configured, VTY_RA_INTERVAL_CONFIGURED);
 	zif->rtadv.MaxRtrAdvInterval = interval;
 	zif->rtadv.MinRtrAdvInterval = 0.33 * interval;
 	zif->rtadv.AdvIntervalTimer = 0;
@@ -993,9 +1005,15 @@ DEFUN (no_ipv6_nd_ra_interval,
 	if (zif->rtadv.MaxRtrAdvInterval % 1000)
 		zns->rtadv.adv_msec_if_count--;
 
-	zif->rtadv.MaxRtrAdvInterval = RTADV_MAX_RTR_ADV_INTERVAL;
-	zif->rtadv.MinRtrAdvInterval = RTADV_MIN_RTR_ADV_INTERVAL;
+	UNSET_FLAG(zif->rtadv.ra_configured, VTY_RA_INTERVAL_CONFIGURED);
+
+	if (CHECK_FLAG(zif->rtadv.ra_configured, BGP_RA_CONFIGURED))
+		zif->rtadv.MaxRtrAdvInterval = 10000;
+	else
+		zif->rtadv.MaxRtrAdvInterval = RTADV_MAX_RTR_ADV_INTERVAL;
+
 	zif->rtadv.AdvIntervalTimer = zif->rtadv.MaxRtrAdvInterval;
+	zif->rtadv.MinRtrAdvInterval = RTADV_MIN_RTR_ADV_INTERVAL;
 
 	return CMD_SUCCESS;
 }
@@ -1550,15 +1568,20 @@ static int rtadv_config_write(struct vty *vty, struct interface *ifp)
 
 	if (!(if_is_loopback(ifp)
 	      || CHECK_FLAG(ifp->status, ZEBRA_INTERFACE_VRF_LOOPBACK))) {
-		if (zif->rtadv.AdvSendAdvertisements)
+		if (zif->rtadv.AdvSendAdvertisements
+		    && CHECK_FLAG(zif->rtadv.ra_configured, VTY_RA_CONFIGURED))
 			vty_out(vty, " no ipv6 nd suppress-ra\n");
 	}
 
 	interval = zif->rtadv.MaxRtrAdvInterval;
-	if (interval % 1000)
-		vty_out(vty, " ipv6 nd ra-interval msec %d\n", interval);
-	else if (interval != RTADV_MAX_RTR_ADV_INTERVAL)
-		vty_out(vty, " ipv6 nd ra-interval %d\n", interval / 1000);
+	if (CHECK_FLAG(zif->rtadv.ra_configured, VTY_RA_INTERVAL_CONFIGURED)) {
+		if (interval % 1000)
+			vty_out(vty, " ipv6 nd ra-interval msec %d\n",
+				interval);
+		else if (interval != RTADV_MAX_RTR_ADV_INTERVAL)
+			vty_out(vty, " ipv6 nd ra-interval %d\n",
+				interval / 1000);
+	}
 
 	if (zif->rtadv.AdvIntervalOption)
 		vty_out(vty, " ipv6 nd adv-interval-option\n");
@@ -1664,7 +1687,7 @@ static void rtadv_event(struct zebra_ns *zns, enum rtadv_event event, int val)
 
 void rtadv_init(struct zebra_ns *zns)
 {
-	zns->rtadv.sock = rtadv_make_socket();
+	zns->rtadv.sock = rtadv_make_socket(zns->ns_id);
 }
 
 void rtadv_terminate(struct zebra_ns *zns)

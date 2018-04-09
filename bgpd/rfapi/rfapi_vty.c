@@ -432,7 +432,7 @@ void rfapi_vty_out_vncinfo(struct vty *vty, struct prefix *p,
 	}
 
 	if (bi->extra != NULL)
-		vty_out(vty, " label=%u", decode_label(&bi->extra->label));
+		vty_out(vty, " label=%u", decode_label(&bi->extra->label[0]));
 
 	if (!rfapiGetVncLifetime(bi->attr, &lifetime)) {
 		vty_out(vty, " life=%d", lifetime);
@@ -494,7 +494,7 @@ void rfapiPrintBi(void *stream, struct bgp_info *bi)
 	char *p = line;
 	int r;
 	int has_macaddr = 0;
-	struct ethaddr macaddr;
+	struct ethaddr macaddr = {{0}};
 	struct rfapi_l2address_option l2o_buf;
 	uint8_t l2hid = 0; /* valid if has_macaddr */
 
@@ -1068,7 +1068,7 @@ static int rfapiPrintRemoteRegBi(struct bgp *bgp, void *stream,
 			 inet_ntop(pfx_vn.family, &pfx_vn.u.prefix, buf_ntop,
 				   BUFSIZ));
 		if (bi->extra) {
-			u_int32_t l = decode_label(&bi->extra->label);
+			u_int32_t l = decode_label(&bi->extra->label[0]);
 			snprintf(buf_vn, BUFSIZ, "Label: %d", l);
 		} else /* should never happen */
 		{
@@ -1146,7 +1146,7 @@ static int rfapiPrintRemoteRegBi(struct bgp *bgp, void *stream,
 
 		char buf_age[BUFSIZ];
 
-		if (bi && bi->extra && bi->extra->vnc.import.create_time) {
+		if (bi->extra && bi->extra->vnc.import.create_time) {
 			rfapiFormatAge(bi->extra->vnc.import.create_time,
 				       buf_age, BUFSIZ);
 		} else {
@@ -1163,7 +1163,7 @@ static int rfapiPrintRemoteRegBi(struct bgp *bgp, void *stream,
 		 * print that on the next line
 		 */
 
-		if (bi && bi->extra
+		if (bi->extra
 		    && bi->extra->vnc.import.aux_prefix.family) {
 			const char *sp;
 
@@ -1181,7 +1181,7 @@ static int rfapiPrintRemoteRegBi(struct bgp *bgp, void *stream,
 		}
 	}
 	if (tun_type != BGP_ENCAP_TYPE_MPLS && bi->extra) {
-		u_int32_t l = decode_label(&bi->extra->label);
+		u_int32_t l = decode_label(&bi->extra->label[0]);
 		if (!MPLS_LABEL_IS_NULL(l)) {
 			fp(out, "  Label: %d", l);
 			if (nlines == 1)
@@ -1527,11 +1527,9 @@ void rfapiPrintRfapiIpPrefix(void *stream, struct rfapi_ip_prefix *p)
 
 void rfapiPrintRd(struct vty *vty, struct prefix_rd *prd)
 {
-	char buf[BUFSIZ];
+	char buf[RD_ADDRSTRLEN];
 
-	buf[0] = 0;
-	prefix_rd2str(prd, buf, BUFSIZ);
-	buf[BUFSIZ - 1] = 0;
+	prefix_rd2str(prd, buf, sizeof(buf));
 	vty_out(vty, "%s", buf);
 }
 
@@ -1599,7 +1597,7 @@ void rfapiPrintDescriptor(struct vty *vty, struct rfapi_descriptor *rfd)
 	int rc;
 	afi_t afi;
 	struct rfapi_adb *adb;
-	char buf[BUFSIZ];
+	char buf[PREFIX_STRLEN];
 
 	vty_out(vty, "%-10p ", rfd);
 	rfapiPrintRfapiIpAddr(vty, &rfd->un_addr);
@@ -1651,8 +1649,7 @@ void rfapiPrintDescriptor(struct vty *vty, struct rfapi_descriptor *rfd)
 			if (family != adb->u.s.prefix_ip.family)
 				continue;
 
-			prefix2str(&adb->u.s.prefix_ip, buf, BUFSIZ);
-			buf[BUFSIZ - 1] = 0; /* guarantee NUL-terminated */
+			prefix2str(&adb->u.s.prefix_ip, buf, sizeof(buf));
 
 			vty_out(vty, "  Adv Pfx: %s%s", buf, HVTYNL);
 			rfapiPrintAdvertisedInfo(vty, rfd, SAFI_MPLS_VPN,
@@ -1664,8 +1661,7 @@ void rfapiPrintDescriptor(struct vty *vty, struct rfapi_descriptor *rfd)
 	     rc == 0; rc = skiplist_next(rfd->advertised.ip0_by_ether, NULL,
 					 (void **)&adb, &cursor)) {
 
-		prefix2str(&adb->u.s.prefix_eth, buf, BUFSIZ);
-		buf[BUFSIZ - 1] = 0; /* guarantee NUL-terminated */
+		prefix2str(&adb->u.s.prefix_eth, buf, sizeof(buf));
 
 		vty_out(vty, "  Adv Pfx: %s%s", buf, HVTYNL);
 
@@ -4632,6 +4628,37 @@ notcfg:
  * add [vrf <vrf-name>] prefix <prefix>
  *     [rd <value>] [label <value>] [local-preference <0-4294967295>]
  ************************************************************************/
+void vnc_add_vrf_opener(struct bgp *bgp, struct rfapi_nve_group_cfg *rfg)
+{
+	if (rfg->rfd == NULL) {	/* need new rfapi_handle */
+		/* based on rfapi_open */
+		struct rfapi_descriptor *rfd;
+
+		rfd = XCALLOC(MTYPE_RFAPI_DESC,
+			      sizeof(struct rfapi_descriptor));
+		rfd->bgp = bgp;
+		rfg->rfd = rfd;
+		/* leave most fields empty as will get from (dynamic) config
+		 * when needed */
+		rfd->default_tunneltype_option.type = BGP_ENCAP_TYPE_MPLS;
+		rfd->cookie = rfg;
+		if (rfg->vn_prefix.family
+		    && !CHECK_FLAG(rfg->flags, RFAPI_RFG_VPN_NH_SELF)) {
+			rfapiQprefix2Raddr(&rfg->vn_prefix, &rfd->vn_addr);
+		} else {
+			memset(&rfd->vn_addr, 0, sizeof(struct rfapi_ip_addr));
+			rfd->vn_addr.addr_family = AF_INET;
+			rfd->vn_addr.addr.v4 = bgp->router_id;
+		}
+		rfd->un_addr = rfd->vn_addr; /* sigh, need something in UN for
+						lookups */
+		vnc_zlog_debug_verbose("%s: Opening RFD for VRF %s", __func__,
+				       rfg->name);
+		rfapi_init_and_open(bgp, rfd, rfg);
+	}
+}
+
+/* NOTE: this functions parallels vnc_direct_add_rn_group_rd */
 static int vnc_add_vrf_prefix(struct vty *vty, const char *arg_vrf,
 			      const char *arg_prefix,
 			      const char *arg_rd,    /* optional */
@@ -4723,32 +4750,7 @@ static int vnc_add_vrf_prefix(struct vty *vty, const char *arg_vrf,
 		}
 	}
 	rpfx.cost = 255 - (pref & 255);
-	if (rfg->rfd == NULL) /* need new rfapi_handle */
-	{
-		/* based on rfapi_open */
-		struct rfapi_descriptor *rfd;
-		rfd = XCALLOC(MTYPE_RFAPI_DESC,
-			      sizeof(struct rfapi_descriptor));
-		rfd->bgp = bgp;
-		rfg->rfd = rfd;
-		/* leave most fields empty as will get from (dynamic) config
-		 * when needed */
-		rfd->default_tunneltype_option.type = BGP_ENCAP_TYPE_MPLS;
-		rfd->cookie = rfg;
-		if (rfg->vn_prefix.family
-		    && !CHECK_FLAG(rfg->flags, RFAPI_RFG_VPN_NH_SELF)) {
-			rfapiQprefix2Raddr(&rfg->vn_prefix, &rfd->vn_addr);
-		} else {
-			memset(&rfd->vn_addr, 0, sizeof(struct rfapi_ip_addr));
-			rfd->vn_addr.addr_family = AF_INET;
-			rfd->vn_addr.addr.v4 = bgp->router_id;
-		}
-		rfd->un_addr = rfd->vn_addr; /* sigh, need something in UN for
-						lookups */
-		vnc_zlog_debug_verbose("%s: Opening RFD for VRF %s", __func__,
-				       rfg->name);
-		rfapi_init_and_open(bgp, rfd, rfg);
-	}
+	vnc_add_vrf_opener(bgp, rfg);
 
 	if (!rfapi_register(rfg->rfd, &rpfx, RFAPI_INFINITE_LIFETIME, NULL,
 			    (cur_opt ? optary : NULL), RFAPI_REGISTER_ADD)) {
@@ -4847,7 +4849,7 @@ static int rfapi_cfg_group_it_count(struct rfapi_nve_group_cfg *rfg)
 	return count;
 }
 
-static void clear_vnc_vrf_closer(struct rfapi_nve_group_cfg *rfg)
+void clear_vnc_vrf_closer(struct rfapi_nve_group_cfg *rfg)
 {
 	struct rfapi_descriptor *rfd = rfg->rfd;
 	afi_t afi;
@@ -4905,7 +4907,6 @@ static int vnc_clear_vrf(struct vty *vty, struct bgp *bgp, const char *arg_vrf,
 
 	start_count = rfapi_cfg_group_it_count(rfg);
 	clear_vnc_prefix(&cda);
-	clear_vnc_vrf_closer(rfg);
 	vty_out(vty, "Cleared %u out of %d prefixes.\n", cda.pfx_count,
 		start_count);
 	return CMD_SUCCESS;

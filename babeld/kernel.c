@@ -174,8 +174,8 @@ zebra_route(int add, int family, const unsigned char *pref, unsigned short plen,
         SET_FLAG(api.message, ZAPI_MESSAGE_NEXTHOP);
         api.nexthop_num = 1;
         api_nh->ifindex = ifindex;
-
-        switch (family) {
+	api_nh->vrf_id = VRF_DEFAULT;
+	switch (family) {
         case AF_INET:
             uchar_to_inaddr(&api_nh->gate.ipv4, gate);
             if (IPV4_ADDR_SAME (&api_nh->gate.ipv4, &quagga_prefix.u.prefix4) &&
@@ -203,7 +203,7 @@ zebra_route(int add, int family, const unsigned char *pref, unsigned short plen,
 }
 
 int
-if_eui64(char *ifname, int ifindex, unsigned char *eui)
+if_eui64(int ifindex, unsigned char *eui)
 {
     struct interface *ifp = if_lookup_by_index(ifindex, VRF_DEFAULT);
     if (ifp == NULL) {

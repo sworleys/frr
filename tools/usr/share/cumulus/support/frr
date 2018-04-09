@@ -9,7 +9,7 @@
 
 module=${0##*/}
 funcs=(frr)
-nondef_funcs=(bgptable)
+nondef_funcs=(bgptable ospftable ospf6table)
 json=
 jexec=
 
@@ -31,6 +31,7 @@ func_frr()
     exec_cmd ospf6.redistribute vtysh -c "show ipv6 ospf6 redistribute"
     exec_cmd ospf6.spf.tree vtysh -c "show ipv6 ospf6 spf tree"
     exec_cmd ospf6.database.router vtysh -c "show ipv6 ospf6 database router"
+    exec_cmd ospf6.route_summary vtysh -c "show ipv6 ospf6 route summary"
     exec_cmd ospf6.show_running vtysh -c "show running ospf6d"
 
     exec_cmd bgp.show_running vtysh -c "show running bgpd"
@@ -72,19 +73,23 @@ func_frr()
 
     exec_cmd $jexec evpn.vni vtysh -c "show evpn vni"
     exec_cmd $jexec evpn.mac.vni vtysh -c "show evpn mac vni all"
+    exec_cmd $jexec evpn.mac.vni vtysh -c "show evpn arp-cache vni all"
     exec_cmd $jexec evpn.rmac.vni vtysh -c "show evpn rmac vni all"
     exec_cmd $jexec evpn.nexthop.vni vtysh -c "show evpn next-hops vni all"
-    exec_cmd $jexec bgp.evpn.summary vtysh -c "show bgp evpn summary"
-    exec_cmd $jexec bgp.evpn.vni vtysh -c "show bgp evpn vni"
-    exec_cmd $jexec bgp.evpn.route vtysh -c "show bgp evpn route"
-    exec_cmd $jexec bgp.evpn.route.vni.all vtysh -c "show bgp evpn route vni all"
+    exec_cmd $jexec bgp.evpn.summary vtysh -c "show bgp l2vpn evpn summary"
+    exec_cmd $jexec bgp.evpn.vni vtysh -c "show bgp l2vpn evpn vni"
+    exec_cmd $jexec bgp.evpn.route vtysh -c "show bgp l2vpn evpn route"
+    exec_cmd $jexec bgp.evpn.route.vni.all vtysh -c "show bgp l2vpn evpn route vni all"
     exec_cmd $jexec bgp.evpn.vrfimportrt vtysh -c "show bgp l2vpn evpn vrf-import-rt"
     exec_cmd $jexec bgp.evpn.importrt vtysh -c "show bgp l2vpn evpn import-rt"
 
+    exec_cmd $jexec pbr.map vtysh -c "show pbr map"
+    exec_cmd $jexec pbr.intf vtysh -c "show pbr interface"
+    exec_cmd $jexec pbr.nhop.group vtysh -c "show pbr nexthop-groups"
 
     [ $SUP_SECURE -eq 0 ] && {
         [ $SUP_VERBOSE -eq 1 ] &&
-            date +"%F_%T: ${FUNCNAME[0]}: copy.vtysh.history files to archive" 1>&2
+            date +"%F_%T.%N: ${FUNCNAME[0]}: copy.vtysh.history files to archive" 1>&2
         for f in /home/* /root; do
             [ -e ${f}/.history_frr ] &&
                 cp -a ${f}/.history_frr ${f##*/}.vtysh.history
@@ -95,6 +100,19 @@ func_frr()
 func_bgptable()
 {
     exec_cmd $jexec bgp.route vtysh -c "show ip bgp vrf all $json"
+}
+
+func_ospftable()
+{
+    exec_cmd $jexec ospf.route vtysh -c "show ip ospf vrf all route $json"
+}
+
+func_ospf6table()
+{
+    exec_cmd ospf6.database_detail vtysh -c "show ipv6 ospf6 database detail"
+    exec_cmd ospf6.route_detail vtysh -c "show ipv6 ospf6 route detail"
+    exec_cmd ospf6.neigbor_detail vtysh -c "show ipv6 ospf6 neighbor detail"
+    exec_cmd ospf6.borderrouters_detail  vtysh -c "show ipv6 ospf6 border-routers detail"
 }
 
 # main
@@ -122,7 +140,7 @@ main()
 
     for func in ${funcs[@]}; do
         [ $SUP_VERBOSE -eq 1 ] && echo "$module.$func" 1>&2
-        date +"### $module.$func Started at %F-%T"
+        date +"### $module.$func Started at %F-%T.%N"
         { time func_$func 2>&$stderr  ; } 2>$tfile
         read secs < $tfile
         echo "### $module.$func Completed in $secs"

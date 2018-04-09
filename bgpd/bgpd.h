@@ -161,6 +161,12 @@ struct bgp_redist {
 	struct bgp_rmap rmap;
 };
 
+typedef enum {
+	BGP_VPN_POLICY_DIR_FROMVPN = 0,
+	BGP_VPN_POLICY_DIR_TOVPN = 1,
+	BGP_VPN_POLICY_DIR_MAX = 2
+} vpn_policy_direction_t;
+
 /*
  * Type of 'struct bgp'.
  * - Default: The default instance
@@ -262,13 +268,14 @@ struct bgp {
 			       /* $FRR indent$ */
 			       /* clang-format off */
 #define BGP_MAXMED_ADMIN_UNCONFIGURED  0 /* Off by default */
-	u_int32_t
-		maxmed_admin_value; /* Max-med value when administrative in on
+	u_int32_t maxmed_admin_value; /* Max-med value when administrative in on
 				       */
+				      /* $FRR indent$ */
+				      /* clang-format off */
 #define BGP_MAXMED_VALUE_DEFAULT  4294967294 /* Maximum by default */
 
-	u_char maxmed_active;   /* 1/0 if max-med is active or not */
-	u_int32_t maxmed_value; /* Max-med value when its active */
+	u_char maxmed_active;	 /* 1/0 if max-med is active or not */
+	u_int32_t maxmed_value;       /* Max-med value when its active */
 
 	/* BGP update delay on startup */
 	struct thread *t_update_delay;
@@ -317,7 +324,19 @@ struct bgp {
 
 	/* BGP Per AF flags */
 	u_int16_t af_flags[AFI_MAX][SAFI_MAX];
-#define BGP_CONFIG_DAMPENING              (1 << 0)
+#define BGP_CONFIG_DAMPENING				(1 << 0)
+/* l2vpn evpn flags - 1 << 0 is used for DAMPENNG */
+#define BGP_L2VPN_EVPN_ADVERTISE_IPV4_UNICAST		(1 << 1)
+#define BGP_L2VPN_EVPN_ADVERTISE_IPV6_UNICAST		(1 << 2)
+#define BGP_L2VPN_EVPN_DEFAULT_ORIGINATE_IPV4		(1 << 3)
+#define BGP_L2VPN_EVPN_DEFAULT_ORIGINATE_IPV6		(1 << 4)
+/* import/export between address families */
+#define BGP_CONFIG_VRF_TO_MPLSVPN_EXPORT		(1 << 5)
+#define BGP_CONFIG_MPLSVPN_TO_VRF_IMPORT		(1 << 6)
+/* vrf-route leaking flags */
+#define BGP_CONFIG_VRF_TO_VRF_IMPORT			(1 << 7)
+#define BGP_CONFIG_VRF_TO_VRF_EXPORT			(1 << 8)
+#define BGP_DEFAULT_NAME		"default"
 
 	/* Route table for next-hop lookup cache. */
 	struct bgp_table *nexthop_cache_table[AFI_MAX];
@@ -390,6 +409,9 @@ struct bgp {
 	/* Actual coalesce time */
 	uint32_t coalesce_time;
 
+	/* Auto-shutdown new peers */
+	bool autoshutdown;
+
 	u_int32_t addpath_tx_id;
 	int addpath_tx_used[AFI_MAX][SAFI_MAX];
 
@@ -427,14 +449,16 @@ struct bgp {
 	/* vrf flags */
 	uint32_t vrf_flags;
 #define BGP_VRF_AUTO                        (1 << 0)
-#define BGP_VRF_ADVERTISE_IPV4_IN_EVPN      (1 << 1)
-#define BGP_VRF_ADVERTISE_IPV6_IN_EVPN      (1 << 2)
-#define BGP_VRF_IMPORT_RT_CFGD              (1 << 3)
-#define BGP_VRF_EXPORT_RT_CFGD              (1 << 4)
-#define BGP_VRF_RD_CFGD                     (1 << 5)
+#define BGP_VRF_IMPORT_RT_CFGD              (1 << 1)
+#define BGP_VRF_EXPORT_RT_CFGD              (1 << 2)
+#define BGP_VRF_RD_CFGD                     (1 << 3)
+#define BGP_VRF_L3VNI_PREFIX_ROUTES_ONLY    (1 << 4)
 
 	/* unique ID for auto derivation of RD for this vrf */
 	uint16_t vrf_rd_id;
+
+	/* Automatically derived RD for this VRF */
+	struct prefix_rd vrf_prd_auto;
 
 	/* RD for this VRF */
 	struct prefix_rd vrf_prd;
@@ -447,6 +471,29 @@ struct bgp {
 
 	/* list of corresponding l2vnis (struct bgpevpn) */
 	struct list *l2vnis;
+
+	/* route map for advertise ipv4/ipv6 unicast (type-5 routes) */
+	struct bgp_rmap adv_cmd_rmap[AFI_MAX][SAFI_MAX];
+
+	/* vpn-policy */
+	struct {
+		struct ecommunity *rtlist[BGP_VPN_POLICY_DIR_MAX];
+		char *rmap_name[BGP_VPN_POLICY_DIR_MAX];
+		struct route_map *rmap[BGP_VPN_POLICY_DIR_MAX];
+
+		/* should be mpls_label_t? */
+		uint32_t tovpn_label; /* may be MPLS_LABEL_NONE */
+		uint32_t tovpn_zebra_vrf_label_last_sent;
+		struct prefix_rd tovpn_rd;
+		struct prefix tovpn_nexthop; /* unset => set to 0 */
+		uint32_t flags;
+#define BGP_VPN_POLICY_TOVPN_RD_SET            0x00000004
+#define BGP_VPN_POLICY_TOVPN_NEXTHOP_SET       0x00000008
+
+		/* If we are importing a vrf -> vrf keep alist of vrf names */
+		struct list *import_vrf;
+		struct list *export_vrf;
+	} vpn_policy[AFI_MAX];
 
 	QOBJ_FIELDS
 };
@@ -635,8 +682,8 @@ struct peer {
 	struct stream_fifo *ibuf; // packets waiting to be processed
 	struct stream_fifo *obuf; // packets waiting to be written
 
-	struct stream *ibuf_work; // WiP buffer used by bgp_read() only
-	struct stream *obuf_work; // WiP buffer used to construct packets
+	struct ringbuf *ibuf_work; // WiP buffer used by bgp_read() only
+	struct stream *obuf_work;  // WiP buffer used to construct packets
 
 	struct stream *curr; // the current packet being parsed
 
@@ -679,7 +726,6 @@ struct peer {
 	time_t readtime;     /* Last read time */
 	time_t resettime;    /* Last reset time */
 
-	ifindex_t ifindex;     /* ifindex of the BGP connection. */
 	char *conf_if;	 /* neighbor interface config name. */
 	struct interface *ifp; /* corresponding interface */
 	char *ifname;	  /* bind interface name. */
@@ -752,9 +798,8 @@ struct peer {
 #define PEER_FLAG_DYNAMIC_NEIGHBOR          (1 << 12) /* dynamic neighbor */
 #define PEER_FLAG_CAPABILITY_ENHE           (1 << 13) /* Extended next-hop (rfc 5549)*/
 #define PEER_FLAG_IFPEER_V6ONLY             (1 << 14) /* if-based peer is v6 only */
-#if ENABLE_BGP_VNC
 #define PEER_FLAG_IS_RFAPI_HD		    (1 << 15) /* attached to rfapi HD */
-#endif
+
 	/* outgoing message sent in CEASE_ADMIN_SHUTDOWN notify */
 	char *tx_shutdown_message;
 
@@ -826,8 +871,8 @@ struct peer {
 #define PEER_CONFIG_ROUTEADV          (1 << 2) /* route advertise */
 #define PEER_GROUP_CONFIG_TIMER       (1 << 3) /* timers from peer-group */
 
-#define PEER_OR_GROUP_TIMER_SET(peer)                                        \
-	(CHECK_FLAG(peer->config, PEER_CONFIG_TIMER)			     \
+#define PEER_OR_GROUP_TIMER_SET(peer)                                          \
+	(CHECK_FLAG(peer->config, PEER_CONFIG_TIMER)                           \
 	 || CHECK_FLAG(peer->config, PEER_GROUP_CONFIG_TIMER))
 
 	_Atomic uint32_t holdtime;
@@ -867,6 +912,30 @@ struct peer {
 	/* workqueues */
 	struct work_queue *clear_node_queue;
 
+#define PEER_TOTAL_RX(peer)                                                    \
+	atomic_load_explicit(&peer->open_in, memory_order_relaxed)             \
+		+ atomic_load_explicit(&peer->update_in, memory_order_relaxed) \
+		+ atomic_load_explicit(&peer->notify_in, memory_order_relaxed) \
+		+ atomic_load_explicit(&peer->refresh_in,                      \
+				       memory_order_relaxed)                   \
+		+ atomic_load_explicit(&peer->keepalive_in,                    \
+				       memory_order_relaxed)                   \
+		+ atomic_load_explicit(&peer->dynamic_cap_in,                  \
+				       memory_order_relaxed)
+
+#define PEER_TOTAL_TX(peer)                                                    \
+	atomic_load_explicit(&peer->open_out, memory_order_relaxed)            \
+		+ atomic_load_explicit(&peer->update_out,                      \
+				       memory_order_relaxed)                   \
+		+ atomic_load_explicit(&peer->notify_out,                      \
+				       memory_order_relaxed)                   \
+		+ atomic_load_explicit(&peer->refresh_out,                     \
+				       memory_order_relaxed)                   \
+		+ atomic_load_explicit(&peer->keepalive_out,                   \
+				       memory_order_relaxed)                   \
+		+ atomic_load_explicit(&peer->dynamic_cap_out,                 \
+				       memory_order_relaxed)
+
 	/* Statistics field */
 	_Atomic uint32_t open_in;         /* Open message input count */
 	_Atomic uint32_t open_out;        /* Open message output count */
@@ -880,7 +949,7 @@ struct peer {
 	_Atomic uint32_t refresh_in;      /* Route Refresh input count */
 	_Atomic uint32_t refresh_out;     /* Route Refresh output count */
 	_Atomic uint32_t dynamic_cap_in;  /* Dynamic Capability input count.  */
-	_Atomic uint32_t dynamic_cap_out; /* Dynamic Capability output count.  */
+	_Atomic uint32_t dynamic_cap_out; /* Dynamic Capability output count. */
 
 	/* BGP state count */
 	u_int32_t established; /* Established */
@@ -900,9 +969,6 @@ struct peer {
 
 	/* Send prefix count. */
 	unsigned long scount[AFI_MAX][SAFI_MAX];
-
-	/* Announcement attribute hash.  */
-	struct hash *hash[AFI_MAX][SAFI_MAX];
 
 	/* Notify data. */
 	struct bgp_notify notify;
@@ -1058,6 +1124,7 @@ struct bgp_nlri {
 #define BGP_ATTR_AS4_PATH                       17
 #define BGP_ATTR_AS4_AGGREGATOR                 18
 #define BGP_ATTR_AS_PATHLIMIT                   21
+#define BGP_ATTR_PMSI_TUNNEL                    22
 #define BGP_ATTR_ENCAP                          23
 #define BGP_ATTR_LARGE_COMMUNITIES              32
 #define BGP_ATTR_PREFIX_SID                     40
@@ -1201,7 +1268,7 @@ enum bgp_clear_type {
 
 /* Macros. */
 #define BGP_INPUT(P)         ((P)->curr)
-#define BGP_INPUT_PNT(P)     (STREAM_PNT(BGP_INPUT(P)))
+#define BGP_INPUT_PNT(P)     (stream_pnt(BGP_INPUT(P)))
 #define BGP_IS_VALID_STATE_FOR_NOTIF(S)                                        \
 	(((S) == OpenSent) || ((S) == OpenConfirm) || ((S) == Established))
 
@@ -1325,6 +1392,9 @@ extern int bgp_get(struct bgp **, as_t *, const char *, enum bgp_instance_type);
 extern void bgp_instance_up(struct bgp *);
 extern void bgp_instance_down(struct bgp *);
 extern int bgp_delete(struct bgp *);
+
+extern int bgp_handle_socket(struct bgp *bgp, struct vrf *vrf,
+			     vrf_id_t old_vrf_id, bool create);
 
 extern int bgp_flag_set(struct bgp *, int);
 extern int bgp_flag_unset(struct bgp *, int);
@@ -1464,7 +1534,8 @@ extern int peer_cmp(struct peer *p1, struct peer *p2);
 extern int bgp_map_afi_safi_iana2int(iana_afi_t pkt_afi, iana_safi_t pkt_safi,
 				     afi_t *afi, safi_t *safi);
 extern int bgp_map_afi_safi_int2iana(afi_t afi, safi_t safi,
-				     iana_afi_t *pkt_afi, iana_safi_t *pkt_safi);
+				     iana_afi_t *pkt_afi,
+				     iana_safi_t *pkt_safi);
 
 extern struct peer_af *peer_af_create(struct peer *, afi_t, safi_t);
 extern struct peer_af *peer_af_find(struct peer *, afi_t, safi_t);

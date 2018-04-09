@@ -441,6 +441,7 @@ void ospf_zebra_add(struct ospf *ospf, struct prefix_ipv4 *p,
 			api_nh->ifindex = path->ifindex;
 			api_nh->type = NEXTHOP_TYPE_IFINDEX;
 		}
+		api_nh->vrf_id = ospf->vrf_id;
 		count++;
 
 		if (IS_DEBUG_OSPF(zebra, ZEBRA_REDISTRIBUTE)) {
@@ -945,6 +946,14 @@ static int ospf_zebra_read_route(int command, struct zclient *zclient,
 	if (IPV4_NET127(ntohl(p.prefix.s_addr)))
 		return 0;
 
+	if (IS_DEBUG_OSPF(zebra, ZEBRA_REDISTRIBUTE)) {
+		char buf_prefix[PREFIX_STRLEN];
+		prefix2str(&api.prefix, buf_prefix, sizeof(buf_prefix));
+
+		zlog_debug("%s: from client %s: vrf_id %d, p %s", __func__,
+			   zebra_route_string(api.type), vrf_id, buf_prefix);
+	}
+
 	if (command == ZEBRA_REDISTRIBUTE_ROUTE_ADD) {
 		/* XXX|HACK|TODO|FIXME:
 		 * Maybe we should ignore reject/blackhole routes? Testing
@@ -1442,8 +1451,6 @@ void ospf_zebra_vrf_register(struct ospf *ospf)
 				   __PRETTY_FUNCTION__,
 				   ospf_vrf_id_to_name(ospf->vrf_id),
 				   ospf->vrf_id);
-		/* Deregister for router-id, interfaces,
-		 * redistributed routes. */
 		zclient_send_reg_requests(zclient, ospf->vrf_id);
 	}
 }
@@ -1475,7 +1482,7 @@ static void ospf_zebra_connected(struct zclient *zclient)
 void ospf_zebra_init(struct thread_master *master, u_short instance)
 {
 	/* Allocate zebra structure. */
-	zclient = zclient_new(master);
+	zclient = zclient_new_notify(master, &zclient_options_default);
 	zclient_init(zclient, ZEBRA_ROUTE_OSPF, instance, &ospfd_privs);
 	zclient->zebra_connected = ospf_zebra_connected;
 	zclient->router_id_update = ospf_router_id_update_zebra;

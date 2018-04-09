@@ -59,6 +59,7 @@ int if_ioctl(u_long request, caddr_t buffer)
 	sock = socket(AF_INET, SOCK_DGRAM, 0);
 	if (sock < 0) {
 		int save_errno = errno;
+
 		if (zserv_privs.change(ZPRIVS_LOWER))
 			zlog_err("Can't lower privileges");
 		zlog_err("Cannot create UDP socket: %s",
@@ -78,6 +79,40 @@ int if_ioctl(u_long request, caddr_t buffer)
 	return 0;
 }
 
+/* call ioctl system call */
+int vrf_if_ioctl(u_long request, caddr_t buffer, vrf_id_t vrf_id)
+{
+	int sock;
+	int ret;
+	int err = 0;
+
+	if (zserv_privs.change(ZPRIVS_RAISE))
+		zlog_err("Can't raise privileges");
+	sock = vrf_socket(AF_INET, SOCK_DGRAM, 0, vrf_id, NULL);
+	if (sock < 0) {
+		int save_errno = errno;
+
+		if (zserv_privs.change(ZPRIVS_LOWER))
+			zlog_err("Can't lower privileges");
+		zlog_err("Cannot create UDP socket: %s",
+			 safe_strerror(save_errno));
+		exit(1);
+	}
+	ret = vrf_ioctl(vrf_id, sock, request, buffer);
+	if (ret < 0)
+		err = errno;
+	if (zserv_privs.change(ZPRIVS_LOWER))
+		zlog_err("Can't lower privileges");
+	close(sock);
+
+	if (ret < 0) {
+		errno = err;
+		return ret;
+	}
+	return 0;
+}
+
+#ifndef HAVE_NETLINK
 static int if_ioctl_ipv6(u_long request, caddr_t buffer)
 {
 	int sock;
@@ -89,6 +124,7 @@ static int if_ioctl_ipv6(u_long request, caddr_t buffer)
 	sock = socket(AF_INET6, SOCK_DGRAM, 0);
 	if (sock < 0) {
 		int save_errno = errno;
+
 		if (zserv_privs.change(ZPRIVS_LOWER))
 			zlog_err("Can't lower privileges");
 		zlog_err("Cannot create IPv6 datagram socket: %s",
@@ -108,6 +144,7 @@ static int if_ioctl_ipv6(u_long request, caddr_t buffer)
 	}
 	return 0;
 }
+#endif /* ! HAVE_NETLINK */
 
 /*
  * get interface metric
@@ -120,7 +157,7 @@ void if_get_metric(struct interface *ifp)
 
 	ifreq_set_name(&ifreq, ifp);
 
-	if (if_ioctl(SIOCGIFMETRIC, (caddr_t)&ifreq) < 0)
+	if (vrf_if_ioctl(SIOCGIFMETRIC, (caddr_t)&ifreq, ifp->vrf_id) < 0)
 		return;
 	ifp->metric = ifreq.ifr_metric;
 	if (ifp->metric == 0)
@@ -138,7 +175,7 @@ void if_get_mtu(struct interface *ifp)
 	ifreq_set_name(&ifreq, ifp);
 
 #if defined(SIOCGIFMTU)
-	if (if_ioctl(SIOCGIFMTU, (caddr_t)&ifreq) < 0) {
+	if (vrf_if_ioctl(SIOCGIFMTU, (caddr_t)&ifreq, ifp->vrf_id) < 0) {
 		zlog_info("Can't lookup mtu by ioctl(SIOCGIFMTU)");
 		ifp->mtu6 = ifp->mtu = -1;
 		return;
@@ -374,9 +411,9 @@ void if_get_flags(struct interface *ifp)
 
 	ifreq_set_name(&ifreq, ifp);
 
-	ret = if_ioctl(SIOCGIFFLAGS, (caddr_t)&ifreq);
+	ret = vrf_if_ioctl(SIOCGIFFLAGS, (caddr_t)&ifreq, ifp->vrf_id);
 	if (ret < 0) {
-		zlog_err("if_ioctl(SIOCGIFFLAGS) failed: %s",
+		zlog_err("vrf_if_ioctl(SIOCGIFFLAGS) failed: %s",
 			 safe_strerror(errno));
 		return;
 	}
@@ -421,7 +458,7 @@ int if_set_flags(struct interface *ifp, uint64_t flags)
 	ifreq.ifr_flags = ifp->flags;
 	ifreq.ifr_flags |= flags;
 
-	ret = if_ioctl(SIOCSIFFLAGS, (caddr_t)&ifreq);
+	ret = vrf_if_ioctl(SIOCSIFFLAGS, (caddr_t)&ifreq, ifp->vrf_id);
 
 	if (ret < 0) {
 		zlog_info("can't set interface flags");
@@ -442,7 +479,7 @@ int if_unset_flags(struct interface *ifp, uint64_t flags)
 	ifreq.ifr_flags = ifp->flags;
 	ifreq.ifr_flags &= ~flags;
 
-	ret = if_ioctl(SIOCSIFFLAGS, (caddr_t)&ifreq);
+	ret = vrf_if_ioctl(SIOCSIFFLAGS, (caddr_t)&ifreq, ifp->vrf_id);
 
 	if (ret < 0) {
 		zlog_info("can't unset interface flags");
@@ -460,44 +497,19 @@ struct in6_ifreq {
 	int ifr6_ifindex;
 };
 #endif /* _LINUX_IN6_H */
-
 /* Interface's address add/delete functions. */
 int if_prefix_add_ipv6(struct interface *ifp, struct connected *ifc)
 {
-	int ret;
-	struct prefix_ipv6 *p;
-	struct in6_ifreq ifreq;
-
-	p = (struct prefix_ipv6 *)ifc->address;
-
-	memset(&ifreq, 0, sizeof(struct in6_ifreq));
-
-	memcpy(&ifreq.ifr6_addr, &p->prefix, sizeof(struct in6_addr));
-	ifreq.ifr6_ifindex = ifp->ifindex;
-	ifreq.ifr6_prefixlen = p->prefixlen;
-
-	ret = if_ioctl_ipv6(SIOCSIFADDR, (caddr_t)&ifreq);
-
-	return ret;
+#ifdef HAVE_NETLINK
+	return kernel_address_add_ipv6 (ifp, ifc);
+#endif /* HAVE_NETLINK */
 }
 
 int if_prefix_delete_ipv6(struct interface *ifp, struct connected *ifc)
 {
-	int ret;
-	struct prefix_ipv6 *p;
-	struct in6_ifreq ifreq;
-
-	p = (struct prefix_ipv6 *)ifc->address;
-
-	memset(&ifreq, 0, sizeof(struct in6_ifreq));
-
-	memcpy(&ifreq.ifr6_addr, &p->prefix, sizeof(struct in6_addr));
-	ifreq.ifr6_ifindex = ifp->ifindex;
-	ifreq.ifr6_prefixlen = p->prefixlen;
-
-	ret = if_ioctl_ipv6(SIOCDIFADDR, (caddr_t)&ifreq);
-
-	return ret;
+#ifdef HAVE_NETLINK
+	return kernel_address_delete_ipv6 (ifp, ifc);
+#endif /* HAVE_NETLINK */
 }
 #else /* LINUX_IPV6 */
 #ifdef HAVE_STRUCT_IN6_ALIASREQ

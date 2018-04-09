@@ -332,12 +332,12 @@ static void remove_excess_adjs(struct list *adjs)
 		if (comp < 0)
 			continue;
 
-		if (candidate->circuit->circuit_id > adj->circuit->circuit_id) {
+		if (candidate->circuit->idx > adj->circuit->idx) {
 			excess = node;
 			continue;
 		}
 
-		if (candidate->circuit->circuit_id < adj->circuit->circuit_id)
+		if (candidate->circuit->idx < adj->circuit->idx)
 			continue;
 
 		comp = memcmp(candidate->snpa, adj->snpa, ETH_ALEN);
@@ -1149,7 +1149,7 @@ static int isis_spf_preload_tent(struct isis_spftree *spftree,
 				root_sysid, parent);
 		} else if (circuit->circ_type == CIRCUIT_T_P2P) {
 			adj = circuit->u.p2p.neighbor;
-			if (!adj)
+			if (!adj || adj->adj_state != ISIS_ADJ_UP)
 				continue;
 			if (!adj_has_mt(adj, spftree->mtid))
 				continue;
@@ -1249,7 +1249,7 @@ static void init_spt(struct isis_spftree *spftree, int mtid, int level,
 }
 
 static int isis_run_spf(struct isis_area *area, int level, int family,
-			u_char *sysid)
+			u_char *sysid, struct timeval *nowtv)
 {
 	int retval = ISIS_OK;
 	struct isis_vertex *vertex;
@@ -1263,9 +1263,8 @@ static int isis_run_spf(struct isis_area *area, int level, int family,
 	uint16_t mtid;
 
 	/* Get time that can't roll backwards. */
-	monotime(&time_now);
-	start_time = time_now.tv_sec;
-	start_time = (start_time * 1000000) + time_now.tv_usec;
+	start_time = nowtv->tv_sec;
+	start_time = (start_time * 1000000) + nowtv->tv_usec;
 
 	if (family == AF_INET)
 		spftree = area->spftree[level - 1];
@@ -1372,9 +1371,11 @@ static int isis_run_spf_cb(struct thread *thread)
 			   area->area_tag, level);
 
 	if (area->ip_circuits)
-		retval = isis_run_spf(area, level, AF_INET, isis->sysid);
+		retval = isis_run_spf(area, level, AF_INET, isis->sysid,
+			&thread->real);
 	if (area->ipv6_circuits)
-		retval = isis_run_spf(area, level, AF_INET6, isis->sysid);
+		retval = isis_run_spf(area, level, AF_INET6, isis->sysid,
+			&thread->real);
 
 	return retval;
 }
@@ -1435,9 +1436,8 @@ int isis_spf_schedule(struct isis_area *area, int level)
 			 timer, &area->spf_timer[level - 1]);
 
 	if (isis->debugs & DEBUG_SPF_EVENTS)
-		zlog_debug("ISIS-Spf (%s) L%d SPF scheduled %d sec from now",
-			   area->area_tag, level,
-			   area->min_spf_interval[level - 1] - diff);
+		zlog_debug("ISIS-Spf (%s) L%d SPF scheduled %ld sec from now",
+			   area->area_tag, level, timer);
 
 	return ISIS_OK;
 }

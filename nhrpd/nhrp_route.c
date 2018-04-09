@@ -95,6 +95,7 @@ void nhrp_route_announce(int add, enum nhrp_cache_type type, const struct prefix
 	memset(&api, 0, sizeof(api));
 	api.type = ZEBRA_ROUTE_NHRP;
 	api.safi = SAFI_UNICAST;
+	api.vrf_id = VRF_DEFAULT;
 	api.prefix = *p;
 
 	switch (type) {
@@ -113,11 +114,12 @@ void nhrp_route_announce(int add, enum nhrp_cache_type type, const struct prefix
 		SET_FLAG(api.flags, ZEBRA_FLAG_FIB_OVERRIDE);
 		break;
 	}
-	SET_FLAG(api.flags, ZEBRA_FLAG_INTERNAL);
+	SET_FLAG(api.flags, ZEBRA_FLAG_ALLOW_RECURSION);
 
 	SET_FLAG(api.message, ZAPI_MESSAGE_NEXTHOP);
 	api.nexthop_num = 1;
 	api_nh = &api.nexthops[0];
+	api_nh->vrf_id = VRF_DEFAULT;
 
 	switch (api.prefix.family) {
 	case AF_INET:
@@ -314,7 +316,7 @@ void nhrp_zebra_init(void)
 	zebra_rib[AFI_IP] = route_table_init();
 	zebra_rib[AFI_IP6] = route_table_init();
 
-	zclient = zclient_new(master);
+	zclient = zclient_new_notify(master, &zclient_options_default);
 	zclient->zebra_connected = nhrp_zebra_connected;
 	zclient->interface_add = nhrp_interface_add;
 	zclient->interface_delete = nhrp_interface_delete;

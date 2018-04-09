@@ -23,30 +23,7 @@
 
 #include "bgpd/bgp_route.h"
 #include "bgpd/bgp_rd.h"
-
-#ifdef MPLS_LABEL_MAX
-#undef MPLS_LABEL_MAX
-#endif
-
-typedef enum {
-	MPLS_LABEL_IPV4_EXPLICIT_NULL = 0, /* [RFC3032] */
-	MPLS_LABEL_ROUTER_ALERT = 1,       /* [RFC3032] */
-	MPLS_LABEL_IPV6_EXPLICIT_NULL = 2, /* [RFC3032] */
-	MPLS_LABEL_IMPLICIT_NULL = 3,      /* [RFC3032] */
-	MPLS_LABEL_UNASSIGNED4 = 4,
-	MPLS_LABEL_UNASSIGNED5 = 5,
-	MPLS_LABEL_UNASSIGNED6 = 6,
-	MPLS_LABEL_ELI = 7, /* Entropy Indicator [RFC6790] */
-	MPLS_LABEL_UNASSIGNED8 = 8,
-	MPLS_LABEL_UNASSIGNED9 = 9,
-	MPLS_LABEL_UNASSIGNED10 = 10,
-	MPLS_LABEL_UNASSIGNED11 = 11,
-	MPLS_LABEL_GAL = 13,       /* [RFC5586] */
-	MPLS_LABEL_OAM_ALERT = 14, /* [RFC3429] */
-	MPLS_LABEL_EXTENSION = 15, /* [RFC7274] */
-	MPLS_LABEL_MAX = 1048575,
-	MPLS_LABEL_ILLEGAL = 0xFFFFFFFF /* for internal use only */
-} mpls_special_label_t;
+#include "bgpd/bgp_zebra.h"
 
 #define MPLS_LABEL_IS_SPECIAL(label) ((label) <= MPLS_LABEL_EXTENSION)
 #define MPLS_LABEL_IS_NULL(label)                                              \
@@ -74,5 +51,137 @@ extern int argv_find_and_parse_vpnvx(struct cmd_token **argv, int argc,
 extern int bgp_show_mpls_vpn(struct vty *vty, afi_t afi, struct prefix_rd *prd,
 			     enum bgp_show_type type, void *output_arg,
 			     int tags, u_char use_json);
+
+extern void vpn_leak_from_vrf_update(struct bgp *bgp_vpn, struct bgp *bgp_vrf,
+				     struct bgp_info *info_vrf);
+
+extern void vpn_leak_from_vrf_withdraw(struct bgp *bgp_vpn, struct bgp *bgp_vrf,
+				       struct bgp_info *info_vrf);
+
+extern void vpn_leak_from_vrf_withdraw_all(struct bgp *bgp_vpn,
+					   struct bgp *bgp_vrf, afi_t afi);
+
+extern void vpn_leak_from_vrf_update_all(struct bgp *bgp_vpn,
+					 struct bgp *bgp_vrf, afi_t afi);
+
+extern void vpn_leak_to_vrf_withdraw_all(struct bgp *bgp_vrf, afi_t afi);
+
+extern void vpn_leak_to_vrf_update_all(struct bgp *bgp_vrf, struct bgp *bgp_vpn,
+				       afi_t afi);
+
+extern void vpn_leak_to_vrf_update(struct bgp *bgp_vpn,
+				   struct bgp_info *info_vpn);
+
+extern void vpn_leak_to_vrf_withdraw(struct bgp *bgp_vpn,
+				     struct bgp_info *info_vpn);
+
+extern void vpn_leak_zebra_vrf_label_update(struct bgp *bgp, afi_t afi);
+extern void vpn_leak_zebra_vrf_label_withdraw(struct bgp *bgp, afi_t afi);
+extern void vrf_import_from_vrf(struct bgp *bgp, struct bgp *vrf_bgp,
+				afi_t afi, safi_t safi);
+void vrf_unimport_from_vrf(struct bgp *bgp, struct bgp *vrf_bgp,
+			   afi_t afi, safi_t safi);
+
+static inline int vpn_leak_to_vpn_active(struct bgp *bgp_vrf, afi_t afi,
+					 const char **pmsg)
+{
+	if (bgp_vrf->inst_type != BGP_INSTANCE_TYPE_VRF
+		&& bgp_vrf->inst_type != BGP_INSTANCE_TYPE_DEFAULT) {
+
+		if (pmsg)
+			*pmsg = "source bgp instance neither vrf nor default";
+		return 0;
+	}
+
+	/* Is vrf configured to export to vpn? */
+	if (!CHECK_FLAG(bgp_vrf->af_flags[afi][SAFI_UNICAST],
+			BGP_CONFIG_VRF_TO_MPLSVPN_EXPORT)
+	    && !CHECK_FLAG(bgp_vrf->af_flags[afi][SAFI_UNICAST],
+			   BGP_CONFIG_VRF_TO_VRF_EXPORT)) {
+		if (pmsg)
+			*pmsg = "export not set";
+		return 0;
+	}
+
+	/* Is there an RT list set? */
+	if (!bgp_vrf->vpn_policy[afi].rtlist[BGP_VPN_POLICY_DIR_TOVPN]) {
+		if (pmsg)
+			*pmsg = "rtlist tovpn not defined";
+		return 0;
+	}
+
+	/* Is there an RD set? */
+	if (!CHECK_FLAG(bgp_vrf->vpn_policy[afi].flags,
+			BGP_VPN_POLICY_TOVPN_RD_SET)) {
+		if (pmsg)
+			*pmsg = "rd not defined";
+		return 0;
+	}
+	return 1;
+}
+
+static inline int vpn_leak_from_vpn_active(struct bgp *bgp_vrf, afi_t afi,
+					   const char **pmsg)
+{
+	if (bgp_vrf->inst_type != BGP_INSTANCE_TYPE_VRF
+		&& bgp_vrf->inst_type != BGP_INSTANCE_TYPE_DEFAULT) {
+
+		if (pmsg)
+			*pmsg = "destination bgp instance neither vrf nor default";
+		return 0;
+	}
+
+	/* Is vrf configured to import from vpn? */
+	if (!CHECK_FLAG(bgp_vrf->af_flags[afi][SAFI_UNICAST],
+			BGP_CONFIG_MPLSVPN_TO_VRF_IMPORT)
+	    && !CHECK_FLAG(bgp_vrf->af_flags[afi][SAFI_UNICAST],
+			   BGP_CONFIG_VRF_TO_VRF_IMPORT)) {
+		if (pmsg)
+			*pmsg = "import not set";
+		return 0;
+	}
+	if (!bgp_vrf->vpn_policy[afi].rtlist[BGP_VPN_POLICY_DIR_FROMVPN]) {
+		if (pmsg)
+			*pmsg = "rtlist fromvpn not defined";
+		return 0;
+	}
+	return 1;
+}
+
+static inline void vpn_leak_prechange(vpn_policy_direction_t direction,
+				      afi_t afi, struct bgp *bgp_vpn,
+				      struct bgp *bgp_vrf)
+{
+	if ((direction == BGP_VPN_POLICY_DIR_FROMVPN) &&
+		vpn_leak_from_vpn_active(bgp_vrf, afi, NULL)) {
+
+		vpn_leak_to_vrf_withdraw_all(bgp_vrf, afi);
+	}
+	if ((direction == BGP_VPN_POLICY_DIR_TOVPN) &&
+		vpn_leak_to_vpn_active(bgp_vrf, afi, NULL)) {
+
+		vpn_leak_from_vrf_withdraw_all(bgp_vpn, bgp_vrf, afi);
+	}
+}
+
+static inline void vpn_leak_postchange(vpn_policy_direction_t direction,
+				       afi_t afi, struct bgp *bgp_vpn,
+				       struct bgp *bgp_vrf)
+{
+	if (direction == BGP_VPN_POLICY_DIR_FROMVPN)
+		vpn_leak_to_vrf_update_all(bgp_vrf, bgp_vpn, afi);
+	if (direction == BGP_VPN_POLICY_DIR_TOVPN) {
+
+		if (bgp_vrf->vpn_policy[afi].tovpn_label !=
+			bgp_vrf->vpn_policy[afi]
+			       .tovpn_zebra_vrf_label_last_sent) {
+			vpn_leak_zebra_vrf_label_update(bgp_vrf, afi);
+		}
+
+		vpn_leak_from_vrf_update_all(bgp_vpn, bgp_vrf, afi);
+	}
+}
+
+extern void vpn_policy_routemap_event(const char *rmap_name);
 
 #endif /* _QUAGGA_BGP_MPLSVPN_H */

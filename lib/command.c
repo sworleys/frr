@@ -62,9 +62,10 @@ const char *node_names[] = {
 	"aaa",			    // AAA_NODE,
 	"keychain",		    // KEYCHAIN_NODE,
 	"keychain key",		    // KEYCHAIN_KEY_NODE,
-	"logical-router",	    // NS_NODE,
+	"logical-router",	    // LOGICALROUTER_NODE,
 	"vrf",			    // VRF_NODE,
 	"interface",		    // INTERFACE_NODE,
+	"nexthop-group",            // NH_GROUP_NODE,
 	"zebra",		    // ZEBRA_NODE,
 	"table",		    // TABLE_NODE,
 	"rip",			    // RIP_NODE,
@@ -96,7 +97,6 @@ const char *node_names[] = {
 	"ldp l2vpn",		    // LDP_L2VPN_NODE,
 	"ldp",			    // LDP_PSEUDOWIRE_NODE,
 	"isis",			    // ISIS_NODE,
-	"pim",			    // PIM_NODE,
 	"masc",			    // MASC_NODE,
 	"irdp",			    // IRDP_NODE,
 	"static ip",		    // IP_NODE,
@@ -108,6 +108,7 @@ const char *node_names[] = {
 	"as list",		    // AS_LIST_NODE,
 	"community list",	    // COMMUNITY_LIST_NODE,
 	"routemap",		    // RMAP_NODE,
+	"pbr-map",		    // PBRMAP_NODE,
 	"smux",			    // SMUX_NODE,
 	"dump",			    // DUMP_NODE,
 	"forwarding",		    // FORWARDING_NODE,
@@ -117,6 +118,7 @@ const char *node_names[] = {
 	"vty",			    // VTY_NODE,
 	"link-params",		    // LINK_PARAMS_NODE,
 	"bgp evpn vni",		    // BGP_EVPN_VNI_NODE,
+	"rpki",			    // RPKI_NODE
 };
 
 /* Command vector which includes some level of command lists. Normally
@@ -500,6 +502,9 @@ static int config_write_host(struct vty *vty)
 	if (cmd_hostname_get())
 		vty_out(vty, "hostname %s\n", cmd_hostname_get());
 
+	if (cmd_domainname_get())
+		vty_out(vty, "domainname %s\n", cmd_domainname_get());
+
 	/* The following are all configuration commands that are not sent to
          * watchfrr.  For instance watchfrr is hardcoded to log to syslog so
          * we would always display 'log syslog informational' in the config
@@ -519,6 +524,10 @@ static int config_write_host(struct vty *vty)
 			if (host.enable)
 				vty_out(vty, "enable password %s\n", host.enable);
 		}
+
+		if (cmd_domainname_get())
+			vty_out(vty, "domainname %s\n", cmd_domainname_get());
+
 
 		if (zlog_default->default_lvl != LOG_DEBUG) {
 			vty_out(vty, "! N.B. The 'log trap' command is deprecated.\n");
@@ -1299,8 +1308,9 @@ void cmd_exit(struct vty *vty)
 		break;
 	case INTERFACE_NODE:
 	case PW_NODE:
-	case NS_NODE:
+	case LOGICALROUTER_NODE:
 	case VRF_NODE:
+	case NH_GROUP_NODE:
 	case ZEBRA_NODE:
 	case BGP_NODE:
 	case RIP_NODE:
@@ -1315,7 +1325,7 @@ void cmd_exit(struct vty *vty)
 	case KEYCHAIN_NODE:
 	case MASC_NODE:
 	case RMAP_NODE:
-	case PIM_NODE:
+	case PBRMAP_NODE:
 	case VTY_NODE:
 		vty->node = CONFIG_NODE;
 		break;
@@ -1385,8 +1395,9 @@ DEFUN (config_end,
 	case CONFIG_NODE:
 	case INTERFACE_NODE:
 	case PW_NODE:
-	case NS_NODE:
+	case LOGICALROUTER_NODE:
 	case VRF_NODE:
+	case NH_GROUP_NODE:
 	case ZEBRA_NODE:
 	case RIP_NODE:
 	case RIPNG_NODE:
@@ -1408,6 +1419,7 @@ DEFUN (config_end,
 	case BGP_EVPN_VNI_NODE:
 	case BGP_IPV6L_NODE:
 	case RMAP_NODE:
+	case PBRMAP_NODE:
 	case OSPF_NODE:
 	case OSPF6_NODE:
 	case LDP_NODE:
@@ -1421,7 +1433,6 @@ DEFUN (config_end,
 	case KEYCHAIN_NODE:
 	case KEYCHAIN_KEY_NODE:
 	case MASC_NODE:
-	case PIM_NODE:
 	case VTY_NODE:
 	case LINK_PARAMS_NODE:
 		vty_config_unlock(vty);
@@ -1564,10 +1575,13 @@ DEFUN (show_commandtree,
 	return cmd_list_cmds(vty, argc == 3);
 }
 
-static void vty_write_config(struct vty *vty)
+static int vty_write_config(struct vty *vty)
 {
 	size_t i;
 	struct cmd_node *node;
+
+	if (host.noconfig)
+		return CMD_SUCCESS;
 
 	if (vty->type == VTY_TERM) {
 		vty_out(vty, "\nCurrent configuration:\n");
@@ -1588,19 +1602,12 @@ static void vty_write_config(struct vty *vty)
 	if (vty->type == VTY_TERM) {
 		vty_out(vty, "end\n");
 	}
+
+	return CMD_SUCCESS;
 }
 
-/* Write current configuration into file. */
-
-DEFUN (config_write,
-       config_write_cmd,
-       "write [<file|memory|terminal>]",
-       "Write running configuration to memory, network, or terminal\n"
-       "Write to configuration file\n"
-       "Write configuration currently in memory\n"
-       "Write configuration to terminal\n")
+static int file_write_config(struct vty *vty)
 {
-	int idx_type = 1;
 	int fd, dirfd;
 	char *config_file, *slash;
 	char *config_file_tmp = NULL;
@@ -1608,13 +1615,6 @@ DEFUN (config_write,
 	int ret = CMD_WARNING;
 	struct vty *file_vty;
 	struct stat conf_stat;
-
-	// if command was 'write terminal' or 'show running-config'
-	if (argc == 2 && (strmatch(argv[idx_type]->text, "terminal")
-			  || strmatch(argv[0]->text, "show"))) {
-		vty_write_config(vty);
-		return CMD_SUCCESS;
-	}
 
 	if (host.noconfig)
 		return CMD_SUCCESS;
@@ -1714,14 +1714,34 @@ finished:
 	return ret;
 }
 
+/* Write current configuration into file. */
+
+DEFUN (config_write,
+       config_write_cmd,
+       "write [<file|memory|terminal>]",
+       "Write running configuration to memory, network, or terminal\n"
+       "Write to configuration file\n"
+       "Write configuration currently in memory\n"
+       "Write configuration to terminal\n")
+{
+	const int idx_type = 1;
+
+	// if command was 'write terminal' or 'write memory'
+	if (argc == 2 && (!strcmp(argv[idx_type]->text, "terminal"))) {
+		return vty_write_config(vty);
+	}
+
+	return file_write_config(vty);
+}
+
 /* ALIAS_FIXME for 'write <terminal|memory>' */
 DEFUN (show_running_config,
        show_running_config_cmd,
        "show running-config",
        SHOW_STR
-       "running configuration (same as write terminal/memory)\n")
+       "running configuration (same as write terminal)\n")
 {
-	return config_write(self, vty, argc, argv);
+	return vty_write_config(vty);
 }
 
 /* ALIAS_FIXME for 'write file' */
@@ -1730,11 +1750,9 @@ DEFUN (copy_runningconf_startupconf,
        "copy running-config startup-config",
        "Copy configuration\n"
        "Copy running config to... \n"
-       "Copy running config to startup config (same as write file)\n")
+       "Copy running config to startup config (same as write file/memory)\n")
 {
-	if (!host.noconfig)
-		vty_write_config(vty);
-	return CMD_SUCCESS;
+	return file_write_config(vty);
 }
 /** -- **/
 
@@ -1865,7 +1883,7 @@ DEFUN (config_password,
 		return CMD_SUCCESS;
 	}
 
-	if (!isalnum(argv[idx_8]->arg[0])) {
+	if (!isalnum((int)argv[idx_8]->arg[0])) {
 		vty_out(vty,
 			"Please specify string starting with alphanumeric\n");
 		return CMD_WARNING_CONFIG_FAILED;
@@ -1917,7 +1935,7 @@ DEFUN (config_enable_password,
 		}
 	}
 
-	if (!isalnum(argv[idx_8]->arg[0])) {
+	if (!isalnum((int)argv[idx_8]->arg[0])) {
 		vty_out(vty,
 			"Please specify string starting with alphanumeric\n");
 		return CMD_WARNING_CONFIG_FAILED;

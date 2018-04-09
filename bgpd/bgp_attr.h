@@ -66,6 +66,8 @@
 #define BGP_PREFIX_SID_IPV6_LENGTH            19
 #define BGP_PREFIX_SID_ORIGINATOR_SRGB_LENGTH  6
 
+/* PMSI tunnel types (RFC 6514) */
+
 struct bgp_attr_encap_subtlv {
 	struct bgp_attr_encap_subtlv *next; /* for chaining */
 	/* Reference count of this attribute. */
@@ -96,6 +98,18 @@ struct overlay_index {
 	union gw_addr gw_ip;
 };
 
+enum pta_type {
+	PMSI_TNLTYPE_NO_INFO = 0,
+	PMSI_TNLTYPE_RSVP_TE_P2MP,
+	PMSI_TNLTYPE_MLDP_P2MP,
+	PMSI_TNLTYPE_PIM_SSM,
+	PMSI_TNLTYPE_PIM_SM,
+	PMSI_TNLTYPE_PIM_BIDIR,
+	PMSI_TNLTYPE_INGR_REPL,
+	PMSI_TNLTYPE_MLDP_MP2MP,
+	PMSI_TNLTYPE_MAX = PMSI_TNLTYPE_MLDP_MP2MP
+};
+
 /* BGP core attribute structure. */
 struct attr {
 	/* AS Path structure */
@@ -119,6 +133,9 @@ struct attr {
 	/* Path origin attribute */
 	u_char origin;
 
+	/* PMSI tunnel type (RFC 6514). */
+	enum pta_type pmsi_tnl_type;
+
 	/* has the route-map changed any attribute?
 	   Used on the peer outbound side. */
 	u_int32_t rmap_change_flags;
@@ -126,6 +143,9 @@ struct attr {
 	/* Multi-Protocol Nexthop, AFI IPv6 */
 	struct in6_addr mp_nexthop_global;
 	struct in6_addr mp_nexthop_local;
+
+	/* ifIndex corresponding to mp_nexthop_local. */
+	ifindex_t nh_lla_ifindex;
 
 	/* Extended Communities attribute. */
 	struct ecommunity *ecommunity;
@@ -233,6 +253,7 @@ typedef enum {
 	/* only used internally, send notify + convert to BGP_ATTR_PARSE_ERROR
 	   */
 	BGP_ATTR_PARSE_ERROR_NOTIFYPLS = -3,
+	BGP_ATTR_PARSE_EOR = -4,
 } bgp_attr_parse_ret_t;
 
 struct bpacket_attr_vec_arr;
@@ -244,6 +265,7 @@ extern bgp_attr_parse_ret_t bgp_attr_parse(struct peer *, struct attr *,
 					   bgp_size_t, struct bgp_nlri *,
 					   struct bgp_nlri *);
 extern void bgp_attr_dup(struct attr *, struct attr *);
+extern void bgp_attr_undup(struct attr *new, struct attr *old);
 extern struct attr *bgp_attr_intern(struct attr *attr);
 extern void bgp_attr_unintern_sub(struct attr *);
 extern void bgp_attr_unintern(struct attr **);

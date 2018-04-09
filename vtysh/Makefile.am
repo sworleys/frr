@@ -56,6 +56,10 @@ vtysh_scan += $(top_srcdir)/bgpd/bgp_routemap.c
 vtysh_scan += $(top_srcdir)/bgpd/bgp_vty.c
 endif
 
+if RPKI
+vtysh_scan += $(top_srcdir)/bgpd/bgp_rpki.c
+endif
+
 if ISISD
 vtysh_scan += $(top_srcdir)/isisd/isis_redist.c
 vtysh_scan += $(top_srcdir)/isisd/isis_spf.c
@@ -71,6 +75,7 @@ vtysh_scan += $(top_srcdir)/ospfd/ospf_opaque.c
 vtysh_scan += $(top_srcdir)/ospfd/ospf_ri.c
 vtysh_scan += $(top_srcdir)/ospfd/ospf_routemap.c
 vtysh_scan += $(top_srcdir)/ospfd/ospf_te.c
+vtysh_scan += $(top_srcdir)/ospfd/ospf_sr.c
 vtysh_scan += $(top_srcdir)/ospfd/ospf_vty.c
 endif
 
@@ -128,8 +133,17 @@ vtysh_scan += $(top_srcdir)/babeld/babel_zebra.c
 vtysh_scan += $(top_srcdir)/babeld/babeld.c
 endif
 
+if SHARPD
+vtysh_scan += $(top_srcdir)/sharpd/sharp_vty.c
+endif
+
 if SNMP
 vtysh_scan += $(top_srcdir)/lib/agentx.c
+endif
+
+if PBRD
+vtysh_scan += $(top_srcdir)/pbrd/pbr_vty.c
+vtysh_scan += $(top_srcdir)/pbrd/pbr_debug.c
 endif
 
 vtysh_cmd_FILES = $(vtysh_scan) \
@@ -138,7 +152,8 @@ vtysh_cmd_FILES = $(vtysh_scan) \
 		  $(top_srcdir)/lib/distribute.c $(top_srcdir)/lib/if_rmap.c \
 		  $(top_srcdir)/lib/vrf.c \
 		  $(top_srcdir)/lib/vty.c $(top_srcdir)/zebra/debug.c \
-		  $(top_srcdir)/lib/ns.c \
+		  $(top_srcdir)/lib/logicalrouter.c \
+		  $(top_srcdir)/lib/nexthop_group.c \
 		  $(top_srcdir)/zebra/interface.c \
 		  $(top_srcdir)/zebra/irdp_interface.c \
 		  $(top_srcdir)/zebra/rtadv.c $(top_srcdir)/zebra/zebra_vty.c \

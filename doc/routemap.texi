@@ -139,6 +139,26 @@ Configure the @var{order}'th entry in @var{route-map-name} with
 Matches the specified @var{access_list}
 @end deffn
 
+@deffn {Route-map Command} {match ip address @var{prefix-list}} {}
+Matches the specified @var{prefix-list}
+@end deffn
+
+@deffn {Route-map Command} {match ip address prefix-len @var{0-32}} {}
+Matches the specified @var{prefix-len}.  This is a Zebra specific command.
+@end deffn
+
+@deffn {Route-map Command} {match ipv6 address @var{access_list}} {}
+Matches the specified @var{access_list}
+@end deffn
+
+@deffn {Route-map Command} {match ipv6 address @var{prefix-list}} {}
+Matches the specified @var{prefix-list}
+@end deffn
+
+@deffn {Route-map Command} {match ipv6 address prefix-len @var{0-128}} {}
+Matches the specified @var{prefix-len}.  This is a Zebra specific command.
+@end deffn
+
 @deffn {Route-map Command} {match ip next-hop @var{ipv4_addr}} {}
 Matches the specified @var{ipv4_addr}.
 @end deffn
@@ -149,6 +169,11 @@ Matches the specified @var{as_path}.
 
 @deffn {Route-map Command} {match metric @var{metric}} {}
 Matches the specified @var{metric}.
+@end deffn
+
+@deffn {Route-map Command} {match tag @var{tag}} {}
+Matches the specified tag value associated with the route.
+This tag value can be in the range of (1-4294967295).
 @end deffn
 
 @deffn {Route-map Command} {match local-preference @var{metric}} {}
@@ -177,6 +202,14 @@ in this manner.
 
 @node Route Map Set Command
 @section Route Map Set Command
+
+@deffn {Route-map Command} {set tag @var{tag}} {}
+Set a tag on the matched route.  This tag value can be from
+(1-4294967295).  Additionally if you have compiled with
+the --enable-realms configure option.  Tag values from (1-255)
+are sent to the linux kernel as a realm value.  Then route
+policy can be applied.  See the tc man page.
+@end deffn
 
 @deffn {Route-map Command} {set ip next-hop @var{ipv4_address}} {}
 Set the BGP nexthop address.

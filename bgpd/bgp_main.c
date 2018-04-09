@@ -42,6 +42,7 @@
 #include "bfd.h"
 #include "libfrr.h"
 #include "vxlan.h"
+#include "ns.h"
 
 #include "bgpd/bgpd.h"
 #include "bgpd/bgp_attr.h"
@@ -58,6 +59,7 @@
 #include "bgpd/bgp_zebra.h"
 #include "bgpd/bgp_packet.h"
 #include "bgpd/bgp_keepalives.h"
+#include "bgpd/bgp_network.h"
 
 #ifdef ENABLE_BGP_VNC
 #include "bgpd/rfapi/rfapi_backend.h"
@@ -222,6 +224,7 @@ static __attribute__((__noreturn__)) void bgp_exit(int status)
 #endif
 	bgp_zebra_destroy();
 
+	bf_free(bm->rd_idspace);
 	list_delete_and_null(&bm->bgp);
 	memset(bm, 0, sizeof(*bm));
 
@@ -232,7 +235,7 @@ static __attribute__((__noreturn__)) void bgp_exit(int status)
 static int bgp_vrf_new(struct vrf *vrf)
 {
 	if (BGP_DEBUG(zebra, ZEBRA))
-		zlog_debug("VRF Created: %s(%d)", vrf->name, vrf->vrf_id);
+		zlog_debug("VRF Created: %s(%u)", vrf->name, vrf->vrf_id);
 
 	return 0;
 }
@@ -240,7 +243,7 @@ static int bgp_vrf_new(struct vrf *vrf)
 static int bgp_vrf_delete(struct vrf *vrf)
 {
 	if (BGP_DEBUG(zebra, ZEBRA))
-		zlog_debug("VRF Deletion: %s(%d)", vrf->name, vrf->vrf_id);
+		zlog_debug("VRF Deletion: %s(%u)", vrf->name, vrf->vrf_id);
 
 	return 0;
 }
@@ -251,7 +254,7 @@ static int bgp_vrf_enable(struct vrf *vrf)
 	vrf_id_t old_vrf_id;
 
 	if (BGP_DEBUG(zebra, ZEBRA))
-		zlog_debug("VRF enable add %s id %d", vrf->name, vrf->vrf_id);
+		zlog_debug("VRF enable add %s id %u", vrf->name, vrf->vrf_id);
 
 	bgp = bgp_lookup_by_name(vrf->name);
 	if (bgp) {
@@ -259,10 +262,13 @@ static int bgp_vrf_enable(struct vrf *vrf)
 		/* We have instance configured, link to VRF and make it "up". */
 		bgp_vrf_link(bgp, vrf);
 
+		bgp_handle_socket(bgp, vrf, old_vrf_id, true);
 		/* Update any redistribute vrf bitmaps if the vrf_id changed */
 		if (old_vrf_id != bgp->vrf_id)
 			bgp_update_redist_vrf_bitmaps(bgp, old_vrf_id);
 		bgp_instance_up(bgp);
+		vpn_leak_zebra_vrf_label_update(bgp, AFI_IP);
+		vpn_leak_zebra_vrf_label_update(bgp, AFI_IP6);
 	}
 
 	return 0;
@@ -281,7 +287,12 @@ static int bgp_vrf_disable(struct vrf *vrf)
 
 	bgp = bgp_lookup_by_name(vrf->name);
 	if (bgp) {
+
+		vpn_leak_zebra_vrf_label_withdraw(bgp, AFI_IP);
+		vpn_leak_zebra_vrf_label_withdraw(bgp, AFI_IP6);
+
 		old_vrf_id = bgp->vrf_id;
+		bgp_handle_socket(bgp, vrf, VRF_UNKNOWN, false);
 		/* We have instance configured, unlink from VRF and make it
 		 * "down". */
 		bgp_vrf_unlink(bgp, vrf);

@@ -1,18 +1,20 @@
 Source: frr
 Section: net
 Priority: optional
-Maintainer: dev-support <dev-support@cumulusnetworks.com>
-Build-Depends: debhelper (>= 7.0.50~), libncurses5-dev, libreadline-dev, texlive-latex-base, texlive-generic-recommended, libpam0g-dev | libpam-dev, libcap-dev, texinfo (>= 4.7), imagemagick, ghostscript, groff, autotools-dev, hardening-wrapper, libpcre3-dev, gawk, chrpath, libsnmp-dev, git, dh-autoreconf, libjson0, libjson0-dev, python-ipaddr, bison, flex, libc-ares-dev, pkg-config, python (>= 2.7), libpython-dev
+Maintainer: Nobody <nobody@frrouting.org>
+Uploaders: Nobody <nobody@frrouting.org>
+XSBC-Original-Maintainer: <maintainers@frrouting.org>
+Build-Depends: debhelper (>= 7.0.50~), libncurses5-dev, libreadline-dev, texlive-latex-base, texlive-generic-recommended, libpam0g-dev | libpam-dev, libcap-dev, texinfo (>= 4.7), imagemagick, ghostscript, groff, autotools-dev, libpcre3-dev, gawk, chrpath, libsnmp-dev, git, dh-autoreconf, libjson-c-dev, libjson-c2, pkg-config, python (>= 2.7), python-ipaddr, libpython2.7-dev, libc-ares-dev
 Standards-Version: 3.9.6
-Homepage: http://www.freerangerouting.org/
+Homepage: http://www.frrouting.org/
 XS-Testsuite: autopkgtest
 
 Package: frr
 Architecture: any
-Depends: ${shlibs:Depends}, logrotate (>= 3.2-11), ${misc:Depends}, libc-ares2
+Depends: ${shlibs:Depends}, logrotate (>= 3.2-11), ${misc:Depends}, python (>= 2.7), python-ipaddr
 Pre-Depends: adduser
-Conflicts: zebra, zebra-pj
-Replaces: zebra, zebra-pj
+Conflicts: zebra, zebra-pj, frr-pythontools, quagga
+Replaces: zebra, zebra-pj, frr-pythontools
 Suggests: snmpd
 Description: BGP/OSPF/RIP/RIPng/ISIS/PIM/LDP routing daemon forked from Quagga
  FRR is free software which manages TCP/IP based routing protocols.
@@ -20,7 +22,7 @@ Description: BGP/OSPF/RIP/RIPng/ISIS/PIM/LDP routing daemon forked from Quagga
  PIM and LDP as well as the IPv6 versions of these.
  .
  FRR is a fork of Quagga with an open community model. The main git
- lives on https://github.com/freerangerouting/frr.git
+ lives on https://github.com/frrouting/frr.git
 
 Package: frr-dbg
 Architecture: any

@@ -52,7 +52,11 @@ is_evpn_enabled()
 
 #define VNI_STR_LEN 32
 
+extern int is_l3vni_for_prefix_routes_only(vni_t vni);
 extern ifindex_t get_l3vni_svi_ifindex(vrf_id_t vrf_id);
+extern int zebra_vxlan_vrf_enable(struct zebra_vrf *zvrf);
+extern int zebra_vxlan_vrf_disable(struct zebra_vrf *zvrf);
+extern int zebra_vxlan_vrf_delete(struct zebra_vrf *zvrf);
 extern int zebra_vxlan_vrf_enable(struct zebra_vrf *zvrf);
 extern int zebra_vxlan_vrf_disable(struct zebra_vrf *zvrf);
 extern int zebra_vxlan_vrf_delete(struct zebra_vrf *zvrf);
@@ -95,15 +99,18 @@ extern void zebra_vxlan_print_vni(struct vty *vty, struct zebra_vrf *zvrf,
 				  vni_t vni, u_char use_json);
 extern void zebra_vxlan_print_vnis(struct vty *vty, struct zebra_vrf *zvrf,
 				   u_char use_json);
-extern void zebra_vxlan_print_rmacs_l3vni(struct vty*, vni_t, u_char);
-extern void zebra_vxlan_print_rmacs_all_l3vni(struct vty*, u_char);
-extern void zebra_vxlan_print_nh_l3vni(struct vty*, vni_t, u_char);
-extern void zebra_vxlan_print_nh_all_l3vni(struct vty*, u_char);
+extern void zebra_vxlan_print_vrf_vni(struct vty *vty, struct zebra_vrf *zvrf,
+				      json_object *json_vrfs);
+extern void zebra_vxlan_print_rmacs_l3vni(struct vty *vty, vni_t vni, u_char
+					  use_json);
+extern void zebra_vxlan_print_rmacs_all_l3vni(struct vty *vty, u_char use_json);
+extern void zebra_vxlan_print_nh_l3vni(struct vty *vty, vni_t vni, u_char
+				       use_json);
+extern void zebra_vxlan_print_nh_all_l3vni(struct vty *vty, u_char use_json);
 extern void zebra_vxlan_print_l3vni(struct vty *vty, vni_t vni,
 				    u_char use_json);
 extern void zebra_vxlan_print_vrf_vni(struct vty *vty, struct zebra_vrf *zvrf,
 				      json_object *json_vrfs);
-
 extern int zebra_vxlan_add_del_gw_macip(struct interface *ifp, struct prefix *p,
 					int add);
 extern int zebra_vxlan_svi_up(struct interface *ifp, struct interface *link_if);
@@ -150,8 +157,10 @@ extern int zebra_vxlan_advertise_gw_macip(struct zserv *client,
 extern int zebra_vxlan_advertise_all_vni(struct zserv *client,
 					 u_short length,
 					 struct zebra_vrf *zvrf);
-extern int zebra_vxlan_process_vrf_vni_cmd(struct zebra_vrf*, vni_t, char*,
-					   int);
+extern void zebra_vxlan_cleanup_tables(struct zebra_vrf *);
+extern int zebra_vxlan_process_vrf_vni_cmd(struct zebra_vrf *zvrf, vni_t vni,
+					   char *err,
+					   int err_str_sz, int filter, int add);
 extern void zebra_vxlan_init_tables(struct zebra_vrf *zvrf);
 extern void zebra_vxlan_close_tables(struct zebra_vrf *);
 extern void zebra_vxlan_cleanup_tables(struct zebra_vrf *);

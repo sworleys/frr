@@ -27,6 +27,7 @@
 #include "thread.h"
 #include "log.h"
 #include "stream.h"
+#include "ringbuf.h"
 #include "memory.h"
 #include "plist.h"
 #include "workqueue.h"
@@ -155,7 +156,6 @@ static struct peer *peer_xfer_conn(struct peer *from_peer)
 
 		stream_fifo_clean(peer->ibuf);
 		stream_fifo_clean(peer->obuf);
-		stream_reset(peer->ibuf_work);
 
 		/*
 		 * this should never happen, since bgp_process_packet() is the
@@ -183,7 +183,9 @@ static struct peer *peer_xfer_conn(struct peer *from_peer)
 			stream_fifo_push(peer->ibuf,
 					 stream_fifo_pop(from_peer->ibuf));
 
-		stream_copy(peer->ibuf_work, from_peer->ibuf_work);
+		ringbuf_wipe(peer->ibuf_work);
+		ringbuf_copy(peer->ibuf_work, from_peer->ibuf_work,
+			     ringbuf_remain(from_peer->ibuf_work));
 	}
 	pthread_mutex_unlock(&from_peer->io_mtx);
 	pthread_mutex_unlock(&peer->io_mtx);
@@ -229,22 +231,15 @@ static struct peer *peer_xfer_conn(struct peer *from_peer)
 		from_peer->domainname = NULL;
 	}
 
-	for (afi = AFI_IP; afi < AFI_MAX; afi++)
-		for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++) {
-			peer->af_flags[afi][safi] =
-				from_peer->af_flags[afi][safi];
-			peer->af_sflags[afi][safi] =
-				from_peer->af_sflags[afi][safi];
-			peer->af_cap[afi][safi] = from_peer->af_cap[afi][safi];
-			peer->afc_nego[afi][safi] =
-				from_peer->afc_nego[afi][safi];
-			peer->afc_adv[afi][safi] =
-				from_peer->afc_adv[afi][safi];
-			peer->afc_recv[afi][safi] =
-				from_peer->afc_recv[afi][safi];
-			peer->orf_plist[afi][safi] =
-				from_peer->orf_plist[afi][safi];
-		}
+	FOREACH_AFI_SAFI (afi, safi) {
+		peer->af_flags[afi][safi] = from_peer->af_flags[afi][safi];
+		peer->af_sflags[afi][safi] = from_peer->af_sflags[afi][safi];
+		peer->af_cap[afi][safi] = from_peer->af_cap[afi][safi];
+		peer->afc_nego[afi][safi] = from_peer->afc_nego[afi][safi];
+		peer->afc_adv[afi][safi] = from_peer->afc_adv[afi][safi];
+		peer->afc_recv[afi][safi] = from_peer->afc_recv[afi][safi];
+		peer->orf_plist[afi][safi] = from_peer->orf_plist[afi][safi];
+	}
 
 	if (bgp_getsockname(peer) < 0) {
 		zlog_err(
@@ -271,13 +266,14 @@ static struct peer *peer_xfer_conn(struct peer *from_peer)
 		}
 	}
 
+	// Note: peer_xfer_stats() must be called with I/O turned OFF
+	if (from_peer)
+		peer_xfer_stats(peer, from_peer);
+
 	bgp_reads_on(peer);
 	bgp_writes_on(peer);
 	thread_add_timer_msec(bm->master, bgp_process_packet, peer, 0,
 			      &peer->t_process_packet);
-
-	if (from_peer)
-		peer_xfer_stats(peer, from_peer);
 
 	return (peer);
 }
@@ -292,7 +288,8 @@ void bgp_timer_set(struct peer *peer)
 		/* First entry point of peer's finite state machine.  In Idle
 		   status start timer is on unless peer is shutdown or peer is
 		   inactive.  All other timer must be turned off */
-		if (BGP_PEER_START_SUPPRESSED(peer) || !peer_active(peer)) {
+		if (BGP_PEER_START_SUPPRESSED(peer) || !peer_active(peer)
+		    || peer->bgp->vrf_id == VRF_UNKNOWN) {
 			BGP_TIMER_OFF(peer->t_start);
 		} else {
 			BGP_TIMER_ON(peer->t_start, bgp_start_timer,
@@ -1104,7 +1101,7 @@ int bgp_stop(struct peer *peer)
 			stream_fifo_clean(peer->obuf);
 
 		if (peer->ibuf_work)
-			stream_reset(peer->ibuf_work);
+			ringbuf_wipe(peer->ibuf_work);
 		if (peer->obuf_work)
 			stream_reset(peer->obuf_work);
 
@@ -1121,30 +1118,28 @@ int bgp_stop(struct peer *peer)
 		peer->fd = -1;
 	}
 
-	for (afi = AFI_IP; afi < AFI_MAX; afi++)
-		for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++) {
-			/* Reset all negotiated variables */
-			peer->afc_nego[afi][safi] = 0;
-			peer->afc_adv[afi][safi] = 0;
-			peer->afc_recv[afi][safi] = 0;
+	FOREACH_AFI_SAFI (afi, safi) {
+		/* Reset all negotiated variables */
+		peer->afc_nego[afi][safi] = 0;
+		peer->afc_adv[afi][safi] = 0;
+		peer->afc_recv[afi][safi] = 0;
 
-			/* peer address family capability flags*/
-			peer->af_cap[afi][safi] = 0;
+		/* peer address family capability flags*/
+		peer->af_cap[afi][safi] = 0;
 
-			/* peer address family status flags*/
-			peer->af_sflags[afi][safi] = 0;
+		/* peer address family status flags*/
+		peer->af_sflags[afi][safi] = 0;
 
-			/* Received ORF prefix-filter */
-			peer->orf_plist[afi][safi] = NULL;
+		/* Received ORF prefix-filter */
+		peer->orf_plist[afi][safi] = NULL;
 
-			if ((peer->status == OpenConfirm)
-			    || (peer->status == Established)) {
-				/* ORF received prefix-filter pnt */
-				sprintf(orf_name, "%s.%d.%d", peer->host, afi,
-					safi);
-				prefix_bgp_orf_remove_all(afi, orf_name);
-			}
+		if ((peer->status == OpenConfirm)
+		    || (peer->status == Established)) {
+			/* ORF received prefix-filter pnt */
+			sprintf(orf_name, "%s.%d.%d", peer->host, afi, safi);
+			prefix_bgp_orf_remove_all(afi, orf_name);
 		}
+	}
 
 	/* Reset keepalive and holdtime */
 	if (PEER_OR_GROUP_TIMER_SET(peer)) {
@@ -1381,6 +1376,15 @@ int bgp_start(struct peer *peer)
 		return 0;
 	}
 
+	if (peer->bgp &&
+	    peer->bgp->vrf_id == VRF_UNKNOWN) {
+		if (bgp_debug_neighbor_events(peer))
+			zlog_err(
+				 "%s [FSM] In a VRF that is not initialised yet",
+				 peer->host);
+		return -1;
+	}
+
 	/* Register to be notified on peer up */
 	if (peer->sort == BGP_PEER_EBGP && peer->ttl == 1
 	    && !CHECK_FLAG(peer->flags, PEER_FLAG_DISABLE_CONNECTED_CHECK)
@@ -1593,38 +1597,33 @@ static int bgp_establish(struct peer *peer)
 	peer->uptime = bgp_clock();
 
 	/* Send route-refresh when ORF is enabled */
-	for (afi = AFI_IP; afi < AFI_MAX; afi++)
-		for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++)
+	FOREACH_AFI_SAFI (afi, safi) {
+		if (CHECK_FLAG(peer->af_cap[afi][safi],
+			       PEER_CAP_ORF_PREFIX_SM_ADV)) {
 			if (CHECK_FLAG(peer->af_cap[afi][safi],
-				       PEER_CAP_ORF_PREFIX_SM_ADV)) {
-				if (CHECK_FLAG(peer->af_cap[afi][safi],
-					       PEER_CAP_ORF_PREFIX_RM_RCV))
-					bgp_route_refresh_send(
-						peer, afi, safi,
-						ORF_TYPE_PREFIX,
-						REFRESH_IMMEDIATE, 0);
-				else if (
-					CHECK_FLAG(
-						peer->af_cap[afi][safi],
-						PEER_CAP_ORF_PREFIX_RM_OLD_RCV))
-					bgp_route_refresh_send(
-						peer, afi, safi,
-						ORF_TYPE_PREFIX_OLD,
-						REFRESH_IMMEDIATE, 0);
-			}
+				       PEER_CAP_ORF_PREFIX_RM_RCV))
+				bgp_route_refresh_send(peer, afi, safi,
+						       ORF_TYPE_PREFIX,
+						       REFRESH_IMMEDIATE, 0);
+			else if (CHECK_FLAG(peer->af_cap[afi][safi],
+					    PEER_CAP_ORF_PREFIX_RM_OLD_RCV))
+				bgp_route_refresh_send(peer, afi, safi,
+						       ORF_TYPE_PREFIX_OLD,
+						       REFRESH_IMMEDIATE, 0);
+		}
+	}
 
 	/* First update is deferred until ORF or ROUTE-REFRESH is received */
-	for (afi = AFI_IP; afi < AFI_MAX; afi++)
-		for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++)
+	FOREACH_AFI_SAFI (afi, safi) {
+		if (CHECK_FLAG(peer->af_cap[afi][safi],
+			       PEER_CAP_ORF_PREFIX_RM_ADV))
 			if (CHECK_FLAG(peer->af_cap[afi][safi],
-				       PEER_CAP_ORF_PREFIX_RM_ADV))
-				if (CHECK_FLAG(peer->af_cap[afi][safi],
-					       PEER_CAP_ORF_PREFIX_SM_RCV)
-				    || CHECK_FLAG(
-					       peer->af_cap[afi][safi],
-					       PEER_CAP_ORF_PREFIX_SM_OLD_RCV))
-					SET_FLAG(peer->af_sflags[afi][safi],
-						 PEER_STATUS_ORF_WAIT_REFRESH);
+				       PEER_CAP_ORF_PREFIX_SM_RCV)
+			    || CHECK_FLAG(peer->af_cap[afi][safi],
+					  PEER_CAP_ORF_PREFIX_SM_OLD_RCV))
+				SET_FLAG(peer->af_sflags[afi][safi],
+					 PEER_STATUS_ORF_WAIT_REFRESH);
+	}
 
 	bgp_announce_peer(peer);
 

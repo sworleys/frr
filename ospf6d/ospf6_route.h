@@ -96,6 +96,9 @@ struct ospf6_path {
 		u_int32_t cost_config;
 	} u;
 	u_int32_t tag;
+
+	/* nh list for this path */
+	struct list *nh_list;
 };
 
 #define OSPF6_PATH_TYPE_NONE         0
@@ -148,6 +151,9 @@ struct ospf6_route {
 
 	/* path */
 	struct ospf6_path path;
+
+	/* List of Paths. */
+	struct list *paths;
 
 	/* nexthop */
 	struct list *nh_list;
@@ -240,6 +246,7 @@ extern const char *ospf6_path_type_substr[OSPF6_PATH_TYPE_MAX];
 	((ra)->type == (rb)->type                                              \
 	 && memcmp(&(ra)->prefix, &(rb)->prefix, sizeof(struct prefix)) == 0   \
 	 && memcmp(&(ra)->path, &(rb)->path, sizeof(struct ospf6_path)) == 0   \
+	 && listcount(ra->paths) == listcount(rb->paths)		       \
 	 && ospf6_route_cmp_nexthops(ra, rb) == 0)
 
 #define ospf6_route_is_best(r) (CHECK_FLAG ((r)->flag, OSPF6_ROUTE_BEST))
@@ -256,6 +263,7 @@ extern void ospf6_linkstate_prefix2str(struct prefix *prefix, char *buf,
 				       int size);
 
 extern struct ospf6_nexthop *ospf6_nexthop_create(void);
+extern int ospf6_nexthop_cmp(struct ospf6_nexthop *a, struct ospf6_nexthop *b);
 extern void ospf6_nexthop_delete(struct ospf6_nexthop *nh);
 extern void ospf6_clear_nexthops(struct list *nh_list);
 extern int ospf6_num_nexthops(struct list *nh_list);
@@ -331,5 +339,8 @@ extern int config_write_ospf6_debug_route(struct vty *vty);
 extern void install_element_ospf6_debug_route(void);
 extern void ospf6_route_init(void);
 extern void ospf6_clean(void);
+extern void ospf6_path_free(struct ospf6_path *op);
+extern struct ospf6_path *ospf6_path_dup(struct ospf6_path *path);
+extern void ospf6_copy_paths(struct list *dst, struct list *src);
 
 #endif /* OSPF6_ROUTE_H */

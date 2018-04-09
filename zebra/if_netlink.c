@@ -31,6 +31,7 @@
 #define _LINUX_IN6_H
 
 #include <linux/if_bridge.h>
+#include <linux/if_link.h>
 #include <net/if_arp.h>
 #include <linux/sockios.h>
 #include <linux/ethtool.h>
@@ -65,6 +66,7 @@
 #include "zebra/kernel_netlink.h"
 #include "zebra/if_netlink.h"
 
+extern struct zebra_privs_t zserv_privs;
 
 /* Note: on netlink systems, there should be a 1-to-1 mapping between interface
    names and ifindex values. */
@@ -220,8 +222,10 @@ static enum zebra_link_type netlink_to_zebra_link_type(unsigned int hwt)
 		return ZEBRA_LLT_IEEE802_TR;
 	case ARPHRD_IEEE80211:
 		return ZEBRA_LLT_IEEE80211;
+#ifdef ARPHRD_IEEE802154
 	case ARPHRD_IEEE802154:
 		return ZEBRA_LLT_IEEE802154;
+#endif
 #ifdef ARPHRD_IP6GRE
 	case ARPHRD_IP6GRE:
 		return ZEBRA_LLT_IP6GRE;
@@ -254,47 +258,6 @@ static void netlink_determine_zebra_iftype(char *kind, zebra_iftype_t *zif_type)
 	else if (strcmp(kind, "macvlan") == 0)
 		*zif_type = ZEBRA_IF_MACVLAN;
 }
-
-// Temporary Assignments to compile on older platforms.
-#ifndef IFLA_BR_MAX
-#define IFLA_BR_MAX   39
-#endif
-
-#ifndef IFLA_VXLAN_ID
-#define IFLA_VXLAN_ID 1
-#endif
-
-#ifndef IFLA_VXLAN_LOCAL
-#define IFLA_VXLAN_LOCAL  4
-#endif
-
-#ifndef IFLA_VXLAN_MAX
-#define IFLA_VXLAN_MAX 26
-#endif
-
-#ifndef IFLA_BRIDGE_MAX
-#define IFLA_BRIDGE_MAX   2
-#endif
-
-#ifndef IFLA_BRIDGE_VLAN_INFO
-#define IFLA_BRIDGE_VLAN_INFO 2
-#endif
-
-#ifndef BRIDGE_VLAN_INFO_PVID
-#define BRIDGE_VLAN_INFO_PVID  (1<<1)
-#endif
-
-#ifndef RTEXT_FILTER_BRVLAN
-#define RTEXT_FILTER_BRVLAN    (1<<1)
-#endif
-
-#ifndef NTF_SELF
-#define NTF_SELF   0x02
-#endif
-
-#ifndef IFLA_BR_VLAN_FILTERING
-#define IFLA_BR_VLAN_FILTERING  7
-#endif
 
 #define parse_rtattr_nested(tb, max, rta)                                      \
 	netlink_parse_rtattr((tb), (max), RTA_DATA(rta), RTA_PAYLOAD(rta))
@@ -350,6 +313,21 @@ static void netlink_vrf_change(struct nlmsghdr *h, struct rtattr *tb,
 			return;
 		}
 
+		/*
+		 * This is the only place that we get the actual kernel table_id
+		 * being used.  We need it to set the table_id of the routes
+		 * we are passing to the kernel.... And to throw some totally
+		 * awesome parties. that too.
+		 *
+		 * At this point we *must* have a zvrf because the vrf_create
+		 * callback creates one.  We *must* set the table id
+		 * before the vrf_enable because of( at the very least )
+		 * static routes being delayed for installation until
+		 * during the vrf_enable callbacks.
+		 */
+		zvrf = (struct zebra_vrf *)vrf->info;
+		zvrf->table_id = nl_table_id;
+
 		/* Enable the created VRF. */
 		if (!vrf_enable(vrf)) {
 			zlog_err("Failed to enable VRF %s id %u", name,
@@ -357,14 +335,6 @@ static void netlink_vrf_change(struct nlmsghdr *h, struct rtattr *tb,
 			return;
 		}
 
-		/*
-		 * This is the only place that we get the actual kernel table_id
-		 * being used.  We need it to set the table_id of the routes
-		 * we are passing to the kernel.... And to throw some totally
-		 * awesome parties. that too.
-		 */
-		zvrf = (struct zebra_vrf *)vrf->info;
-		zvrf->table_id = nl_table_id;
 	} else // h->nlmsg_type == RTM_DELLINK
 	{
 		if (IS_ZEBRA_DEBUG_KERNEL)
@@ -382,12 +352,13 @@ static void netlink_vrf_change(struct nlmsghdr *h, struct rtattr *tb,
 	}
 }
 
-static int get_iflink_speed(const char *ifname)
+static int get_iflink_speed(struct interface *interface)
 {
 	struct ifreq ifdata;
 	struct ethtool_cmd ecmd;
 	int sd;
 	int rc;
+	const char *ifname = interface->name;
 
 	/* initialize struct */
 	memset(&ifdata, 0, sizeof(ifdata));
@@ -401,16 +372,20 @@ static int get_iflink_speed(const char *ifname)
 	ifdata.ifr_data = (__caddr_t)&ecmd;
 
 	/* use ioctl to get IP address of an interface */
-	sd = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
+	if (zserv_privs.change(ZPRIVS_RAISE))
+		zlog_err("Can't raise privileges");
+	sd = vrf_socket(PF_INET, SOCK_DGRAM, IPPROTO_IP,
+			interface->vrf_id, NULL);
 	if (sd < 0) {
 		if (IS_ZEBRA_DEBUG_KERNEL)
 			zlog_debug("Failure to read interface %s speed: %d %s",
 				   ifname, errno, safe_strerror(errno));
 		return 0;
 	}
-
 	/* Get the current link state for the interface */
-	rc = ioctl(sd, SIOCETHTOOL, (char *)&ifdata);
+	rc = vrf_ioctl(interface->vrf_id, sd, SIOCETHTOOL, (char *)&ifdata);
+	if (zserv_privs.change(ZPRIVS_LOWER))
+		zlog_err("Can't lower privileges");
 	if (rc < 0) {
 		if (IS_ZEBRA_DEBUG_KERNEL)
 			zlog_debug(
@@ -423,6 +398,11 @@ static int get_iflink_speed(const char *ifname)
 	close(sd);
 
 	return (ecmd.speed_hi << 16) | ecmd.speed;
+}
+
+uint32_t kernel_get_speed(struct interface *ifp)
+{
+	return get_iflink_speed(ifp);
 }
 
 static int netlink_extract_bridge_info(struct rtattr *link_data,
@@ -588,6 +568,7 @@ static int netlink_interface(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	struct interface *ifp;
 	char *name = NULL;
 	char *kind = NULL;
+	char *desc = NULL;
 	char *slave_kind = NULL;
 	struct zebra_ns *zns;
 	vrf_id_t vrf_id = VRF_DEFAULT;
@@ -629,6 +610,9 @@ static int netlink_interface(struct sockaddr_nl *snl, struct nlmsghdr *h,
 		return -1;
 	name = (char *)RTA_DATA(tb[IFLA_IFNAME]);
 
+	if (tb[IFLA_IFALIAS])
+		desc = (char *)RTA_DATA(tb[IFLA_IFALIAS]);
+
 	if (tb[IFLA_LINKINFO]) {
 		parse_rtattr_nested(linkinfo, IFLA_INFO_MAX, tb[IFLA_LINKINFO]);
 
@@ -644,13 +628,14 @@ static int netlink_interface(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	}
 
 	/* If VRF, create the VRF structure itself. */
-	if (zif_type == ZEBRA_IF_VRF) {
+	if (zif_type == ZEBRA_IF_VRF && !vrf_is_backend_netns()) {
 		netlink_vrf_change(h, tb[IFLA_LINKINFO], name);
 		vrf_id = (vrf_id_t)ifi->ifi_index;
 	}
 
 	if (tb[IFLA_MASTER]) {
-		if (slave_kind && (strcmp(slave_kind, "vrf") == 0)) {
+		if (slave_kind && (strcmp(slave_kind, "vrf") == 0)
+		    && !vrf_is_backend_netns()) {
 			zif_slave_type = ZEBRA_IF_SLAVE_VRF;
 			vrf_id = *(u_int32_t *)RTA_DATA(tb[IFLA_MASTER]);
 		} else if (slave_kind && (strcmp(slave_kind, "bridge") == 0)) {
@@ -660,6 +645,8 @@ static int netlink_interface(struct sockaddr_nl *snl, struct nlmsghdr *h,
 		} else
 			zif_slave_type = ZEBRA_IF_SLAVE_OTHER;
 	}
+	if (vrf_is_backend_netns())
+		vrf_id = (vrf_id_t)ns_id;
 
 	/* If linking to another interface, note it. */
 	if (tb[IFLA_LINK])
@@ -669,15 +656,18 @@ static int netlink_interface(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	ifp = if_get_by_name(name, vrf_id, 0);
 	set_ifindex(ifp, ifi->ifi_index, zns);
 	ifp->flags = ifi->ifi_flags & 0x0000fffff;
-	if (IS_ZEBRA_IF_VRF(ifp))
-		SET_FLAG(ifp->status, ZEBRA_INTERFACE_VRF_LOOPBACK);
 	ifp->mtu6 = ifp->mtu = *(uint32_t *)RTA_DATA(tb[IFLA_MTU]);
 	ifp->metric = 0;
-	ifp->speed = get_iflink_speed(name);
+	ifp->speed = get_iflink_speed(ifp);
 	ifp->ptm_status = ZEBRA_PTM_STATUS_UNKNOWN;
+
+	if (desc)
+		ifp->desc = XSTRDUP(MTYPE_TMP, desc);
 
 	/* Set zebra interface type */
 	zebra_if_set_ziftype(ifp, zif_type, zif_slave_type);
+	if (IS_ZEBRA_IF_VRF(ifp))
+		SET_FLAG(ifp->status, ZEBRA_INTERFACE_VRF_LOOPBACK);
 
 	/* Update link. */
 	zebra_if_update_link(ifp, link_ifindex);
@@ -815,8 +805,12 @@ static int netlink_address(int cmd, int family, struct interface *ifp,
 		char buf[NL_PKT_BUF_SIZE];
 	} req;
 
-	struct zebra_ns *zns = zebra_ns_lookup(NS_DEFAULT);
+	struct zebra_ns *zns;
 
+	if (vrf_is_backend_netns())
+		zns = zebra_ns_lookup((ns_id_t)ifp->vrf_id);
+	else
+		zns = zebra_ns_lookup(NS_DEFAULT);
 	p = ifc->address;
 	memset(&req, 0, sizeof req - NL_PKT_BUF_SIZE);
 
@@ -867,6 +861,16 @@ int kernel_address_add_ipv4(struct interface *ifp, struct connected *ifc)
 int kernel_address_delete_ipv4(struct interface *ifp, struct connected *ifc)
 {
 	return netlink_address(RTM_DELADDR, AF_INET, ifp, ifc);
+}
+
+int kernel_address_add_ipv6 (struct interface *ifp, struct connected *ifc)
+{
+  return netlink_address (RTM_NEWADDR, AF_INET6, ifp, ifc);
+}
+
+int kernel_address_delete_ipv6 (struct interface *ifp, struct connected *ifc)
+{
+  return netlink_address (RTM_DELADDR, AF_INET6, ifp, ifc);
 }
 
 int netlink_interface_addr(struct sockaddr_nl *snl, struct nlmsghdr *h,
@@ -1020,6 +1024,7 @@ int netlink_link_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	struct interface *ifp;
 	char *name = NULL;
 	char *kind = NULL;
+	char *desc = NULL;
 	char *slave_kind = NULL;
 	struct zebra_ns *zns;
 	vrf_id_t vrf_id = VRF_DEFAULT;
@@ -1032,6 +1037,7 @@ int netlink_link_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	zns = zebra_ns_lookup(ns_id);
 	ifi = NLMSG_DATA(h);
 
+	/* assume if not default zns, then new VRF */
 	if (!(h->nlmsg_type == RTM_NEWLINK || h->nlmsg_type == RTM_DELLINK)) {
 		/* If this is not link add/delete message so print warning. */
 		zlog_warn("netlink_link_change: wrong kernel message %d",
@@ -1084,8 +1090,12 @@ int netlink_link_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	if (tb[IFLA_LINK])
 		link_ifindex = *(ifindex_t *)RTA_DATA(tb[IFLA_LINK]);
 
+	if (tb[IFLA_IFALIAS]) {
+		desc = (char *)RTA_DATA(tb[IFLA_IFALIAS]);
+	}
+
 	/* If VRF, create or update the VRF structure itself. */
-	if (zif_type == ZEBRA_IF_VRF) {
+	if (zif_type == ZEBRA_IF_VRF && !vrf_is_backend_netns()) {
 		netlink_vrf_change(h, tb[IFLA_LINKINFO], name);
 		vrf_id = (vrf_id_t)ifi->ifi_index;
 	}
@@ -1093,9 +1103,17 @@ int netlink_link_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	/* See if interface is present. */
 	ifp = if_lookup_by_name_per_ns(zns, name);
 
+	if (ifp) {
+		if (ifp->desc)
+			XFREE(MTYPE_TMP, ifp->desc);
+		if (desc)
+			ifp->desc = XSTRDUP(MTYPE_TMP, desc);
+	}
+
 	if (h->nlmsg_type == RTM_NEWLINK) {
 		if (tb[IFLA_MASTER]) {
-			if (slave_kind && (strcmp(slave_kind, "vrf") == 0)) {
+			if (slave_kind && (strcmp(slave_kind, "vrf") == 0)
+			    && !vrf_is_backend_netns()) {
 				zif_slave_type = ZEBRA_IF_SLAVE_VRF;
 				vrf_id =
 					*(u_int32_t *)RTA_DATA(tb[IFLA_MASTER]);
@@ -1107,7 +1125,8 @@ int netlink_link_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 			} else
 				zif_slave_type = ZEBRA_IF_SLAVE_OTHER;
 		}
-
+		if (vrf_is_backend_netns())
+			vrf_id = (vrf_id_t)ns_id;
 		if (ifp == NULL
 		    || !CHECK_FLAG(ifp->status, ZEBRA_INTERFACE_ACTIVE)) {
 			/* Add interface notification from kernel */
@@ -1131,15 +1150,15 @@ int netlink_link_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 			/* Update interface information. */
 			set_ifindex(ifp, ifi->ifi_index, zns);
 			ifp->flags = ifi->ifi_flags & 0x0000fffff;
-			if (IS_ZEBRA_IF_VRF(ifp))
-				SET_FLAG(ifp->status,
-					 ZEBRA_INTERFACE_VRF_LOOPBACK);
 			ifp->mtu6 = ifp->mtu = *(int *)RTA_DATA(tb[IFLA_MTU]);
 			ifp->metric = 0;
 			ifp->ptm_status = ZEBRA_PTM_STATUS_UNKNOWN;
 
 			/* Set interface type */
 			zebra_if_set_ziftype(ifp, zif_type, zif_slave_type);
+			if (IS_ZEBRA_IF_VRF(ifp))
+				SET_FLAG(ifp->status,
+					 ZEBRA_INTERFACE_VRF_LOOPBACK);
 
 			/* Update link. */
 			zebra_if_update_link(ifp, link_ifindex);

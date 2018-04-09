@@ -62,10 +62,6 @@
 #include "pim_bfd.h"
 #include "bfd.h"
 
-static struct cmd_node pim_global_node = {
-	PIM_NODE, "", 1 /* vtysh ? yes */
-};
-
 static struct cmd_node interface_node = {
 	INTERFACE_NODE, "%s(config-if)# ", 1 /* vtysh ? yes */
 };
@@ -2604,30 +2600,30 @@ static void pim_show_upstream_rpf(struct pim_instance *pim, struct vty *vty,
 	}
 }
 
-static void show_rpf_refresh_stats(struct vty *vty, time_t now,
-				   json_object *json)
+static void show_rpf_refresh_stats(struct vty *vty, struct pim_instance *pim,
+				   time_t now, json_object *json)
 {
 	char refresh_uptime[10];
 
 	pim_time_uptime_begin(refresh_uptime, sizeof(refresh_uptime), now,
-			      qpim_rpf_cache_refresh_last);
+			      pim->rpf_cache_refresh_last);
 
 	if (json) {
 		json_object_int_add(json, "rpfCacheRefreshDelayMsecs",
 				    qpim_rpf_cache_refresh_delay_msec);
 		json_object_int_add(
 			json, "rpfCacheRefreshTimer",
-			pim_time_timer_remain_msec(qpim_rpf_cache_refresher));
+			pim_time_timer_remain_msec(pim->rpf_cache_refresher));
 		json_object_int_add(json, "rpfCacheRefreshRequests",
-				    qpim_rpf_cache_refresh_requests);
+				    pim->rpf_cache_refresh_requests);
 		json_object_int_add(json, "rpfCacheRefreshEvents",
-				    qpim_rpf_cache_refresh_events);
+				    pim->rpf_cache_refresh_events);
 		json_object_string_add(json, "rpfCacheRefreshLast",
 				       refresh_uptime);
 		json_object_int_add(json, "nexthopLookups",
-				    qpim_nexthop_lookups);
+				    pim->nexthop_lookups);
 		json_object_int_add(json, "nexthopLookupsAvoided",
-				    nexthop_lookups_avoided);
+				    pim->nexthop_lookups_avoided);
 	} else {
 		vty_out(vty,
 			"RPF Cache Refresh Delay:    %ld msecs\n"
@@ -2638,11 +2634,11 @@ static void show_rpf_refresh_stats(struct vty *vty, time_t now,
 			"Nexthop Lookups:            %lld\n"
 			"Nexthop Lookups Avoided:    %lld\n",
 			qpim_rpf_cache_refresh_delay_msec,
-			pim_time_timer_remain_msec(qpim_rpf_cache_refresher),
-			(long long)qpim_rpf_cache_refresh_requests,
-			(long long)qpim_rpf_cache_refresh_events,
-			refresh_uptime, (long long)qpim_nexthop_lookups,
-			(long long)nexthop_lookups_avoided);
+			pim_time_timer_remain_msec(pim->rpf_cache_refresher),
+			(long long)pim->rpf_cache_refresh_requests,
+			(long long)pim->rpf_cache_refresh_events,
+			refresh_uptime, (long long)pim->nexthop_lookups,
+			(long long)pim->nexthop_lookups_avoided);
 	}
 }
 
@@ -2654,7 +2650,7 @@ static void show_scan_oil_stats(struct pim_instance *pim, struct vty *vty,
 	char uptime_mroute_del[10];
 
 	pim_time_uptime_begin(uptime_scan_oil, sizeof(uptime_scan_oil), now,
-			      qpim_scan_oil_last);
+			      pim->scan_oil_last);
 	pim_time_uptime_begin(uptime_mroute_add, sizeof(uptime_mroute_add), now,
 			      pim->mroute_add_last);
 	pim_time_uptime_begin(uptime_mroute_del, sizeof(uptime_mroute_del), now,
@@ -2664,7 +2660,7 @@ static void show_scan_oil_stats(struct pim_instance *pim, struct vty *vty,
 		"Scan OIL - Last: %s  Events: %lld\n"
 		"MFC Add  - Last: %s  Events: %lld\n"
 		"MFC Del  - Last: %s  Events: %lld\n",
-		uptime_scan_oil, (long long)qpim_scan_oil_events,
+		uptime_scan_oil, (long long)pim->scan_oil_events,
 		uptime_mroute_add, (long long)pim->mroute_add_events,
 		uptime_mroute_del, (long long)pim->mroute_del_events);
 }
@@ -2680,9 +2676,9 @@ static void pim_show_rpf(struct pim_instance *pim, struct vty *vty, u_char uj)
 
 	if (uj) {
 		json = json_object_new_object();
-		show_rpf_refresh_stats(vty, now, json);
+		show_rpf_refresh_stats(vty, pim, now, json);
 	} else {
-		show_rpf_refresh_stats(vty, now, json);
+		show_rpf_refresh_stats(vty, pim, now, json);
 		vty_out(vty, "\n");
 		vty_out(vty,
 			"Source          Group           RpfIface RpfAddress      RibNextHop      Metric Pref\n");
@@ -4374,7 +4370,7 @@ static void pim_cmd_show_ip_multicast_helper(struct pim_instance *pim,
 
 	vty_out(vty, "\n");
 
-	show_rpf_refresh_stats(vty, now, NULL);
+	show_rpf_refresh_stats(vty, pim, now, NULL);
 
 	vty_out(vty, "\n");
 
@@ -7315,6 +7311,27 @@ DEFUN (no_debug_msdp_packets,
 ALIAS(no_debug_msdp_packets, undebug_msdp_packets_cmd, "undebug msdp packets",
       UNDEBUG_STR DEBUG_MSDP_STR DEBUG_MSDP_PACKETS_STR)
 
+DEFUN (debug_mtrace,
+       debug_mtrace_cmd,
+       "debug mtrace",
+       DEBUG_STR
+       DEBUG_MTRACE_STR)
+{
+	PIM_DO_DEBUG_MTRACE;
+	return CMD_SUCCESS;
+}
+
+DEFUN (no_debug_mtrace,
+       no_debug_mtrace_cmd,
+       "no debug mtrace",
+       NO_STR
+       DEBUG_STR
+       DEBUG_MTRACE_STR)
+{
+	PIM_DONT_DEBUG_MTRACE;
+	return CMD_SUCCESS;
+}
+
 DEFUN_NOSH (show_debugging_pim,
 	    show_debugging_pim_cmd,
 	    "show debugging [pim]",
@@ -7333,6 +7350,7 @@ static int interface_pim_use_src_cmd_worker(struct vty *vty, const char *source)
 {
 	int result;
 	struct in_addr source_addr;
+	int ret = CMD_SUCCESS;
 	VTY_DECLVAR_CONTEXT(interface, ifp);
 
 	result = inet_pton(AF_INET, source, &source_addr);
@@ -7347,16 +7365,19 @@ static int interface_pim_use_src_cmd_worker(struct vty *vty, const char *source)
 	case PIM_SUCCESS:
 		break;
 	case PIM_IFACE_NOT_FOUND:
+		ret = CMD_WARNING_CONFIG_FAILED;
 		vty_out(vty, "Pim not enabled on this interface\n");
 		break;
 	case PIM_UPDATE_SOURCE_DUP:
+		ret = CMD_WARNING;
 		vty_out(vty, "%% Source already set to %s\n", source);
 		break;
 	default:
+		ret = CMD_WARNING_CONFIG_FAILED;
 		vty_out(vty, "%% Source set failed\n");
 	}
 
-	return result ? CMD_WARNING_CONFIG_FAILED : CMD_SUCCESS;
+	return ret;
 }
 
 DEFUN (interface_pim_use_source,
@@ -8519,7 +8540,6 @@ DEFUN (show_ip_msdp_sa_sg_vrf_all,
 
 void pim_cmd_init(void)
 {
-	install_node(&pim_global_node, pim_global_config_write); /* PIM_NODE */
 	install_node(&interface_node,
 		     pim_interface_config_write); /* INTERFACE_NODE */
 	if_cmd_init();
@@ -8722,6 +8742,8 @@ void pim_cmd_init(void)
 	install_element(ENABLE_NODE, &debug_msdp_packets_cmd);
 	install_element(ENABLE_NODE, &no_debug_msdp_packets_cmd);
 	install_element(ENABLE_NODE, &undebug_msdp_packets_cmd);
+	install_element(ENABLE_NODE, &debug_mtrace_cmd);
+	install_element(ENABLE_NODE, &no_debug_mtrace_cmd);
 
 	install_element(CONFIG_NODE, &debug_igmp_cmd);
 	install_element(CONFIG_NODE, &no_debug_igmp_cmd);
@@ -8764,6 +8786,8 @@ void pim_cmd_init(void)
 	install_element(CONFIG_NODE, &debug_msdp_packets_cmd);
 	install_element(CONFIG_NODE, &no_debug_msdp_packets_cmd);
 	install_element(CONFIG_NODE, &undebug_msdp_packets_cmd);
+	install_element(CONFIG_NODE, &debug_mtrace_cmd);
+	install_element(CONFIG_NODE, &no_debug_mtrace_cmd);
 
 	install_element(CONFIG_NODE, &ip_msdp_mesh_group_member_cmd);
 	install_element(VRF_NODE, &ip_msdp_mesh_group_member_cmd);

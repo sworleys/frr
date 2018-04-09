@@ -58,7 +58,8 @@ int is_zebra_import_table_enabled(afi_t afi, u_int32_t table_id)
 	if (afi == AFI_MAX)
 		return 0;
 
-	if (is_zebra_valid_kernel_table(table_id))
+	if (is_zebra_valid_kernel_table(table_id) &&
+	    table_id < ZEBRA_KERNEL_TABLE_MAX)
 		return zebra_import_table_used[afi][table_id];
 	return 0;
 }
@@ -115,11 +116,12 @@ static void zebra_redistribute(struct zserv *client, int type, u_short instance,
 
 			if (IS_ZEBRA_DEBUG_EVENT)
 				zlog_debug(
-					"%s: checking: selected=%d, type=%d, distance=%d, "
+					"%s: client %s vrf %d checking: selected=%d, type=%d, distance=%d, "
 					"zebra_check_addr=%d",
 					__func__,
-					CHECK_FLAG(newre->flags,
-						   ZEBRA_FLAG_SELECTED),
+					zebra_route_string(client->proto),
+					vrf_id, CHECK_FLAG(newre->flags,
+							   ZEBRA_FLAG_SELECTED),
 					newre->type, newre->distance,
 					zebra_check_addr(dst_p));
 
@@ -246,16 +248,31 @@ void redistribute_delete(struct prefix *p, struct prefix *src_p,
 void zebra_redistribute_add(int command, struct zserv *client, int length,
 			    struct zebra_vrf *zvrf)
 {
-	afi_t afi;
-	int type;
+	afi_t afi = 0;
+	int type = 0;
 	u_short instance;
 
-	afi = stream_getc(client->ibuf);
-	type = stream_getc(client->ibuf);
-	instance = stream_getw(client->ibuf);
+	STREAM_GETC(client->ibuf, afi);
+	STREAM_GETC(client->ibuf, type);
+	STREAM_GETW(client->ibuf, instance);
 
-	if (type == 0 || type >= ZEBRA_ROUTE_MAX)
+	if (IS_ZEBRA_DEBUG_EVENT)
+		zlog_debug(
+			"%s: client proto %s afi=%d, wants %s, vrf %d, instance=%d",
+			__func__, zebra_route_string(client->proto), afi,
+			zebra_route_string(type), zvrf_id(zvrf), instance);
+
+	if (afi == 0 || afi > AFI_MAX) {
+		zlog_warn("%s: Specified afi %d does not exist",
+			  __PRETTY_FUNCTION__, afi);
 		return;
+	}
+
+	if (type == 0 || type >= ZEBRA_ROUTE_MAX) {
+		zlog_warn("%s: Specified Route Type %d does not exist",
+			  __PRETTY_FUNCTION__, type);
+		return;
+	}
 
 	if (instance) {
 		if (!redist_check_instance(&client->mi_redist[afi][type],
@@ -268,26 +285,41 @@ void zebra_redistribute_add(int command, struct zserv *client, int length,
 	} else {
 		if (!vrf_bitmap_check(client->redist[afi][type],
 				      zvrf_id(zvrf))) {
+			if (IS_ZEBRA_DEBUG_EVENT)
+				zlog_debug("%s: setting vrf %d redist bitmap",
+					   __func__, zvrf_id(zvrf));
 			vrf_bitmap_set(client->redist[afi][type],
 				       zvrf_id(zvrf));
 			zebra_redistribute(client, type, 0, zvrf_id(zvrf), afi);
 		}
 	}
+
+stream_failure:
+	return;
 }
 
 void zebra_redistribute_delete(int command, struct zserv *client, int length,
 			       struct zebra_vrf *zvrf)
 {
-	afi_t afi;
-	int type;
+	afi_t afi = 0;
+	int type = 0;
 	u_short instance;
 
-	afi = stream_getc(client->ibuf);
-	type = stream_getc(client->ibuf);
-	instance = stream_getw(client->ibuf);
+	STREAM_GETC(client->ibuf, afi);
+	STREAM_GETC(client->ibuf, type);
+	STREAM_GETW(client->ibuf, instance);
 
-	if (type == 0 || type >= ZEBRA_ROUTE_MAX)
+	if (afi == 0 || afi > AFI_MAX) {
+		zlog_warn("%s: Specified afi %d does not exist",
+			  __PRETTY_FUNCTION__, afi);
 		return;
+	}
+
+	if (type == 0 || type >= ZEBRA_ROUTE_MAX) {
+		zlog_warn("%s: Specified Route Type %d does not exist",
+			  __PRETTY_FUNCTION__, type);
+		return;
+	}
 
 	/*
 	 * NOTE: no need to withdraw the previously advertised routes. The
@@ -299,6 +331,9 @@ void zebra_redistribute_delete(int command, struct zserv *client, int length,
 		redist_del_instance(&client->mi_redist[afi][type], instance);
 	else
 		vrf_bitmap_unset(client->redist[afi][type], zvrf_id(zvrf));
+
+stream_failure:
+	return;
 }
 
 void zebra_redistribute_default_add(int command, struct zserv *client,
@@ -495,7 +530,7 @@ int zebra_add_import_table_entry(struct route_node *rn, struct route_entry *re,
 	afi = family2afi(rn->p.family);
 	if (rmap_name)
 		ret = zebra_import_table_route_map_check(
-			afi, re->type, &rn->p, re->nexthop, re->vrf_id,
+			afi, re->type, &rn->p, re->ng.nexthop, re->vrf_id,
 			re->tag, rmap_name);
 
 	if (ret != RMAP_MATCH) {
@@ -529,7 +564,7 @@ int zebra_add_import_table_entry(struct route_node *rn, struct route_entry *re,
 	newre->nexthop_num = 0;
 	newre->uptime = time(NULL);
 	newre->instance = re->table;
-	route_entry_copy_nexthops(newre, re->nexthop);
+	route_entry_copy_nexthops(newre, re->ng.nexthop);
 
 	rib_add_multipath(afi, SAFI_UNICAST, &p, NULL, newre);
 
@@ -544,9 +579,9 @@ int zebra_del_import_table_entry(struct route_node *rn, struct route_entry *re)
 	afi = family2afi(rn->p.family);
 	prefix_copy(&p, &rn->p);
 
-	rib_delete(afi, SAFI_UNICAST, re->vrf_id, ZEBRA_ROUTE_TABLE,
-		   re->table, re->flags, &p, NULL, re->nexthop,
-		   zebrad.rtm_table_default, re->metric, false);
+	rib_delete(afi, SAFI_UNICAST, re->vrf_id, ZEBRA_ROUTE_TABLE, re->table,
+		   re->flags, &p, NULL, re->ng.nexthop,
+		   zebrad.rtm_table_default, re->metric, false, NULL);
 
 	return 0;
 }

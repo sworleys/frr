@@ -1,2 +1,0 @@
-# These exist so that no DEBHELPER is generated for this package
-# We don't need a daemon-reload when frr-dbg is removed

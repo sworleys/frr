@@ -344,8 +344,18 @@ int eigrp_write(struct thread *thread)
 
 	/* Get one packet from queue. */
 	ep = eigrp_fifo_next(ei->obuf);
-	assert(ep);
-	assert(ep->length >= EIGRP_HEADER_LEN);
+	if (!ep) {
+		zlog_err("%s: Interface %s no packet on queue?",
+			 __PRETTY_FUNCTION__, ei->ifp->name);
+		goto out;
+	}
+	if (ep->length < EIGRP_HEADER_LEN) {
+		zlog_err("%s: Packet just has a header?",
+			 __PRETTY_FUNCTION__);
+		eigrp_header_dump((struct eigrp_header *)ep->s->data);
+		eigrp_packet_delete(ei);
+		goto out;
+	}
 
 	if (ep->dst.s_addr == htonl(EIGRP_MULTICAST_ADDRESS))
 		eigrp_if_ipmulticast(eigrp, ei->address, ei->ifp->ifindex);
@@ -415,7 +425,7 @@ int eigrp_write(struct thread *thread)
 
 	iov[0].iov_base = (char *)&iph;
 	iov[0].iov_len = iph.ip_hl << EIGRP_WRITE_IPHL_SHIFT;
-	iov[1].iov_base = STREAM_PNT(ep->s);
+	iov[1].iov_base = stream_pnt(ep->s);
 	iov[1].iov_len = ep->length;
 
 	/* send final fragment (could be first) */
@@ -442,6 +452,7 @@ int eigrp_write(struct thread *thread)
 	/* Now delete packet from queue. */
 	eigrp_packet_delete(ei);
 
+out:
 	if (eigrp_fifo_next(ei->obuf) == NULL) {
 		ei->on_write_q = 0;
 		list_delete_node(eigrp->oi_write_q, node);
@@ -544,7 +555,7 @@ int eigrp_read(struct thread *thread)
 	   by eigrp_recv_packet() to be correct). */
 
 	stream_forward_getp(ibuf, (iph->ip_hl * 4));
-	eigrph = (struct eigrp_header *)STREAM_PNT(ibuf);
+	eigrph = (struct eigrp_header *)stream_pnt(ibuf);
 
 	if (IS_DEBUG_EIGRP_TRANSMIT(0, RECV)
 	    && IS_DEBUG_EIGRP_TRANSMIT(0, PACKET_DETAIL))
@@ -1154,25 +1165,57 @@ u_int16_t eigrp_add_internalTLV_to_stream(struct stream *s,
 	u_int16_t length;
 
 	stream_putw(s, EIGRP_TLV_IPv4_INT);
-	if (pe->destination->prefixlen <= 8) {
-		stream_putw(s, 0x001A);
-		length = 0x001A;
+	switch (pe->destination->prefixlen) {
+	case 0:
+	case 1:
+	case 2:
+	case 3:
+	case 4:
+	case 5:
+	case 6:
+	case 7:
+	case 8:
+		length = EIGRP_TLV_IPV4_SIZE_GRT_0_BIT;
+		stream_putw(s, length);
+		break;
+	case 9:
+	case 10:
+	case 11:
+	case 12:
+	case 13:
+	case 14:
+	case 15:
+	case 16:
+		length = EIGRP_TLV_IPV4_SIZE_GRT_8_BIT;
+		stream_putw(s, length);
+		break;
+	case 17:
+	case 18:
+	case 19:
+	case 20:
+	case 21:
+	case 22:
+	case 23:
+	case 24:
+		length = EIGRP_TLV_IPV4_SIZE_GRT_16_BIT;
+		stream_putw(s, length);
+		break;
+	case 25:
+	case 26:
+	case 27:
+	case 28:
+	case 29:
+	case 30:
+	case 31:
+	case 32:
+		length = EIGRP_TLV_IPV4_SIZE_GRT_24_BIT;
+		stream_putw(s, length);
+		break;
+	default:
+		zlog_err("%s: Unexpected prefix length: %d",
+			 __PRETTY_FUNCTION__, pe->destination->prefixlen);
+		return 0;
 	}
-	if ((pe->destination->prefixlen > 8)
-	    && (pe->destination->prefixlen <= 16)) {
-		stream_putw(s, 0x001B);
-		length = 0x001B;
-	}
-	if ((pe->destination->prefixlen > 16)
-	    && (pe->destination->prefixlen <= 24)) {
-		stream_putw(s, 0x001C);
-		length = 0x001C;
-	}
-	if (pe->destination->prefixlen > 24) {
-		stream_putw(s, 0x001D);
-		length = 0x001D;
-	}
-
 	stream_putl(s, 0x00000000);
 
 	/*Metric*/

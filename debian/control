@@ -1,19 +1,19 @@
 Source: frr
 Section: net
 Priority: optional
-Maintainer: dev-support <dev-support@cumulusnetworks.com>
-Build-Depends: debhelper (>= 7.0.50~), libncurses5-dev, libreadline-dev, texlive-latex-base, texlive-generic-recommended, libpam0g-dev | libpam-dev, libcap-dev, texinfo (>= 4.7), imagemagick, ghostscript, groff, autotools-dev, hardening-wrapper, libpcre3-dev, gawk, chrpath, libsnmp-dev, git, dh-autoreconf, libjson0, libjson0-dev, dh-systemd, libsystemd-dev, python-ipaddr, bison, flex, libc-ares-dev, python3-dev, pkg-config, python (>= 2.7), python-ipaddr
+Maintainer: Nobody <nobody@frrouting.org>
+Uploaders: Nobody <nobody@frrouting.org>
+XSBC-Original-Maintainer: <maintainers@frrouting.org>
+Build-Depends: debhelper (>= 7.0.50~), libncurses5-dev, libreadline-dev, texlive-latex-base, texlive-generic-recommended, libpam0g-dev | libpam-dev, libcap-dev, texinfo (>= 4.7), imagemagick, ghostscript, groff, autotools-dev, libpcre3-dev, gawk, chrpath, libsnmp-dev, git, dh-autoreconf, libjson-c-dev, libjson-c2 | libjson-c3, dh-systemd, libsystemd-dev, bison, flex, libc-ares-dev, pkg-config, python (>= 2.7), python-ipaddr, libpython2.7-dev
 Standards-Version: 3.9.6
-Homepage: http://www.freerangerouting.org/
-XS-Testsuite: autopkgtest
+Homepage: http://www.frrouting.org/
 
 Package: frr
 Architecture: any
-Depends: ${shlibs:Depends}, logrotate (>= 3.2-11), iproute2 | iproute, ${misc:Depends}, libc-ares2
+Depends: ${shlibs:Depends}, logrotate (>= 3.2-11), iproute2 | iproute, ${misc:Depends}, libc-ares2, python (>= 2.7), python-ipaddr
 Pre-Depends: adduser
-Conflicts: zebra, zebra-pj
-Replaces: zebra, zebra-pj
-Breaks: quagga (<< 1.0.0+cl3u14~)
+Conflicts: zebra, zebra-pj, quagga, frr-pythontools
+Replaces: zebra, zebra-pj, frr-pythontools
 Suggests: snmpd
 Description: BGP/OSPF/RIP/RIPng/ISIS/PIM/LDP routing daemon forked from Quagga
  FRR is free software which manages TCP/IP based routing protocols.
@@ -21,15 +21,13 @@ Description: BGP/OSPF/RIP/RIPng/ISIS/PIM/LDP routing daemon forked from Quagga
  PIM and LDP as well as the IPv6 versions of these.
  .
  FRR is a fork of Quagga with an open community model. The main git
- lives on https://github.com/freerangerouting/frr.git
+ lives on https://github.com/frrouting/frr.git
 
 Package: frr-dbg
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}, frr (= ${binary:Version})
 Priority: extra
 Section: debug
-Replaces: quagga-dbg (<< 1.0.0+cl3u14~)
-Breaks: quagga-dbg (<< 1.0.0+cl3u14~)
 Description: BGP/OSPF/RIP/RIPng/ISIS/PIM/LDP routing daemon (debug symbols)
  This package provides debugging symbols for all binary packages built 
  from frr source package. It's highly recommended to have this package
@@ -40,8 +38,6 @@ Package: frr-doc
 Section: net
 Architecture: all
 Depends: ${misc:Depends}
-Replaces: quagga-doc (<< 1.0.0+cl3u14~)
-Breaks: quagga-doc (<< 1.0.0+cl3u14~)
 Suggests: frr
 Description: BGP/OSPF/RIP/RIPng/ISIS/PIM/LDP routing daemon (documentation)
  This package includes info files for frr, a free software which manages

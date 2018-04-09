@@ -51,6 +51,28 @@ DEFINE_QOBJ_TYPE(ospf_interface)
 DEFINE_HOOK(ospf_vl_add, (struct ospf_vl_data * vd), (vd))
 DEFINE_HOOK(ospf_vl_delete, (struct ospf_vl_data * vd), (vd))
 
+int ospf_interface_neighbor_count(struct ospf_interface *oi)
+{
+	int count = 0;
+	struct route_node *rn;
+	struct ospf_neighbor *nbr = NULL;
+
+	for (rn = route_top(oi->nbrs); rn; rn = route_next(rn)) {
+		nbr = rn->info;
+		if (nbr) {
+			/* Do not show myself. */
+			if (nbr == oi->nbr_self)
+				continue;
+			/* Down state is not shown. */
+			if (nbr->state == NSM_Down)
+				continue;
+			count++;
+		}
+	}
+
+	return count;
+}
+
 int ospf_if_get_output_cost(struct ospf_interface *oi)
 {
 	/* If all else fails, use default OSPF cost */
@@ -437,7 +459,7 @@ struct ospf_interface *ospf_if_lookup_recv_if(struct ospf *ospf,
 		if (oi->type == OSPF_IFTYPE_VIRTUALLINK)
 			continue;
 
-		if (if_is_loopback(oi->ifp))
+		if (if_is_loopback(oi->ifp) || if_is_vrf(oi->ifp))
 			continue;
 
 		if (CHECK_FLAG(oi->connected->flags, ZEBRA_IFA_UNNUMBERED))
@@ -681,7 +703,7 @@ static int ospf_if_delete_hook(struct interface *ifp)
 
 int ospf_if_is_enable(struct ospf_interface *oi)
 {
-	if (!if_is_loopback(oi->ifp))
+	if (!(if_is_loopback(oi->ifp) || if_is_vrf(oi->ifp)))
 		if (if_is_up(oi->ifp))
 			return 1;
 
@@ -1183,7 +1205,7 @@ u_char ospf_default_iftype(struct interface *ifp)
 {
 	if (if_is_pointopoint(ifp))
 		return OSPF_IFTYPE_POINTOPOINT;
-	else if (if_is_loopback(ifp))
+	else if (if_is_loopback(ifp) || if_is_vrf(ifp))
 		return OSPF_IFTYPE_LOOPBACK;
 	else
 		return OSPF_IFTYPE_BROADCAST;

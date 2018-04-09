@@ -30,7 +30,7 @@
 #include "vty.h"
 
 #include "zebra/rib.h"
-#include "zebra/zserv.h"
+#include "zebra/rt.h"
 
 /* Thank you, Solaris, for polluting application symbol namespace. */
 #undef hook_register
@@ -94,11 +94,12 @@ static void handle_route_entry(mib2_ipRouteEntry_t *routeEntry)
 	prefix.prefixlen = ip_masklen(tmpaddr);
 
 	memset(&nh, 0, sizeof(nh));
+	nh.vrf_id = VRF_DEFAULT;
 	nh.type = NEXTHOP_TYPE_IPV4;
 	nh.gate.ipv4.s_addr = routeEntry->ipRouteNextHop;
 
 	rib_add(AFI_IP, SAFI_UNICAST, VRF_DEFAULT, ZEBRA_ROUTE_KERNEL, 0,
-		zebra_flags, &prefix, NULL, &nh, 0, 0, 0, 0);
+		zebra_flags, &prefix, NULL, &nh, 0, 0, 0, 0, 0);
 }
 
 void route_read(struct zebra_ns *zns)
@@ -259,6 +260,10 @@ void neigh_read(struct zebra_ns *zns)
 }
 
 void neigh_read_for_vlan(struct zebra_ns *zns, struct interface *vlan_if)
+{
+}
+
+void kernel_read_pbr_rules(struct zebra_ns *zns)
 {
 }
 

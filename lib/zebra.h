@@ -402,7 +402,7 @@ extern const char *zserv_command_string(unsigned int command);
 #define strmatch(a,b) (!strcmp((a), (b)))
 
 /* Zebra message flags */
-#define ZEBRA_FLAG_INTERNAL           0x01
+#define ZEBRA_FLAG_ALLOW_RECURSION    0x01
 #define ZEBRA_FLAG_SELFROUTE          0x02
 #define ZEBRA_FLAG_IBGP               0x08
 #define ZEBRA_FLAG_SELECTED           0x10
@@ -481,12 +481,22 @@ typedef enum {
 #define UNSET_FLAG(V,F)      (V) &= ~(F)
 #define RESET_FLAG(V)        (V) = 0
 
+/* Atomic flag manipulation macros. */
+#define CHECK_FLAG_ATOMIC(PV, F)                                               \
+	((atomic_load_explicit(PV, memory_order_seq_cst)) & (F))
+#define SET_FLAG_ATOMIC(PV, F)                                                 \
+	((atomic_fetch_or_explicit(PV, (F), memory_order_seq_cst)))
+#define UNSET_FLAG_ATOMIC(PV, F)                                               \
+	((atomic_fetch_and_explicit(PV, ~(F), memory_order_seq_cst)))
+#define RESET_FLAG_ATOMIC(PV)                                                  \
+	((atomic_store_explicit(PV, 0, memory_order_seq_cst)))
+
 /* Zebra types. Used in Zserv message header. */
 typedef u_int16_t zebra_size_t;
 typedef u_int16_t zebra_command_t;
 
 /* VRF ID type. */
-typedef u_int16_t vrf_id_t;
+typedef uint32_t vrf_id_t;
 
 typedef uint32_t route_tag_t;
 #define ROUTE_TAG_MAX UINT32_MAX

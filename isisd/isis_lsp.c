@@ -286,7 +286,7 @@ static void put_lsp_hdr(struct isis_lsp *lsp, size_t *len_pointer, bool keep)
 		(lsp->level == IS_LEVEL_1) ? L1_LINK_STATE : L2_LINK_STATE;
 	struct isis_lsp_hdr *hdr = &lsp->hdr;
 	struct stream *stream = lsp->pdu;
-	size_t orig_getp, orig_endp;
+	size_t orig_getp = 0, orig_endp = 0;
 
 	if (keep) {
 		orig_getp = stream_get_getp(lsp->pdu);
@@ -1034,7 +1034,8 @@ static void lsp_build(struct isis_lsp *lsp, struct isis_area *area)
 			break;
 		case CIRCUIT_T_P2P: {
 			struct isis_adjacency *nei = circuit->u.p2p.neighbor;
-			if (nei && (level & nei->circuit_t)) {
+			if (nei && nei->adj_state == ISIS_ADJ_UP
+			    && (level & nei->circuit_t)) {
 				uint8_t ne_id[7];
 				memcpy(ne_id, nei->sysid, ISIS_SYS_ID_LEN);
 				LSP_PSEUDO_ID(ne_id) = 0;
@@ -1873,12 +1874,12 @@ int lsp_tick(struct thread *thread)
 					if (!circuit->lsp_queue)
 						continue;
 
-					if (now - circuit->lsp_queue_last_push
+					if (now - circuit->lsp_queue_last_push[level]
 					    < MIN_LSP_RETRANS_INTERVAL) {
 						continue;
 					}
 
-					circuit->lsp_queue_last_push = now;
+					circuit->lsp_queue_last_push[level] = now;
 
 					for (ALL_LIST_ELEMENTS_RO(
 						     lsp_list, lspnode, lsp)) {

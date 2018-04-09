@@ -215,7 +215,7 @@ void ospf6_copy_nexthops(struct list *dst, struct list *src)
 			if (ospf6_nexthop_is_set(nh)) {
 				nh_new = ospf6_nexthop_create();
 				ospf6_nexthop_copy(nh_new, nh);
-				listnode_add(dst, nh_new);
+				listnode_add_sort(dst, nh_new);
 			}
 		}
 	}
@@ -231,7 +231,7 @@ void ospf6_merge_nexthops(struct list *dst, struct list *src)
 			if (!ospf6_route_find_nexthop(dst, nh)) {
 				nh_new = ospf6_nexthop_create();
 				ospf6_nexthop_copy(nh_new, nh);
-				listnode_add(dst, nh_new);
+				listnode_add_sort(dst, nh_new);
 			}
 		}
 	}
@@ -241,18 +241,25 @@ int ospf6_route_cmp_nexthops(struct ospf6_route *a, struct ospf6_route *b)
 {
 	struct listnode *anode, *bnode;
 	struct ospf6_nexthop *anh, *bnh;
+	bool identical = false;
 
 	if (a && b) {
 		if (listcount(a->nh_list) == listcount(b->nh_list)) {
 			for (ALL_LIST_ELEMENTS_RO(a->nh_list, anode, anh)) {
+				identical = false;
 				for (ALL_LIST_ELEMENTS_RO(b->nh_list, bnode,
-							  bnh))
-					if (!ospf6_nexthop_is_same(anh, bnh))
-						return (1);
+							  bnh)) {
+					if (ospf6_nexthop_is_same(anh, bnh))
+						identical = true;
+				}
+				/* Currnet List A element not found List B
+				 * Non-Identical lists return */
+				if (identical == false)
+					return 1;
 			}
-			return (0);
+			return 0;
 		} else
-			return (1);
+			return 1;
 	}
 	/* One of the routes doesn't exist ? */
 	return (1);
@@ -308,6 +315,7 @@ void ospf6_route_zebra_copy_nexthops(struct ospf6_route *route,
 			if (i >= entries)
 				return;
 
+			nexthops[i].vrf_id = VRF_DEFAULT;
 			nexthops[i].ifindex = nh->ifindex;
 			if (!IN6_IS_ADDR_UNSPECIFIED(&nh->address)) {
 				nexthops[i].gate.ipv6 = nh->address;
@@ -331,12 +339,61 @@ int ospf6_route_get_first_nh_index(struct ospf6_route *route)
 	return (-1);
 }
 
-static int ospf6_nexthop_cmp(struct ospf6_nexthop *a, struct ospf6_nexthop *b)
+int ospf6_nexthop_cmp(struct ospf6_nexthop *a, struct ospf6_nexthop *b)
 {
-	if ((a)->ifindex == (b)->ifindex &&
-	    IN6_ARE_ADDR_EQUAL(&(a)->address, &(b)->address))
+	if (a->ifindex < b->ifindex)
+		return -1;
+	else if (a->ifindex > b->ifindex)
 		return 1;
+	else
+		return memcmp(&a->address, &b->address,
+			      sizeof(struct in6_addr));
+
 	return 0;
+}
+
+static int ospf6_path_cmp(struct ospf6_path *a, struct ospf6_path *b)
+{
+	if (a->origin.adv_router < b->origin.adv_router)
+		return -1;
+	else if (a->origin.adv_router > b->origin.adv_router)
+		return 1;
+	else
+		return 0;
+}
+
+void ospf6_path_free(struct ospf6_path *op)
+{
+	if (op->nh_list)
+		list_delete_and_null(&op->nh_list);
+	XFREE(MTYPE_OSPF6_PATH, op);
+}
+
+struct ospf6_path *ospf6_path_dup(struct ospf6_path *path)
+{
+	struct ospf6_path *new;
+
+	new = XCALLOC(MTYPE_OSPF6_PATH, sizeof(struct ospf6_path));
+	memcpy(new, path, sizeof(struct ospf6_path));
+	new->nh_list = list_new();
+	new->nh_list->cmp = (int (*)(void *, void *))ospf6_nexthop_cmp;
+	new->nh_list->del = (void (*) (void *))ospf6_nexthop_delete;
+
+	return new;
+}
+
+void ospf6_copy_paths(struct list *dst, struct list *src)
+{
+	struct ospf6_path *path_new, *path;
+	struct listnode *node;
+
+	if (dst && src) {
+		for (ALL_LIST_ELEMENTS_RO(src, node, path)) {
+			path_new = ospf6_path_dup(path);
+			ospf6_copy_nexthops(path_new->nh_list, path->nh_list);
+			listnode_add_sort(dst, path_new);
+		}
+	}
 }
 
 struct ospf6_route *ospf6_route_create(void)
@@ -346,6 +403,9 @@ struct ospf6_route *ospf6_route_create(void)
 	route->nh_list = list_new();
 	route->nh_list->cmp = (int (*)(void *, void *))ospf6_nexthop_cmp;
 	route->nh_list->del = (void (*) (void *))ospf6_nexthop_delete;
+	route->paths = list_new();
+	route->paths->cmp = (int (*)(void *, void *))ospf6_path_cmp;
+	route->paths->del =  (void (*)(void *))ospf6_path_free;
 	return route;
 }
 
@@ -354,6 +414,8 @@ void ospf6_route_delete(struct ospf6_route *route)
 	if (route) {
 		if (route->nh_list)
 			list_delete_and_null(&route->nh_list);
+		if (route->paths)
+			list_delete_and_null(&route->paths);
 		XFREE(MTYPE_OSPF6_ROUTE, route);
 	}
 }
@@ -372,6 +434,7 @@ struct ospf6_route *ospf6_route_copy(struct ospf6_route *route)
 	new->linkstate_id = route->linkstate_id;
 	new->path = route->path;
 	ospf6_copy_nexthops(new->nh_list, route->nh_list);
+	ospf6_copy_paths(new->paths, route->paths);
 	new->rnode = NULL;
 	new->prev = NULL;
 	new->next = NULL;
@@ -412,19 +475,21 @@ int ospf6_route_cmp(struct ospf6_route *ra, struct ospf6_route *rb)
 	if (ra->type != rb->type)
 		return (ra->type - rb->type);
 
-	if (ra->path.area_id != rb->path.area_id)
-		return (ntohl(ra->path.area_id) - ntohl(rb->path.area_id));
-
 	if (ra->path.type != rb->path.type)
 		return (ra->path.type - rb->path.type);
 
 	if (ra->path.type == OSPF6_PATH_TYPE_EXTERNAL2) {
 		if (ra->path.u.cost_e2 != rb->path.u.cost_e2)
 			return (ra->path.u.cost_e2 - rb->path.u.cost_e2);
+		else
+			return (ra->path.cost - rb->path.cost);
 	} else {
 		if (ra->path.cost != rb->path.cost)
 			return (ra->path.cost - rb->path.cost);
 	}
+
+	if (ra->path.area_id != rb->path.area_id)
+		return (ntohl(ra->path.area_id) - ntohl(rb->path.area_id));
 
 	return 0;
 }
@@ -452,7 +517,13 @@ ospf6_route_lookup_identical(struct ospf6_route *route,
 
 	for (target = ospf6_route_lookup(&route->prefix, table); target;
 	     target = target->next) {
-		if (ospf6_route_is_identical(target, route))
+		if (target->type == route->type &&
+		    (memcmp(&target->prefix, &route->prefix,
+			   sizeof(struct prefix)) == 0) &&
+		    target->path.type == route->path.type &&
+		    target->path.cost == route->path.cost &&
+		    target->path.u.cost_e2 == route->path.u.cost_e2 &&
+		    ospf6_route_cmp_nexthops(target, route) == 0)
 			return target;
 	}
 	return NULL;
@@ -573,10 +644,10 @@ struct ospf6_route *ospf6_route_add(struct ospf6_route *route,
 		if (ospf6_route_is_identical(old, route)) {
 			if (IS_OSPF6_DEBUG_ROUTE(MEMORY))
 				zlog_debug(
-					"%s %p: route add %p: needless update of %p",
+					"%s %p: route add %p: needless update of %p old cost %u",
 					ospf6_route_table_name(table),
 					(void *)table, (void *)route,
-					(void *)old);
+					(void *)old, old->path.cost);
 			else if (IS_OSPF6_DEBUG_ROUTE(TABLE))
 				zlog_debug("%s: route add: needless update",
 					   ospf6_route_table_name(table));
@@ -591,9 +662,12 @@ struct ospf6_route *ospf6_route_add(struct ospf6_route *route,
 		}
 
 		if (IS_OSPF6_DEBUG_ROUTE(MEMORY))
-			zlog_debug("%s %p: route add %p: update of %p",
-				   ospf6_route_table_name(table), (void *)table,
-				   (void *)route, (void *)old);
+			zlog_debug(
+				"%s %p: route add %p cost %u nh %u: update of %p old cost %u nh %u",
+				ospf6_route_table_name(table), (void *)table,
+				(void *)route, route->path.cost,
+				listcount(route->nh_list), (void *)old,
+				old->path.cost, listcount(old->nh_list));
 		else if (IS_OSPF6_DEBUG_ROUTE(TABLE))
 			zlog_debug("%s: route add: update",
 				   ospf6_route_table_name(table));
@@ -632,13 +706,14 @@ struct ospf6_route *ospf6_route_add(struct ospf6_route *route,
 	if (prev || next) {
 		if (IS_OSPF6_DEBUG_ROUTE(MEMORY))
 			zlog_debug(
-				"%s %p: route add %p: another path: prev %p, next %p node refcount %u",
+				"%s %p: route add %p cost %u: another path: prev %p, next %p node ref %u",
 				ospf6_route_table_name(table), (void *)table,
-				(void *)route, (void *)prev, (void *)next,
-				node->lock);
+				(void *)route, route->path.cost, (void *)prev,
+				(void *)next, node->lock);
 		else if (IS_OSPF6_DEBUG_ROUTE(TABLE))
-			zlog_debug("%s: route add: another path found",
-				   ospf6_route_table_name(table));
+			zlog_debug("%s: route add cost %u: another path found",
+				   ospf6_route_table_name(table),
+				   route->path.cost);
 
 		if (prev == NULL)
 			prev = next->prev;
@@ -659,10 +734,11 @@ struct ospf6_route *ospf6_route_add(struct ospf6_route *route,
 			SET_FLAG(route->flag, OSPF6_ROUTE_BEST);
 			if (IS_OSPF6_DEBUG_ROUTE(MEMORY))
 				zlog_info(
-					"%s %p: route add %p: replacing previous best: %p",
+					"%s %p: route add %p cost %u: replacing previous best: %p cost %u",
 					ospf6_route_table_name(table),
 					(void *)table, (void *)route,
-					(void *)next);
+					route->path.cost,
+					(void *)next, next->path.cost);
 		}
 
 		route->installed = now;
@@ -683,9 +759,9 @@ struct ospf6_route *ospf6_route_add(struct ospf6_route *route,
 
 	/* Else, this is the brand new route regarding to the prefix */
 	if (IS_OSPF6_DEBUG_ROUTE(MEMORY))
-		zlog_debug("%s %p: route add %p %s : brand new route",
+		zlog_debug("%s %p: route add %p %s cost %u: brand new route",
 			   ospf6_route_table_name(table), (void *)table,
-			   (void *)route, buf);
+			   (void *)route, buf, route->path.cost);
 	else if (IS_OSPF6_DEBUG_ROUTE(TABLE))
 		zlog_debug("%s: route add: brand new route",
 			   ospf6_route_table_name(table));
@@ -760,9 +836,9 @@ void ospf6_route_remove(struct ospf6_route *route,
 		prefix2str(&route->prefix, buf, sizeof(buf));
 
 	if (IS_OSPF6_DEBUG_ROUTE(MEMORY))
-		zlog_debug("%s %p: route remove %p: %s refcount %u",
+		zlog_debug("%s %p: route remove %p: %s cost %u refcount %u",
 			   ospf6_route_table_name(table), (void *)table,
-			   (void *)route, buf, route->lock);
+			   (void *)route, buf, route->path.cost, route->lock);
 	else if (IS_OSPF6_DEBUG_ROUTE(TABLE))
 		zlog_debug("%s: route remove: %s",
 			   ospf6_route_table_name(table), buf);
@@ -1071,6 +1147,7 @@ void ospf6_route_show_detail(struct vty *vty, struct ospf6_route *route)
 	vty_out(vty, "Metric: %d (%d)\n", route->path.cost,
 		route->path.u.cost_e2);
 
+	vty_out(vty, "Paths count: %u\n", route->paths->count);
 	vty_out(vty, "Nexthop count: %u\n", route->nh_list->count);
 	/* Nexthops */
 	vty_out(vty, "Nexthop:\n");

@@ -120,7 +120,7 @@ static int _ptm_lib_decode_header(csv_t *csv, int *msglen, int *version,
 	}
 	/* remove leading spaces */
 	for (i = j = 0; i < csv_field_len(fld); i++) {
-		if (!isspace(hdr[i])) {
+		if (!isspace((int)hdr[i])) {
 			client_name[j] = hdr[i];
 			j++;
 		}
@@ -220,6 +220,25 @@ int ptm_lib_init_msg(ptm_lib_handle_t *hdl, int cmd_id, int type, void *in_ctxt,
 		csv_clone_record(p_in_ctxt->csv, rec, &d_rec);
 		csv_insert_record(csv, d_rec);
 	}
+	return 0;
+}
+
+int ptm_lib_cleanup_msg(ptm_lib_handle_t *hdl, void *ctxt)
+{
+	ptm_lib_msg_ctxt_t *p_ctxt = ctxt;
+	csv_t *csv;
+
+	if (!p_ctxt) {
+		ERRLOG("%s: no context \n", __FUNCTION__);
+		return -1;
+	}
+
+	csv = p_ctxt->csv;
+
+	csv_clean(csv);
+	csv_free(csv);
+	free(p_ctxt);
+
 	return 0;
 }
 
@@ -328,7 +347,7 @@ int ptm_lib_process_msg(ptm_lib_handle_t *hdl, int fd, char *inbuf, int inlen,
 {
 	int rc, len;
 	char client_name[32];
-	int cmd_id, type, ver, msglen;
+	int cmd_id = 0, type = 0, ver = 0, msglen = 0;
 	csv_t *csv;
 	ptm_lib_msg_ctxt_t *p_ctxt = NULL;
 
