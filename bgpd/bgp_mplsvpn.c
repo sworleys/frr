@@ -1190,6 +1190,13 @@ static void vpn_policy_routemap_update(struct bgp *bgp, const char *rmap_name)
 		char *mapname = bgp->vpn_policy[afi]
 			.rmap_name[BGP_VPN_POLICY_DIR_FROMVPN];
 
+		if (mapname && (strcmp(mapname, rmap_name) == 0)
+		     && (!bgp->vpn_policy[afi].
+			       rmap[BGP_VPN_POLICY_DIR_FROMVPN]))
+			bgp->vpn_policy[afi].
+			     rmap[BGP_VPN_POLICY_DIR_FROMVPN] =
+				route_map_lookup_by_name(rmap_name);
+
 		if (vpn_leak_from_vpn_active(bgp, afi, NULL) &&
 			mapname &&
 			!strcmp(rmap_name, mapname))  {
@@ -1207,10 +1214,10 @@ static void vpn_policy_routemap_update(struct bgp *bgp, const char *rmap_name)
 				bgp->vpn_policy[afi]
 					.rmap[BGP_VPN_POLICY_DIR_FROMVPN] =
 					NULL;
-			}
-
-			vpn_leak_postchange(BGP_VPN_POLICY_DIR_FROMVPN, afi,
-					    bgp_get_default(), bgp);
+			} else
+				vpn_leak_postchange(BGP_VPN_POLICY_DIR_FROMVPN,
+						    afi, bgp_get_default(),
+						    bgp);
 		}
 	}
 }
