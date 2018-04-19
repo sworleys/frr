@@ -610,7 +610,7 @@ void ospf6_asbr_lsa_remove(struct ospf6_lsa *lsa,
 		return;
 	}
 
-	if (IS_OSPF6_DEBUG_EXAMIN(AS_EXTERNAL)) {
+	if (IS_OSPF6_DEBUG_EXAMIN(AS_EXTERNAL))	{
 		prefix2str(&prefix, buf, sizeof(buf));
 		zlog_debug("%s: Current route %s cost %u e2 %u, route to del cost %u e2 %u",
 			   __PRETTY_FUNCTION__, buf, route->path.cost,
@@ -669,11 +669,12 @@ void ospf6_asbr_lsa_remove(struct ospf6_lsa *lsa,
 					continue;
 				}
 
-				if (IS_OSPF6_DEBUG_EXAMIN(AS_EXTERNAL))  {
+				if (IS_OSPF6_DEBUG_EXAMIN(AS_EXTERNAL)) {
 					prefix2str(&prefix, buf, sizeof(buf));
 					zlog_debug(
-						"%s: route %s path found with nh %u to remove.",
+						"%s: route %s path found with cost %u nh %u to remove.",
 						__PRETTY_FUNCTION__, buf,
+						route->path.cost,
 						listcount(o_path->nh_list));
 				}
 
@@ -722,27 +723,37 @@ void ospf6_asbr_lsa_remove(struct ospf6_lsa *lsa,
 						   listcount(route->nh_list));
 				}
 
-				/* Update RIB/FIB with effective nh_list */
-				if (ospf6->route_table->hook_add)
-					(*ospf6->route_table->hook_add)(route);
+				if (listcount(route->paths)) {
+					/* Update RIB/FIB with effective
+					 * nh_list
+					 */
+					if (ospf6->route_table->hook_add)
+						(*ospf6->route_table->hook_add)
+						(route);
 
-				/* route's primary path is similar to LSA,
-				 * replace route's primary path with
-				 * route's paths list head.
-				 */
-				if (route->path.origin.id == lsa->header->id &&
-				    route->path.origin.adv_router ==
-						lsa->header->adv_router) {
-					struct ospf6_path *h_path;
+					/* route's primary path is similar
+					 * to LSA, replace route's primary
+					 * path with route's paths list head.
+					 */
+					if ((route->path.origin.id ==
+					    lsa->header->id) &&
+					    (route->path.origin.adv_router
+						 == lsa->header->adv_router)) {
+						struct ospf6_path *h_path;
 
-					h_path = (struct ospf6_path *)
-					listgetdata(listhead(route->paths));
-					route->path.origin.type =
-						h_path->origin.type;
-					route->path.origin.id =
-						h_path->origin.id;
-					route->path.origin.adv_router =
+						h_path = (struct ospf6_path *)
+						listgetdata(
+							listhead(route->paths));
+						route->path.origin.type =
+							h_path->origin.type;
+						route->path.origin.id =
+							h_path->origin.id;
+						route->path.origin.adv_router =
 						h_path->origin.adv_router;
+					}
+				} else {
+					ospf6_route_remove(route,
+							   ospf6->route_table);
 				}
 			}
 			continue;
