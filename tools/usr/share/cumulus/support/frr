@@ -40,9 +40,9 @@ func_frr()
     exec_cmd bgp.nexthop vtysh -c "show ip bgp vrf all nexthop"
     exec_cmd bgp.update_group vtysh -c "show ip bgp vrf all update-group"
 
-    exec_cmd $jexec bgp.ipv6_summary vtysh -c "show bgp vrf all summary $json"
-    exec_cmd bgp.ipv6_update_group vtysh -c "show bgp vrf all update-group"
-    exec_cmd $jexec bgp.ipv6_route vtysh -c "show bgp vrf all $json"
+    exec_cmd $jexec bgp.ipv6_summary vtysh -c "show bgp vrf all ipv6 uni summary $json"
+    exec_cmd bgp.ipv6_update_group vtysh -c "show bgp vrf all ipv6 uni update-group"
+    exec_cmd $jexec bgp.ipv6_route vtysh -c "show bgp vrf all ipv6 uni $json"
 
     exec_cmd frr.show_running vtysh -c "show running-config"
 
