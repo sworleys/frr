@@ -36,7 +36,7 @@ export DH_OPTIONS=-v
 export WANT_SNMP=1
 export WANT_PIM=1
 export WANT_LDP=1
-export WANT_CUMULUS_NODE=1
+export WANT_CUMULUS_MODE=1
 export WANT_MULTIPATH=1
 export WANT_BGP_VNC=0
 
