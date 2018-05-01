@@ -10874,7 +10874,7 @@ static int bgp_show_route_leak_vty(struct vty *vty, const char *name,
 		ecom_str = ecommunity_ecom2str(
 				bgp->vpn_policy[afi].rtlist[dir],
 				ECOMMUNITY_FORMAT_ROUTE_MAP, 0);
-		vty_out(vty, "Emport RT: %s\n", ecom_str);
+		vty_out(vty, "Export RT: %s\n", ecom_str);
 		XFREE(MTYPE_ECOMMUNITY_STR, ecom_str);
 	}
 
