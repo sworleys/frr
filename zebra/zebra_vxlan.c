@@ -6022,6 +6022,13 @@ int zebra_vxlan_svi_down(struct interface *ifp, struct interface *link_if)
 		 * SVI would have already been deleted */
 		zvni = zvni_from_svi(ifp, link_if);
 		if (zvni) {
+
+			/* locate the l3vni and remove the association with
+			 * l3vni */
+			zl3vni = zl3vni_from_vrf(zvni->vrf_id);
+			if (zl3vni)
+				listnode_delete(zl3vni->l2vnis, zvni);
+
 			zvni->vrf_id = VRF_DEFAULT;
 
 			/* update the tenant vrf in BGP */
@@ -6075,6 +6082,13 @@ int zebra_vxlan_svi_up(struct interface *ifp, struct interface *link_if)
 
 		/* update the vrf information for l2-vni and inform bgp */
 		zvni->vrf_id = ifp->vrf_id;
+
+		/* l2-vni is now associated with a vrf associate it with the
+		 * corresponding l3-vni, if any */
+		zl3vni = zl3vni_from_vrf(ifp->vrf_id);
+		if (zl3vni)
+			listnode_add_sort(zl3vni->l2vnis, zvni);
+
 		zvni_send_add_to_client(zvni);
 
 		/* Install any remote neighbors for this VNI. */
