@@ -1622,8 +1622,10 @@ void ospf6_intra_brouter_calculation(struct ospf6_area *oa)
 	u_int32_t brouter_id;
 	char brouter_name[16];
 
-	if (IS_OSPF6_DEBUG_BROUTER_SPECIFIC_AREA_ID(oa->area_id))
-		zlog_info("border-router calculation for area %s", oa->name);
+	if (IS_OSPF6_DEBUG_BROUTER_SPECIFIC_AREA_ID(oa->area_id) ||
+	    IS_OSPF6_DEBUG_ROUTE(MEMORY))
+		zlog_info("%s: border-router calculation for area %s",
+			  __PRETTY_FUNCTION__, oa->name);
 
 	hook_add = oa->ospf6->brouter_table->hook_add;
 	hook_remove = oa->ospf6->brouter_table->hook_remove;
@@ -1689,6 +1691,7 @@ void ospf6_intra_brouter_calculation(struct ospf6_area *oa)
 
 	for (brouter = ospf6_route_head(oa->ospf6->brouter_table); brouter;
 	     brouter = nbrouter) {
+
 		/*
 		 * brouter may have been "deleted" in the last loop iteration.
 		 * If this is the case there is still 1 final refcount lock
@@ -1697,6 +1700,8 @@ void ospf6_intra_brouter_calculation(struct ospf6_area *oa)
 		 * skip processing the deleted route.
 		 */
 		if (brouter->lock == 1) {
+			if (IS_OSPF6_DEBUG_ROUTE(MEMORY))
+				ospf6_brouter_debug_print(brouter);
 			nbrouter = ospf6_route_next(brouter);
 			continue;
 		} else {
@@ -1748,8 +1753,14 @@ void ospf6_intra_brouter_calculation(struct ospf6_area *oa)
 				       brouter_id)
 			    || IS_OSPF6_DEBUG_BROUTER_SPECIFIC_AREA_ID(
 				       oa->area_id))
-				zlog_info("brouter %s disappears via area %s",
-					  brouter_name, oa->name);
+				zlog_info("%s: brouter %s disappears via area %s",
+					  __PRETTY_FUNCTION__, brouter_name,
+					  oa->name);
+			/* This is used to protect nbrouter from removed from
+			 * the table. For an example, ospf6_abr_examin_summary,
+			 * removes brouters which are marked for remove.
+			 */
+			oa->intra_brouter_calc = 1;
 			ospf6_route_remove(brouter, oa->ospf6->brouter_table);
 			brouter = NULL;
 		} else if (CHECK_FLAG(brouter->flag, OSPF6_ROUTE_ADD)
@@ -1759,8 +1770,9 @@ void ospf6_intra_brouter_calculation(struct ospf6_area *oa)
 				       brouter_id)
 			    || IS_OSPF6_DEBUG_BROUTER_SPECIFIC_AREA_ID(
 				       oa->area_id))
-				zlog_info("brouter %s appears via area %s",
-					  brouter_name, oa->name);
+				zlog_info("%s: brouter %s appears via area %s",
+					  __PRETTY_FUNCTION__, brouter_name,
+					  oa->name);
 
 			/* newly added */
 			if (hook_add)
@@ -1780,11 +1792,14 @@ void ospf6_intra_brouter_calculation(struct ospf6_area *oa)
 			UNSET_FLAG(brouter->flag, OSPF6_ROUTE_ADD);
 			UNSET_FLAG(brouter->flag, OSPF6_ROUTE_CHANGE);
 		}
+		/* Reset for nbrouter */
+		oa->intra_brouter_calc = 0;
 	}
 
-	if (IS_OSPF6_DEBUG_BROUTER_SPECIFIC_AREA_ID(oa->area_id))
-		zlog_info("border-router calculation for area %s: done",
-			  oa->name);
+	if (IS_OSPF6_DEBUG_BROUTER_SPECIFIC_AREA_ID(oa->area_id) ||
+	    IS_OSPF6_DEBUG_ROUTE(MEMORY))
+		zlog_info("%s: border-router calculation for area %s: done",
+			  __PRETTY_FUNCTION__, oa->name);
 }
 
 struct ospf6_lsa_handler router_handler = {
