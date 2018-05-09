@@ -1,3 +1,11 @@
+frr (4.0+cl3u2) RELEASED; urgency=medium
+
+  * Fixes: CM-20471 bgpd: Update parent's refcount for imported routes
+  * Fixes: CM-20776 bgpd: Set NEXT_HOP attribute for EVPN imported routes
+  * Fixes: CM-20664 Increase timeout for restart failure conditions
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Wed, 9 May 2018 12:30:41 -0400
+
 frr (4.0+cl3u1) RELEASED; urgency=medium
 
   * New Enabled: PBR Policy Based Routing
