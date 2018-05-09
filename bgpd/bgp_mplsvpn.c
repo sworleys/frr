@@ -425,7 +425,7 @@ leak_update(struct bgp *bgp, /* destination bgp instance */
 		}
 		new->extra->num_labels = num_labels;
 	}
-	new->extra->parent = parent;
+	new->extra->parent = bgp_info_lock(parent);
 
 	if (bgp_orig)
 		new->extra->bgp_orig = bgp_orig;
