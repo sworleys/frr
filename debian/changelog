@@ -3,6 +3,7 @@ frr (4.0+cl3u2) RELEASED; urgency=medium
   * Fixes: CM-20471 bgpd: Update parent's refcount for imported routes
   * Fixes: CM-20776 bgpd: Set NEXT_HOP attribute for EVPN imported routes
   * Fixes: CM-20664 Increase timeout for restart failure conditions
+  * Fixes: CM-20807 ospf6d: Fix area border router duplicate
 
  -- dev-support <dev-support@cumulusnetworks.com>  Wed, 9 May 2018 12:30:41 -0400
 
