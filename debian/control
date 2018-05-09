@@ -12,8 +12,9 @@ Package: frr
 Architecture: any
 Depends: ${shlibs:Depends}, logrotate (>= 3.2-11), iproute2 | iproute, ${misc:Depends}, libc-ares2, python (>= 2.7), python-ipaddr
 Pre-Depends: adduser
-Conflicts: zebra, zebra-pj, quagga, frr-pythontools
+Conflicts: zebra, zebra-pj, frr-pythontools
 Replaces: zebra, zebra-pj, frr-pythontools
+Breaks: quagga (<< 1.0.0+cl3u14~)
 Suggests: snmpd
 Description: BGP/OSPF/RIP/RIPng/ISIS/PIM/LDP routing daemon forked from Quagga
  FRR is free software which manages TCP/IP based routing protocols.
