@@ -5,6 +5,7 @@ frr (4.0+cl3u2) RELEASED; urgency=medium
   * Fixes: CM-20664 Increase timeout for restart failure conditions
   * Fixes: CM-20807 ospf6d: Fix area border router duplicate
   * Fixes: CM-20841 Put back lost backwards compatibility guard in packaging
+  * Fixes: CM-20744 ospfd: Always create the fifo for the interface
 
  -- dev-support <dev-support@cumulusnetworks.com>  Wed, 9 May 2018 12:30:41 -0400
 
