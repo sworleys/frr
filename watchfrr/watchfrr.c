@@ -991,7 +991,7 @@ int main(int argc, char **argv)
 				"The -%c option no longer exists.\n"
 				"Please refer to the watchfrr(8) man page.\n",
 				opt);
-			exit(1);
+			continue;
 		}
 
 		switch (opt) {
