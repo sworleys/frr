@@ -7,8 +7,12 @@ frr (4.0+cl3u2) RELEASED; urgency=medium
   * Fixes: CM-20841 Put back lost backwards compatibility guard in packaging
   * Fixes: CM-20744 ospfd: Always create the fifo for the interface
   * Fixes: CM-20086 lib: allow hostname to begin with a letter or number
+  * Fixes: CM-21019 bgpd: Fix crash on shutdown
+  * Fixes: CM-21013 watchfrr: Accept deprecated options
+  * Fixes: CM-20871 zebra: link/unlink l2vni with l3vni when svi state change
+  * Fixes: CM-20732 bgpd: Fix a typo in output cmd
 
- -- dev-support <dev-support@cumulusnetworks.com>  Wed, 9 May 2018 12:30:41 -0400
+ -- dev-support <dev-support@cumulusnetworks.com>  Wed, 19 May 2018 12:30:41 -0400
 
 frr (4.0+cl3u1) RELEASED; urgency=medium
 
