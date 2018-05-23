@@ -12,6 +12,7 @@ frr (4.0+cl3u2) RELEASED; urgency=medium
   * Fixes: CM-20871 zebra: link/unlink l2vni with l3vni when svi state change
   * Fixes: CM-20732 bgpd: Fix a typo in output cmd
   * Fixes: CM-21068 bgpd: Fix crash on shutdown
+  * Fixes: CM-21114 vtysh: Fix bad path to conf file in -q mode
 
  -- dev-support <dev-support@cumulusnetworks.com>  Wed, 19 May 2018 12:30:41 -0400
 
