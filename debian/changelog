@@ -1,8 +1,17 @@
 frr (4.0+cl3u3) RELEASED; urgency=medium
 
-  * Fixes: Lots of stuff
+  * New Enabled: Error Messaging
+  * Fixes: CM-20204 bgpd: Accept vni rd_rt command for default vrf
+  * Fixes: CM-20206 bgpd: Fix default RD value in running-cfg
+  * Fixes: CM-20572 zebra: Hide default vrf instance of l3vni cmd
+  * Fixes: CM-21335 bgpd: Fix bgp crash in evpn vni route-map
+  * Fixes: CM-20043 bgpd: aggregate summarization duplicates updates
+  * Fixes: CM-16139 ospf6d: Fix ECMP for asbr external routes
+  * Fixes: CM-20849 lib: Reorder evpn prefix for ipv6
+  * Fixes: CM-20952 lib: Reorder evpn prefix for ipv6
+  * Fixes: CM-21014 bgpd: Check for L3VNI before sending RMAC/L3 RT's
 
- -- dev-support <dev-support@cumulusnetworks.com>  Fri, 25 May 2018 18:10:00 -0400
+ -- dev-support <dev-support@cumulusnetworks.com>  Mon, 25 Jun 2018 18:10:00 -0400
 
 frr (4.0+cl3u2) RELEASED; urgency=medium
 
