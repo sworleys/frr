@@ -1,6 +1,7 @@
 frr (4.0+cl3u3) RELEASED; urgency=medium
 
   * New Enabled: Error Messaging
+  * Fixes: CM-21319 debian: Rewrite frr.conf to support vrf static routes
   * Fixes: CM-20204 bgpd: Accept vni rd_rt command for default vrf
   * Fixes: CM-20206 bgpd: Fix default RD value in running-cfg
   * Fixes: CM-20572 zebra: Hide default vrf instance of l3vni cmd
