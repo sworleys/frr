@@ -43,6 +43,7 @@
 #include "bgpd/bgp_ecommunity.h"
 #include "bgpd/bgp_encap_types.h"
 #include "bgpd/bgp_debug.h"
+#include "bgpd/bgp_errors.h"
 #include "bgpd/bgp_aspath.h"
 #include "bgpd/bgp_zebra.h"
 #include "bgpd/bgp_nexthop.h"
@@ -129,7 +130,8 @@ static struct vrf_irt_node *vrf_import_rt_new(struct ecommunity_val *rt)
 
 	bgp_def = bgp_get_default();
 	if (!bgp_def) {
-		zlog_err("vrf import rt new - def instance not created yet");
+		zlog_ferr(BGP_ERR_NO_DFLT,
+			  "vrf import rt new - def instance not created yet");
 		return NULL;
 	}
 
@@ -159,7 +161,8 @@ static void vrf_import_rt_free(struct vrf_irt_node *irt)
 
 	bgp_def = bgp_get_default();
 	if (!bgp_def) {
-		zlog_err("vrf import rt free - def instance not created yet");
+		zlog_ferr(BGP_ERR_NO_DFLT,
+			  "vrf import rt free - def instance not created yet");
 		return;
 	}
 
@@ -179,7 +182,9 @@ static struct vrf_irt_node *lookup_vrf_import_rt(struct ecommunity_val *rt)
 
 	bgp_def = bgp_get_default();
 	if (!bgp_def) {
-		zlog_err("vrf import rt lookup - def instance not created yet");
+		zlog_ferr(
+			BGP_ERR_NO_DFLT,
+			"vrf import rt lookup - def instance not created yet");
 		return NULL;
 	}
 
@@ -573,9 +578,9 @@ static int bgp_zebra_send_remote_vtep(struct bgp *bgp, struct bgpevpn *vpn,
 	if (IS_EVPN_PREFIX_IPADDR_V4(p))
 		stream_put_in_addr(s, &p->prefix.ip.ipaddr_v4);
 	else if (IS_EVPN_PREFIX_IPADDR_V6(p)) {
-		zlog_err(
-			"Bad remote IP when trying to %s remote VTEP for VNI %u",
-			add ? "ADD" : "DEL", vpn->vni);
+		zlog_ferr(BGP_ERR_VTEP_INVALID,
+			  "Bad remote IP when trying to %s remote VTEP for VNI %u",
+			  add ? "ADD" : "DEL", vpn->vni);
 		return -1;
 	}
 
@@ -1308,7 +1313,8 @@ static int update_evpn_route(struct bgp *bgp, struct bgpevpn *vpn,
 	if (p->prefix.route_type == BGP_EVPN_MAC_IP_ROUTE &&
 	    (IS_EVPN_PREFIX_IPADDR_V4(p) ||
 	     !IN6_IS_ADDR_LINKLOCAL(&p->prefix.ip.ipaddr_v6)) &&
-	    CHECK_FLAG(vpn->flags, VNI_FLAG_USE_TWO_LABELS))
+	    CHECK_FLAG(vpn->flags, VNI_FLAG_USE_TWO_LABELS) &&
+	    bgpevpn_get_l3vni(vpn))
 		add_l3_ecomm = 1;
 
 	/* Set up extended community. */
@@ -1534,7 +1540,8 @@ static int update_all_type2_routes(struct bgp *bgp, struct bgpevpn *vpn)
 	/* Add L3 VNI RTs and RMAC for non IPv6 link-local attributes if
 	 * using L3 VNI for type-2 routes also.
 	 */
-	if (CHECK_FLAG(vpn->flags, VNI_FLAG_USE_TWO_LABELS))
+	if (CHECK_FLAG(vpn->flags, VNI_FLAG_USE_TWO_LABELS) &&
+	    bgpevpn_get_l3vni(vpn))
 		add_l3_ecomm = 1;
 
 	build_evpn_route_extcomm(vpn, &attr, add_l3_ecomm);
@@ -2275,7 +2282,8 @@ static int install_uninstall_routes_for_vrf(struct bgp *bgp_vrf,
 							bgp_vrf, evp, ri);
 
 					if (ret) {
-						zlog_err(
+						zlog_ferr(
+							BGP_ERR_EVPN_FAIL,
 							"Failed to %s EVPN %s route in VRF %s",
 							install ? "install"
 								: "uninstall",
@@ -2347,7 +2355,8 @@ static int install_uninstall_routes_for_vni(struct bgp *bgp,
 							bgp, vpn, evp, ri);
 
 					if (ret) {
-						zlog_err(
+						zlog_ferr(
+							BGP_ERR_EVPN_FAIL,
 							"%u: Failed to %s EVPN %s route in VNI %u",
 							bgp->vrf_id,
 							install ? "install"
@@ -2457,11 +2466,12 @@ static int install_uninstall_route_in_vrfs(struct bgp *bgp_def, afi_t afi,
 								evp, ri);
 
 		if (ret) {
-			zlog_err("%u: Failed to %s prefix %s in VRF %s",
-				 bgp_def->vrf_id,
-				 install ? "install" : "uninstall",
-				 prefix2str(evp, buf, sizeof(buf)),
-				 vrf_id_to_name(bgp_vrf->vrf_id));
+			zlog_ferr(BGP_ERR_EVPN_FAIL,
+				  "%u: Failed to %s prefix %s in VRF %s",
+				  bgp_def->vrf_id,
+				  install ? "install" : "uninstall",
+				  prefix2str(evp, buf, sizeof(buf)),
+				  vrf_id_to_name(bgp_vrf->vrf_id));
 			return ret;
 		}
 	}
@@ -2492,12 +2502,14 @@ static int install_uninstall_route_in_vnis(struct bgp *bgp, afi_t afi,
 			ret = uninstall_evpn_route_entry(bgp, vpn, evp, ri);
 
 		if (ret) {
-			zlog_err("%u: Failed to %s EVPN %s route in VNI %u",
-				 bgp->vrf_id, install ? "install" : "uninstall",
-				 evp->prefix.route_type == BGP_EVPN_MAC_IP_ROUTE
-					 ? "MACIP"
-					 : "IMET",
-				 vpn->vni);
+			zlog_ferr(
+				BGP_ERR_EVPN_FAIL,
+				"%u: Failed to %s EVPN %s route in VNI %u",
+				bgp->vrf_id, install ? "install" : "uninstall",
+				evp->prefix.route_type == BGP_EVPN_MAC_IP_ROUTE
+					? "MACIP"
+					: "IMET",
+				vpn->vni);
 			return ret;
 		}
 	}
@@ -2844,8 +2856,9 @@ static int process_type2_route(struct peer *peer, afi_t afi, safi_t safi,
 	 */
 	if (psize != 33 && psize != 37 && psize != 49 && psize != 36
 	    && psize != 40 && psize != 52) {
-		zlog_err("%u:%s - Rx EVPN Type-2 NLRI with invalid length %d",
-			 peer->bgp->vrf_id, peer->host, psize);
+		zlog_ferr(BGP_ERR_EVPN_ROUTE_INVALID,
+			  "%u:%s - Rx EVPN Type-2 NLRI with invalid length %d",
+			  peer->bgp->vrf_id, peer->host, psize);
 		return -1;
 	}
 
@@ -2875,7 +2888,8 @@ static int process_type2_route(struct peer *peer, afi_t afi, safi_t safi,
 		memcpy(&p.prefix.mac.octet, pfx, ETH_ALEN);
 		pfx += ETH_ALEN;
 	} else {
-		zlog_err(
+		zlog_ferr(
+			BGP_ERR_EVPN_ROUTE_INVALID,
 			"%u:%s - Rx EVPN Type-2 NLRI with unsupported MAC address length %d",
 			peer->bgp->vrf_id, peer->host, macaddr_len);
 		return -1;
@@ -2886,7 +2900,8 @@ static int process_type2_route(struct peer *peer, afi_t afi, safi_t safi,
 	ipaddr_len = *pfx++;
 	if (ipaddr_len != 0 && ipaddr_len != IPV4_MAX_BITLEN
 	    && ipaddr_len != IPV6_MAX_BITLEN) {
-		zlog_err(
+		zlog_ferr(
+			BGP_ERR_EVPN_ROUTE_INVALID,
 			"%u:%s - Rx EVPN Type-2 NLRI with unsupported IP address length %d",
 			peer->bgp->vrf_id, peer->host, ipaddr_len);
 		return -1;
@@ -2945,8 +2960,9 @@ static int process_type3_route(struct peer *peer, afi_t afi, safi_t safi,
 	 * IP len (1) and IP (4 or 16).
 	 */
 	if (psize != 17 && psize != 29) {
-		zlog_err("%u:%s - Rx EVPN Type-3 NLRI with invalid length %d",
-			 peer->bgp->vrf_id, peer->host, psize);
+		zlog_ferr(BGP_ERR_EVPN_ROUTE_INVALID,
+			  "%u:%s - Rx EVPN Type-3 NLRI with invalid length %d",
+			  peer->bgp->vrf_id, peer->host, psize);
 		return -1;
 	}
 
@@ -2984,7 +3000,8 @@ static int process_type3_route(struct peer *peer, afi_t afi, safi_t safi,
 		p.prefix.ip.ipa_type = IPADDR_V4;
 		memcpy(&p.prefix.ip.ip.addr, pfx, IPV4_MAX_BYTELEN);
 	} else {
-		zlog_err(
+		zlog_ferr(
+			BGP_ERR_EVPN_ROUTE_INVALID,
 			"%u:%s - Rx EVPN Type-3 NLRI with unsupported IP address length %d",
 			peer->bgp->vrf_id, peer->host, ipaddr_len);
 		return -1;
@@ -3023,8 +3040,9 @@ static int process_type5_route(struct peer *peer, afi_t afi, safi_t safi,
 	 * Note that the IP and GW should both be IPv4 or both IPv6.
 	 */
 	if (psize != 34 && psize != 58) {
-		zlog_err("%u:%s - Rx EVPN Type-5 NLRI with invalid length %d",
-			 peer->bgp->vrf_id, peer->host, psize);
+		zlog_ferr(BGP_ERR_EVPN_ROUTE_INVALID,
+			  "%u:%s - Rx EVPN Type-5 NLRI with invalid length %d",
+			  peer->bgp->vrf_id, peer->host, psize);
 		return -1;
 	}
 
@@ -3055,7 +3073,8 @@ static int process_type5_route(struct peer *peer, afi_t afi, safi_t safi,
 	/* Fetch IP prefix length. */
 	ippfx_len = *pfx++;
 	if (ippfx_len > IPV6_MAX_BITLEN) {
-		zlog_err(
+		zlog_ferr(
+			BGP_ERR_EVPN_ROUTE_INVALID,
 			"%u:%s - Rx EVPN Type-5 NLRI with invalid IP Prefix length %d",
 			peer->bgp->vrf_id, peer->host, ippfx_len);
 		return -1;
@@ -3258,11 +3277,11 @@ void bgp_evpn_withdraw_type5_route(struct bgp *bgp_vrf, struct prefix *p,
 	build_type5_prefix_from_ip_prefix(&evp, p);
 	ret = delete_evpn_type5_route(bgp_vrf, &evp);
 	if (ret) {
-		zlog_err(
-			 "%u failed to delete type-5 route for prefix %s in vrf %s",
-			 bgp_vrf->vrf_id,
-			 prefix2str(p, buf, sizeof(buf)),
-			 vrf_id_to_name(bgp_vrf->vrf_id));
+		zlog_ferr(
+			BGP_ERR_EVPN_ROUTE_DELETE,
+			"%u failed to delete type-5 route for prefix %s in vrf %s",
+			bgp_vrf->vrf_id, prefix2str(p, buf, sizeof(buf)),
+			vrf_id_to_name(bgp_vrf->vrf_id));
 	}
 }
 
@@ -3306,10 +3325,9 @@ void bgp_evpn_advertise_type5_route(struct bgp *bgp_vrf, struct prefix *p,
 	build_type5_prefix_from_ip_prefix(&evp, p);
 	ret = update_evpn_type5_route(bgp_vrf, &evp, src_attr);
 	if (ret)
-		zlog_err(
-			 "%u: Failed to create type-5 route for prefix %s",
-			 bgp_vrf->vrf_id,
-			 prefix2str(p, buf, sizeof(buf)));
+		zlog_ferr(BGP_ERR_EVPN_ROUTE_CREATE,
+			  "%u: Failed to create type-5 route for prefix %s",
+			  bgp_vrf->vrf_id, prefix2str(p, buf, sizeof(buf)));
 }
 
 /* Inject all prefixes of a particular address-family (currently, IPv4 or
@@ -3778,13 +3796,6 @@ int bgp_nlri_parse_evpn(struct peer *peer, struct attr *attr,
 	u_char rlen;
 	struct prefix p;
 
-	/* Check peer status. */
-	if (peer->status != Established) {
-		zlog_err("%u:%s - EVPN update received in state %d",
-			 peer->bgp->vrf_id, peer->host, peer->status);
-		return -1;
-	}
-
 	/* Start processing the NLRI - there may be multiple in the MP_REACH */
 	pnt = packet->nlri;
 	lim = pnt + packet->length;
@@ -3827,7 +3838,8 @@ int bgp_nlri_parse_evpn(struct peer *peer, struct attr *attr,
 			if (process_type2_route(peer, afi, safi,
 						withdraw ? NULL : attr, pnt,
 						psize, addpath_id)) {
-				zlog_err(
+				zlog_ferr(
+					BGP_ERR_EVPN_FAIL,
 					"%u:%s - Error in processing EVPN type-2 NLRI size %d",
 					peer->bgp->vrf_id, peer->host, psize);
 				return -1;
@@ -3838,7 +3850,8 @@ int bgp_nlri_parse_evpn(struct peer *peer, struct attr *attr,
 			if (process_type3_route(peer, afi, safi,
 						withdraw ? NULL : attr, pnt,
 						psize, addpath_id)) {
-				zlog_err(
+				zlog_ferr(
+					BGP_ERR_PKT_PROCESS,
 					"%u:%s - Error in processing EVPN type-3 NLRI size %d",
 					peer->bgp->vrf_id, peer->host, psize);
 				return -1;
@@ -3848,7 +3861,8 @@ int bgp_nlri_parse_evpn(struct peer *peer, struct attr *attr,
 		case BGP_EVPN_IP_PREFIX_ROUTE:
 			if (process_type5_route(peer, afi, safi, attr, pnt,
 						psize, addpath_id, withdraw)) {
-				zlog_err(
+				zlog_ferr(
+					BGP_ERR_PKT_PROCESS,
 					"%u:%s - Error in processing EVPN type-5 NLRI size %d",
 					peer->bgp->vrf_id, peer->host, psize);
 				return -1;
@@ -4072,7 +4086,7 @@ struct bgpevpn *bgp_evpn_new(struct bgp *bgp, vni_t vni,
 	derive_rd_rt_for_vni(bgp, vpn);
 
 	/* Initialize EVPN route table. */
-	vpn->route_table = bgp_table_init(AFI_L2VPN, SAFI_EVPN);
+	vpn->route_table = bgp_table_init(bgp, AFI_L2VPN, SAFI_EVPN);
 
 	/* Add to hash */
 	if (!hash_get(bgp->vnihash, vpn, hash_alloc_intern)) {
@@ -4198,11 +4212,6 @@ int bgp_evpn_local_macip_del(struct bgp *bgp, vni_t vni, struct ethaddr *mac,
 	struct bgpevpn *vpn;
 	struct prefix_evpn p;
 
-	if (!bgp->vnihash) {
-		zlog_err("%u: VNI hash not created", bgp->vrf_id);
-		return -1;
-	}
-
 	/* Lookup VNI hash - should exist. */
 	vpn = bgp_evpn_lookup_vni(bgp, vni);
 	if (!vpn || !is_vni_live(vpn)) {
@@ -4227,11 +4236,6 @@ int bgp_evpn_local_macip_add(struct bgp *bgp, vni_t vni, struct ethaddr *mac,
 	struct bgpevpn *vpn;
 	struct prefix_evpn p;
 
-	if (!bgp->vnihash) {
-		zlog_err("%u: VNI hash not created", bgp->vrf_id);
-		return -1;
-	}
-
 	/* Lookup VNI hash - should exist. */
 	vpn = bgp_evpn_lookup_vni(bgp, vni);
 	if (!vpn || !is_vni_live(vpn)) {
@@ -4246,7 +4250,8 @@ int bgp_evpn_local_macip_add(struct bgp *bgp, vni_t vni, struct ethaddr *mac,
 		char buf[ETHER_ADDR_STRLEN];
 		char buf2[INET6_ADDRSTRLEN];
 
-		zlog_err(
+		zlog_ferr(
+			BGP_ERR_EVPN_ROUTE_CREATE,
 			"%u:Failed to create Type-2 route, VNI %u %s MAC %s IP %s (flags: 0x%x)",
 			bgp->vrf_id, vpn->vni,
 			CHECK_FLAG(flags, ZEBRA_MACIP_TYPE_STICKY) ? "sticky gateway"
@@ -4290,8 +4295,10 @@ int bgp_evpn_local_l3vni_add(vni_t l3vni,
 	 * auto-creation*/
 	bgp_def = bgp_get_default();
 	if (!bgp_def) {
-		zlog_err("Cannot process L3VNI  %u ADD - default BGP instance not yet created",
-			 l3vni);
+		zlog_ferr(
+			BGP_ERR_NO_DFLT,
+			"Cannot process L3VNI  %u ADD - default BGP instance not yet created",
+			l3vni);
 		return -1;
 	}
 	as = bgp_def->as;
@@ -4306,13 +4313,16 @@ int bgp_evpn_local_l3vni_add(vni_t l3vni,
 			      BGP_INSTANCE_TYPE_VRF);
 		switch (ret) {
 		case BGP_ERR_MULTIPLE_INSTANCE_NOT_SET:
-			zlog_err("'bgp multiple-instance' not present\n");
+			zlog_ferr(BGP_ERR_MULTI_INSTANCE,
+				  "'bgp multiple-instance' not present\n");
 			return -1;
 		case BGP_ERR_AS_MISMATCH:
-			zlog_err("BGP is already running; AS is %u\n", as);
+			zlog_ferr(BGP_ERR_EVPN_AS_MISMATCH,
+				  "BGP is already running; AS is %u\n", as);
 			return -1;
 		case BGP_ERR_INSTANCE_MISMATCH:
-			zlog_err("BGP instance name and AS number mismatch\n");
+			zlog_ferr(BGP_ERR_EVPN_INSTANCE_MISMATCH,
+				  "BGP instance name and AS number mismatch\n");
 			return -1;
 		}
 
@@ -4374,15 +4384,19 @@ int bgp_evpn_local_l3vni_del(vni_t l3vni,
 
 	bgp_vrf = bgp_lookup_by_vrf_id(vrf_id);
 	if (!bgp_vrf) {
-		zlog_err("Cannot process L3VNI %u Del - Could not find BGP instance",
-			 l3vni);
+		zlog_ferr(
+			BGP_ERR_NO_DFLT,
+			"Cannot process L3VNI %u Del - Could not find BGP instance",
+			l3vni);
 		return -1;
 	}
 
 	bgp_def = bgp_get_default();
 	if (!bgp_def) {
-		zlog_err("Cannot process L3VNI %u Del - Could not find default BGP instance",
-			 l3vni);
+		zlog_ferr(
+			BGP_ERR_NO_DFLT,
+			"Cannot process L3VNI %u Del - Could not find default BGP instance",
+			l3vni);
 		return -1;
 	}
 
@@ -4435,11 +4449,6 @@ int bgp_evpn_local_vni_del(struct bgp *bgp, vni_t vni)
 {
 	struct bgpevpn *vpn;
 
-	if (!bgp->vnihash) {
-		zlog_err("%u: VNI hash not created", bgp->vrf_id);
-		return -1;
-	}
-
 	/* Locate VNI hash */
 	vpn = bgp_evpn_lookup_vni(bgp, vni);
 	if (!vpn) {
@@ -4478,11 +4487,6 @@ int bgp_evpn_local_vni_add(struct bgp *bgp, vni_t vni,
 	struct bgpevpn *vpn;
 	struct prefix_evpn p;
 
-	if (!bgp->vnihash) {
-		zlog_err("%u: VNI hash not created", bgp->vrf_id);
-		return -1;
-	}
-
 	/* Lookup VNI. If present and no change, exit. */
 	vpn = bgp_evpn_lookup_vni(bgp, vni);
 	if (vpn) {
@@ -4518,7 +4522,8 @@ int bgp_evpn_local_vni_add(struct bgp *bgp, vni_t vni,
 	if (!vpn) {
 		vpn = bgp_evpn_new(bgp, vni, originator_ip, tenant_vrf_id);
 		if (!vpn) {
-			zlog_err(
+			zlog_ferr(
+				BGP_ERR_VNI,
 				"%u: Failed to allocate VNI entry for VNI %u - at Add",
 				bgp->vrf_id, vni);
 			return -1;
@@ -4541,8 +4546,9 @@ int bgp_evpn_local_vni_add(struct bgp *bgp, vni_t vni,
 	/* Create EVPN type-3 route and schedule for processing. */
 	build_evpn_type3_prefix(&p, vpn->originator_ip);
 	if (update_evpn_route(bgp, vpn, &p, 0)) {
-		zlog_err("%u: Type3 route creation failure for VNI %u",
-			 bgp->vrf_id, vni);
+		zlog_ferr(BGP_ERR_EVPN_ROUTE_CREATE,
+			  "%u: Type3 route creation failure for VNI %u",
+			  bgp->vrf_id, vni);
 		return -1;
 	}
 

@@ -31,6 +31,7 @@
 #include "prefix.h"
 #include "interface.h"
 #include "log.h"
+#include "lib_errors.h"
 
 extern struct zebra_privs_t zserv_privs;
 
@@ -117,13 +118,14 @@ static int kernel_send_rtmsg_v4(int action, mpls_label_t in_label,
 	}
 
 	if (zserv_privs.change(ZPRIVS_RAISE))
-		zlog_err("Can't raise privileges");
+		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 	ret = writev(kr_state.fd, iov, iovcnt);
 	if (zserv_privs.change(ZPRIVS_LOWER))
-		zlog_err("Can't lower privileges");
+		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 
 	if (ret == -1)
-		zlog_err("%s: %s", __func__, safe_strerror(errno));
+		zlog_ferr(LIB_ERR_SOCKET, "%s: %s", __func__,
+			  safe_strerror(errno));
 
 	return ret;
 }
@@ -225,13 +227,14 @@ static int kernel_send_rtmsg_v6(int action, mpls_label_t in_label,
 	}
 
 	if (zserv_privs.change(ZPRIVS_RAISE))
-		zlog_err("Can't raise privileges");
+		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 	ret = writev(kr_state.fd, iov, iovcnt);
 	if (zserv_privs.change(ZPRIVS_LOWER))
-		zlog_err("Can't lower privileges");
+		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 
 	if (ret == -1)
-		zlog_err("%s: %s", __func__, safe_strerror(errno));
+		zlog_ferr(LIB_ERR_SOCKET, "%s: %s", __func__,
+			  safe_strerror(errno));
 
 	return ret;
 }
@@ -361,8 +364,8 @@ static int kmpw_install(struct zebra_pw *pw)
 		imr.imr_type = IMR_TYPE_ETHERNET_TAGGED;
 		break;
 	default:
-		zlog_err("%s: unhandled pseudowire type (%#X)", __func__,
-			 pw->type);
+		zlog_warn("%s: unhandled pseudowire type (%#X)", __func__,
+			  pw->type);
 		return -1;
 	}
 
@@ -383,8 +386,8 @@ static int kmpw_install(struct zebra_pw *pw)
 		sa_in6->sin6_addr = pw->nexthop.ipv6;
 		break;
 	default:
-		zlog_err("%s: unhandled pseudowire address-family (%u)",
-			 __func__, pw->af);
+		zlog_warn("%s: unhandled pseudowire address-family (%u)",
+			  __func__, pw->af);
 		return -1;
 	}
 	memcpy(&imr.imr_nexthop, (struct sockaddr *)&ss,
@@ -399,7 +402,8 @@ static int kmpw_install(struct zebra_pw *pw)
 	strlcpy(ifr.ifr_name, pw->ifname, sizeof(ifr.ifr_name));
 	ifr.ifr_data = (caddr_t)&imr;
 	if (ioctl(kr_state.ioctl_fd, SIOCSETMPWCFG, &ifr) == -1) {
-		zlog_err("ioctl SIOCSETMPWCFG: %s", safe_strerror(errno));
+		zlog_ferr(LIB_ERR_SYSTEM_CALL, "ioctl SIOCSETMPWCFG: %s",
+			  safe_strerror(errno));
 		return -1;
 	}
 
@@ -416,7 +420,8 @@ static int kmpw_uninstall(struct zebra_pw *pw)
 	strlcpy(ifr.ifr_name, pw->ifname, sizeof(ifr.ifr_name));
 	ifr.ifr_data = (caddr_t)&imr;
 	if (ioctl(kr_state.ioctl_fd, SIOCSETMPWCFG, &ifr) == -1) {
-		zlog_err("ioctl SIOCSETMPWCFG: %s", safe_strerror(errno));
+		zlog_ferr(LIB_ERR_SYSTEM_CALL, "ioctl SIOCSETMPWCFG: %s",
+			  safe_strerror(errno));
 		return -1;
 	}
 

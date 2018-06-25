@@ -57,6 +57,7 @@
 #include "isisd/isis_events.h"
 #include "isisd/isis_te.h"
 #include "isisd/isis_mt.h"
+#include "isisd/isis_errors.h"
 
 DEFINE_QOBJ_TYPE(isis_circuit)
 
@@ -73,10 +74,6 @@ struct isis_circuit *isis_circuit_new()
 	int i;
 
 	circuit = XCALLOC(MTYPE_ISIS_CIRCUIT, sizeof(struct isis_circuit));
-	if (circuit == NULL) {
-		zlog_err("Can't malloc isis circuit");
-		return NULL;
-	}
 
 	/*
 	 * Default values
@@ -569,7 +566,8 @@ int isis_circuit_up(struct isis_circuit *circuit)
 		return ISIS_OK;
 
 	if (circuit->area->lsp_mtu > isis_circuit_pdu_size(circuit)) {
-		zlog_err(
+		zlog_ferr(
+			ISIS_ERR_CONFIG,
 			"Interface MTU %zu on %s is too low to support area lsp mtu %u!",
 			isis_circuit_pdu_size(circuit),
 			circuit->interface->name, circuit->area->lsp_mtu);
@@ -580,7 +578,9 @@ int isis_circuit_up(struct isis_circuit *circuit)
 	if (circuit->circ_type == CIRCUIT_T_BROADCAST) {
 		circuit->circuit_id = isis_circuit_id_gen(isis, circuit->interface);
 		if (!circuit->circuit_id) {
-			zlog_err("There are already 255 broadcast circuits active!");
+			zlog_ferr(
+				ISIS_ERR_CONFIG,
+				"There are already 255 broadcast circuits active!");
 			return ISIS_ERROR;
 		}
 
@@ -1133,6 +1133,11 @@ int isis_interface_config_write(struct vty *vty)
 					}
 				}
 			}
+
+			if (host.obfuscate)
+				caesar(true, (char *)circuit->passwd.passwd,
+				       ISIS_PASSWD_OBFUSCATION_KEY);
+
 			if (circuit->passwd.type == ISIS_PASSWD_TYPE_HMAC_MD5) {
 				vty_out(vty, " isis password md5 %s\n",
 					circuit->passwd.passwd);
@@ -1143,6 +1148,9 @@ int isis_interface_config_write(struct vty *vty)
 					circuit->passwd.passwd);
 				write++;
 			}
+			if (host.obfuscate)
+				caesar(false, (char *)circuit->passwd.passwd,
+				       ISIS_PASSWD_OBFUSCATION_KEY);
 			write += circuit_write_mt_settings(circuit, vty);
 		}
 		vty_endframe(vty, "!\n");
@@ -1248,6 +1256,9 @@ static int isis_circuit_passwd_set(struct isis_circuit *circuit,
 
 	circuit->passwd.len = len;
 	strncpy((char *)circuit->passwd.passwd, passwd, 255);
+	if (host.obfuscate)
+		caesar(false, (char *)circuit->passwd.passwd,
+		       ISIS_PASSWD_OBFUSCATION_KEY);
 	circuit->passwd.type = passwd_type;
 	return ferr_ok();
 }

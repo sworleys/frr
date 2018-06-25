@@ -40,9 +40,11 @@
 #include "md5.h"
 #include "keychain.h"
 #include "privs.h"
+#include "lib_errors.h"
 
 #include "ripd/ripd.h"
 #include "ripd/rip_debug.h"
+#include "ripd/rip_errors.h"
 
 DEFINE_QOBJ_TYPE(rip)
 
@@ -1057,9 +1059,9 @@ static void rip_auth_md5_set(struct stream *s, struct rip_interface *ri,
 
 	/* Check packet length. */
 	if (len < (RIP_HEADER_SIZE + RIP_RTE_SIZE)) {
-		zlog_err(
-			"rip_auth_md5_set(): packet length %ld is less than minimum length.",
-			len);
+		zlog_ferr(RIP_ERR_PACKET,
+			  "rip_auth_md5_set(): packet length %ld is less than minimum length.",
+			  len);
 		return;
 	}
 
@@ -1340,7 +1342,8 @@ static int rip_create_socket(void)
 	/* Make datagram socket. */
 	sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if (sock < 0) {
-		zlog_err("Cannot create UDP socket: %s", safe_strerror(errno));
+		zlog_ferr(LIB_ERR_SOCKET, "Cannot create UDP socket: %s",
+			  safe_strerror(errno));
 		exit(1);
 	}
 
@@ -1356,25 +1359,29 @@ static int rip_create_socket(void)
 #endif
 
 	if (ripd_privs.change(ZPRIVS_RAISE))
-		zlog_err("rip_create_socket: could not raise privs");
+		zlog_ferr(LIB_ERR_PRIVILEGES,
+			  "rip_create_socket: could not raise privs");
 	setsockopt_so_recvbuf(sock, RIP_UDP_RCV_BUF);
 	if ((ret = bind(sock, (struct sockaddr *)&addr, sizeof(addr))) < 0)
 
 	{
 		int save_errno = errno;
 		if (ripd_privs.change(ZPRIVS_LOWER))
-			zlog_err("rip_create_socket: could not lower privs");
+			zlog_ferr(LIB_ERR_PRIVILEGES,
+				  "rip_create_socket: could not lower privs");
 
-		zlog_err("%s: Can't bind socket %d to %s port %d: %s", __func__,
-			 sock, inet_ntoa(addr.sin_addr),
-			 (int)ntohs(addr.sin_port), safe_strerror(save_errno));
+		zlog_ferr(LIB_ERR_SOCKET,
+			  "%s: Can't bind socket %d to %s port %d: %s",
+			  __func__, sock, inet_ntoa(addr.sin_addr),
+			  (int)ntohs(addr.sin_port), safe_strerror(save_errno));
 
 		close(sock);
 		return ret;
 	}
 
 	if (ripd_privs.change(ZPRIVS_LOWER))
-		zlog_err("rip_create_socket: could not lower privs");
+		zlog_ferr(LIB_ERR_PRIVILEGES,
+			  "rip_create_socket: could not lower privs");
 
 	return sock;
 }
@@ -2786,15 +2793,9 @@ DEFUN_NOSH (router_rip,
        "Enable a routing process\n"
        "Routing Information Protocol (RIP)\n")
 {
-	int ret;
-
 	/* If rip is not enabled before. */
 	if (!rip) {
-		ret = rip_create();
-		if (ret < 0) {
-			zlog_info("Can't create RIP");
-			return CMD_WARNING_CONFIG_FAILED;
-		}
+		rip_create();
 	}
 	VTY_PUSH_CONTEXT(RIP_NODE, rip);
 

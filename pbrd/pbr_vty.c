@@ -28,7 +28,6 @@
 #include "nexthop.h"
 #include "nexthop_group.h"
 #include "log.h"
-#include "json.h"
 #include "debug.h"
 
 #include "pbrd/pbr_nht.h"
@@ -86,6 +85,33 @@ DEFUN_NOSH(no_pbr_map, no_pbr_map_cmd, "no pbr-map WORD [seq (1-700)]",
 
 	return CMD_SUCCESS;
 }
+
+DEFPY(pbr_set_table_range,
+      pbr_set_table_range_cmd,
+      "[no] pbr table range (10000-4294966272)$lb (10000-4294966272)$ub",
+      NO_STR
+      PBR_STR
+      "Set table ID range\n"
+      "Set table ID range\n"
+      "Lower bound for table ID range\n"
+      "Upper bound for table ID range\n")
+{
+	/* upper bound is 2^32 - 2^10 */
+	int ret = CMD_WARNING;
+
+	/* validate given bounds */
+	if (lb > ub)
+		vty_out(vty, "%% Lower bound must be less than upper bound\n");
+	else if (ub - lb < 10)
+		vty_out(vty, "%% Range breadth must be at least 10\n");
+	else {
+		ret = CMD_SUCCESS;
+		pbr_nht_set_tableid_range((uint32_t) lb, (uint32_t) ub);
+	}
+
+	return ret;
+}
+
 
 DEFPY(pbr_map_match_src, pbr_map_match_src_cmd,
 	"[no] match src-ip <A.B.C.D/M|X:X::X:X/M>$prefix",
@@ -353,10 +379,9 @@ DEFPY (pbr_policy,
 
 DEFPY (show_pbr,
 	show_pbr_cmd,
-	"show pbr [json$json]",
+	"show pbr",
 	SHOW_STR
-	"Policy Based Routing\n"
-	JSON_STR)
+	PBR_STR)
 {
 	pbr_nht_write_table_range(vty);
 	pbr_nht_write_rule_range(vty);
@@ -366,13 +391,12 @@ DEFPY (show_pbr,
 
 DEFPY (show_pbr_map,
 	show_pbr_map_cmd,
-	"show pbr map [NAME$name] [detail$detail] [json$json]",
+	"show pbr map [NAME$name] [detail$detail]",
 	SHOW_STR
-	"Policy Based Routing\n"
+	PBR_STR
 	"PBR Map\n"
 	"PBR Map Name\n"
-	"Detailed information\n"
-	JSON_STR)
+	"Detailed information\n")
 {
 	struct pbr_map_sequence *pbrms;
 	struct pbr_map *pbrm;
@@ -437,7 +461,7 @@ DEFPY(show_pbr_nexthop_group,
       show_pbr_nexthop_group_cmd,
       "show pbr nexthop-groups [WORD$word]",
       SHOW_STR
-      "Policy Based Routing\n"
+      PBR_STR
       "Nexthop Groups\n"
       "Optional Name of the nexthop group\n")
 {
@@ -448,12 +472,11 @@ DEFPY(show_pbr_nexthop_group,
 
 DEFPY (show_pbr_interface,
 	show_pbr_interface_cmd,
-	"show pbr interface [NAME$name] [json$json]",
+	"show pbr interface [NAME$name]",
 	SHOW_STR
-	"Policy Based Routing\n"
+	PBR_STR
 	"PBR Interface\n"
-	"PBR Interface Name\n"
-	JSON_STR)
+	"PBR Interface Name\n")
 {
 	struct interface *ifp;
 	struct vrf *vrf;
@@ -574,6 +597,7 @@ void pbr_vty_init(void)
 
 	install_element(CONFIG_NODE, &pbr_map_cmd);
 	install_element(CONFIG_NODE, &no_pbr_map_cmd);
+	install_element(CONFIG_NODE, &pbr_set_table_range_cmd);
 	install_element(INTERFACE_NODE, &pbr_policy_cmd);
 	install_element(PBRMAP_NODE, &pbr_map_match_src_cmd);
 	install_element(PBRMAP_NODE, &pbr_map_match_dst_cmd);

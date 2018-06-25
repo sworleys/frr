@@ -1067,9 +1067,6 @@ static void *route_match_address_prefix_len_compile(const char *arg)
 
 	prefix_len = XMALLOC(MTYPE_ROUTE_MAP_COMPILED, sizeof(u_int32_t));
 
-	if (!prefix_len)
-		return prefix_len;
-
 	*prefix_len = tmpval;
 	return prefix_len;
 }

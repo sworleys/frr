@@ -1146,12 +1146,18 @@ DEFUN (ospf_area_vlink,
 
 		memset(md5_key, 0, OSPF_AUTH_MD5_SIZE + 1);
 		strncpy(md5_key, argv[idx + 3]->arg, OSPF_AUTH_MD5_SIZE);
+		if (host.obfuscate)
+			caesar(false, (char *)md5_key,
+			       OSPF_PASSWD_OBFUSCATION_KEY);
 		vl_config.md5_key = md5_key;
 	}
 
 	if (argv_find(argv, argc, "authentication-key", &idx)) {
 		memset(auth_key, 0, OSPF_AUTH_SIMPLE_SIZE + 1);
 		strncpy(auth_key, argv[idx + 1]->arg, OSPF_AUTH_SIMPLE_SIZE);
+		if (host.obfuscate)
+			caesar(false, (char *)auth_key,
+			       OSPF_PASSWD_OBFUSCATION_KEY);
 		vl_config.auth_key = auth_key;
 	}
 
@@ -6885,6 +6891,9 @@ DEFUN (ip_ospf_authentication_key,
 	memset(params->auth_simple, 0, OSPF_AUTH_SIMPLE_SIZE + 1);
 	strncpy((char *)params->auth_simple, argv[3]->arg,
 		OSPF_AUTH_SIMPLE_SIZE);
+	if (host.obfuscate)
+		caesar(false, (char *)params->auth_simple,
+		       OSPF_PASSWD_OBFUSCATION_KEY);
 	SET_IF_PARAM(params, auth_simple);
 
 	return CMD_SUCCESS;
@@ -6995,6 +7004,9 @@ DEFUN (ip_ospf_message_digest_key,
 	ck->key_id = (u_char)key_id;
 	memset(ck->auth_key, 0, OSPF_AUTH_MD5_SIZE + 1);
 	strncpy((char *)ck->auth_key, cryptkey, OSPF_AUTH_MD5_SIZE);
+	if (host.obfuscate)
+		caesar(false, (char *)ck->auth_key,
+		       OSPF_PASSWD_OBFUSCATION_KEY);
 
 	ospf_crypt_key_add(params->auth_crypt, ck);
 	SET_IF_PARAM(params, auth_crypt);
@@ -9748,9 +9760,17 @@ static int config_write_interface_one(struct vty *vty, struct vrf *vrf)
 
 			/* Simple Authentication Password print. */
 			if (OSPF_IF_PARAM_CONFIGURED(params, auth_simple)
-				&& params->auth_simple[0] != '\0') {
+			    && params->auth_simple[0] != '\0') {
+				if (host.obfuscate)
+					caesar(true,
+					       (char *)params->auth_simple,
+					       OSPF_PASSWD_OBFUSCATION_KEY);
 				vty_out(vty, " ip ospf authentication-key %s",
 					params->auth_simple);
+				if (host.obfuscate)
+					caesar(false,
+					       (char *)params->auth_simple,
+					       OSPF_PASSWD_OBFUSCATION_KEY);
 				if (params != IF_DEF_PARAMS(ifp))
 					vty_out(vty, " %s",
 						inet_ntoa(rn->p.u.prefix4));
@@ -9759,13 +9779,21 @@ static int config_write_interface_one(struct vty *vty, struct vrf *vrf)
 
 			/* Cryptographic Authentication Key print. */
 			if (params && params->auth_crypt) {
-				for (ALL_LIST_ELEMENTS_RO(
-						params->auth_crypt,
-						node, ck)) {
+				for (ALL_LIST_ELEMENTS_RO(params->auth_crypt,
+							  node, ck)) {
+					if (host.obfuscate)
+						caesar(true,
+						       (char *)ck->auth_key,
+						       OSPF_PASSWD_OBFUSCATION_KEY);
+
 					vty_out(vty,
 						" ip ospf message-digest-key %d md5 %s",
-						ck->key_id,
-						ck->auth_key);
+						ck->key_id, ck->auth_key);
+
+					if (host.obfuscate)
+						caesar(false,
+						       (char *)ck->auth_key,
+						       OSPF_PASSWD_OBFUSCATION_KEY);
 					if (params != IF_DEF_PARAMS(ifp))
 						vty_out(vty, " %s",
 						inet_ntoa(rn->p.u.prefix4));
@@ -10136,6 +10164,12 @@ static int config_write_virtual_link(struct vty *vty, struct ospf *ospf)
 			else
 				vty_out(vty, " area %s virtual-link %s\n", buf,
 					inet_ntoa(vl_data->vl_peer));
+			if (host.obfuscate)
+				caesar(true,
+				       (char *)IF_DEF_PARAMS(
+					       vl_data->vl_oi->ifp)
+					       ->auth_simple,
+				       OSPF_PASSWD_OBFUSCATION_KEY);
 			/* Auth key */
 			if (IF_DEF_PARAMS(vl_data->vl_oi->ifp)->auth_simple[0]
 			    != '\0')
@@ -10144,16 +10178,31 @@ static int config_write_virtual_link(struct vty *vty, struct ospf *ospf)
 					buf, inet_ntoa(vl_data->vl_peer),
 					IF_DEF_PARAMS(vl_data->vl_oi->ifp)
 						->auth_simple);
+			if (host.obfuscate)
+				caesar(false,
+				       (char *)IF_DEF_PARAMS(
+					       vl_data->vl_oi->ifp)
+					       ->auth_simple,
+				       OSPF_PASSWD_OBFUSCATION_KEY);
 			/* md5 keys */
 			for (ALL_LIST_ELEMENTS_RO(
 				     IF_DEF_PARAMS(vl_data->vl_oi->ifp)
 					     ->auth_crypt,
-				     n2, ck))
+				     n2, ck)) {
+				if (host.obfuscate)
+					caesar(true, (char *)ck->auth_key,
+					       OSPF_PASSWD_OBFUSCATION_KEY);
+
 				vty_out(vty,
 					" area %s virtual-link %s"
 					" message-digest-key %d md5 %s\n",
 					buf, inet_ntoa(vl_data->vl_peer),
 					ck->key_id, ck->auth_key);
+
+				if (host.obfuscate)
+					caesar(false, (char *)ck->auth_key,
+					       OSPF_PASSWD_OBFUSCATION_KEY);
+			}
 		}
 	}
 

@@ -21,12 +21,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include <zebra.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
 
-#include "zebra.h"
-#include "zserv.h"
 #include "lib/log.h"
 #include "lib/memory.h"
 #include "lib/mpls.h"
@@ -35,7 +34,9 @@
 #include "lib/zclient.h"
 #include "lib/libfrr.h"
 
-#include "label_manager.h"
+#include "zebra/zserv.h"
+#include "zebra/label_manager.h"
+#include "zebra/zebra_errors.h"
 
 #define CONNECTION_DELAY 5
 
@@ -76,8 +77,9 @@ static int relay_response_back(struct zserv *zserv)
 	ret = zclient_read_header(src, zclient->sock, &size, &marker, &version,
 				  &vrf_id, &resp_cmd);
 	if (ret < 0 && errno != EAGAIN) {
-		zlog_err("%s: Error reading Label Manager response: %s",
-			 __func__, strerror(errno));
+		zlog_ferr(ZEBRA_ERR_LM_RESPONSE,
+			  "Error reading Label Manager response: %s",
+			  strerror(errno));
 		return -1;
 	}
 	zlog_debug("%s: Label Manager response received, %d bytes", __func__,
@@ -89,8 +91,9 @@ static int relay_response_back(struct zserv *zserv)
 	stream_copy(dst, src);
 	ret = writen(zserv->sock, dst->data, stream_get_endp(dst));
 	if (ret <= 0) {
-		zlog_err("%s: Error sending Label Manager response back: %s",
-			 __func__, strerror(errno));
+		zlog_ferr(ZEBRA_ERR_LM_RELAY_FAILED,
+			  "Error relaying LM response %s",
+			  strerror(errno));
 		return -1;
 	}
 	zlog_debug("%s: Label Manager response (%d bytes) sent back", __func__,
@@ -149,9 +152,8 @@ int zread_relay_label_manager_request(int cmd, struct zserv *zserv,
 	int ret = 0;
 
 	if (zclient->sock < 0) {
-		zlog_err(
-			"%s: Error relaying label chunk request: no zclient socket",
-			__func__);
+		zlog_ferr(ZEBRA_ERR_LM_NO_SOCKET,
+			  "Unable to relay LM request: no socket");
 		reply_error(cmd, zserv, vrf_id);
 		return -1;
 	}
@@ -168,8 +170,9 @@ int zread_relay_label_manager_request(int cmd, struct zserv *zserv,
 
 	ret = writen(zclient->sock, dst->data, stream_get_endp(dst));
 	if (ret <= 0) {
-		zlog_err("%s: Error relaying label chunk request: %s", __func__,
-			 strerror(errno));
+		zlog_ferr(ZEBRA_ERR_LM_RELAY_FAILED,
+			  "%s: Error relaying label chunk request: %s",
+			  __func__, strerror(errno));
 		reply_error(cmd, zserv, vrf_id);
 		return -1;
 	}
@@ -196,7 +199,8 @@ static int lm_zclient_connect(struct thread *t)
 		return 0;
 
 	if (zclient_socket_connect(zclient) < 0) {
-		zlog_err("Error connecting synchronous zclient!");
+		zlog_ferr(ZEBRA_ERR_LM_CLIENT_CONNECTION_FAILED,
+			  "Error connecting synchronous zclient!");
 		thread_add_timer(zebrad.master, lm_zclient_connect, zclient,
 				 CONNECTION_DELAY, &zclient->t_connect);
 		return -1;
@@ -279,8 +283,6 @@ struct label_manager_chunk *assign_label_chunk(u_char proto, u_short instance,
 	}
 	/* otherwise create a new one */
 	lmc = XCALLOC(MTYPE_LM_CHUNK, sizeof(struct label_manager_chunk));
-	if (!lmc)
-		return NULL;
 
 	if (list_isempty(lbl_mgr.lc_list))
 		lmc->start = MPLS_LABEL_UNRESERVED_MIN;
@@ -290,8 +292,9 @@ struct label_manager_chunk *assign_label_chunk(u_char proto, u_short instance,
 				     ->end
 			     + 1;
 	if (lmc->start > MPLS_LABEL_UNRESERVED_MAX - size + 1) {
-		zlog_err("Reached max labels. Start: %u, size: %u", lmc->start,
-			 size);
+		zlog_ferr(ZEBRA_ERR_LM_EXHAUSTED_LABELS,
+			  "Reached max labels. Start: %u, size: %u", lmc->start,
+			  size);
 		XFREE(MTYPE_LM_CHUNK, lmc);
 		return NULL;
 	}
@@ -329,7 +332,8 @@ int release_label_chunk(u_char proto, u_short instance, uint32_t start,
 		if (lmc->end != end)
 			continue;
 		if (lmc->proto != proto || lmc->instance != instance) {
-			zlog_err("%s: Daemon mismatch!!", __func__);
+			zlog_ferr(ZEBRA_ERR_LM_DAEMON_MISMATCH,
+				  "%s: Daemon mismatch!!", __func__);
 			continue;
 		}
 		lmc->proto = NO_PROTO;
@@ -339,7 +343,8 @@ int release_label_chunk(u_char proto, u_short instance, uint32_t start,
 		break;
 	}
 	if (ret != 0)
-		zlog_err("%s: Label chunk not released!!", __func__);
+		zlog_ferr(ZEBRA_ERR_LM_UNRELEASED_CHUNK,
+			  "%s: Label chunk not released!!", __func__);
 
 	return ret;
 }

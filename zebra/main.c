@@ -37,6 +37,7 @@
 #include "logicalrouter.h"
 #include "libfrr.h"
 
+#include "zebra/zebra_errors.h"
 #include "zebra/rib.h"
 #include "zebra/zserv.h"
 #include "zebra/debug.h"
@@ -261,7 +262,8 @@ int main(int argc, char **argv)
 			multipath_num = atoi(optarg);
 			if (multipath_num > MULTIPATH_NUM
 			    || multipath_num <= 0) {
-				zlog_err(
+				zlog_ferr(
+					ZEBRA_ERR_BAD_MULTIPATH_NUM,
 					"Multipath Number specified must be less than %d and greater than 0",
 					MULTIPATH_NUM);
 				return 1;
@@ -371,6 +373,9 @@ int main(int argc, char **argv)
 
 	/* Init label manager */
 	label_manager_init(lblmgr_path);
+
+	/* Error init */
+	zebra_error_init();
 
 	frr_run(zebrad.master);
 

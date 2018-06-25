@@ -382,6 +382,20 @@ struct ospf6_path *ospf6_path_dup(struct ospf6_path *path)
 	return new;
 }
 
+void ospf6_copy_paths(struct list *dst, struct list *src)
+{
+	struct ospf6_path *path_new, *path;
+	struct listnode *node;
+
+	if (dst && src) {
+		for (ALL_LIST_ELEMENTS_RO(src, node, path)) {
+			path_new = ospf6_path_dup(path);
+			ospf6_copy_nexthops(path_new->nh_list, path->nh_list);
+			listnode_add_sort(dst, path_new);
+		}
+	}
+}
+
 struct ospf6_route *ospf6_route_create(void)
 {
 	struct ospf6_route *route;
@@ -420,6 +434,7 @@ struct ospf6_route *ospf6_route_copy(struct ospf6_route *route)
 	new->linkstate_id = route->linkstate_id;
 	new->path = route->path;
 	ospf6_copy_nexthops(new->nh_list, route->nh_list);
+	ospf6_copy_paths(new->paths, route->paths);
 	new->rnode = NULL;
 	new->prev = NULL;
 	new->next = NULL;
@@ -558,8 +573,8 @@ static void route_table_assert(struct ospf6_route_table *table)
 	if (link_error == 0 && num == table->count)
 		return;
 
-	zlog_err("PANIC !!");
-	zlog_err("Something has gone wrong with ospf6_route_table[%p]", table);
+	zlog_ferr(LIB_ERR_DEVELOPMENT, "PANIC !!");
+	zlog_ferr(LIB_ERR_DEVELOPMENT, "Something has gone wrong with ospf6_route_table[%p]", table);
 	zlog_debug("table count = %d, real number = %d", table->count, num);
 	zlog_debug("DUMP START");
 	for (r = ospf6_route_head(table); r; r = ospf6_route_next(r)) {
@@ -595,9 +610,10 @@ struct ospf6_route *ospf6_route_add(struct ospf6_route *route,
 		prefix2str(&route->prefix, buf, sizeof(buf));
 
 	if (IS_OSPF6_DEBUG_ROUTE(MEMORY))
-		zlog_debug("%s %p: route add %p: %s",
+		zlog_debug("%s %p: route add %p: %s paths %u nh %u",
 			   ospf6_route_table_name(table), (void *)table,
-			   (void *)route, buf);
+			   (void *)route, buf, listcount(route->paths),
+			   listcount(route->nh_list));
 	else if (IS_OSPF6_DEBUG_ROUTE(TABLE))
 		zlog_debug("%s: route add: %s", ospf6_route_table_name(table),
 			   buf);
@@ -647,10 +663,14 @@ struct ospf6_route *ospf6_route_add(struct ospf6_route *route,
 		}
 
 		if (IS_OSPF6_DEBUG_ROUTE(MEMORY))
-			zlog_debug("%s %p: route add %p cost %u: update of %p old cost %u",
-				   ospf6_route_table_name(table), (void *)table,
-				   (void *)route, route->path.cost, (void *)old,
-				   old->path.cost);
+			zlog_debug(
+				"%s %p: route add %p cost %u paths %u nh %u: update of %p cost %u paths %u nh %u",
+				ospf6_route_table_name(table), (void *)table,
+				(void *)route, route->path.cost,
+				listcount(route->paths),
+				listcount(route->nh_list), (void *)old,
+				old->path.cost, listcount(old->paths),
+				listcount(old->nh_list));
 		else if (IS_OSPF6_DEBUG_ROUTE(TABLE))
 			zlog_debug("%s: route add: update",
 				   ospf6_route_table_name(table));

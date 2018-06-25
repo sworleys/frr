@@ -44,6 +44,7 @@
 #include "zebra/zebra_memory.h"
 #include "zebra/zebra_vrf.h"
 #include "zebra/zebra_mpls.h"
+#include "zebra/zebra_errors.h"
 
 DEFINE_MTYPE_STATIC(ZEBRA, LSP, "MPLS LSP object")
 DEFINE_MTYPE_STATIC(ZEBRA, FEC, "MPLS FEC object")
@@ -550,8 +551,6 @@ static zebra_fec_t *fec_add(struct route_table *table, struct prefix *p,
 
 	if (!fec) {
 		fec = XCALLOC(MTYPE_FEC, sizeof(zebra_fec_t));
-		if (!fec)
-			return NULL;
 
 		rn->info = fec;
 		fec->rn = rn;
@@ -1031,7 +1030,8 @@ static int lsp_processq_add(zebra_lsp_t *lsp)
 		return 0;
 
 	if (zebrad.lsp_process_q == NULL) {
-		zlog_err("%s: work_queue does not exist!", __func__);
+		zlog_ferr(ZEBRA_ERR_WQ_NONEXISTENT,
+			  "%s: work_queue does not exist!", __func__);
 		return -1;
 	}
 
@@ -1162,8 +1162,6 @@ static zebra_nhlfe_t *nhlfe_add(zebra_lsp_t *lsp, enum lsp_types_t lsp_type,
 		return NULL;
 
 	nhlfe = XCALLOC(MTYPE_NHLFE, sizeof(zebra_nhlfe_t));
-	if (!nhlfe)
-		return NULL;
 
 	nhlfe->lsp = lsp;
 	nhlfe->type = lsp_type;
@@ -1675,7 +1673,8 @@ static int mpls_processq_init(struct zebra_t *zebra)
 {
 	zebra->lsp_process_q = work_queue_new(zebra->master, "LSP processing");
 	if (!zebra->lsp_process_q) {
-		zlog_err("%s: could not initialise work queue!", __func__);
+		zlog_ferr(ZEBRA_ERR_WQ_NONEXISTENT,
+			  "%s: could not initialise work queue!", __func__);
 		return -1;
 	}
 
@@ -1888,7 +1887,8 @@ int zebra_mpls_fec_register(struct zebra_vrf *zvrf, struct prefix *p,
 		fec = fec_add(table, p, MPLS_INVALID_LABEL, 0, label_index);
 		if (!fec) {
 			prefix2str(p, buf, BUFSIZ);
-			zlog_err(
+			zlog_ferr(
+				ZEBRA_ERR_FEC_ADD_FAILED,
 				"Failed to add FEC %s upon register, client %s",
 				buf, zebra_route_string(client->proto));
 			return -1;
@@ -1968,8 +1968,9 @@ int zebra_mpls_fec_unregister(struct zebra_vrf *zvrf, struct prefix *p,
 	fec = fec_find(table, p);
 	if (!fec) {
 		prefix2str(p, buf, BUFSIZ);
-		zlog_err("Failed to find FEC %s upon unregister, client %s",
-			 buf, zebra_route_string(client->proto));
+		zlog_ferr(ZEBRA_ERR_FEC_RM_FAILED,
+			  "Failed to find FEC %s upon unregister, client %s",
+			  buf, zebra_route_string(client->proto));
 		return -1;
 	}
 
@@ -2099,7 +2100,8 @@ int zebra_mpls_static_fec_add(struct zebra_vrf *zvrf, struct prefix *p,
 			      MPLS_INVALID_LABEL_INDEX);
 		if (!fec) {
 			prefix2str(p, buf, BUFSIZ);
-			zlog_err("Failed to add FEC %s upon config", buf);
+			zlog_ferr(ZEBRA_ERR_FEC_ADD_FAILED,
+				  "Failed to add FEC %s upon config", buf);
 			return -1;
 		}
 
@@ -2146,7 +2148,8 @@ int zebra_mpls_static_fec_del(struct zebra_vrf *zvrf, struct prefix *p)
 	fec = fec_find(table, p);
 	if (!fec) {
 		prefix2str(p, buf, BUFSIZ);
-		zlog_err("Failed to find FEC %s upon delete", buf);
+		zlog_ferr(ZEBRA_ERR_FEC_RM_FAILED,
+			  "Failed to find FEC %s upon delete", buf);
 		return -1;
 	}
 

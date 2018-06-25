@@ -53,6 +53,7 @@
 #include "bgpd/bgp_route.h"
 #include "bgpd/bgp_dump.h"
 #include "bgpd/bgp_debug.h"
+#include "bgpd/bgp_errors.h"
 #include "bgpd/bgp_community.h"
 #include "bgpd/bgp_attr.h"
 #include "bgpd/bgp_regex.h"
@@ -697,12 +698,6 @@ struct peer_af *peer_af_create(struct peer *peer, afi_t afi, safi_t safi)
 
 	/* Allocate new peer af */
 	af = XCALLOC(MTYPE_BGP_PEER_AF, sizeof(struct peer_af));
-
-	if (af == NULL) {
-		zlog_err("Could not create af structure for peer %s",
-			 peer->host);
-		return NULL;
-	}
 
 	peer->peer_af_array[afid] = af;
 	af->afi = afi;
@@ -1391,6 +1386,12 @@ void bgp_peer_conf_if_to_su_update(struct peer *peer)
 	if (!peer->conf_if)
 		return;
 
+	/*
+	 * Our peer structure is stored in the bgp->peerhash
+	 * release it before we modify anything.
+	 */
+	hash_release(peer->bgp->peerhash, peer);
+
 	prev_family = peer->su.sa.sa_family;
 	if ((ifp = if_lookup_by_name(peer->conf_if, peer->bgp->vrf_id))) {
 		peer->ifp = ifp;
@@ -1429,8 +1430,9 @@ void bgp_peer_conf_if_to_su_update(struct peer *peer)
 		memset(&peer->su.sin6.sin6_addr, 0, sizeof(struct in6_addr));
 	}
 
-	/* Since our su changed we need to del/add peer to the peerhash */
-	hash_release(peer->bgp->peerhash, peer);
+	/*
+	 * Since our su changed we need to del/add peer to the peerhash
+	 */
 	hash_get(peer->bgp->peerhash, peer, hash_alloc_intern);
 }
 
@@ -1879,8 +1881,8 @@ static int peer_activate_af(struct peer *peer, afi_t afi, safi_t safi)
 	int active;
 
 	if (CHECK_FLAG(peer->sflags, PEER_STATUS_GROUP)) {
-		zlog_err("%s was called for peer-group %s", __func__,
-			 peer->host);
+		zlog_ferr(BGP_ERR_PEER_GROUP, "%s was called for peer-group %s",
+			  __func__, peer->host);
 		return 1;
 	}
 
@@ -1989,8 +1991,8 @@ static int non_peergroup_deactivate_af(struct peer *peer, afi_t afi,
 				       safi_t safi)
 {
 	if (CHECK_FLAG(peer->sflags, PEER_STATUS_GROUP)) {
-		zlog_err("%s was called for peer-group %s", __func__,
-			 peer->host);
+		zlog_ferr(BGP_ERR_PEER_GROUP, "%s was called for peer-group %s",
+			  __func__, peer->host);
 		return 1;
 	}
 
@@ -2002,8 +2004,9 @@ static int non_peergroup_deactivate_af(struct peer *peer, afi_t afi,
 	peer->afc[afi][safi] = 0;
 
 	if (peer_af_delete(peer, afi, safi) != 0) {
-		zlog_err("couldn't delete af structure for peer %s",
-			 peer->host);
+		zlog_ferr(BGP_ERR_PEER_DELETE,
+			  "couldn't delete af structure for peer %s",
+			  peer->host);
 		return 1;
 	}
 
@@ -2052,8 +2055,9 @@ int peer_deactivate(struct peer *peer, afi_t afi, safi_t safi)
 		group = peer->group;
 
 		if (peer_af_delete(peer, afi, safi) != 0) {
-			zlog_err("couldn't delete af structure for peer %s",
-				 peer->host);
+			zlog_ferr(BGP_ERR_PEER_DELETE,
+				  "couldn't delete af structure for peer %s",
+				  peer->host);
 		}
 
 		for (ALL_LIST_ELEMENTS(group->peer, node, nnode, tmp_peer)) {
@@ -2798,7 +2802,8 @@ int peer_group_unbind(struct bgp *bgp, struct peer *peer,
 			peer_af_flag_reset(peer, afi, safi);
 
 			if (peer_af_delete(peer, afi, safi) != 0) {
-				zlog_err(
+				zlog_ferr(
+					BGP_ERR_PEER_DELETE,
 					"couldn't delete af structure for peer %s",
 					peer->host);
 			}
@@ -2845,6 +2850,18 @@ static int bgp_startup_timer_expire(struct thread *thread)
 	bgp->t_startup = NULL;
 
 	return 0;
+}
+
+/*
+ * On shutdown we call the cleanup function which
+ * does a free of the link list nodes,  free up
+ * the data we are pointing at too.
+ */
+static void bgp_vrf_string_name_delete(void *data)
+{
+	char *vname = data;
+
+	XFREE(MTYPE_TMP, vname);
 }
 
 /* BGP instance creation by `router bgp' commands. */
@@ -2907,9 +2924,9 @@ static struct bgp *bgp_create(as_t *as, const char *name,
 	bgp->group->cmp = (int (*)(void *, void *))peer_group_cmp;
 
 	FOREACH_AFI_SAFI (afi, safi) {
-		bgp->route[afi][safi] = bgp_table_init(afi, safi);
-		bgp->aggregate[afi][safi] = bgp_table_init(afi, safi);
-		bgp->rib[afi][safi] = bgp_table_init(afi, safi);
+		bgp->route[afi][safi] = bgp_table_init(bgp, afi, safi);
+		bgp->aggregate[afi][safi] = bgp_table_init(bgp, afi, safi);
+		bgp->rib[afi][safi] = bgp_table_init(bgp, afi, safi);
 
 		/* Enable maximum-paths */
 		bgp_maximum_paths_set(bgp, afi, safi, BGP_PEER_EBGP,
@@ -2958,7 +2975,11 @@ static struct bgp *bgp_create(as_t *as, const char *name,
 			MPLS_LABEL_NONE;
 
 		bgp->vpn_policy[afi].import_vrf = list_new();
+		bgp->vpn_policy[afi].import_vrf->del =
+			bgp_vrf_string_name_delete;
 		bgp->vpn_policy[afi].export_vrf = list_new();
+		bgp->vpn_policy[afi].export_vrf->del =
+			bgp_vrf_string_name_delete;
 	}
 	if (name) {
 		bgp->name = XSTRDUP(MTYPE_BGP, name);
@@ -2967,6 +2988,28 @@ static struct bgp *bgp_create(as_t *as, const char *name,
 		 */
 		thread_add_timer(bm->master, bgp_startup_timer_expire, bgp,
 				 bgp->restart_time, &bgp->t_startup);
+	}
+
+	/* printable name we can use in debug messages */
+	if (inst_type == BGP_INSTANCE_TYPE_DEFAULT) {
+		bgp->name_pretty = XSTRDUP(MTYPE_BGP, "VRF default");
+	} else {
+		const char *n;
+		int len;
+
+		if (bgp->name)
+			n = bgp->name;
+		else
+			n = "?";
+
+		len = 4 + 1 + strlen(n) + 1;	/* "view foo\0" */
+
+		bgp->name_pretty = XCALLOC(MTYPE_BGP, len);
+		snprintf(bgp->name_pretty, len, "%s %s",
+			(bgp->inst_type == BGP_INSTANCE_TYPE_VRF)
+				? "VRF"
+				: "VIEW",
+			n);
 	}
 
 	atomic_store_explicit(&bgp->wpkt_quanta, BGP_WRITE_PACKET_MAX,
@@ -3361,9 +3404,26 @@ void bgp_free(struct bgp *bgp)
 	bf_release_index(bm->rd_idspace, bgp->vrf_rd_id);
 
 	bgp_evpn_cleanup(bgp);
+	for (afi = AFI_IP; afi < AFI_MAX; afi++) {
+		vpn_policy_direction_t dir;
+
+		if (bgp->vpn_policy[afi].import_vrf)
+			list_delete_and_null(&bgp->vpn_policy[afi].import_vrf);
+		if (bgp->vpn_policy[afi].export_vrf)
+			list_delete_and_null(&bgp->vpn_policy[afi].export_vrf);
+
+		dir = BGP_VPN_POLICY_DIR_FROMVPN;
+		if (bgp->vpn_policy[afi].rtlist[dir])
+			ecommunity_free(&bgp->vpn_policy[afi].rtlist[dir]);
+		dir = BGP_VPN_POLICY_DIR_TOVPN;
+		if (bgp->vpn_policy[afi].rtlist[dir])
+			ecommunity_free(&bgp->vpn_policy[afi].rtlist[dir]);
+	}
 
 	if (bgp->name)
 		XFREE(MTYPE_BGP, bgp->name);
+	if (bgp->name_pretty)
+		XFREE(MTYPE_BGP, bgp->name_pretty);
 
 	XFREE(MTYPE_BGP, bgp);
 }
@@ -5184,6 +5244,8 @@ int peer_password_set(struct peer *peer, const char *password)
 		XFREE(MTYPE_PEER_PASSWORD, peer->password);
 
 	peer->password = XSTRDUP(MTYPE_PEER_PASSWORD, password);
+	if (host.obfuscate)
+		caesar(false, peer->password, BGP_PASSWD_OBFUSCATION_KEY);
 
 	if (!CHECK_FLAG(peer->sflags, PEER_STATUS_GROUP)) {
 		if (BGP_IS_VALID_STATE_FOR_NOTIF(peer->status))
@@ -5207,6 +5269,9 @@ int peer_password_set(struct peer *peer, const char *password)
 			XFREE(MTYPE_PEER_PASSWORD, peer->password);
 
 		peer->password = XSTRDUP(MTYPE_PEER_PASSWORD, password);
+		if (host.obfuscate)
+			caesar(false, peer->password,
+			       BGP_PASSWD_OBFUSCATION_KEY);
 
 		if (BGP_IS_VALID_STATE_FOR_NOTIF(peer->status))
 			bgp_notify_send(peer, BGP_NOTIFY_CEASE,
@@ -6611,8 +6676,14 @@ static void bgp_config_write_peer_global(struct vty *vty, struct bgp *bgp,
 	if (peer->password) {
 		if (!peer_group_active(peer) || !g_peer->password
 		    || strcmp(peer->password, g_peer->password) != 0) {
+			if (host.obfuscate)
+				caesar(true, peer->password,
+				       BGP_PASSWD_OBFUSCATION_KEY);
 			vty_out(vty, " neighbor %s password %s\n", addr,
 				peer->password);
+			if (host.obfuscate)
+				caesar(false, peer->password,
+				       BGP_PASSWD_OBFUSCATION_KEY);
 		}
 	}
 

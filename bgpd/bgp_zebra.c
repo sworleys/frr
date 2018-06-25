@@ -44,6 +44,7 @@
 #include "bgpd/bgp_zebra.h"
 #include "bgpd/bgp_fsm.h"
 #include "bgpd/bgp_debug.h"
+#include "bgpd/bgp_errors.h"
 #include "bgpd/bgp_mpath.h"
 #include "bgpd/bgp_nexthop.h"
 #include "bgpd/bgp_nht.h"
@@ -1098,6 +1099,7 @@ void bgp_zebra_announce(struct bgp_node *rn, struct prefix *p,
 	int nh_othervrf = 0;
 	bool is_evpn = false;
 	int nh_updated;
+	char buf_prefix[PREFIX_STRLEN];	/* filled in if we are debugging */
 
 	/* Don't try to install if we're not connected to Zebra or Zebra doesn't
 	 * know of this instance.
@@ -1107,6 +1109,9 @@ void bgp_zebra_announce(struct bgp_node *rn, struct prefix *p,
 
 	if (bgp->main_zebra_update_hold)
 		return;
+
+	if (bgp_debug_zebra(p))
+		prefix2str(&api.prefix, buf_prefix, sizeof(buf_prefix));
 
 	/*
 	 * vrf leaking support (will have only one nexthop)
@@ -1134,12 +1139,6 @@ void bgp_zebra_announce(struct bgp_node *rn, struct prefix *p,
 	}
 
 	tag = info->attr->tag;
-
-	/* When we create an aggregate route we must also install a Null0 route
-	 * in
-	 * the RIB */
-	if (info->sub_type == BGP_ROUTE_AGGREGATE)
-		zapi_route_set_blackhole(&api, BLACKHOLE_NULL);
 
 	/* If the route's source is EVPN, flag as such. */
 	is_evpn = is_route_parent_evpn(info);
@@ -1182,9 +1181,6 @@ void bgp_zebra_announce(struct bgp_node *rn, struct prefix *p,
 					     : bgp->vrf_id;
 		if (nh_family == AF_INET) {
 			if (bgp_debug_zebra(&api.prefix)) {
-				char buf_prefix[PREFIX_STRLEN];
-				prefix2str(&api.prefix, buf_prefix,
-					   sizeof(buf_prefix));
 				if (mpinfo->extra) {
 					zlog_debug(
 						"%s: p=%s, bgp_is_valid_label: %d",
@@ -1283,7 +1279,14 @@ void bgp_zebra_announce(struct bgp_node *rn, struct prefix *p,
 	if (has_valid_label && !(CHECK_FLAG(api.flags, ZEBRA_FLAG_EVPN_ROUTE)))
 		SET_FLAG(api.message, ZAPI_MESSAGE_LABEL);
 
-	if (info->sub_type != BGP_ROUTE_AGGREGATE)
+	/*
+	 * When we create an aggregate route we must also
+	 * install a Null0 route in the RIB, so overwrite
+	 * what was written into api with a blackhole route
+	 */
+	if (info->sub_type == BGP_ROUTE_AGGREGATE)
+		zapi_route_set_blackhole(&api, BLACKHOLE_NULL);
+	else
 		api.nexthop_num = valid_nh_count;
 
 	SET_FLAG(api.message, ZAPI_MESSAGE_METRIC);
@@ -1336,6 +1339,16 @@ void bgp_zebra_announce(struct bgp_node *rn, struct prefix *p,
 		}
 	}
 
+	if (bgp_debug_zebra(p)) {
+		int recursion_flag = 0;
+
+		if (CHECK_FLAG(api.flags, ZEBRA_FLAG_ALLOW_RECURSION))
+			recursion_flag = 1;
+
+		zlog_debug("%s: %s: announcing to zebra (recursion %sset)",
+			__func__, buf_prefix,
+			(recursion_flag ? "" : "NOT "));
+	}
 	zclient_route_send(valid_nh_count ? ZEBRA_ROUTE_ADD
 					  : ZEBRA_ROUTE_DELETE,
 			   zclient, &api);
@@ -1938,9 +1951,10 @@ static int bgp_zebra_process_local_macip(int command, struct zclient *zclient,
 	ipa_len = stream_getl(s);
 	if (ipa_len != 0 && ipa_len != IPV4_MAX_BYTELEN
 	    && ipa_len != IPV6_MAX_BYTELEN) {
-		zlog_err("%u:Recv MACIP %s with invalid IP addr length %d",
-			 vrf_id, (command == ZEBRA_MACIP_ADD) ? "Add" : "Del",
-			 ipa_len);
+		zlog_ferr(BGP_ERR_MACIP_LEN,
+			  "%u:Recv MACIP %s with invalid IP addr length %d",
+			  vrf_id, (command == ZEBRA_MACIP_ADD) ? "Add" : "Del",
+			  ipa_len);
 		return -1;
 	}
 

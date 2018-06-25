@@ -45,6 +45,7 @@
 #include "bgpd/bgp_lcommunity.h"
 #include "bgpd/bgp_damp.h"
 #include "bgpd/bgp_debug.h"
+#include "bgpd/bgp_errors.h"
 #include "bgpd/bgp_fsm.h"
 #include "bgpd/bgp_nexthop.h"
 #include "bgpd/bgp_open.h"
@@ -7832,7 +7833,7 @@ static int bgp_show_summary(struct vty *vty, struct bgp *bgp, int afi, int safi,
 					    BGP_UPTIME_LEN, 0, NULL));
 
 			if (peer->status == Established)
-				if (peer->afc_recv[afi][pfx_rcd_safi])
+				if (peer->afc_recv[afi][safi])
 					vty_out(vty, " %12ld",
 						peer->pcount[afi]
 							    [pfx_rcd_safi]);
@@ -10543,7 +10544,7 @@ static int bgp_show_neighbor(struct vty *vty, struct bgp *bgp,
 		if (use_json)
 			json_object_boolean_true_add(json, "bgpNoSuchNeighbor");
 		else
-			vty_out(vty, "%% No such neighbor\n");
+			vty_out(vty, "%% No such neighbor in this view/vrf\n");
 	}
 
 	if (use_json) {
@@ -10575,7 +10576,8 @@ static void bgp_show_all_instances_neighbors_vty(struct vty *vty,
 	for (ALL_LIST_ELEMENTS(bm->bgp, node, nnode, bgp)) {
 		if (use_json) {
 			if (!(json = json_object_new_object())) {
-				zlog_err(
+				zlog_ferr(
+					BGP_ERR_JSON_MEM_ERROR,
 					"Unable to allocate memory for JSON object");
 				vty_out(vty,
 					"{\"error\": {\"message:\": \"Unable to allocate memory for JSON object\"}}}\n");
@@ -12041,7 +12043,6 @@ static void bgp_ac_neighbor(vector comps, struct cmd_token *token)
 {
 	struct bgp *bgp;
 	struct peer *peer;
-	struct peer_group *group;
 	struct listnode *lnbgp, *lnpeer;
 
 	for (ALL_LIST_ELEMENTS_RO(bm->bgp, lnbgp, bgp)) {
@@ -12065,11 +12066,6 @@ static void bgp_ac_neighbor(vector comps, struct cmd_token *token)
 
 			vector_set(comps, XSTRDUP(MTYPE_COMPLETION, name));
 		}
-
-		if (token->type == VARIABLE_TKN)
-			for (ALL_LIST_ELEMENTS_RO(bgp->group, lnpeer, group))
-				vector_set(comps, XSTRDUP(MTYPE_COMPLETION,
-							  group->name));
 	}
 }
 
@@ -12079,9 +12075,27 @@ static const struct cmd_variable_handler bgp_var_neighbor[] = {
 	{.varname = "peer", .completions = bgp_ac_neighbor},
 	{.completions = NULL}};
 
+static void bgp_ac_peergroup(vector comps, struct cmd_token *token)
+{
+	struct bgp *bgp;
+	struct peer_group *group;
+	struct listnode *lnbgp, *lnpeer;
+
+	for (ALL_LIST_ELEMENTS_RO(bm->bgp, lnbgp, bgp)) {
+		for (ALL_LIST_ELEMENTS_RO(bgp->group, lnpeer, group))
+			vector_set(comps, XSTRDUP(MTYPE_COMPLETION,
+						  group->name));
+	}
+}
+
+static const struct cmd_variable_handler bgp_var_peergroup[] = {
+	{.tokenname = "PGNAME", .completions = bgp_ac_peergroup},
+	{.completions = NULL} };
+
 void bgp_vty_init(void)
 {
 	cmd_variable_handler_register(bgp_var_neighbor);
+	cmd_variable_handler_register(bgp_var_peergroup);
 
 	/* Install bgp top node. */
 	install_node(&bgp_node, bgp_config_write);

@@ -33,6 +33,7 @@
 #include "log.h"
 #include "privs.h"
 #include "vxlan.h"
+#include "lib_errors.h"
 
 #include "zebra/debug.h"
 #include "zebra/rib.h"
@@ -211,7 +212,8 @@ static int kernel_rtm_ipv4(int cmd, struct prefix *p, struct route_entry *re)
 			 */
 			case ZEBRA_ERR_RTEXIST:
 				if (cmd != RTM_ADD)
-					zlog_err(
+					zlog_ferr(
+						LIB_ERR_SYSTEM_CALL,
 						"%s: rtm_write() returned %d for command %d",
 						__func__, error, cmd);
 				continue;
@@ -224,7 +226,8 @@ static int kernel_rtm_ipv4(int cmd, struct prefix *p, struct route_entry *re)
 			case ZEBRA_ERR_RTNOEXIST:
 			case ZEBRA_ERR_RTUNREACH:
 			default:
-				zlog_err(
+				zlog_ferr(
+					LIB_ERR_SYSTEM_CALL,
 					"%s: %s: rtm_write() unexpectedly returned %d for command %s",
 					__func__,
 					prefix2str(p, prefix_buf,
@@ -394,12 +397,12 @@ void kernel_route_rib(struct route_node *rn, struct prefix *p,
 	int route = 0;
 
 	if (src_p && src_p->prefixlen) {
-		zlog_err("route add: IPv6 sourcedest routes unsupported!");
+		zlog_warn("route add: IPv6 sourcedest routes unsupported!");
 		return;
 	}
 
 	if (zserv_privs.change(ZPRIVS_RAISE))
-		zlog_err("Can't raise privileges");
+		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 
 	if (old)
 		route |= kernel_rtm(RTM_DELETE, p, old);
@@ -408,7 +411,7 @@ void kernel_route_rib(struct route_node *rn, struct prefix *p,
 		route |= kernel_rtm(RTM_ADD, p, new);
 
 	if (zserv_privs.change(ZPRIVS_LOWER))
-		zlog_err("Can't lower privileges");
+		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 
 	if (new) {
 		kernel_route_rib_pass_fail(rn, p, new,

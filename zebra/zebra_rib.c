@@ -20,27 +20,32 @@
 
 #include <zebra.h>
 
-#include "if.h"
-#include "prefix.h"
-#include "table.h"
-#include "memory.h"
-#include "zebra_memory.h"
 #include "command.h"
+#include "if.h"
+#include "linklist.h"
 #include "log.h"
 #include "log_int.h"
-#include "sockunion.h"
-#include "linklist.h"
-#include "thread.h"
-#include "workqueue.h"
+#include "memory.h"
+#include "mpls.h"
+#include "nexthop.h"
+#include "prefix.h"
 #include "prefix.h"
 #include "routemap.h"
-#include "nexthop.h"
-#include "vrf.h"
-#include "mpls.h"
+#include "sockunion.h"
 #include "srcdest_table.h"
+#include "table.h"
+#include "thread.h"
+#include "vrf.h"
+#include "workqueue.h"
 
+#include "zebra/connected.h"
+#include "zebra/debug.h"
+#include "zebra/interface.h"
+#include "zebra/redistribute.h"
 #include "zebra/rib.h"
 #include "zebra/rt.h"
+#include "zebra/zebra_errors.h"
+#include "zebra/zebra_memory.h"
 #include "zebra/zebra_ns.h"
 #include "zebra/zserv.h"
 #include "zebra/zebra_vrf.h"
@@ -48,8 +53,8 @@
 #include "zebra/zebra_routemap.h"
 #include "zebra/debug.h"
 #include "zebra/zebra_rnh.h"
-#include "zebra/interface.h"
-#include "zebra/connected.h"
+#include "zebra/zebra_routemap.h"
+#include "zebra/zebra_vrf.h"
 #include "zebra/zebra_vxlan.h"
 
 DEFINE_HOOK(rib_update, (struct route_node * rn, const char *reason),
@@ -1918,7 +1923,8 @@ void rib_queue_add(struct route_node *rn)
 	}
 
 	if (zebrad.ribq == NULL) {
-		zlog_err("%s: work_queue does not exist!", __func__);
+		zlog_ferr(ZEBRA_ERR_WQ_NONEXISTENT,
+			  "%s: work_queue does not exist!", __func__);
 		return;
 	}
 
@@ -1947,7 +1953,6 @@ static struct meta_queue *meta_queue_new(void)
 	unsigned i;
 
 	new = XCALLOC(MTYPE_WORK_QUEUE, sizeof(struct meta_queue));
-	assert(new);
 
 	for (i = 0; i < MQ_SIZE; i++) {
 		new->subq[i] = list_new();
@@ -1974,7 +1979,8 @@ static void rib_queue_init(struct zebra_t *zebra)
 
 	if (!(zebra->ribq =
 		      work_queue_new(zebra->master, "route_node processing"))) {
-		zlog_err("%s: could not initialise work queue!", __func__);
+		zlog_ferr(ZEBRA_ERR_WQ_NONEXISTENT,
+			  "%s: could not initialise work queue!", __func__);
 		return;
 	}
 
@@ -1987,7 +1993,8 @@ static void rib_queue_init(struct zebra_t *zebra)
 	zebra->ribq->spec.hold = ZEBRA_RIB_PROCESS_HOLD_TIME;
 
 	if (!(zebra->mq = meta_queue_new())) {
-		zlog_err("%s: could not initialise meta queue!", __func__);
+		zlog_ferr(ZEBRA_ERR_WQ_NONEXISTENT,
+			  "%s: could not initialise meta queue!", __func__);
 		return;
 	}
 	return;
@@ -2217,7 +2224,9 @@ void rib_lookup_and_dump(struct prefix_ipv4 *p, vrf_id_t vrf_id)
 	/* Lookup table.  */
 	table = zebra_vrf_table(AFI_IP, SAFI_UNICAST, vrf_id);
 	if (!table) {
-		zlog_err("%s: zebra_vrf_table() returned NULL", __func__);
+		zlog_ferr(ZEBRA_ERR_TABLE_LOOKUP_FAILED,
+			  "%s:%u zebra_vrf_table() returned NULL", __func__,
+			  vrf_id);
 		return;
 	}
 
@@ -2262,7 +2271,9 @@ void rib_lookup_and_pushup(struct prefix_ipv4 *p, vrf_id_t vrf_id)
 	rib_dest_t *dest;
 
 	if (NULL == (table = zebra_vrf_table(AFI_IP, SAFI_UNICAST, vrf_id))) {
-		zlog_err("%s: zebra_vrf_table() returned NULL", __func__);
+		zlog_ferr(ZEBRA_ERR_TABLE_LOOKUP_FAILED,
+			  "%s:%u zebra_vrf_table() returned NULL", __func__,
+			  vrf_id);
 		return;
 	}
 

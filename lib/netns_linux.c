@@ -35,10 +35,10 @@
 #include "ns.h"
 #include "log.h"
 #include "memory.h"
-
 #include "command.h"
 #include "vty.h"
 #include "vrf.h"
+#include "lib_errors.h"
 
 DEFINE_MTYPE_STATIC(LIB, NS, "NetNS Context")
 DEFINE_MTYPE_STATIC(LIB, NS_NAME, "NetNS Name")
@@ -199,15 +199,17 @@ static int ns_enable_internal(struct ns *ns, void (*func)(ns_id_t, void *))
 		}
 
 		if (!ns_is_enabled(ns)) {
-			zlog_err("Can not enable NS %u: %s!", ns->ns_id,
-				 safe_strerror(errno));
+			zlog_ferr(LIB_ERR_SYSTEM_CALL,
+				  "Can not enable NS %u: %s!", ns->ns_id,
+				  safe_strerror(errno));
 			return 0;
 		}
 
 		/* Non default NS. leave */
 		if (ns->ns_id == NS_UNKNOWN) {
-			zlog_err("Can not enable NS %s %u: Invalid NSID",
-				 ns->name, ns->ns_id);
+			zlog_ferr(LIB_ERR_NS,
+				  "Can not enable NS %s %u: Invalid NSID",
+				  ns->name, ns->ns_id);
 			return 0;
 		}
 		if (func)
@@ -426,8 +428,9 @@ void ns_init(void)
 	default_ns = NULL;
 #endif /* HAVE_NETNS */
 	if (ns_default_ns_fd == -1)
-		zlog_err("NS initialisation failure (%s)",
-			 safe_strerror(errno));
+		zlog_ferr(LIB_ERR_NS,
+			  "NS initialisation failure (%s)",
+			  safe_strerror(errno));
 	ns_current_ns_fd = -1;
 	ns_initialised = 1;
 }
@@ -440,8 +443,8 @@ void ns_init_management(ns_id_t default_ns_id)
 	ns_init();
 	default_ns = ns_get_created_internal(NULL, NULL, default_ns_id);
 	if (!default_ns) {
-		zlog_err("%s: failed to create the default NS!",
-			 __func__);
+		zlog_ferr(LIB_ERR_NS, "%s: failed to create the default NS!",
+			  __func__);
 		exit(1);
 	}
 	if (have_netns()) {
@@ -456,8 +459,8 @@ void ns_init_management(ns_id_t default_ns_id)
 
 	/* Enable the default NS. */
 	if (!ns_enable(default_ns, NULL)) {
-		zlog_err("%s: failed to enable the default NS!",
-			 __func__);
+		zlog_ferr(LIB_ERR_NS, "%s: failed to enable the default NS!",
+			  __func__);
 		exit(1);
 	}
 }

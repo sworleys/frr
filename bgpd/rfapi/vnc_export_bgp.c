@@ -33,6 +33,7 @@
 #include "lib/linklist.h"
 #include "lib/plist.h"
 #include "lib/routemap.h"
+#include "lib/lib_errors.h"
 
 #include "bgpd/bgpd.h"
 #include "bgpd/bgp_ecommunity.h"
@@ -188,7 +189,8 @@ void vnc_direct_bgp_add_route_ce(struct bgp *bgp, struct route_node *rn,
 
 
 	if (!afi) {
-		zlog_err("%s: can't get afi of route node", __func__);
+		zlog_ferr(LIB_ERR_DEVELOPMENT,
+			  "%s: can't get afi of route node", __func__);
 		return;
 	}
 
@@ -334,7 +336,7 @@ void vnc_direct_bgp_del_route_ce(struct bgp *bgp, struct route_node *rn,
 	struct prefix ce_nexthop;
 
 	if (!afi) {
-		zlog_err("%s: bad afi", __func__);
+		zlog_ferr(LIB_ERR_DEVELOPMENT, "%s: bad afi", __func__);
 		return;
 	}
 
@@ -700,7 +702,8 @@ void vnc_direct_bgp_add_prefix(struct bgp *bgp,
 	afi_t afi = family2afi(rn->p.family);
 
 	if (!afi) {
-		zlog_err("%s: can't get afi of route node", __func__);
+		zlog_ferr(LIB_ERR_DEVELOPMENT,
+			  "%s: can't get afi of route node", __func__);
 		return;
 	}
 
@@ -809,7 +812,8 @@ void vnc_direct_bgp_del_prefix(struct bgp *bgp,
 	afi_t afi = family2afi(rn->p.family);
 
 	if (!afi) {
-		zlog_err("%s: can't get afi route node", __func__);
+		zlog_ferr(LIB_ERR_DEVELOPMENT, "%s: can't get afi route node",
+			  __func__);
 		return;
 	}
 
@@ -922,7 +926,8 @@ void vnc_direct_bgp_add_nve(struct bgp *bgp, struct rfapi_descriptor *rfd)
 	afi_t afi = family2afi(rfd->vn_addr.addr_family);
 
 	if (!afi) {
-		zlog_err("%s: can't get afi of nve vn addr", __func__);
+		zlog_ferr(LIB_ERR_DEVELOPMENT,
+			  "%s: can't get afi of nve vn addr", __func__);
 		return;
 	}
 
@@ -974,7 +979,8 @@ void vnc_direct_bgp_add_nve(struct bgp *bgp, struct rfapi_descriptor *rfd)
 			if (afi == AFI_IP || afi == AFI_IP6) {
 				rt = import_table->imported_vpn[afi];
 			} else {
-				zlog_err("%s: bad afi %d", __func__, afi);
+				zlog_ferr(LIB_ERR_DEVELOPMENT, "%s: bad afi %d",
+					  __func__, afi);
 				return;
 			}
 
@@ -1068,7 +1074,8 @@ void vnc_direct_bgp_del_nve(struct bgp *bgp, struct rfapi_descriptor *rfd)
 	afi_t afi = family2afi(rfd->vn_addr.addr_family);
 
 	if (!afi) {
-		zlog_err("%s: can't get afi of nve vn addr", __func__);
+		zlog_ferr(LIB_ERR_DEVELOPMENT,
+			  "%s: can't get afi of nve vn addr", __func__);
 		return;
 	}
 
@@ -1115,7 +1122,8 @@ void vnc_direct_bgp_del_nve(struct bgp *bgp, struct rfapi_descriptor *rfd)
 			if (afi == AFI_IP || afi == AFI_IP6) {
 				rt = import_table->imported_vpn[afi];
 			} else {
-				zlog_err("%s: bad afi %d", __func__, afi);
+				zlog_ferr(LIB_ERR_DEVELOPMENT, "%s: bad afi %d",
+					  __func__, afi);
 				return;
 			}
 
@@ -1292,7 +1300,7 @@ static void vnc_direct_bgp_add_group_afi(struct bgp *bgp,
 	if (afi == AFI_IP || afi == AFI_IP6) {
 		rt = import_table->imported_vpn[afi];
 	} else {
-		zlog_err("%s: bad afi %d", __func__, afi);
+		zlog_ferr(LIB_ERR_DEVELOPMENT, "%s: bad afi %d", __func__, afi);
 		return;
 	}
 
@@ -1637,7 +1645,8 @@ void vnc_direct_bgp_rh_add_route(struct bgp *bgp, afi_t afi,
 	struct attr *iattr;
 
 	if (!afi) {
-		zlog_err("%s: can't get afi of route node", __func__);
+		zlog_ferr(LIB_ERR_DEVELOPMENT,
+			  "%s: can't get afi of route node", __func__);
 		return;
 	}
 
@@ -1755,7 +1764,8 @@ void vnc_direct_bgp_rh_del_route(struct bgp *bgp, afi_t afi,
 	struct vnc_export_info *eti;
 
 	if (!afi) {
-		zlog_err("%s: can't get afi route node", __func__);
+		zlog_ferr(LIB_ERR_DEVELOPMENT, "%s: can't get afi route node",
+			  __func__);
 		return;
 	}
 

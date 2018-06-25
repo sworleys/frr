@@ -61,16 +61,8 @@ struct evpn_addr {
 	u_char route_type;
 	u_char ip_prefix_length;
 	struct ethaddr mac;
-	uint32_t eth_tag;
 	struct ipaddr ip;
-#if 0
-  union
-  {
-    u_char addr;
-    struct in_addr v4_addr;
-    struct in6_addr v6_addr;
-  } ip;
-#endif
+	uint32_t eth_tag;
 };
 
 #define IS_EVPN_PREFIX_IPADDR_NONE(evp)  IS_IPADDR_NONE(&(evp)->prefix.ip)
@@ -271,6 +263,7 @@ static inline void ipv4_addr_copy(struct in_addr *dst,
 extern int str2family(const char *);
 extern int afi2family(afi_t);
 extern afi_t family2afi(int);
+extern const char *family2str(int family);
 extern const char *safi2str(safi_t safi);
 extern const char *afi2str(afi_t afi);
 

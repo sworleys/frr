@@ -92,10 +92,6 @@ static struct pim_nexthop_cache *pim_nexthop_cache_add(struct pim_instance *pim,
 
 	pnc = XCALLOC(MTYPE_PIM_NEXTHOP_CACHE,
 		      sizeof(struct pim_nexthop_cache));
-	if (!pnc) {
-		zlog_err("%s: NHT PIM XCALLOC failure ", __PRETTY_FUNCTION__);
-		return NULL;
-	}
 	pnc->rpf.rpf_addr.family = rpf_addr->rpf_addr.family;
 	pnc->rpf.rpf_addr.prefixlen = rpf_addr->rpf_addr.prefixlen;
 	pnc->rpf.rpf_addr.u.prefix4.s_addr =
@@ -454,7 +450,7 @@ int pim_ecmp_nexthop_search(struct pim_instance *pim,
 		   metric is less than nexthop update.
 		 */
 
-		if (qpim_ecmp_rebalance_enable == 0) {
+		if (pim->ecmp_rebalance_enable == 0) {
 			uint8_t curr_route_valid = 0;
 			// Check if current nexthop is present in new updated
 			// Nexthop list.
@@ -504,7 +500,7 @@ int pim_ecmp_nexthop_search(struct pim_instance *pim,
 			}
 		}
 	}
-	if (qpim_ecmp_enable) {
+	if (pim->ecmp_enable) {
 		// PIM ECMP flag is enable then choose ECMP path.
 		hash_val = pim_compute_ecmp_hash(src, grp);
 		mod_val = hash_val % pnc->nexthop_num;
@@ -591,7 +587,7 @@ int pim_ecmp_nexthop_search(struct pim_instance *pim,
 					"%s: (%s,%s)(%s) selected nhop interface %s addr %s mod_val %u iter %d ecmp %d",
 					__PRETTY_FUNCTION__, buf2, buf3,
 					pim->vrf->name, ifp->name, buf, mod_val,
-					nh_iter, qpim_ecmp_enable);
+					nh_iter, pim->ecmp_enable);
 			}
 		}
 		nh_iter++;
@@ -813,7 +809,7 @@ int pim_ecmp_nexthop_lookup(struct pim_instance *pim,
 	}
 
 	// If PIM ECMP enable then choose ECMP path.
-	if (qpim_ecmp_enable) {
+	if (pim->ecmp_enable) {
 		hash_val = pim_compute_ecmp_hash(src, grp);
 		mod_val = hash_val % num_ifindex;
 		if (PIM_DEBUG_PIM_NHT_DETAIL)
@@ -947,7 +943,7 @@ int pim_ecmp_fib_lookup_if_vif_index(struct pim_instance *pim,
 	}
 
 	// If PIM ECMP enable then choose ECMP path.
-	if (qpim_ecmp_enable) {
+	if (pim->ecmp_enable) {
 		hash_val = pim_compute_ecmp_hash(src, grp);
 		mod_val = hash_val % num_ifindex;
 		if (PIM_DEBUG_PIM_NHT_DETAIL)

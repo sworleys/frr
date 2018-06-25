@@ -25,6 +25,7 @@
 #include "if.h"
 #include "vty.h"
 #include "plist.h"
+#include "lib_errors.h"
 
 #include "pimd.h"
 #include "pim_neighbor.h"
@@ -305,11 +306,6 @@ pim_neighbor_new(struct interface *ifp, struct in_addr source_addr,
 	zassert(pim_ifp);
 
 	neigh = XCALLOC(MTYPE_PIM_NEIGHBOR, sizeof(*neigh));
-	if (!neigh) {
-		zlog_err("%s: PIM XCALLOC(%zu) failure", __PRETTY_FUNCTION__,
-			 sizeof(*neigh));
-		return 0;
-	}
 
 	neigh->creation = pim_time_monotonic_sec();
 	neigh->source_addr = source_addr;
@@ -801,7 +797,8 @@ void pim_neighbor_update(struct pim_neighbor *neigh,
 
 	if (neigh->prefix_list == addr_list) {
 		if (addr_list) {
-			zlog_err(
+			zlog_ferr(
+				LIB_ERR_DEVELOPMENT,
 				"%s: internal error: trying to replace same prefix list=%p",
 				__PRETTY_FUNCTION__, (void *)addr_list);
 		}

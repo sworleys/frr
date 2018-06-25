@@ -90,8 +90,9 @@ struct ospf_if_params {
 	DECLARE_IF_PARAM(u_char, fast_hello);
 
 	/* Authentication data. */
-	u_char auth_simple[OSPF_AUTH_SIMPLE_SIZE + 1]; /* Simple password. */
-	u_char auth_simple__config : 1;
+#define OSPF_PASSWD_OBFUSCATION_KEY "4d48bc58afd8379d2795926dc3484c00"
+	uint8_t auth_simple[OSPF_AUTH_SIMPLE_SIZE + 1]; /* Simple password. */
+	uint8_t auth_simple__config : 1;
 
 	DECLARE_IF_PARAM(struct list *,
 			 auth_crypt);     /* List of Auth cryptographic data. */

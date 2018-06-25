@@ -37,6 +37,7 @@
 #include "checksum.h"
 #include "md5.h"
 #include "table.h"
+#include "lib_errors.h"
 
 #include "isisd/dict.h"
 #include "isisd/isis_constants.h"
@@ -455,7 +456,8 @@ void lsp_update(struct isis_lsp *lsp, struct isis_lsp_hdr *hdr,
 		struct isis_area *area, int level, bool confusion)
 {
 	if (lsp->own_lsp) {
-		zlog_err(
+		zlog_ferr(
+			LIB_ERR_DEVELOPMENT,
 			"ISIS-Upd (%s): BUG updating LSP %s still marked as own LSP",
 			area->area_tag, rawlspid_print(lsp->hdr.lsp_id));
 		lsp_clear_data(lsp);
@@ -1229,8 +1231,9 @@ static int lsp_regenerate(struct isis_area *area, int level)
 	lsp = lsp_search(lspid, lspdb);
 
 	if (!lsp) {
-		zlog_err("ISIS-Upd (%s): lsp_regenerate: no L%d LSP found!",
-			 area->area_tag, level);
+		zlog_ferr(LIB_ERR_DEVELOPMENT,
+			  "ISIS-Upd (%s): lsp_regenerate: no L%d LSP found!",
+			  area->area_tag, level);
 		return ISIS_ERROR;
 	}
 
@@ -1597,8 +1600,9 @@ static int lsp_regenerate_pseudo(struct isis_circuit *circuit, int level)
 	lsp = lsp_search(lsp_id, lspdb);
 
 	if (!lsp) {
-		zlog_err("lsp_regenerate_pseudo: no l%d LSP %s found!", level,
-			 rawlspid_print(lsp_id));
+		zlog_ferr(LIB_ERR_DEVELOPMENT,
+			  "lsp_regenerate_pseudo: no l%d LSP %s found!", level,
+			  rawlspid_print(lsp_id));
 		return ISIS_ERROR;
 	}
 

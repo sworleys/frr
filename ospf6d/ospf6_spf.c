@@ -30,6 +30,7 @@
 #include "pqueue.h"
 #include "linklist.h"
 #include "thread.h"
+#include "lib_errors.h"
 
 #include "ospf6_lsa.h"
 #include "ospf6_lsdb.h"
@@ -272,7 +273,8 @@ static void ospf6_nexthop_calc(struct ospf6_vertex *w, struct ospf6_vertex *v,
 	ifindex = (VERTEX_IS_TYPE(NETWORK, v) ? ospf6_spf_get_ifindex_from_nh(v)
 					      : ROUTER_LSDESC_GET_IFID(lsdesc));
 	if (ifindex == 0) {
-		zlog_err("No nexthop ifindex at vertex %s", v->name);
+		zlog_ferr(LIB_ERR_DEVELOPMENT,
+			  "No nexthop ifindex at vertex %s", v->name);
 		return;
 	}
 
@@ -1012,16 +1014,10 @@ struct ospf6_lsa *ospf6_create_single_router_lsa(struct ospf6_area *area,
 
 	/* Allocate memory for this LSA */
 	new_header = XMALLOC(MTYPE_OSPF6_LSA_HEADER, total_lsa_length);
-	if (!new_header)
-		return NULL;
 
 	/* LSA information structure */
 	lsa = (struct ospf6_lsa *)XCALLOC(MTYPE_OSPF6_LSA,
 					  sizeof(struct ospf6_lsa));
-	if (!lsa) {
-		free(new_header);
-		return NULL;
-	}
 
 	lsa->header = (struct ospf6_lsa_header *)new_header;
 

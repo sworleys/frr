@@ -1944,7 +1944,13 @@ static int area_passwd_set(struct vty *vty, int level,
 		return CMD_WARNING_CONFIG_FAILED;
 	}
 
-	type_set(area, level, passwd, snp_auth);
+	char pass[strlen(passwd) + 1];
+	snprintf(pass, sizeof(pass), "%s", passwd);
+
+	if (host.obfuscate)
+		caesar(false, pass, ISIS_PASSWD_OBFUSCATION_KEY);
+
+	type_set(area, level, pass, snp_auth);
 	return CMD_SUCCESS;
 }
 

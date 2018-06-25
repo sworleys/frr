@@ -38,6 +38,7 @@
 #include "bfd.h"
 #include "libfrr.h"
 #include "defaults.h"
+#include "lib_errors.h"
 
 #include "ospfd/ospfd.h"
 #include "ospfd/ospf_network.h"
@@ -308,12 +309,7 @@ static struct ospf *ospf_new(u_short instance, const char *name)
 			 new->lsa_refresh_interval, &new->t_lsa_refresher);
 	new->lsa_refresher_started = monotime(NULL);
 
-	if ((new->ibuf = stream_new(OSPF_MAX_PACKET_SIZE + 1)) == NULL) {
-		zlog_err(
-			"ospf_new: fatal error: stream_new(%u) failed allocating ibuf",
-			OSPF_MAX_PACKET_SIZE + 1);
-		exit(1);
-	}
+	new->ibuf = stream_new(OSPF_MAX_PACKET_SIZE + 1);
 	new->t_read = NULL;
 	new->oi_write_q = list_new();
 	new->write_oi_count = OSPF_WRITE_INTERFACE_COUNT_DEFAULT;
@@ -2088,10 +2084,10 @@ static int ospf_vrf_enable(struct vrf *vrf)
 				   old_vrf_id);
 
 		if (old_vrf_id != ospf->vrf_id) {
-			if (ospfd_privs.change(ZPRIVS_RAISE)) {
-				zlog_err("ospf_sock_init: could not raise privs, %s",
-					 safe_strerror(errno));
-			}
+			if (ospfd_privs.change(ZPRIVS_RAISE))
+				zlog_ferr(
+					LIB_ERR_PRIVILEGES,
+					"ospf_vrf_link: could not raise privs");
 
 			/* stop zebra redist to us for old vrf */
 			zclient_send_dereg_requests(zclient, old_vrf_id);
@@ -2102,10 +2098,11 @@ static int ospf_vrf_enable(struct vrf *vrf)
 			ospf_zebra_vrf_register(ospf);
 
 			ret = ospf_sock_init(ospf);
-			if (ospfd_privs.change(ZPRIVS_LOWER)) {
-				zlog_err("ospf_sock_init: could not lower privs, %s",
-					 safe_strerror(errno));
-			}
+			if (ospfd_privs.change(ZPRIVS_LOWER))
+				zlog_ferr(
+					LIB_ERR_PRIVILEGES,
+					"ospf_sock_init: could not lower privs");
+
 			if (ret < 0 || ospf->fd <= 0)
 				return 0;
 			thread_add_read(master, ospf_read, ospf,

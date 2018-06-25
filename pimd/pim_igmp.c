@@ -24,6 +24,7 @@
 #include "if.h"
 #include "hash.h"
 #include "jhash.h"
+#include "lib_errors.h"
 
 #include "pimd.h"
 #include "pim_igmp.h"
@@ -96,9 +97,9 @@ static int igmp_sock_open(struct in_addr ifaddr, struct interface *ifp,
 	}
 
 	if (!join) {
-		zlog_err(
-			"IGMP socket fd=%d could not join any group on interface address %s",
-			fd, inet_ntoa(ifaddr));
+		zlog_ferr(LIB_ERR_SOCKET,
+			  "IGMP socket fd=%d could not join any group on interface address %s",
+			  fd, inet_ntoa(ifaddr));
 		close(fd);
 		fd = -1;
 	}
@@ -671,7 +672,8 @@ static void sock_close(struct igmp_sock *igmp)
 	THREAD_OFF(igmp->t_igmp_read);
 
 	if (close(igmp->fd)) {
-		zlog_err(
+		zlog_ferr(
+			LIB_ERR_SOCKET,
 			"Failure closing IGMP socket %s fd=%d on interface %s: errno=%d: %s",
 			inet_ntoa(igmp->ifaddr), igmp->fd,
 			igmp->interface->name, errno, safe_strerror(errno));
@@ -834,18 +836,8 @@ static struct igmp_sock *igmp_sock_new(int fd, struct in_addr ifaddr,
 	}
 
 	igmp = XCALLOC(MTYPE_PIM_IGMP_SOCKET, sizeof(*igmp));
-	if (!igmp) {
-		zlog_warn("%s %s: XCALLOC() failure", __FILE__,
-			  __PRETTY_FUNCTION__);
-		return 0;
-	}
 
 	igmp->igmp_group_list = list_new();
-	if (!igmp->igmp_group_list) {
-		zlog_err("%s %s: failure: igmp_group_list = list_new()",
-			 __FILE__, __PRETTY_FUNCTION__);
-		return 0;
-	}
 	igmp->igmp_group_list->del = (void (*)(void *))igmp_group_free;
 
 	snprintf(hash_name, 64, "IGMP %s hash", ifp->name);
@@ -936,12 +928,6 @@ struct igmp_sock *pim_igmp_sock_add(struct list *igmp_sock_list,
 	}
 
 	igmp = igmp_sock_new(fd, ifaddr, ifp);
-	if (!igmp) {
-		zlog_err("%s %s: igmp_sock_new() failure", __FILE__,
-			 __PRETTY_FUNCTION__);
-		close(fd);
-		return 0;
-	}
 
 	igmp_read_on(igmp);
 
@@ -1095,11 +1081,6 @@ struct igmp_group *igmp_add_group_by_addr(struct igmp_sock *igmp,
 	*/
 
 	group = XCALLOC(MTYPE_PIM_IGMP_GROUP, sizeof(*group));
-	if (!group) {
-		zlog_warn("%s %s: XCALLOC() failure", __FILE__,
-			  __PRETTY_FUNCTION__);
-		return NULL; /* error, not found, could not create */
-	}
 
 	group->group_source_list = list_new();
 	if (!group->group_source_list) {

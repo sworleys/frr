@@ -781,10 +781,7 @@ static struct ospf_lsa *ospf_router_lsa_new(struct ospf_area *area)
 	lsah->length = htons(length);
 
 	/* Now, create OSPF LSA instance. */
-	if ((new = ospf_lsa_new()) == NULL) {
-		zlog_err("%s: Unable to create new lsa", __func__);
-		return NULL;
-	}
+	new = ospf_lsa_new();
 
 	new->area = area;
 	SET_FLAG(new->flags, OSPF_LSA_SELF | OSPF_LSA_SELF_CHECKED);
@@ -804,10 +801,7 @@ static struct ospf_lsa *ospf_router_lsa_originate(struct ospf_area *area)
 	struct ospf_lsa *new;
 
 	/* Create new router-LSA instance. */
-	if ((new = ospf_router_lsa_new(area)) == NULL) {
-		zlog_err("%s: ospf_router_lsa_new returned NULL", __func__);
-		return NULL;
-	}
+	new = ospf_router_lsa_new(area);
 
 	/* Sanity check. */
 	if (new->data->adv_router.s_addr == 0) {
@@ -852,10 +846,7 @@ static struct ospf_lsa *ospf_router_lsa_refresh(struct ospf_lsa *lsa)
 	ospf_refresher_unregister_lsa(area->ospf, lsa);
 
 	/* Create new router-LSA instance. */
-	if ((new = ospf_router_lsa_new(area)) == NULL) {
-		zlog_err("%s: ospf_router_lsa_new returned NULL", __func__);
-		return NULL;
-	}
+	new = ospf_router_lsa_new(area);
 
 	new->data->ls_seqnum = lsa_seqnum_increment(lsa);
 
@@ -997,10 +988,7 @@ static struct ospf_lsa *ospf_network_lsa_new(struct ospf_interface *oi)
 	lsah->length = htons(length);
 
 	/* Create OSPF LSA instance. */
-	if ((new = ospf_lsa_new()) == NULL) {
-		zlog_err("%s: ospf_lsa_new returned NULL", __func__);
-		return NULL;
-	}
+	new = ospf_lsa_new();
 
 	new->area = oi->area;
 	SET_FLAG(new->flags, OSPF_LSA_SELF | OSPF_LSA_SELF_CHECKED);
@@ -1033,6 +1021,20 @@ void ospf_network_lsa_update(struct ospf_interface *oi)
 {
 	struct ospf_lsa *new;
 
+	/*
+	 * The Designated Router originates the LSA only if it is fully
+	 * adjacent to at least one other router on the network.
+	 * -- RFC2328 ss. 12.4.2
+	 */
+	if (oi->full_nbrs == 0) {
+		if (IS_DEBUG_OSPF(lsa, LSA_GENERATE)) {
+			zlog_debug(
+				"Interface '%s': Skipping network-LSA origination since full adjacency count is zero",
+				ospf_if_name_string(oi));
+		}
+		return;
+	}
+
 	if (oi->network_lsa_self != NULL) {
 		ospf_lsa_refresh(oi->ospf, oi->network_lsa_self);
 		return;
@@ -1040,7 +1042,8 @@ void ospf_network_lsa_update(struct ospf_interface *oi)
 
 	/* Create new network-LSA instance. */
 	new = ospf_network_lsa_new(oi);
-	if (new == NULL)
+
+	if (!new)
 		return;
 
 	/* Install LSA to LSDB. */
@@ -1091,8 +1094,6 @@ static struct ospf_lsa *ospf_network_lsa_refresh(struct ospf_lsa *lsa)
 
 	/* Create new network-LSA instance. */
 	new = ospf_network_lsa_new(oi);
-	if (new == NULL)
-		return NULL;
 
 	oip = ospf_lookup_if_params(oi->ifp, oi->address->u.prefix4);
 	assert(oip != NULL);
@@ -1214,8 +1215,7 @@ struct ospf_lsa *ospf_summary_lsa_originate(struct prefix_ipv4 *p,
 	}
 
 	/* Create new summary-LSA instance. */
-	if (!(new = ospf_summary_lsa_new(area, (struct prefix *)p, metric, id)))
-		return NULL;
+	new = ospf_summary_lsa_new(area, (struct prefix *)p, metric, id);
 
 	/* Instlal LSA to LSDB. */
 	new = ospf_lsa_install(area->ospf, NULL, new);
@@ -1250,9 +1250,6 @@ static struct ospf_lsa *ospf_summary_lsa_refresh(struct ospf *ospf,
 	p.prefixlen = ip_masklen(sl->mask);
 	new = ospf_summary_lsa_new(lsa->area, &p, GET_METRIC(sl->metric),
 				   sl->header.id);
-
-	if (!new)
-		return NULL;
 
 	new->data->ls_seqnum = lsa_seqnum_increment(lsa);
 
@@ -2911,23 +2908,17 @@ void ospf_lsa_maxage(struct ospf *ospf, struct ospf_lsa *lsa)
 	lsa_prefix.prefixlen = sizeof(lsa_prefix.u.ptr) * CHAR_BIT;
 	lsa_prefix.u.ptr = (uintptr_t)lsa;
 
-	if ((rn = route_node_get(ospf->maxage_lsa,
-				 (struct prefix *)&lsa_prefix)) != NULL) {
-		if (rn->info != NULL) {
-			if (IS_DEBUG_OSPF(lsa, LSA_FLOODING))
-				zlog_debug(
-					"LSA[%s]: found LSA (%p) in table for LSA %p %d",
-					dump_lsa_key(lsa), rn->info,
-					(void *)lsa, lsa_prefix.prefixlen);
-			route_unlock_node(rn);
-		} else {
-			rn->info = ospf_lsa_lock(lsa);
-			SET_FLAG(lsa->flags, OSPF_LSA_IN_MAXAGE);
-		}
+	rn = route_node_get(ospf->maxage_lsa, (struct prefix *)&lsa_prefix);
+	if (rn->info != NULL) {
+		if (IS_DEBUG_OSPF(lsa, LSA_FLOODING))
+			zlog_debug(
+				   "LSA[%s]: found LSA (%p) in table for LSA %p %d",
+				   dump_lsa_key(lsa), rn->info,
+				   (void *)lsa, lsa_prefix.prefixlen);
+		route_unlock_node(rn);
 	} else {
-		zlog_err("Unable to allocate memory for maxage lsa %s\n",
-			 dump_lsa_key(lsa));
-		assert(0);
+		rn->info = ospf_lsa_lock(lsa);
+		SET_FLAG(lsa->flags, OSPF_LSA_IN_MAXAGE);
 	}
 
 	if (IS_DEBUG_OSPF(lsa, LSA_FLOODING))

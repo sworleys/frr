@@ -1,3 +1,9 @@
+frr (4.0+cl3u3) RELEASED; urgency=medium
+
+  * Fixes: Lots of stuff
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Fri, 25 May 2018 18:10:00 -0400
+
 frr (4.0+cl3u2) RELEASED; urgency=medium
 
   * Fixes: CM-20471 bgpd: Update parent's refcount for imported routes
@@ -22,58 +28,6 @@ frr (4.0+cl3u1) RELEASED; urgency=medium
   * New Enabled: BGP VRF - VRF Route Leaking
 
  -- dev-support <dev-support@cumulusnetworks.com>  Mon, 9 Apr 2018 18:10:00 -0400
-
-frr (3.2+cl3u6) RELEASED; urgency=medium
-
-  * Fixes: CM-19756 bgpd: Provide efficient access to bgp vrf
-
- -- dev-support <dev-support@cumulusnetworks.com>  Wed, 14 Mar 2018 15:51:20 -0400
-
-frr (3.2+cl3u5) RELEASED; urgency=medium
-
-  * Fixes: CM-19923 zebra: Act on kernel notifications for remote neighbors
-
- -- dev-support <dev-support@cumulusnetworks.com>  Wed, 7 Mar 2018 14:06:39 -0500
-
-frr (3.2+cl3u4) RELEASED; urgency=medium
-
-  * Fixes: CM-19812 bgpd: Fix incorrect keepalive timer evaluation
-
- -- dev-support <dev-support@cumulusnetworks.com>  Wed, 21 Feb 2018 15:51:19 -0500
-
-frr (3.2+cl3u3) RELEASED; urgency=medium
-
-  * Fixes: CM-19456 bgpd: Ensure EVPN routes are not injected back into EVPN
-  * Fixes: CM-19256 bgpd: Fix crash compliance testing
-  * Fixes: CM-19118 bgpd: Fix display of coalesce-time values
-  * Fixes: CM-19195 zebra: Fix VxLan tunnel handling
-  * Fixes: CM-19521 zebra: Fix Unable to ping locally connected host
-  * Fixes: CM-19603 zebra: Handle local-ip change correctly for l3-vni
-
- -- dev-support <dev-support@cumulusnetworks.com>  Fri, 19 Jan 2018 12:54:32 -0500
-
-frr (3.2+cl3u2) RELEASED; urgency=medium
-
-  * Fixes: CM-18818 pimd: *,G join to clear S,G RPT state not always sent
-  * Fixes: CM-19156 ospfd: Fix core with passive interfaces in vrf's
-  * Fixes: CM-19213 ospfd: Fix chatty log
-  * Fixes: CM-19131 bgpd: Fix display for type-5 route
-  * Fixes: CM-19206 bgpd: Fix failure to delete type-5 route when vrf/32 withdrawn
-  * Fixes: CM-19053 pimd: Fix error reported for non-error commands in msdp
-  * Fixes: CM-19365 ospfd: Fix no passive interface command parsing
-
- -- dev-support <dev-support@cumulusnetworks.com>  Thu, 4 Jan 2018 06:42:22 -0500
-
-frr (3.2+cl3u1) RELEASED; urgency=medium
-
-  * New Enabled: Update FRR to latest codebase
-  * New Enabled: PIM - Boundaries
-  * New Enabled: PIM - Overlapping RP specifications
-  * New Enabled: OSPF VRF
-  * New Enabled: BGP Symmetric EVPN Routing
-  * Fixes: Too many bugs to list
-
- -- FRRouting-Dev <dev@lists.frrouting.org>  Wed, 18 Oct 2017 17:01:42 -0700
 
 frr (3.0-1) RELEASED; urgency=medium
 

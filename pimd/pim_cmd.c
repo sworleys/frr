@@ -4364,9 +4364,9 @@ static void pim_cmd_show_ip_multicast_helper(struct pim_instance *pim,
 	vty_out(vty, "\n");
 	vty_out(vty, "Upstream Join Timer: %d secs\n", qpim_t_periodic);
 	vty_out(vty, "Join/Prune Holdtime: %d secs\n", PIM_JP_HOLDTIME);
-	vty_out(vty, "PIM ECMP: %s\n", qpim_ecmp_enable ? "Enable" : "Disable");
+	vty_out(vty, "PIM ECMP: %s\n", pim->ecmp_enable ? "Enable" : "Disable");
 	vty_out(vty, "PIM ECMP Rebalance: %s\n",
-		qpim_ecmp_rebalance_enable ? "Enable" : "Disable");
+		pim->ecmp_rebalance_enable ? "Enable" : "Disable");
 
 	vty_out(vty, "\n");
 
@@ -5034,11 +5034,6 @@ static int pim_rp_cmd_worker(struct pim_instance *pim, struct vty *vty,
 
 	result = pim_rp_new(pim, rp, group, plist);
 
-	if (result == PIM_MALLOC_FAIL) {
-		vty_out(vty, "%% Out of memory\n");
-		return CMD_WARNING_CONFIG_FAILED;
-	}
-
 	if (result == PIM_GROUP_BAD_ADDRESS) {
 		vty_out(vty, "%% Bad group address specified: %s\n", group);
 		return CMD_WARNING_CONFIG_FAILED;
@@ -5667,7 +5662,7 @@ DEFUN (ip_pim_ecmp,
        "Enable PIM ECMP \n")
 {
 	PIM_DECLVAR_CONTEXT(vrf, pim);
-	qpim_ecmp_enable = 1;
+	pim->ecmp_enable = true;
 
 	return CMD_SUCCESS;
 }
@@ -5681,7 +5676,7 @@ DEFUN (no_ip_pim_ecmp,
        "Disable PIM ECMP \n")
 {
 	PIM_DECLVAR_CONTEXT(vrf, pim);
-	qpim_ecmp_enable = 0;
+	pim->ecmp_enable = false;
 
 	return CMD_SUCCESS;
 }
@@ -5695,8 +5690,8 @@ DEFUN (ip_pim_ecmp_rebalance,
        "Enable PIM ECMP Rebalance\n")
 {
 	PIM_DECLVAR_CONTEXT(vrf, pim);
-	qpim_ecmp_enable = 1;
-	qpim_ecmp_rebalance_enable = 1;
+	pim->ecmp_enable = true;
+	pim->ecmp_rebalance_enable = true;
 
 	return CMD_SUCCESS;
 }
@@ -5711,7 +5706,7 @@ DEFUN (no_ip_pim_ecmp_rebalance,
        "Disable PIM ECMP Rebalance\n")
 {
 	PIM_DECLVAR_CONTEXT(vrf, pim);
-	qpim_ecmp_rebalance_enable = 0;
+	pim->ecmp_rebalance_enable = false;
 
 	return CMD_SUCCESS;
 }

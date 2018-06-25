@@ -35,6 +35,7 @@
 #include "bgpd/bgp_evpn_private.h"
 #include "bgpd/bgp_zebra.h"
 #include "bgpd/bgp_vty.h"
+#include "bgpd/bgp_errors.h"
 #include "bgpd/bgp_ecommunity.h"
 
 #define SHOW_DISPLAY_STANDARD 0
@@ -1687,6 +1688,7 @@ static void evpn_unconfigure_vrf_rd(struct bgp *bgp_vrf)
 
 	/* fall back to default RD */
 	bgp_evpn_derive_auto_rd_for_vrf(bgp_vrf);
+	UNSET_FLAG(bgp_vrf->vrf_flags, BGP_VRF_RD_CFGD);
 
 	/* We have a new RD for VRF.
 	 * Advertise all type-5 routes again with the new RD
@@ -1751,7 +1753,8 @@ static struct bgpevpn *evpn_create_update_vni(struct bgp *bgp, vni_t vni)
 		 */
 		vpn = bgp_evpn_new(bgp, vni, bgp->router_id, 0);
 		if (!vpn) {
-			zlog_err(
+			zlog_ferr(
+				BGP_ERR_VNI,
 				"%u: Failed to allocate VNI entry for VNI %u - at Config",
 				bgp->vrf_id, vni);
 			return NULL;
@@ -2587,14 +2590,6 @@ static void write_vni_config(struct vty *vty, struct bgpevpn *vpn)
 		vty_out(vty, "  exit-vni\n");
 	}
 }
-
-static void write_vni_config_for_entry(struct hash_backet *backet,
-				       struct vty *vty)
-{
-	struct bgpevpn *vpn = (struct bgpevpn *)backet->data;
-	write_vni_config(vty, vpn);
-}
-
 
 #if defined(HAVE_CUMULUS)
 DEFUN (bgp_evpn_advertise_default_gw_vni,
@@ -3827,6 +3822,12 @@ DEFUN (bgp_evpn_vni_rd,
 	if (!bgp || !vpn)
 		return CMD_WARNING;
 
+	if (bgp->vrf_id != VRF_DEFAULT) {
+		vty_out(vty,
+			"This command is only supported under Default VRF\n");
+		return CMD_WARNING;
+	}
+
 	ret = str2prefix_rd(argv[1]->arg, &prd);
 	if (!ret) {
 		vty_out(vty, "%% Malformed Route Distinguisher\n");
@@ -3856,6 +3857,12 @@ DEFUN (no_bgp_evpn_vni_rd,
 
 	if (!bgp || !vpn)
 		return CMD_WARNING;
+
+	if (bgp->vrf_id != VRF_DEFAULT) {
+		vty_out(vty,
+			"This command is only supported under Default VRF\n");
+		return CMD_WARNING;
+	}
 
 	ret = str2prefix_rd(argv[2]->arg, &prd);
 	if (!ret) {
@@ -3890,6 +3897,12 @@ DEFUN (no_bgp_evpn_vni_rd_without_val,
 
 	if (!bgp || !vpn)
 		return CMD_WARNING;
+
+	if (bgp->vrf_id != VRF_DEFAULT) {
+		vty_out(vty,
+			"This command is only supported under Default VRF\n");
+		return CMD_WARNING;
+	}
 
 	/* Check if we should disallow. */
 	if (!is_rd_configured(vpn)) {
@@ -4217,6 +4230,12 @@ DEFUN (bgp_evpn_vni_rt,
 	if (!bgp || !vpn)
 		return CMD_WARNING;
 
+	if (bgp->vrf_id != VRF_DEFAULT) {
+		vty_out(vty,
+			"This command is only supported under Default VRF\n");
+		return CMD_WARNING;
+	}
+
 	if (!strcmp(argv[1]->text, "import"))
 		rt_type = RT_TYPE_IMPORT;
 	else if (!strcmp(argv[1]->text, "export"))
@@ -4278,6 +4297,12 @@ DEFUN (no_bgp_evpn_vni_rt,
 
 	if (!bgp || !vpn)
 		return CMD_WARNING;
+
+	if (bgp->vrf_id != VRF_DEFAULT) {
+		vty_out(vty,
+			"This command is only supported under Default VRF\n");
+		return CMD_WARNING;
+	}
 
 	if (!strcmp(argv[2]->text, "import"))
 		rt_type = RT_TYPE_IMPORT;
@@ -4372,6 +4397,12 @@ DEFUN (no_bgp_evpn_vni_rt_without_val,
 	if (!bgp || !vpn)
 		return CMD_WARNING;
 
+	if (bgp->vrf_id != VRF_DEFAULT) {
+		vty_out(vty,
+			"This command is only supported under Default VRF\n");
+		return CMD_WARNING;
+	}
+
 	if (!strcmp(argv[2]->text, "import")) {
 		rt_type = RT_TYPE_IMPORT;
 	} else if (!strcmp(argv[2]->text, "export")) {
@@ -4404,6 +4435,15 @@ DEFUN (no_bgp_evpn_vni_rt_without_val,
 	return CMD_SUCCESS;
 }
 #endif
+
+static int vni_cmp(const void **a, const void **b)
+{
+	const struct bgpevpn *first = *a;
+	const struct bgpevpn *secnd = *b;
+
+	return secnd->vni - first->vni;
+}
+
 /*
  * Output EVPN configuration information.
  */
@@ -4412,11 +4452,17 @@ void bgp_config_write_evpn_info(struct vty *vty, struct bgp *bgp, afi_t afi,
 {
 	char buf1[RD_ADDRSTRLEN];
 
-	if (bgp->vnihash)
-		hash_iterate(bgp->vnihash,
-			     (void (*)(struct hash_backet *,
-				       void *))write_vni_config_for_entry,
-			     vty);
+	if (bgp->vnihash) {
+		struct list *vnilist = hash_to_list(bgp->vnihash);
+		struct listnode *ln;
+		struct bgpevpn *data;
+
+		list_sort(vnilist, vni_cmp);
+		for (ALL_LIST_ELEMENTS_RO(vnilist, ln, data))
+			write_vni_config(vty, data);
+
+		list_delete_and_null(&vnilist);
+	}
 
 	if (bgp->advertise_all_vni)
 		vty_out(vty, "  advertise-all-vni\n");

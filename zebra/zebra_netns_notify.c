@@ -34,6 +34,7 @@
 #include "ns.h"
 #include "command.h"
 #include "memory.h"
+#include "lib_errors.h"
 
 #include "zserv.h"
 #include "zebra_memory.h"
@@ -76,10 +77,10 @@ static void zebra_ns_notify_create_context_from_entry_name(const char *name)
 		return;
 
 	if (zserv_privs.change(ZPRIVS_RAISE))
-		zlog_err("Can't raise privileges");
+		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 	ns_id = zebra_ns_id_get(netnspath);
 	if (zserv_privs.change(ZPRIVS_LOWER))
-		zlog_err("Can't lower privileges");
+		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 	/* if VRF with NS ID already present */
 	vrf = vrf_lookup_by_id((vrf_id_t)ns_id);
 	if (vrf) {
@@ -132,19 +133,19 @@ static int zebra_ns_ready_read(struct thread *t)
 	if (--zns_info->retries == 0)
 		stop_retry = 1;
 	if (zserv_privs.change(ZPRIVS_RAISE))
-		zlog_err("Can't raise privileges");
+		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 	err = ns_switch_to_netns(netnspath);
 	if (zserv_privs.change(ZPRIVS_LOWER))
-		zlog_err("Can't lower privileges");
+		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 	if (err < 0)
 		return zebra_ns_continue_read(zns_info, stop_retry);
 
 	/* go back to default ns */
 	if (zserv_privs.change(ZPRIVS_RAISE))
-		zlog_err("Can't raise privileges");
+		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 	err = ns_switchback_to_initial();
 	if (zserv_privs.change(ZPRIVS_LOWER))
-		zlog_err("Can't lower privileges");
+		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 	if (err < 0)
 		return zebra_ns_continue_read(zns_info, stop_retry);
 

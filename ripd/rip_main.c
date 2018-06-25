@@ -37,6 +37,7 @@
 #include "libfrr.h"
 
 #include "ripd/ripd.h"
+#include "ripd/rip_errors.h"
 
 /* ripd options. */
 static struct option longopts[] = {{"retain", no_argument, NULL, 'r'}, {0}};
@@ -160,6 +161,7 @@ int main(int argc, char **argv)
 	master = frr_init();
 
 	/* Library initialization. */
+	rip_error_init();
 	keychain_init();
 	vrf_init(NULL, NULL, NULL, NULL);
 

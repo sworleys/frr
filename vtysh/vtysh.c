@@ -43,6 +43,8 @@
 #include "ns.h"
 #include "vrf.h"
 #include "libfrr.h"
+#include "command_graph.h"
+#include "json.h"
 
 DEFINE_MTYPE_STATIC(MVTYSH, VTYSH_CMD, "Vtysh cmd copy")
 
@@ -358,6 +360,8 @@ static int vtysh_execute_func(const char *line, int pager)
 			    || saved_node == BGP_VNC_L2_GROUP_NODE)
 			   && (tried == 1)) {
 			vtysh_execute("exit-vnc");
+		} else if (saved_node == VRF_NODE && (tried == 1)) {
+			vtysh_execute("exit-vrf");
 		} else if ((saved_node == KEYCHAIN_KEY_NODE
 			    || saved_node == LDP_PSEUDOWIRE_NODE
 			    || saved_node == LDP_IPV4_IFACE_NODE
@@ -1641,8 +1645,16 @@ DEFUNSH(VTYSH_BGPD, exit_vnc_config, exit_vnc_config_cmd, "exit-vnc",
 	return CMD_SUCCESS;
 }
 
+DEFUNSH(VTYSH_PIMD|VTYSH_ZEBRA, exit_vrf_config, exit_vrf_config_cmd, "exit-vrf",
+	"Exit from VRF configuration mode\n")
+{
+	if (vty->node == VRF_NODE)
+		vty->node = CONFIG_NODE;
+	return CMD_SUCCESS;
+}
+
 DEFUNSH(VTYSH_BGPD, exit_vrf_policy, exit_vrf_policy_cmd, "exit-vrf-policy",
-	"Exit from VRF  configuration mode\n")
+	"Exit from VRF policy configuration mode\n")
 {
 	if (vty->node == BGP_VRF_POLICY_NODE)
 		vty->node = BGP_NODE;
@@ -1928,6 +1940,29 @@ DEFUNSH(VTYSH_INTERFACE, vtysh_quit_interface, vtysh_quit_interface_cmd, "quit",
 	return vtysh_exit_interface(self, vty, argc, argv);
 }
 
+DEFUN (vtysh_show_poll,
+       vtysh_show_poll_cmd,
+       "show thread poll",
+       SHOW_STR
+       "Thread information\n"
+       "Thread Poll Information\n")
+{
+	unsigned int i;
+	int ret = CMD_SUCCESS;
+	char line[100];
+
+	snprintf(line, sizeof(line), "do show thread poll\n");
+	for (i = 0; i < array_size(vtysh_client); i++)
+		if (vtysh_client[i].fd >= 0) {
+			vty_out(vty, "Thread statistics for %s:\n",
+				vtysh_client[i].name);
+			ret = vtysh_client_execute(&vtysh_client[i], line,
+						   outputfile);
+			vty_out(vty, "\n");
+		}
+	return ret;
+}
+
 DEFUN (vtysh_show_thread,
        vtysh_show_thread_cmd,
        "show thread cpu [FILTER]",
@@ -2079,6 +2114,27 @@ DEFUN (vtysh_show_debugging_hashtable,
 
 	return show_per_daemon("do show debugging hashtable\n",
 			       "Hashtable statistics for %s:\n");
+}
+
+DEFUN (vtysh_show_error_code,
+       vtysh_show_error_code_cmd,
+       "show error <(1-4294967296)|all> [json]",
+       SHOW_STR
+       "Information on errors\n"
+       "Error code to get info about\n"
+       "Information on all errors\n"
+       JSON_STR)
+{
+	char cmd[256];
+	int rv;
+	char *fcmd = argv_concat(argv, argc, 0);
+	snprintf(cmd, sizeof(cmd), "do %s", fcmd);
+
+	/* FIXME: Needs to determine which daemon to send to via code ranges */
+	rv = show_per_daemon(cmd, "");
+
+	XFREE(MTYPE_TMP, fcmd);
+	return rv;
 }
 
 /* Memory */
@@ -2282,6 +2338,15 @@ DEFUNSH(VTYSH_ALL, no_vtysh_service_password_encrypt,
 	NO_STR
 	"Set up miscellaneous service\n"
 	"Enable encrypted passwords\n")
+{
+	return CMD_SUCCESS;
+}
+
+DEFUNSH(VTYSH_ALL, service_password_obfuscate, service_password_obfuscate_cmd,
+	"[no] service password-obfuscation",
+	NO_STR
+	"Set up miscellaneous service\n"
+	"Obfuscate unencrypted passwords\n")
 {
 	return CMD_SUCCESS;
 }
@@ -3420,6 +3485,8 @@ void vtysh_init_vty(void)
 	install_element(ENABLE_NODE, &vtysh_show_running_config_cmd);
 	install_element(ENABLE_NODE, &vtysh_copy_running_config_cmd);
 
+	install_element(VRF_NODE, &exit_vrf_config_cmd);
+
 	install_element(CONFIG_NODE, &vtysh_vrf_cmd);
 	install_element(CONFIG_NODE, &vtysh_no_vrf_cmd);
 	install_element(CONFIG_NODE, &vtysh_no_nexthop_group_cmd);
@@ -3457,6 +3524,7 @@ void vtysh_init_vty(void)
 
 	/* debugging */
 	install_element(VIEW_NODE, &vtysh_show_debugging_cmd);
+	install_element(VIEW_NODE, &vtysh_show_error_code_cmd);
 	install_element(VIEW_NODE, &vtysh_show_debugging_hashtable_cmd);
 	install_element(VIEW_NODE, &vtysh_debug_all_cmd);
 	install_element(CONFIG_NODE, &vtysh_debug_all_cmd);
@@ -3467,6 +3535,7 @@ void vtysh_init_vty(void)
 	install_element(VIEW_NODE, &vtysh_show_work_queues_cmd);
 	install_element(VIEW_NODE, &vtysh_show_work_queues_daemon_cmd);
 	install_element(VIEW_NODE, &vtysh_show_thread_cmd);
+	install_element(VIEW_NODE, &vtysh_show_poll_cmd);
 
 	/* Logging */
 	install_element(VIEW_NODE, &vtysh_show_logging_cmd);
@@ -3491,6 +3560,8 @@ void vtysh_init_vty(void)
 
 	install_element(CONFIG_NODE, &vtysh_service_password_encrypt_cmd);
 	install_element(CONFIG_NODE, &no_vtysh_service_password_encrypt_cmd);
+
+	install_element(CONFIG_NODE, &service_password_obfuscate_cmd);
 
 	install_element(CONFIG_NODE, &vtysh_password_cmd);
 	install_element(CONFIG_NODE, &vtysh_enable_password_cmd);

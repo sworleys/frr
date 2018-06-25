@@ -27,6 +27,7 @@
 #include "memory.h"
 #include "log.h"
 #include "jhash.h"
+#include "lib_errors.h"
 
 DEFINE_MTYPE_STATIC(LIB, PREFIX, "Prefix")
 
@@ -339,6 +340,21 @@ int str2family(const char *string)
 	return -1;
 }
 
+const char *family2str(int family)
+{
+	switch (family) {
+	case AF_INET:
+		return "IPv4";
+	case AF_INET6:
+		return "IPv6";
+	case AF_ETHERNET:
+		return "Ethernet";
+	case AF_EVPN:
+		return "Evpn";
+	}
+	return "?";
+}
+
 /* Address Famiy Identifier to Address Family converter. */
 int afi2family(afi_t afi)
 {
@@ -473,8 +489,9 @@ void prefix_copy(struct prefix *dest, const struct prefix *src)
 		dest->u.lp.id = src->u.lp.id;
 		dest->u.lp.adv_router = src->u.lp.adv_router;
 	} else {
-		zlog_err("prefix_copy(): Unknown address family %d",
-			 src->family);
+		zlog_ferr(LIB_ERR_DEVELOPMENT,
+			  "prefix_copy(): Unknown address family %d",
+			  src->family);
 		assert(0);
 	}
 }

@@ -37,6 +37,7 @@
 #include "privs.h"
 #include "table.h"
 #include "vty.h"
+#include "lib_errors.h"
 
 #include "eigrpd/eigrp_structs.h"
 #include "eigrpd/eigrpd.h"
@@ -58,17 +59,19 @@ int eigrp_sock_init(void)
 	int ret, hincl = 1;
 
 	if (eigrpd_privs.change(ZPRIVS_RAISE))
-		zlog_err("eigrp_sock_init: could not raise privs, %s",
-			 safe_strerror(errno));
+		zlog_ferr(LIB_ERR_PRIVILEGES,
+			  "eigrp_sock_init: could not raise privs, %s",
+			  safe_strerror(errno));
 
 	eigrp_sock = socket(AF_INET, SOCK_RAW, IPPROTO_EIGRPIGP);
 	if (eigrp_sock < 0) {
 		int save_errno = errno;
 		if (eigrpd_privs.change(ZPRIVS_LOWER))
-			zlog_err("eigrp_sock_init: could not lower privs, %s",
-				 safe_strerror(errno));
-		zlog_err("eigrp_read_sock_init: socket: %s",
-			 safe_strerror(save_errno));
+			zlog_ferr(LIB_ERR_PRIVILEGES,
+				  "eigrp_sock_init: could not lower privs, %s",
+				  safe_strerror(errno));
+		zlog_ferr(LIB_ERR_SOCKET, "eigrp_read_sock_init: socket: %s",
+			  safe_strerror(save_errno));
 		exit(1);
 	}
 
@@ -79,8 +82,9 @@ int eigrp_sock_init(void)
 	if (ret < 0) {
 		int save_errno = errno;
 		if (eigrpd_privs.change(ZPRIVS_LOWER))
-			zlog_err("eigrp_sock_init: could not lower privs, %s",
-				 safe_strerror(errno));
+			zlog_ferr(LIB_ERR_PRIVILEGES,
+				  "eigrp_sock_init: could not lower privs, %s",
+				  safe_strerror(errno));
 		zlog_warn("Can't set IP_HDRINCL option for fd %d: %s",
 			  eigrp_sock, safe_strerror(save_errno));
 	}
@@ -91,8 +95,9 @@ int eigrp_sock_init(void)
 	if (ret < 0) {
 		int save_errno = errno;
 		if (eigrpd_privs.change(ZPRIVS_LOWER))
-			zlog_err("eigrpd_sock_init: could not lower privs, %s",
-				 safe_strerror(errno));
+			zlog_ferr(LIB_ERR_PRIVILEGES,
+				  "eigrpd_sock_init: could not lower privs, %s",
+				  safe_strerror(errno));
 		zlog_warn("can't set sockopt IP_TOS %d to socket %d: %s", tos,
 			  eigrp_sock, safe_strerror(save_errno));
 		close(eigrp_sock); /* Prevent sd leak. */
@@ -109,8 +114,9 @@ int eigrp_sock_init(void)
 		zlog_warn("Can't set pktinfo option for fd %d", eigrp_sock);
 
 	if (eigrpd_privs.change(ZPRIVS_LOWER)) {
-		zlog_err("eigrp_sock_init: could not lower privs, %s",
-			 safe_strerror(errno));
+		zlog_ferr(LIB_ERR_PRIVILEGES,
+			  "eigrp_sock_init: could not lower privs, %s",
+			  safe_strerror(errno));
 	}
 
 	return eigrp_sock;
@@ -123,8 +129,8 @@ void eigrp_adjust_sndbuflen(struct eigrp *eigrp, unsigned int buflen)
 	if (eigrp->maxsndbuflen >= buflen)
 		return;
 	if (eigrpd_privs.change(ZPRIVS_RAISE))
-		zlog_err("%s: could not raise privs, %s", __func__,
-			 safe_strerror(errno));
+		zlog_ferr(LIB_ERR_PRIVILEGES, "%s: could not raise privs, %s",
+			  __func__, safe_strerror(errno));
 
 	/* Now we try to set SO_SNDBUF to what our caller has requested
 	 * (the MTU of a newly added interface). However, if the OS has
@@ -143,8 +149,8 @@ void eigrp_adjust_sndbuflen(struct eigrp *eigrp, unsigned int buflen)
 	else
 		zlog_warn("%s: failed to get SO_SNDBUF", __func__);
 	if (eigrpd_privs.change(ZPRIVS_LOWER))
-		zlog_err("%s: could not lower privs, %s", __func__,
-			 safe_strerror(errno));
+		zlog_ferr(LIB_ERR_PRIVILEGES, "%s: could not lower privs, %s",
+			  __func__, safe_strerror(errno));
 }
 
 int eigrp_if_ipmulticast(struct eigrp *top, struct prefix *p,

@@ -43,6 +43,7 @@
 #include "vrf.h"
 #include "libfrr.h"
 #include "sockopt.h"
+#include "lib_errors.h"
 
 #include "zebra/zserv.h"
 #include "zebra/zebra_ns.h"
@@ -61,6 +62,7 @@
 #include "zebra/zebra_vxlan.h"
 #include "zebra/rt.h"
 #include "zebra/zebra_pbr.h"
+#include "zebra/zebra_errors.h"
 
 /* Event list of zebra. */
 enum event { ZEBRA_SERV, ZEBRA_READ, ZEBRA_WRITE };
@@ -745,9 +747,9 @@ static int zserv_rnh_register(struct zserv *client, u_short length,
 			STREAM_GET(&p.u.prefix6, s, IPV6_MAX_BYTELEN);
 			l += IPV6_MAX_BYTELEN;
 		} else {
-			zlog_err(
-				"rnh_register: Received unknown family type %d\n",
-				p.family);
+			zlog_ferr(ZEBRA_ERR_UNKNOWN_FAMILY,
+				  "rnh_register: Received unknown family type %d\n",
+				  p.family);
 			return -1;
 		}
 		rnh = zebra_add_rnh(&p, zvrf_id(zvrf), type);
@@ -818,9 +820,9 @@ static int zserv_rnh_unregister(struct zserv *client, u_short length,
 			STREAM_GET(&p.u.prefix6, s, IPV6_MAX_BYTELEN);
 			l += IPV6_MAX_BYTELEN;
 		} else {
-			zlog_err(
-				"rnh_register: Received unknown family type %d\n",
-				p.family);
+			zlog_ferr(ZEBRA_ERR_UNKNOWN_FAMILY,
+				  "rnh_register: Received unknown family type %d\n",
+				  p.family);
 			return -1;
 		}
 		rnh = zebra_lookup_rnh(&p, zvrf_id(zvrf), type);
@@ -855,9 +857,9 @@ static int zserv_fec_register(struct zserv *client, u_short length)
 	 * registration
 	 */
 	if (length < ZEBRA_MIN_FEC_LENGTH) {
-		zlog_err(
-			"fec_register: Received a fec register of length %d, it is of insufficient size to properly decode",
-			length);
+		zlog_ferr(ZEBRA_ERR_IRDP_LEN_MISMATCH,
+			  "fec_register: Received a fec register of length %d, it is of insufficient size to properly decode",
+			  length);
 		return -1;
 	}
 
@@ -866,9 +868,9 @@ static int zserv_fec_register(struct zserv *client, u_short length)
 		memset(&p, 0, sizeof(p));
 		STREAM_GETW(s, p.family);
 		if (p.family != AF_INET && p.family != AF_INET6) {
-			zlog_err(
-				"fec_register: Received unknown family type %d\n",
-				p.family);
+			zlog_ferr(ZEBRA_ERR_UNKNOWN_FAMILY,
+				  "fec_register: Received unknown family type %d\n",
+				  p.family);
 			return -1;
 		}
 		STREAM_GETC(s, p.prefixlen);
@@ -912,9 +914,9 @@ static int zserv_fec_unregister(struct zserv *client, u_short length)
 	 * fec unregistration
 	 */
 	if (length < ZEBRA_MIN_FEC_LENGTH) {
-		zlog_err(
-			"fec_unregister: Received a fec unregister of length %d, it is of insufficient size to properly decode",
-			length);
+		zlog_ferr(ZEBRA_ERR_IRDP_LEN_MISMATCH,
+			  "fec_unregister: Received a fec unregister of length %d, it is of insufficient size to properly decode",
+			  length);
 		return -1;
 	}
 
@@ -926,9 +928,9 @@ static int zserv_fec_unregister(struct zserv *client, u_short length)
 		memset(&p, 0, sizeof(p));
 		STREAM_GETW(s, p.family);
 		if (p.family != AF_INET && p.family != AF_INET6) {
-			zlog_err(
-				"fec_unregister: Received unknown family type %d\n",
-				p.family);
+			zlog_ferr(ZEBRA_ERR_UNKNOWN_FAMILY,
+				  "fec_unregister: Received unknown family type %d\n",
+				  p.family);
 			return -1;
 		}
 		STREAM_GETC(s, p.prefixlen);
@@ -2261,8 +2263,9 @@ static void zread_label_manager_connect(struct zserv *client, vrf_id_t vrf_id)
 
 	/* accept only dynamic routing protocols */
 	if ((proto >= ZEBRA_ROUTE_MAX) || (proto <= ZEBRA_ROUTE_STATIC)) {
-		zlog_err("client %d has wrong protocol %s", client->sock,
-			 zebra_route_string(proto));
+		zlog_ferr(ZEBRA_ERR_TM_WRONG_PROTO,
+			  "client %d has wrong protocol %s", client->sock,
+			  zebra_route_string(proto));
 		zsend_label_manager_connect_response(client, vrf_id, 1);
 		return;
 	}
@@ -2328,8 +2331,9 @@ static void zread_get_label_chunk(struct zserv *client, vrf_id_t vrf_id)
 
 	lmc = assign_label_chunk(client->proto, client->instance, keep, size);
 	if (!lmc)
-		zlog_err("%s: Unable to assign Label Chunk of size %u",
-			 __func__, size);
+		zlog_ferr(ZEBRA_ERR_LM_CANNOT_ASSIGN_CHUNK,
+			  "%s: Unable to assign Label Chunk of size %u",
+			  __func__, size);
 	else
 		zlog_debug("Assigned Label Chunk %u - %u to %u", lmc->start,
 			   lmc->end, keep);
@@ -2376,8 +2380,8 @@ static void zread_label_manager_request(int cmd, struct zserv *client,
 		else {
 			/* Sanity: don't allow 'unidentified' requests */
 			if (!client->proto) {
-				zlog_err(
-					"Got label request from an unidentified client");
+				zlog_ferr(ZEBRA_ERR_LM_ALIENS,
+					  "Got label request from an unidentified client");
 				return;
 			}
 			if (cmd == ZEBRA_GET_LABEL_CHUNK)
@@ -3003,9 +3007,9 @@ static int zebra_client_read(struct thread *thread)
 		STREAM_GETW(client->ibuf, command);
 
 		if (marker != ZEBRA_HEADER_MARKER || version != ZSERV_VERSION) {
-			zlog_err(
-				"%s: socket %d version mismatch, marker %d, version %d",
-				__func__, sock, marker, version);
+			zlog_ferr(LIB_ERR_ZAPI_MISSMATCH,
+				  "%s: socket %d version mismatch, marker %d, version %d",
+				  __func__, sock, marker, version);
 			zebra_client_close(client);
 			return -1;
 		}
@@ -3161,7 +3165,7 @@ void zebra_zserv_socket_init(char *path)
 	zserv_privs.change(ZPRIVS_LOWER);
 
 	if (sa.ss_family != AF_UNIX && zserv_privs.change(ZPRIVS_RAISE))
-		zlog_err("Can't raise privileges");
+		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 
 	ret = bind(sock, (struct sockaddr *)&sa, sa_len);
 	if (ret < 0) {
@@ -3173,7 +3177,7 @@ void zebra_zserv_socket_init(char *path)
 		return;
 	}
 	if (sa.ss_family != AF_UNIX && zserv_privs.change(ZPRIVS_LOWER))
-		zlog_err("Can't lower privileges");
+		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 
 	ret = listen(sock, 5);
 	if (ret < 0) {
