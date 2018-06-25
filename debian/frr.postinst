@@ -32,5 +32,36 @@ if [ "$1" = "abort-upgrade" ]; then
   exit 0
 fi
 
+# move global level static route configuration lines before any vrf context
+FRRCONF=/etc/frr/frr.conf
+FRRCONFBAK=/etc/frr/frr.conf.deb_bak
+if grep -q '^ip route ' $FRRCONF && grep -q '^vrf ' $FRRCONF; then
+  echo "Modifying your frr.conf file to support static route commands inside vrf context blocks."
+  echo "A copy of your original $FRRCONF will be saved at $FRRCONFBAK."
+  cat $FRRCONF > $FRRCONFBAK
+  MUNGED=`mktemp`
+  echo "Reading from $FRRCONF"
+  echo "Writing to $MUNGED"
+  mawk 'match($0, /^ip route .*/) { statics[FNR] = substr($0, RSTART, RLENGTH); next }
+        match($0, /^vrf .*/) {
+                if (!vrfline)
+                        vrfline = FNR;
+        }
+        { others[FNR] = $0 }
+        END {
+                for (i = 0; i <= NR; i++) {
+                        if (others[i])
+                                print others[i]
+                        if (i == vrfline - 1) {
+                                for (j in statics) {
+                                        print statics[j];
+                                }
+                        }
+                }
+        }' $FRRCONF > $MUNGED
+  echo "Moving $MUNGED to $FRRCONF"
+  mv $MUNGED $FRRCONF
+fi
+
 #DEBHELPER#
 
