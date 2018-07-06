@@ -592,6 +592,9 @@ static void zvni_print_mac(zebra_mac_t *mac, void *ctxt)
 	if (CHECK_FLAG(mac->flags, ZEBRA_MAC_DEF_GW))
 		vty_out(vty, " Default-gateway Mac ");
 
+	if (CHECK_FLAG(mac->flags, ZEBRA_MAC_REMOTE_DEF_GW))
+		vty_out(vty, " Remote-gateway Mac ");
+
 	vty_out(vty, "\n");
 	/* print all the associated neigh */
 	vty_out(vty, " Neighbors:\n");
@@ -2581,7 +2584,8 @@ static int zvni_mac_install(zebra_vni_t *zvni, zebra_mac_t *mac)
 		return -1;
 	vxl = &zif->l2info.vxl;
 
-	sticky = CHECK_FLAG(mac->flags, ZEBRA_MAC_STICKY) ? 1 : 0;
+	sticky = CHECK_FLAG(mac->flags,
+			 (ZEBRA_MAC_STICKY | ZEBRA_MAC_REMOTE_DEF_GW)) ? 1 : 0;
 
 	return kernel_add_mac(zvni->vxlan_if, vxl->access_vlan, &mac->macaddr,
 			      mac->fwd_info.r_vtep_ip, sticky);
@@ -5244,6 +5248,7 @@ int zebra_vxlan_remote_macip_add(struct zserv *client, u_short length,
 	char buf[ETHER_ADDR_STRLEN];
 	char buf1[INET6_ADDRSTRLEN];
 	u_char sticky = 0;
+	u_char remote_gw = 0;
 	u_char flags = 0;
 	struct interface *ifp = NULL;
 	struct zebra_if *zif = NULL;
@@ -5288,6 +5293,7 @@ int zebra_vxlan_remote_macip_add(struct zserv *client, u_short length,
 		/* Get flags - sticky mac and/or gateway mac */
 		STREAM_GETC(s, flags);
 		sticky = CHECK_FLAG(flags, ZEBRA_MACIP_TYPE_STICKY);
+		remote_gw = CHECK_FLAG(flags, ZEBRA_MACIP_TYPE_GW);
 		l++;
 
 		if (IS_ZEBRA_DEBUG_VXLAN)
@@ -5361,6 +5367,8 @@ int zebra_vxlan_remote_macip_add(struct zserv *client, u_short length,
 		if (!mac || !CHECK_FLAG(mac->flags, ZEBRA_MAC_REMOTE)
 		    || (CHECK_FLAG(mac->flags, ZEBRA_MAC_STICKY) ? 1 : 0)
 			       != sticky
+		    || (CHECK_FLAG(mac->flags, ZEBRA_MAC_REMOTE_DEF_GW) ? 1 : 0)
+			       != remote_gw
 		    || !IPV4_ADDR_SAME(&mac->fwd_info.r_vtep_ip, &vtep_ip))
 			update_mac = 1;
 
@@ -5391,6 +5399,11 @@ int zebra_vxlan_remote_macip_add(struct zserv *client, u_short length,
 				SET_FLAG(mac->flags, ZEBRA_MAC_STICKY);
 			else
 				UNSET_FLAG(mac->flags, ZEBRA_MAC_STICKY);
+
+			if (remote_gw)
+				SET_FLAG(mac->flags, ZEBRA_MAC_REMOTE_DEF_GW);
+			else
+				UNSET_FLAG(mac->flags, ZEBRA_MAC_REMOTE_DEF_GW);
 
 			zvni_process_neigh_on_remote_mac_add(zvni, mac);
 
