@@ -1390,7 +1390,10 @@ struct ospf_lsa *ospf_apiserver_opaque_lsa_new(struct ospf_area *area,
 	assert(ospf);
 
 	/* Create a stream for internal opaque LSA */
-	s = stream_new(OSPF_MAX_LSA_SIZE);
+	if ((s = stream_new(OSPF_MAX_LSA_SIZE)) == NULL) {
+		zlog_warn("ospf_apiserver_opaque_lsa_new: stream_new failed");
+		return NULL;
+	}
 
 	newlsa = (struct lsa_header *)STREAM_DATA(s);
 
@@ -1422,8 +1425,19 @@ struct ospf_lsa *ospf_apiserver_opaque_lsa_new(struct ospf_area *area,
 	newlsa->length = htons(length);
 
 	/* Create OSPF LSA. */
-	new = ospf_lsa_new();
-	new->data = ospf_lsa_data_new(length);
+	if ((new = ospf_lsa_new()) == NULL) {
+		zlog_warn("ospf_apiserver_opaque_lsa_new: ospf_lsa_new() ?");
+		stream_free(s);
+		return NULL;
+	}
+
+	if ((new->data = ospf_lsa_data_new(length)) == NULL) {
+		zlog_warn(
+			"ospf_apiserver_opaque_lsa_new: ospf_lsa_data_new() ?");
+		ospf_lsa_unlock(&new);
+		stream_free(s);
+		return NULL;
+	}
 
 	new->area = area;
 	new->oi = oi;

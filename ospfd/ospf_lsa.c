@@ -781,7 +781,10 @@ static struct ospf_lsa *ospf_router_lsa_new(struct ospf_area *area)
 	lsah->length = htons(length);
 
 	/* Now, create OSPF LSA instance. */
-	new = ospf_lsa_new();
+	if ((new = ospf_lsa_new()) == NULL) {
+		zlog_err("%s: Unable to create new lsa", __func__);
+		return NULL;
+	}
 
 	new->area = area;
 	SET_FLAG(new->flags, OSPF_LSA_SELF | OSPF_LSA_SELF_CHECKED);
@@ -801,7 +804,10 @@ static struct ospf_lsa *ospf_router_lsa_originate(struct ospf_area *area)
 	struct ospf_lsa *new;
 
 	/* Create new router-LSA instance. */
-	new = ospf_router_lsa_new(area);
+	if ((new = ospf_router_lsa_new(area)) == NULL) {
+		zlog_err("%s: ospf_router_lsa_new returned NULL", __func__);
+		return NULL;
+	}
 
 	/* Sanity check. */
 	if (new->data->adv_router.s_addr == 0) {
@@ -846,7 +852,10 @@ static struct ospf_lsa *ospf_router_lsa_refresh(struct ospf_lsa *lsa)
 	ospf_refresher_unregister_lsa(area->ospf, lsa);
 
 	/* Create new router-LSA instance. */
-	new = ospf_router_lsa_new(area);
+	if ((new = ospf_router_lsa_new(area)) == NULL) {
+		zlog_err("%s: ospf_router_lsa_new returned NULL", __func__);
+		return NULL;
+	}
 
 	new->data->ls_seqnum = lsa_seqnum_increment(lsa);
 
@@ -988,7 +997,10 @@ static struct ospf_lsa *ospf_network_lsa_new(struct ospf_interface *oi)
 	lsah->length = htons(length);
 
 	/* Create OSPF LSA instance. */
-	new = ospf_lsa_new();
+	if ((new = ospf_lsa_new()) == NULL) {
+		zlog_err("%s: ospf_lsa_new returned NULL", __func__);
+		return NULL;
+	}
 
 	new->area = oi->area;
 	SET_FLAG(new->flags, OSPF_LSA_SELF | OSPF_LSA_SELF_CHECKED);
@@ -1042,6 +1054,8 @@ void ospf_network_lsa_update(struct ospf_interface *oi)
 
 	/* Create new network-LSA instance. */
 	new = ospf_network_lsa_new(oi);
+	if (new == NULL)
+		return;
 
 	if (!new)
 		return;
@@ -1094,6 +1108,8 @@ static struct ospf_lsa *ospf_network_lsa_refresh(struct ospf_lsa *lsa)
 
 	/* Create new network-LSA instance. */
 	new = ospf_network_lsa_new(oi);
+	if (new == NULL)
+		return NULL;
 
 	oip = ospf_lookup_if_params(oi->ifp, oi->address->u.prefix4);
 	assert(oip != NULL);
@@ -1215,7 +1231,8 @@ struct ospf_lsa *ospf_summary_lsa_originate(struct prefix_ipv4 *p,
 	}
 
 	/* Create new summary-LSA instance. */
-	new = ospf_summary_lsa_new(area, (struct prefix *)p, metric, id);
+	if (!(new = ospf_summary_lsa_new(area, (struct prefix *)p, metric, id)))
+		return NULL;
 
 	/* Instlal LSA to LSDB. */
 	new = ospf_lsa_install(area->ospf, NULL, new);
@@ -1250,6 +1267,9 @@ static struct ospf_lsa *ospf_summary_lsa_refresh(struct ospf *ospf,
 	p.prefixlen = ip_masklen(sl->mask);
 	new = ospf_summary_lsa_new(lsa->area, &p, GET_METRIC(sl->metric),
 				   sl->header.id);
+
+	if (!new)
+		return NULL;
 
 	new->data->ls_seqnum = lsa_seqnum_increment(lsa);
 

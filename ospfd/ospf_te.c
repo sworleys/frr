@@ -1143,7 +1143,10 @@ static struct ospf_lsa *ospf_mpls_te_lsa_new(struct ospf *ospf,
 	u_int16_t length;
 
 	/* Create a stream for LSA. */
-	s = stream_new(OSPF_MAX_LSA_SIZE);
+	if ((s = stream_new(OSPF_MAX_LSA_SIZE)) == NULL) {
+		zlog_warn("ospf_mpls_te_lsa_new: stream_new() ?");
+		return NULL;
+	}
 	lsah = (struct lsa_header *)STREAM_DATA(s);
 
 	options = OSPF_OPTION_O; /* Don't forget this :-) */
@@ -1198,8 +1201,18 @@ static struct ospf_lsa *ospf_mpls_te_lsa_new(struct ospf *ospf,
 	lsah->length = htons(length);
 
 	/* Now, create an OSPF LSA instance. */
-	new = ospf_lsa_new();
-	new->data = ospf_lsa_data_new(length);
+	if ((new = ospf_lsa_new()) == NULL) {
+		zlog_warn("ospf_mpls_te_lsa_new: ospf_lsa_new() ?");
+		stream_free(s);
+		return NULL;
+	}
+	if ((new->data = ospf_lsa_data_new(length)) == NULL) {
+		zlog_warn("ospf_mpls_te_lsa_new: ospf_lsa_data_new() ?");
+		ospf_lsa_unlock(&new);
+		new = NULL;
+		stream_free(s);
+		return new;
+	}
 
 	new->vrf_id = ospf->vrf_id;
 	if (area && area->ospf)

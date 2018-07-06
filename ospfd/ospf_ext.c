@@ -950,6 +950,10 @@ static struct ospf_lsa *ospf_ext_pref_lsa_new(struct ospf_area *area,
 
 	/* Create a stream for LSA. */
 	s = stream_new(OSPF_MAX_LSA_SIZE);
+	if (s == NULL) {
+		zlog_warn("EXT (%s): stream_new() error", __func__);
+		return NULL;
+	}
 
 	/* Prepare LSA Header */
 	lsah = (struct lsa_header *)STREAM_DATA(s);
@@ -995,7 +999,19 @@ static struct ospf_lsa *ospf_ext_pref_lsa_new(struct ospf_area *area,
 
 	/* Now, create an OSPF LSA instance. */
 	new = ospf_lsa_new();
+	if (new == NULL) {
+		zlog_warn("EXT (%s): ospf_lsa_new() error", __func__);
+		stream_free(s);
+		return NULL;
+	}
 	new->data = ospf_lsa_data_new(length);
+	if (new->data == NULL) {
+		zlog_warn("EXT (%s): ospf_lsa_data_new() error", __func__);
+		ospf_lsa_unlock(&new);
+		new = NULL;
+		stream_free(s);
+		return NULL;
+	}
 
 	/* Segment Routing belongs only to default VRF */
 	new->vrf_id = VRF_DEFAULT;
@@ -1025,6 +1041,10 @@ static struct ospf_lsa *ospf_ext_link_lsa_new(struct ospf_area *area,
 
 	/* Create a stream for LSA. */
 	s = stream_new(OSPF_MAX_LSA_SIZE);
+	if (s == NULL) {
+		zlog_warn("EXT (%s): stream_new() error", __func__);
+		return NULL;
+	}
 	lsah = (struct lsa_header *)STREAM_DATA(s);
 
 	options = OSPF_OPTION_O;	  /* Don't forget this :-) */
@@ -1058,7 +1078,19 @@ static struct ospf_lsa *ospf_ext_link_lsa_new(struct ospf_area *area,
 
 	/* Now, create an OSPF LSA instance. */
 	new = ospf_lsa_new();
+	if (new == NULL) {
+		zlog_warn("EXT (%s): ospf_lsa_new() error", __func__);
+		stream_free(s);
+		return NULL;
+	}
 	new->data = ospf_lsa_data_new(length);
+	if (new->data == NULL) {
+		zlog_warn("EXT (%s): ospf_lsa_data_new() error", __func__);
+		ospf_lsa_unlock(&new);
+		new = NULL;
+		stream_free(s);
+		return NULL;
+	}
 
 	/* Segment Routing belongs only to default VRF */
 	new->vrf_id = VRF_DEFAULT;
