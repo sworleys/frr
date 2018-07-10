@@ -14,6 +14,7 @@ frr (4.0+cl3u3) RELEASED; urgency=medium
   * Fixes: CM-21443 bgpd: l3vni del to free ip prefix routes from vrf
   * Fixes: CM-21429 zebra: duplicate nexthops for cross-vrf static routes
   * Fixes: CM-21599 pimd: ECMP not recovering after neighbor drops
+  * Fixes: CM-21508 zebra: install EVPN gateway MAC as static/sticky
 
  -- dev-support <dev-support@cumulusnetworks.com>  Mon, 25 Jun 2018 18:10:00 -0400
 
