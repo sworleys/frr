@@ -308,7 +308,7 @@ static unsigned int netlink_file_counter = 1;
 static char netlink_fuzz_file[MAXPATHLEN] = "";
 
 /* Flag for whether to read from file or not */
-bool netlink_read = false;
+bool netlink_read;
 
 /**
  * netlink_read_init() - Starts the message parser
@@ -318,16 +318,9 @@ void netlink_read_init(const char *fname)
 {
 	snprintf(netlink_fuzz_file, MAXPATHLEN, "%s", fname);
 	/* Creating this fake socket for testing purposes */
-	struct zebra_ns zns = {
-		.ns_id = 0,
-		.netlink_cmd = {.sock = -1,
-				.seq = -1,
-				.name = "fuzzer_command_channel"},
-		.netlink = {.sock = -1,
-			    .seq = -1,
-			    .name = "fuzzer_kernel_message"}
-	};
-	netlink_parse_info(netlink_information_fetch, &zns.netlink, &zns, 1, 0);
+	struct zebra_ns *zns = zebra_ns_lookup(NS_DEFAULT);
+
+	netlink_parse_info(netlink_information_fetch, &zns->netlink, zns, 1, 0);
 }
 
 /**
@@ -371,7 +364,7 @@ static long netlink_read_file(char *buf, const char *fname)
 		fseek(f, 0, SEEK_END);
 		file_bytes = ftell(f);
 		rewind(f);
-		fread(buf, file_bytes, 1, f);
+		fread(buf, NL_RCV_PKT_BUF_SIZE, 1, f);
 		fclose(f);
 	}
 	zserv_privs.change(ZPRIVS_LOWER);
