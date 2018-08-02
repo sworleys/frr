@@ -1,8 +1,14 @@
-frr (4.0+cl3u4) RELEASED; urgency=medium
+frr (4.0+cl3u5) RELEASED; urgency=medium
 
   * Fixes:
 
  -- dev-support <dev-support@cumulusnetworks.com>  Thu, 25 Jul 2018 15:13:67 -0400
+
+frr (4.0+cl3u4) RELEASED; urgency=medium
+
+  * Fixes: CM-21895 bgpd: Intentionally stop timers on delete
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Wed, 1 Aug 2018 20:38:01 -0400
 
 frr (4.0+cl3u3) RELEASED; urgency=medium
 
