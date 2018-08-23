@@ -61,54 +61,53 @@ extern int zebra_vxlan_vrf_enable(struct zebra_vrf *zvrf);
 extern int zebra_vxlan_vrf_disable(struct zebra_vrf *zvrf);
 extern int zebra_vxlan_vrf_delete(struct zebra_vrf *zvrf);
 extern void zebra_vxlan_print_specific_nh_l3vni(struct vty *vty, vni_t l3vni,
-						struct ipaddr *ip, u_char uj);
+						struct ipaddr *ip, bool uj);
 extern void zebra_vxlan_print_evpn(struct vty *vty, u_char uj);
 extern void zebra_vxlan_print_specific_rmac_l3vni(struct vty *vty, vni_t l3vni,
 						  struct ethaddr *rmac,
-						  u_char use_json);
+						  bool use_json);
 extern void zebra_vxlan_print_macs_vni(struct vty *vty, struct zebra_vrf *zvrf,
-				       vni_t vni, u_char use_json);
+				       vni_t vni, bool use_json);
 extern void zebra_vxlan_print_macs_all_vni(struct vty *vty,
 					   struct zebra_vrf *zvrf,
-					   u_char use_json);
+					   bool use_json);
 extern void zebra_vxlan_print_macs_all_vni_vtep(struct vty *vty,
 						struct zebra_vrf *zvrf,
 						struct in_addr vtep_ip,
-						u_char use_json);
+						bool use_json);
 extern void zebra_vxlan_print_specific_mac_vni(struct vty *vty,
 					       struct zebra_vrf *zvrf,
 					       vni_t vni, struct ethaddr *mac);
 extern void zebra_vxlan_print_macs_vni_vtep(struct vty *vty,
 					    struct zebra_vrf *zvrf, vni_t vni,
 					    struct in_addr vtep_ip,
-					    u_char use_json);
+					    bool use_json);
 extern void zebra_vxlan_print_neigh_vni(struct vty *vty, struct zebra_vrf *zvrf,
-					vni_t vni, u_char use_json);
+					vni_t vni, bool use_json);
 extern void zebra_vxlan_print_neigh_all_vni(struct vty *vty,
 					    struct zebra_vrf *zvrf,
-					    u_char use_json);
+					    bool use_json);
 extern void zebra_vxlan_print_specific_neigh_vni(struct vty *vty,
 						 struct zebra_vrf *zvrf,
 						 vni_t vni, struct ipaddr *ip,
-						 u_char use_json);
+						 bool use_json);
 extern void zebra_vxlan_print_neigh_vni_vtep(struct vty *vty,
 					     struct zebra_vrf *zvrf, vni_t vni,
 					     struct in_addr vtep_ip,
-					     u_char use_json);
+					     bool use_json);
 extern void zebra_vxlan_print_vni(struct vty *vty, struct zebra_vrf *zvrf,
-				  vni_t vni, u_char use_json);
+				  vni_t vni, bool use_json);
 extern void zebra_vxlan_print_vnis(struct vty *vty, struct zebra_vrf *zvrf,
-				   u_char use_json);
+				   bool use_json);
 extern void zebra_vxlan_print_vrf_vni(struct vty *vty, struct zebra_vrf *zvrf,
 				      json_object *json_vrfs);
-extern void zebra_vxlan_print_rmacs_l3vni(struct vty *vty, vni_t vni, u_char
-					  use_json);
-extern void zebra_vxlan_print_rmacs_all_l3vni(struct vty *vty, u_char use_json);
-extern void zebra_vxlan_print_nh_l3vni(struct vty *vty, vni_t vni, u_char
-				       use_json);
-extern void zebra_vxlan_print_nh_all_l3vni(struct vty *vty, u_char use_json);
-extern void zebra_vxlan_print_l3vni(struct vty *vty, vni_t vni,
-				    u_char use_json);
+extern void zebra_vxlan_print_rmacs_l3vni(struct vty *vty, vni_t vni,
+					  bool use_json);
+extern void zebra_vxlan_print_rmacs_all_l3vni(struct vty *vty, bool use_json);
+extern void zebra_vxlan_print_nh_l3vni(struct vty *vty, vni_t vni,
+				       bool use_json);
+extern void zebra_vxlan_print_nh_all_l3vni(struct vty *vty, bool use_json);
+extern void zebra_vxlan_print_l3vni(struct vty *vty, vni_t vni, bool use_json);
 extern void zebra_vxlan_print_vrf_vni(struct vty *vty, struct zebra_vrf *zvrf,
 				      json_object *json_vrfs);
 extern int zebra_vxlan_add_del_gw_macip(struct interface *ifp, struct prefix *p,

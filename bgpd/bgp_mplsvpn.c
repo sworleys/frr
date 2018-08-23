@@ -1610,7 +1610,7 @@ DEFUN (no_vpnv6_network,
 
 int bgp_show_mpls_vpn(struct vty *vty, afi_t afi, struct prefix_rd *prd,
 		      enum bgp_show_type type, void *output_arg, int tags,
-		      u_char use_json)
+		      bool use_json)
 {
 	struct bgp *bgp;
 	struct bgp_table *table;
@@ -1788,7 +1788,7 @@ DEFUN (show_ip_bgp_vpn_all_neighbor_routes,
 	union sockunion su;
 	struct peer *peer;
 	int ret;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	afi_t afi;
 	int idx = 0;
 
@@ -1852,7 +1852,7 @@ DEFUN (show_ip_bgp_vpn_rd_neighbor_routes,
 	union sockunion su;
 	struct peer *peer;
 	struct prefix_rd prd;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	afi_t afi;
 	int idx = 0;
 
@@ -1930,7 +1930,7 @@ DEFUN (show_ip_bgp_vpn_all_neighbor_advertised_routes,
 	int ret;
 	struct peer *peer;
 	union sockunion su;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	afi_t afi;
 	int idx = 0;
 
@@ -1992,7 +1992,7 @@ DEFUN (show_ip_bgp_vpn_rd_neighbor_advertised_routes,
 	struct peer *peer;
 	struct prefix_rd prd;
 	union sockunion su;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	afi_t afi;
 	int idx = 0;
 

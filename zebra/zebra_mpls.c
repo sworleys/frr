@@ -2753,7 +2753,7 @@ void zebra_mpls_lsp_schedule(struct zebra_vrf *zvrf)
  * (VTY command handler).
  */
 void zebra_mpls_print_lsp(struct vty *vty, struct zebra_vrf *zvrf,
-			  mpls_label_t label, u_char use_json)
+			  mpls_label_t label, bool use_json)
 {
 	struct hash *lsp_table;
 	zebra_lsp_t *lsp;
@@ -2784,7 +2784,7 @@ void zebra_mpls_print_lsp(struct vty *vty, struct zebra_vrf *zvrf,
  * Display MPLS label forwarding table (VTY command handler).
  */
 void zebra_mpls_print_lsp_table(struct vty *vty, struct zebra_vrf *zvrf,
-				u_char use_json)
+				bool use_json)
 {
 	char buf[BUFSIZ];
 	json_object *json = NULL;

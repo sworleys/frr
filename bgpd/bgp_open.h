@@ -95,7 +95,7 @@ struct capability_gr {
 
 extern int bgp_open_option_parse(struct peer *, u_char, int *);
 extern void bgp_open_capability(struct stream *, struct peer *);
-extern void bgp_capability_vty_out(struct vty *, struct peer *, u_char,
+extern void bgp_capability_vty_out(struct vty *, struct peer *, bool,
 				   json_object *);
 extern as_t peek_for_as4_capability(struct peer *, u_char);
 

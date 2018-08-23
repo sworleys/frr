@@ -52,7 +52,7 @@
    Next, if we send capability to the peer we want to set my capabilty
    inforation at each peer. */
 
-void bgp_capability_vty_out(struct vty *vty, struct peer *peer, u_char use_json,
+void bgp_capability_vty_out(struct vty *vty, struct peer *peer, bool use_json,
 			    json_object *json_neigh)
 {
 	char *pnt;

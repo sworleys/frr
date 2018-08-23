@@ -286,7 +286,7 @@ int argv_find_and_parse_safi(struct cmd_token **argv, int argc, int *index,
 int bgp_vty_find_and_parse_afi_safi_bgp(struct vty *vty,
 					struct cmd_token **argv, int argc,
 					int *idx, afi_t *afi, safi_t *safi,
-					struct bgp **bgp)
+					struct bgp **bgp, bool use_json)
 {
 	char *vrf_name = NULL;
 
@@ -306,9 +306,11 @@ int bgp_vty_find_and_parse_afi_safi_bgp(struct vty *vty,
 		else {
 			*bgp = bgp_lookup_by_name(vrf_name);
 			if (!*bgp) {
-				vty_out(vty,
-					"View/Vrf specified is unknown: %s\n",
-					vrf_name);
+				use_json
+					? vty_out(vty, "{}\n")
+					: vty_out(vty,
+						  "View/Vrf specified is unknown: %s\n",
+						  vrf_name);
 				*idx = 0;
 				return 0;
 			}
@@ -316,7 +318,10 @@ int bgp_vty_find_and_parse_afi_safi_bgp(struct vty *vty,
 	} else {
 		*bgp = bgp_get_default();
 		if (!*bgp) {
-			vty_out(vty, "Unable to find default BGP instance\n");
+			use_json
+				? vty_out(vty, "{}\n")
+				: vty_out(vty,
+					  "Unable to find default BGP instance\n");
 			*idx = 0;
 			return 0;
 		}
@@ -7159,7 +7164,7 @@ DEFUN (show_bgp_vrfs,
 	struct list *inst = bm->bgp;
 	struct listnode *node;
 	struct bgp *bgp;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	json_object *json = NULL;
 	json_object *json_vrfs = NULL;
 	int count = 0;
@@ -7485,7 +7490,7 @@ static void bgp_show_bestpath_json(struct bgp *bgp, json_object *json)
 
 /* Show BGP peer's summary information. */
 static int bgp_show_summary(struct vty *vty, struct bgp *bgp, int afi, int safi,
-			    u_char use_json, json_object *json)
+			    bool use_json, json_object *json)
 {
 	struct peer *peer;
 	struct listnode *node, *nnode;
@@ -7904,14 +7909,14 @@ static int bgp_show_summary(struct vty *vty, struct bgp *bgp, int afi, int safi,
 }
 
 static void bgp_show_summary_afi_safi(struct vty *vty, struct bgp *bgp, int afi,
-				      int safi, u_char use_json,
+				      int safi, bool use_json,
 				      json_object *json)
 {
 	int is_first = 1;
 	int afi_wildcard = (afi == AFI_MAX);
 	int safi_wildcard = (safi == SAFI_MAX);
 	int is_wildcard = (afi_wildcard || safi_wildcard);
-	bool json_output = false;
+	bool nbr_output = false;
 
 	if (use_json && is_wildcard)
 		vty_out(vty, "{\n");
@@ -7922,7 +7927,7 @@ static void bgp_show_summary_afi_safi(struct vty *vty, struct bgp *bgp, int afi,
 			safi = 1; /* SAFI_UNICAST */
 		while (safi < SAFI_MAX) {
 			if (bgp_afi_safi_peer_exists(bgp, afi, safi)) {
-				json_output = true;
+				nbr_output = true;
 				if (is_wildcard) {
 					/*
 					 * So limit output to those afi/safi
@@ -7961,22 +7966,25 @@ static void bgp_show_summary_afi_safi(struct vty *vty, struct bgp *bgp, int afi,
 
 	if (use_json && is_wildcard)
 		vty_out(vty, "}\n");
-	else if (use_json && !json_output)
-		vty_out(vty, "{}\n");
+	else if (!nbr_output)
+		use_json ? vty_out(vty, "{}\n")
+			 : vty_out(vty, "%% No BGP neighbors found\n");
 }
 
 static void bgp_show_all_instances_summary_vty(struct vty *vty, afi_t afi,
-					       safi_t safi, u_char use_json)
+					       safi_t safi, bool use_json)
 {
 	struct listnode *node, *nnode;
 	struct bgp *bgp;
 	json_object *json = NULL;
 	int is_first = 1;
+	bool nbr_output = false;
 
 	if (use_json)
 		vty_out(vty, "{\n");
 
 	for (ALL_LIST_ELEMENTS(bm->bgp, node, nnode, bgp)) {
+		nbr_output = true;
 		if (use_json) {
 			json = json_object_new_object();
 
@@ -8000,10 +8008,12 @@ static void bgp_show_all_instances_summary_vty(struct vty *vty, afi_t afi,
 
 	if (use_json)
 		vty_out(vty, "}\n");
+	else if (!nbr_output)
+		vty_out(vty, "%% BGP instance not found\n");
 }
 
 int bgp_show_summary_vty(struct vty *vty, const char *name, afi_t afi,
-			 safi_t safi, u_char use_json)
+			 safi_t safi, bool use_json)
 {
 	struct bgp *bgp;
 
@@ -8016,11 +8026,10 @@ int bgp_show_summary_vty(struct vty *vty, const char *name, afi_t afi,
 			bgp = bgp_lookup_by_name(name);
 
 			if (!bgp) {
-				if (use_json)
-					vty_out(vty, "{}\n");
-				else
-					vty_out(vty,
-						"%% No such BGP instance exist\n");
+				use_json
+					? vty_out(vty, "{}\n")
+					: vty_out(vty,
+						  "%% BGP instance not found\n");
 				return CMD_WARNING;
 			}
 
@@ -8034,6 +8043,11 @@ int bgp_show_summary_vty(struct vty *vty, const char *name, afi_t afi,
 
 	if (bgp)
 		bgp_show_summary_afi_safi(vty, bgp, afi, safi, use_json, NULL);
+	else {
+		use_json ? vty_out(vty, "{}\n")
+			 : vty_out(vty, "%% No such BGP instance exist\n");
+		return CMD_WARNING;
+	}
 
 	return CMD_SUCCESS;
 }
@@ -8069,7 +8083,7 @@ DEFUN (show_ip_bgp_summary,
 		argv_find_and_parse_safi(argv, argc, &idx, &safi);
 	}
 
-	int uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	return bgp_show_summary_vty(vty, vrf, afi, safi, uj);
 }
@@ -8143,7 +8157,7 @@ static void bgp_show_peer_afi_orf_cap(struct vty *vty, struct peer *p,
 				      afi_t afi, safi_t safi,
 				      u_int16_t adv_smcap, u_int16_t adv_rmcap,
 				      u_int16_t rcv_smcap, u_int16_t rcv_rmcap,
-				      u_char use_json, json_object *json_pref)
+				      bool use_json, json_object *json_pref)
 {
 	/* Send-Mode */
 	if (CHECK_FLAG(p->af_cap[afi][safi], adv_smcap)
@@ -8203,7 +8217,7 @@ static void bgp_show_peer_afi_orf_cap(struct vty *vty, struct peer *p,
 }
 
 static void bgp_show_peer_afi(struct vty *vty, struct peer *p, afi_t afi,
-			      safi_t safi, u_char use_json,
+			      safi_t safi, bool use_json,
 			      json_object *json_neigh)
 {
 	struct bgp_filter *filter;
@@ -8779,7 +8793,7 @@ static void bgp_show_peer_afi(struct vty *vty, struct peer *p, afi_t afi,
 	}
 }
 
-static void bgp_show_peer(struct vty *vty, struct peer *p, u_char use_json,
+static void bgp_show_peer(struct vty *vty, struct peer *p, bool use_json,
 			  json_object *json)
 {
 	struct bgp *bgp;
@@ -10517,12 +10531,13 @@ static void bgp_show_peer(struct vty *vty, struct peer *p, u_char use_json,
 
 static int bgp_show_neighbor(struct vty *vty, struct bgp *bgp,
 			     enum show_type type, union sockunion *su,
-			     const char *conf_if, u_char use_json,
+			     const char *conf_if, bool use_json,
 			     json_object *json)
 {
 	struct listnode *node, *nnode;
 	struct peer *peer;
 	int find = 0;
+	bool nbr_output = false;
 
 	for (ALL_LIST_ELEMENTS(bgp->peer, node, nnode, peer)) {
 		if (!CHECK_FLAG(peer->flags, PEER_FLAG_CONFIG_NODE))
@@ -10531,6 +10546,7 @@ static int bgp_show_neighbor(struct vty *vty, struct bgp *bgp,
 		switch (type) {
 		case show_all:
 			bgp_show_peer(vty, peer, use_json, json);
+			nbr_output = true;
 			break;
 		case show_peer:
 			if (conf_if) {
@@ -10560,6 +10576,9 @@ static int bgp_show_neighbor(struct vty *vty, struct bgp *bgp,
 			vty_out(vty, "%% No such neighbor in this view/vrf\n");
 	}
 
+	if (type != show_peer && !nbr_output && !use_json)
+		vty_out(vty, "%% No BGP neighbors found \n");
+
 	if (use_json) {
 		vty_out(vty, "%s\n",
 			json_object_to_json_string_ext(
@@ -10575,18 +10594,20 @@ static int bgp_show_neighbor(struct vty *vty, struct bgp *bgp,
 static void bgp_show_all_instances_neighbors_vty(struct vty *vty,
 						 enum show_type type,
 						 const char *ip_str,
-						 u_char use_json)
+						 bool use_json)
 {
 	struct listnode *node, *nnode;
 	struct bgp *bgp;
 	union sockunion su;
 	json_object *json = NULL;
 	int ret, is_first = 1;
+	bool nbr_output = false;
 
 	if (use_json)
 		vty_out(vty, "{\n");
 
 	for (ALL_LIST_ELEMENTS(bm->bgp, node, nnode, bgp)) {
+		nbr_output = true;
 		if (use_json) {
 			if (!(json = json_object_new_object())) {
 				flog_err(
@@ -10639,11 +10660,13 @@ static void bgp_show_all_instances_neighbors_vty(struct vty *vty,
 
 	if (use_json)
 		vty_out(vty, "}\n");
+	else if (!nbr_output)
+		vty_out(vty, "%% BGP instance not found\n");
 }
 
 static int bgp_show_neighbor_vty(struct vty *vty, const char *name,
 				 enum show_type type, const char *ip_str,
-				 u_char use_json)
+				 bool use_json)
 {
 	int ret;
 	struct bgp *bgp;
@@ -10660,8 +10683,6 @@ static int bgp_show_neighbor_vty(struct vty *vty, const char *name,
 			if (!bgp) {
 				if (use_json) {
 					json = json_object_new_object();
-					json_object_boolean_true_add(
-						json, "bgpNoSuchInstance");
 					vty_out(vty, "%s\n",
 						json_object_to_json_string_ext(
 							json,
@@ -10669,7 +10690,7 @@ static int bgp_show_neighbor_vty(struct vty *vty, const char *name,
 					json_object_free(json);
 				} else
 					vty_out(vty,
-						"%% No such BGP instance exist\n");
+						"%% BGP instance not found\n");
 
 				return CMD_WARNING;
 			}
@@ -10693,6 +10714,9 @@ static int bgp_show_neighbor_vty(struct vty *vty, const char *name,
 					  json);
 		}
 		json_object_free(json);
+	} else {
+		use_json ? vty_out(vty, "{}\n")
+			 : vty_out(vty, "%% BGP instance not found\n");
 	}
 
 	return CMD_SUCCESS;
@@ -10718,7 +10742,7 @@ DEFUN (show_ip_bgp_neighbors,
 	char *sh_arg = NULL;
 	enum show_type sh_type;
 
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	int idx = 0;
 
@@ -10828,8 +10852,8 @@ DEFUN (show_ip_bgp_attr_info,
 	return CMD_SUCCESS;
 }
 
-static int bgp_show_route_leak_vty(struct vty *vty, const char *name,
-				   afi_t afi, safi_t safi, uint8_t use_json)
+static int bgp_show_route_leak_vty(struct vty *vty, const char *name, afi_t afi,
+				   safi_t safi, bool use_json)
 {
 	struct bgp *bgp;
 	struct listnode *node;
@@ -10845,16 +10869,9 @@ static int bgp_show_route_leak_vty(struct vty *vty, const char *name,
 
 		json = json_object_new_object();
 
-		/* Provide context for the block */
-		json_object_string_add(json, "vrf", name ? name : "default");
-		json_object_string_add(json, "afiSafi",
-					afi_safi_print(afi, safi));
-
 		bgp = name ? bgp_lookup_by_name(name) : bgp_get_default();
 
 		if (!bgp) {
-			json_object_boolean_true_add(json,
-						     "bgpNoSuchInstance");
 			vty_out(vty, "%s\n",
 				json_object_to_json_string_ext(
 					json,
@@ -10862,6 +10879,12 @@ static int bgp_show_route_leak_vty(struct vty *vty, const char *name,
 			json_object_free(json);
 
 			return CMD_WARNING;
+		} else {
+			/* Provide context for the block */
+			json_object_string_add(json, "vrf",
+					       name ? name : "default");
+			json_object_string_add(json, "afiSafi",
+					       afi_safi_print(afi, safi));
 		}
 
 		if (!CHECK_FLAG(bgp->af_flags[afi][safi],
@@ -11002,7 +11025,7 @@ DEFUN (show_ip_bgp_route_leak,
 	afi_t afi = AFI_MAX;
 	safi_t safi = SAFI_MAX;
 
-	uint8_t uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	int idx = 0;
 
 	/* show [ip] bgp */
@@ -11318,7 +11341,7 @@ static int bgp_show_peer_group_vty(struct vty *vty, const char *name,
 	bgp = name ? bgp_lookup_by_name(name) : bgp_get_default();
 
 	if (!bgp) {
-		vty_out(vty, "%% No such BGP instance exists\n");
+		vty_out(vty, "%% BGP instance not found\n");
 		return CMD_WARNING;
 	}
 

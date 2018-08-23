@@ -2652,7 +2652,7 @@ const char *ospf_abr_type_descr_str[] = {"Unknown", "Standard (RFC2328)",
 const char *ospf_shortcut_mode_descr_str[] = {"Default", "Enabled", "Disabled"};
 
 static void show_ip_ospf_area(struct vty *vty, struct ospf_area *area,
-			      json_object *json_areas, u_char use_json)
+			      json_object *json_areas, bool use_json)
 {
 	json_object *json_area = NULL;
 
@@ -3272,7 +3272,7 @@ DEFUN (show_ip_ospf,
        JSON_STR)
 {
 	struct ospf *ospf;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct listnode *node = NULL;
 	char *vrf_name = NULL;
 	bool all_vrf = FALSE;
@@ -3292,11 +3292,13 @@ DEFUN (show_ip_ospf,
 
 	  /* vrf input is provided could be all or specific vrf*/
 	if (vrf_name) {
+		bool ospf_output = FALSE;
 		use_vrf = 1;
 		if (all_vrf) {
 			for (ALL_LIST_ELEMENTS_RO(om->ospf, node, ospf)) {
 				if (!ospf->oi_running)
 					continue;
+				ospf_output = TRUE;
 				ret = show_ip_ospf_common(vty, ospf, json,
 							  use_vrf);
 			}
@@ -3305,21 +3307,34 @@ DEFUN (show_ip_ospf,
 					json_object_to_json_string_ext(json,
 						  JSON_C_TO_STRING_PRETTY));
 				json_object_free(json);
-			}
+			} else if (!ospf_output)
+				vty_out(vty, "%% OSPF instance not found\n");
 			return ret;
 		}
 		ospf = ospf_lookup_by_inst_name(inst, vrf_name);
 		if ((ospf == NULL) || !ospf->oi_running) {
-			if (uj)
+			if (uj) {
+				vty_out(vty, "%s\n",
+					json_object_to_json_string_ext(
+						json, JSON_C_TO_STRING_PRETTY));
 				json_object_free(json);
+			} else
+				vty_out(vty, "%% OSPF instance not found \n");
+
 			return CMD_SUCCESS;
 		}
 	} else {
 		ospf = ospf_lookup_by_vrf_id(VRF_DEFAULT);
 		/* Display default ospf (instance 0) info */
 		if (ospf == NULL || !ospf->oi_running) {
-			if (uj)
+			if (uj) {
+				vty_out(vty, "%s\n",
+					json_object_to_json_string_ext(
+						json, JSON_C_TO_STRING_PRETTY));
 				json_object_free(json);
+			} else
+				vty_out(vty, "%% OSPF instance not found \n");
+
 			return CMD_SUCCESS;
 		}
 	}
@@ -3349,7 +3364,7 @@ DEFUN (show_ip_ospf_instance,
 	int idx_number = 3;
 	struct ospf *ospf;
 	u_short instance = 0;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	int ret = CMD_SUCCESS;
 	json_object *json = NULL;
 
@@ -3378,7 +3393,7 @@ DEFUN (show_ip_ospf_instance,
 static void show_ip_ospf_interface_sub(struct vty *vty, struct ospf *ospf,
 				       struct interface *ifp,
 				       json_object *json_interface_sub,
-				       u_char use_json)
+				       bool use_json)
 {
 	int is_up;
 	struct ospf_neighbor *nbr;
@@ -3695,7 +3710,7 @@ static void show_ip_ospf_interface_sub(struct vty *vty, struct ospf *ospf,
 
 static int show_ip_ospf_interface_common(struct vty *vty, struct ospf *ospf,
 					 char *intf_name, u_char use_vrf,
-					 json_object *json, u_char use_json)
+					 json_object *json, bool use_json)
 {
 	struct interface *ifp;
 	struct vrf *vrf = vrf_lookup_by_id(ospf->vrf_id);
@@ -3788,7 +3803,7 @@ static int show_ip_ospf_interface_common(struct vty *vty, struct ospf *ospf,
 static void show_ip_ospf_interface_traffic_sub(struct vty *vty,
 					       struct ospf_interface *oi,
 					       json_object *json_interface_sub,
-					       u_char use_json)
+					       bool use_json)
 {
 	if (use_json) {
 		json_object_int_add(json_interface_sub,
@@ -3837,13 +3852,9 @@ static void show_ip_ospf_interface_traffic_sub(struct vty *vty,
 }
 
 /* OSPFv2 Packet Counters */
-static int show_ip_ospf_interface_traffic_common(struct vty *vty,
-						 struct ospf *ospf,
-						 char *intf_name,
-						 json_object *json,
-						 int display_once,
-						 u_char use_vrf,
-						 u_char use_json)
+static int show_ip_ospf_interface_traffic_common(
+	struct vty *vty, struct ospf *ospf, char *intf_name, json_object *json,
+	int display_once, u_char use_vrf, bool use_json)
 {
 	struct vrf *vrf = NULL;
 	struct interface *ifp = NULL;
@@ -3961,7 +3972,7 @@ DEFUN (show_ip_ospf_interface,
        JSON_STR)
 {
 	struct ospf *ospf;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct listnode *node = NULL;
 	char *vrf_name = NULL, *intf_name = NULL;
 	bool all_vrf = FALSE;
@@ -3999,14 +4010,21 @@ DEFUN (show_ip_ospf_interface,
 					json_object_to_json_string_ext(json,
 						  JSON_C_TO_STRING_PRETTY));
 				json_object_free(json);
-			}
+			} else if (!ospf)
+				vty_out(vty, "%% OSPF instance not found \n");
 
 			return ret;
 		}
 		ospf = ospf_lookup_by_inst_name(inst, vrf_name);
 		if (ospf == NULL || !ospf->oi_running) {
-			if (uj)
+			if (uj) {
+				vty_out(vty, "%s\n",
+					json_object_to_json_string_ext(
+						json, JSON_C_TO_STRING_PRETTY));
 				json_object_free(json);
+			} else
+				vty_out(vty, "%% OSPF instance not found \n");
+
 			return CMD_SUCCESS;
 		}
 		ret = show_ip_ospf_interface_common(vty, ospf, intf_name,
@@ -4016,8 +4034,14 @@ DEFUN (show_ip_ospf_interface,
 		/* Display default ospf (instance 0) info */
 		ospf = ospf_lookup_by_vrf_id(VRF_DEFAULT);
 		if (ospf == NULL || !ospf->oi_running) {
-			if (uj)
+			if (uj) {
+				vty_out(vty, "%s\n",
+					json_object_to_json_string_ext(
+						json, JSON_C_TO_STRING_PRETTY));
 				json_object_free(json);
+			} else
+				vty_out(vty, "%% OSPF instance not found \n");
+
 			return CMD_SUCCESS;
 		}
 		ret = show_ip_ospf_interface_common(vty, ospf, intf_name,
@@ -4048,7 +4072,7 @@ DEFUN (show_ip_ospf_instance_interface,
 	int idx_intf = 0;
 	struct ospf *ospf;
 	u_short instance = 0;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	char *intf_name = NULL;
 	int ret = CMD_SUCCESS;
 	json_object *json = NULL;
@@ -4097,7 +4121,7 @@ DEFUN (show_ip_ospf_interface_traffic,
 	bool all_vrf = FALSE;
 	int inst = 0;
 	int idx_vrf = 0, idx_intf = 0;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	json_object *json = NULL;
 	int ret = CMD_SUCCESS;
 	int display_once = 0;
@@ -4180,7 +4204,7 @@ static void show_ip_ospf_neighbour_header(struct vty *vty)
 
 static void show_ip_ospf_neighbor_sub(struct vty *vty,
 				      struct ospf_interface *oi,
-				      json_object *json, u_char use_json)
+				      json_object *json, bool use_json)
 {
 	struct route_node *rn;
 	struct ospf_neighbor *nbr, *prev_nbr = NULL;
@@ -4295,7 +4319,7 @@ static void show_ip_ospf_neighbor_sub(struct vty *vty,
 }
 
 static int show_ip_ospf_neighbor_common(struct vty *vty, struct ospf *ospf,
-					json_object *json, u_char use_json,
+					json_object *json, bool use_json,
 					u_char use_vrf)
 {
 	struct ospf_interface *oi;
@@ -4358,7 +4382,7 @@ DEFUN (show_ip_ospf_neighbor,
        JSON_STR)
 {
 	struct ospf *ospf;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct listnode *node = NULL;
 	char *vrf_name = NULL;
 	bool all_vrf = FALSE;
@@ -4390,23 +4414,36 @@ DEFUN (show_ip_ospf_neighbor,
 					json_object_to_json_string_ext(json,
 						  JSON_C_TO_STRING_PRETTY));
 				json_object_free(json);
-			}
+			} else if (!ospf)
+				vty_out(vty, "OSPF instance not found\n");
 
 			return ret;
 		}
 
 		ospf = ospf_lookup_by_inst_name(inst, vrf_name);
 		if (ospf == NULL || !ospf->oi_running) {
-			if (uj)
+			if (uj) {
+				vty_out(vty, "%s\n",
+					json_object_to_json_string_ext(
+						json, JSON_C_TO_STRING_PRETTY));
 				json_object_free(json);
+			} else
+				vty_out(vty, "%% OSPF instance not found\n");
+
 			return CMD_SUCCESS;
 		}
 	} else {
 		/* Display default ospf (instance 0) info */
 		ospf = ospf_lookup_by_vrf_id(VRF_DEFAULT);
 		if (ospf == NULL || !ospf->oi_running) {
-			if (uj)
+			if (uj) {
+				vty_out(vty, "%s\n",
+					json_object_to_json_string_ext(
+						json, JSON_C_TO_STRING_PRETTY));
 				json_object_free(json);
+			} else
+				vty_out(vty, "%% OSPF instance not found\n");
+
 			return CMD_SUCCESS;
 		}
 	}
@@ -4442,7 +4479,7 @@ DEFUN (show_ip_ospf_instance_neighbor,
 	int idx_number = 3;
 	struct ospf *ospf;
 	u_short instance = 0;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	json_object *json = NULL;
 	int ret = CMD_SUCCESS;
 
@@ -4469,8 +4506,7 @@ DEFUN (show_ip_ospf_instance_neighbor,
 }
 
 static int show_ip_ospf_neighbor_all_common(struct vty *vty, struct ospf *ospf,
-					    json_object *json,
-					    u_char use_json,
+					    json_object *json, bool use_json,
 					    u_char use_vrf)
 {
 	struct listnode *node;
@@ -4573,7 +4609,7 @@ DEFUN (show_ip_ospf_neighbor_all,
        JSON_STR)
 {
 	struct ospf *ospf;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct listnode *node = NULL;
 	char *vrf_name = NULL;
 	bool all_vrf = FALSE;
@@ -4658,7 +4694,7 @@ DEFUN (show_ip_ospf_instance_neighbor_all,
 	int idx_number = 3;
 	struct ospf *ospf;
 	u_short instance = 0;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	json_object *json = NULL;
 	int ret = CMD_SUCCESS;
 
@@ -4686,7 +4722,7 @@ DEFUN (show_ip_ospf_instance_neighbor_all,
 static int show_ip_ospf_neighbor_int_common(struct vty *vty, struct ospf *ospf,
 					    int arg_base,
 					    struct cmd_token **argv,
-					    u_char use_json, u_char use_vrf)
+					    bool use_json, u_char use_vrf)
 {
 	struct interface *ifp;
 	struct route_node *rn;
@@ -4745,7 +4781,7 @@ DEFUN (show_ip_ospf_neighbor_int,
 {
 	struct ospf *ospf;
 	int idx_ifname = 4;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct listnode *node = NULL;
 	int ret = CMD_SUCCESS;
 	struct interface *ifp = NULL;
@@ -4781,7 +4817,7 @@ DEFUN (show_ip_ospf_instance_neighbor_int,
 	int idx_ifname = 5;
 	struct ospf *ospf;
 	u_short instance = 0;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	if (!uj)
 		show_ip_ospf_neighbour_header(vty);
@@ -4804,7 +4840,7 @@ DEFUN (show_ip_ospf_instance_neighbor_int,
 static void show_ip_ospf_nbr_nbma_detail_sub(struct vty *vty,
 					     struct ospf_interface *oi,
 					     struct ospf_nbr_nbma *nbr_nbma,
-					     u_char use_json, json_object *json)
+					     bool use_json, json_object *json)
 {
 	char timebuf[OSPF_TIME_DUMP_SIZE];
 	json_object *json_sub = NULL;
@@ -4881,8 +4917,7 @@ static void show_ip_ospf_nbr_nbma_detail_sub(struct vty *vty,
 static void show_ip_ospf_neighbor_detail_sub(struct vty *vty,
 					     struct ospf_interface *oi,
 					     struct ospf_neighbor *nbr,
-					     json_object *json,
-					     u_char use_json)
+					     json_object *json, bool use_json)
 {
 	char timebuf[OSPF_TIME_DUMP_SIZE];
 	json_object *json_sub = NULL;
@@ -5098,8 +5133,7 @@ static void show_ip_ospf_neighbor_detail_sub(struct vty *vty,
 static int show_ip_ospf_neighbor_id_common(struct vty *vty, struct ospf *ospf,
 					   int arg_base,
 					   struct cmd_token **argv,
-					   u_char use_json,
-					   u_char use_vrf)
+					   bool use_json, u_char use_vrf)
 {
 	struct listnode *node;
 	struct ospf_neighbor *nbr;
@@ -5160,7 +5194,7 @@ DEFUN (show_ip_ospf_neighbor_id,
        JSON_STR)
 {
 	struct ospf *ospf;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct listnode *node = NULL;
 	int ret = CMD_SUCCESS;
 
@@ -5189,7 +5223,7 @@ DEFUN (show_ip_ospf_instance_neighbor_id,
 	int idx_router_id = 5;
 	struct ospf *ospf;
 	u_short instance = 0;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	instance = strtoul(argv[idx_number]->arg, NULL, 10);
 	ospf = ospf_lookup_instance(instance);
@@ -5205,8 +5239,7 @@ DEFUN (show_ip_ospf_instance_neighbor_id,
 
 static int show_ip_ospf_neighbor_detail_common(struct vty *vty,
 					       struct ospf *ospf,
-					       json_object *json,
-					       u_char use_json,
+					       json_object *json, bool use_json,
 					       u_char use_vrf)
 {
 	struct ospf_interface *oi;
@@ -5274,7 +5307,7 @@ DEFUN (show_ip_ospf_neighbor_detail,
        JSON_STR)
 {
 	struct ospf *ospf;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct listnode *node = NULL;
 	char *vrf_name = NULL;
 	bool all_vrf = FALSE;
@@ -5357,7 +5390,7 @@ DEFUN (show_ip_ospf_instance_neighbor_detail,
 	int idx_number = 3;
 	struct ospf *ospf;
 	u_short instance = 0;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	json_object *json = NULL;
 	int ret = CMD_SUCCESS;
 
@@ -5386,7 +5419,7 @@ DEFUN (show_ip_ospf_instance_neighbor_detail,
 static int show_ip_ospf_neighbor_detail_all_common(struct vty *vty,
 						   struct ospf *ospf,
 						   json_object *json,
-						   u_char use_json,
+						   bool use_json,
 						   u_char use_vrf)
 {
 	struct listnode *node;
@@ -5466,7 +5499,7 @@ DEFUN (show_ip_ospf_neighbor_detail_all,
        JSON_STR)
 {
 	struct ospf *ospf;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct listnode *node = NULL;
 	char *vrf_name = NULL;
 	bool all_vrf = FALSE;
@@ -5551,7 +5584,7 @@ DEFUN (show_ip_ospf_instance_neighbor_detail_all,
 	int idx_number = 3;
 	struct ospf *ospf;
 	u_short instance = 0;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	json_object *json = NULL;
 	int ret = CMD_SUCCESS;
 
@@ -5581,7 +5614,7 @@ static int show_ip_ospf_neighbor_int_detail_common(struct vty *vty,
 						   struct ospf *ospf,
 						   int arg_base,
 						   struct cmd_token **argv,
-						   u_char use_json)
+						   bool use_json)
 {
 	struct ospf_interface *oi;
 	struct interface *ifp;
@@ -5649,16 +5682,21 @@ DEFUN (show_ip_ospf_neighbor_int_detail,
        JSON_STR)
 {
 	struct ospf *ospf;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct listnode *node = NULL;
 	int ret = CMD_SUCCESS;
+	bool ospf_output = FALSE;
 
 	for (ALL_LIST_ELEMENTS_RO(om->ospf, node, ospf)) {
 		if (!ospf->oi_running)
 			continue;
+		ospf_output = TRUE;
 		ret = show_ip_ospf_neighbor_int_detail_common(vty, ospf, 0,
 							      argv, uj);
 	}
+
+	if (!ospf_output)
+		vty_out(vty, "%% OSPF instance not found\n");
 
 	return ret;
 }
@@ -5679,7 +5717,7 @@ DEFUN (show_ip_ospf_instance_neighbor_int_detail,
 	int idx_ifname = 5;
 	struct ospf *ospf;
 	u_short instance = 0;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	instance = strtoul(argv[idx_number]->arg, NULL, 10);
 	ospf = ospf_lookup_instance(instance);
@@ -6362,21 +6400,29 @@ DEFUN (show_ip_ospf_database_max,
 	OSPF_FIND_VRF_ARGS(argv, argc, idx_vrf, vrf_name, all_vrf);
 
 	if (vrf_name) {
+		bool ospf_output = FALSE;
 		use_vrf = 1;
 		if (all_vrf) {
 			for (ALL_LIST_ELEMENTS_RO(om->ospf, node, ospf)) {
 				if (!ospf->oi_running)
 					continue;
+				ospf_output = TRUE;
 				ret = show_ip_ospf_database_common(vty, ospf,
 								    idx_vrf ? 2
 								    : 0, argc,
 								    argv,
 								    use_vrf);
 			}
+
+			if (!ospf_output)
+				vty_out(vty, "%% OSPF instance not found\n");
 		} else {
 			ospf = ospf_lookup_by_inst_name(inst, vrf_name);
-			if (ospf == NULL || !ospf->oi_running)
+			if (ospf == NULL || !ospf->oi_running) {
+				vty_out(vty, "%% OSPF instance not found \n");
 				return CMD_SUCCESS;
+			}
+
 			ret = (show_ip_ospf_database_common(vty, ospf, idx_vrf ?
 							    2 : 0, argc, argv,
 							    use_vrf));
@@ -6384,8 +6430,11 @@ DEFUN (show_ip_ospf_database_max,
 	} else {
 		/* Display default ospf (instance 0) info */
 		ospf = ospf_lookup_by_vrf_id(VRF_DEFAULT);
-		if (ospf == NULL || !ospf->oi_running)
+		if (ospf == NULL || !ospf->oi_running) {
+			vty_out(vty, "%% OSPF instance not found \n");
 			return CMD_SUCCESS;
+		}
+
 		ret = show_ip_ospf_database_common(vty, ospf, 0, argc, argv,
 						   use_vrf);
 	}
@@ -6446,8 +6495,11 @@ DEFUN (show_ip_ospf_instance_database,
 			}
 		} else {
 			ospf = ospf_lookup_by_inst_name(inst, vrf_name);
-			if ((ospf == NULL) || !ospf->oi_running)
+			if ((ospf == NULL) || !ospf->oi_running) {
+				vty_out(vty, "%% OSPF instance not found \n");
 				return CMD_SUCCESS;
+			}
+
 			ret = (show_ip_ospf_database_common(vty, ospf, idx ? 2 :
 							    0, argc, argv,
 							    use_vrf));
@@ -6455,8 +6507,11 @@ DEFUN (show_ip_ospf_instance_database,
 	} else {
 		/* Display default ospf (instance 0) info */
 		ospf = ospf_lookup_by_vrf_id(VRF_DEFAULT);
-		if (ospf == NULL || !ospf->oi_running)
+		if (ospf == NULL || !ospf->oi_running) {
+			vty_out(vty, "%% OSPF instance not found \n");
 			return CMD_SUCCESS;
+		}
+
 		ret = (show_ip_ospf_database_common(vty, ospf, 0, argc, argv,
 						    use_vrf));
 	}
@@ -6485,8 +6540,10 @@ DEFUN (show_ip_ospf_instance_database_max,
 	if (ospf == NULL)
 		return CMD_NOT_MY_INSTANCE;
 
-	if (!ospf->oi_running)
+	if (!ospf->oi_running) {
+		vty_out(vty, "%% OSPF instance not found \n");
 		return CMD_SUCCESS;
+	}
 
 	return show_ip_ospf_database_common(vty, ospf, 1, argc, argv, 0);
 }
@@ -6575,8 +6632,11 @@ DEFUN (show_ip_ospf_instance_database_type_adv_router,
 		ospf = ospf_lookup_instance(instance);
 		if (ospf == NULL)
 			return CMD_NOT_MY_INSTANCE;
-		if (!ospf->oi_running)
+		if (!ospf->oi_running) {
+			vty_out(vty, "%% OSPF instance not found \n");
 			return CMD_SUCCESS;
+		}
+
 		return (show_ip_ospf_database_type_adv_router_common(vty, ospf,
 								     idx ? 1 : 0,
 								     argc,
@@ -6589,17 +6649,25 @@ DEFUN (show_ip_ospf_instance_database_type_adv_router,
 	if (vrf_name) {
 		use_vrf = 1;
 		if (all_vrf) {
+			bool ospf_output = FALSE;
 			for (ALL_LIST_ELEMENTS_RO(om->ospf, node, ospf)) {
 				if (!ospf->oi_running)
 					continue;
+				ospf_output = TRUE;
 				ret = show_ip_ospf_database_type_adv_router_common(vty,
 						ospf, idx ? 1 : 0, argc, argv,
 						use_vrf);
 			}
+
+			if (!ospf_output)
+				vty_out(vty, "%% OSPF instance not found\n");
 		} else {
 			ospf = ospf_lookup_by_inst_name(inst, vrf_name);
-			if ((ospf == NULL) || !ospf->oi_running)
+			if ((ospf == NULL) || !ospf->oi_running) {
+				vty_out(vty, "%% OSPF instance not found \n");
 				return CMD_SUCCESS;
+			}
+
 			ret = show_ip_ospf_database_type_adv_router_common(vty,
 						ospf, idx ? 1 : 0, argc, argv,
 						use_vrf);
@@ -6607,8 +6675,11 @@ DEFUN (show_ip_ospf_instance_database_type_adv_router,
 	} else {
 		/* Display default ospf (instance 0) info */
 		ospf = ospf_lookup_by_vrf_id(VRF_DEFAULT);
-		if (ospf == NULL || !ospf->oi_running)
+		if (ospf == NULL || !ospf->oi_running) {
+			vty_out(vty, "%% OSPF instance not found \n");
 			return CMD_SUCCESS;
+		}
+
 		ret = show_ip_ospf_database_type_adv_router_common(vty, ospf,
 								   idx ? 1 : 0,
 								   argc, argv,
@@ -9392,20 +9463,26 @@ DEFUN (show_ip_ospf_border_routers,
 	OSPF_FIND_VRF_ARGS(argv, argc, idx_vrf, vrf_name, all_vrf);
 
 	if (vrf_name) {
+		bool ospf_output = FALSE;
 		use_vrf = 1;
 		if (all_vrf) {
 			for (ALL_LIST_ELEMENTS_RO(om->ospf, node, ospf)) {
 				if (!ospf->oi_running)
 					continue;
-
+				ospf_output = TRUE;
 				ret = show_ip_ospf_border_routers_common(vty,
 								ospf,
 								use_vrf);
 			}
+
+			if (!ospf_output)
+				vty_out(vty, "%% OSPF instance not found \n");
 		} else {
 			ospf = ospf_lookup_by_inst_name(inst, vrf_name);
-			if (ospf == NULL || !ospf->oi_running)
+			if (ospf == NULL || !ospf->oi_running) {
+				vty_out(vty, "%% OSPF instance not found \n");
 				return CMD_SUCCESS;
+			}
 
 			ret = show_ip_ospf_border_routers_common(vty, ospf,
 								 use_vrf);
@@ -9413,8 +9490,11 @@ DEFUN (show_ip_ospf_border_routers,
 	} else {
 		/* Display default ospf (instance 0) info */
 		ospf = ospf_lookup_by_vrf_id(VRF_DEFAULT);
-		if (ospf == NULL || !ospf->oi_running)
+		if (ospf == NULL || !ospf->oi_running) {
+			vty_out(vty, "%% OSPF instance not found \n");
 			return CMD_SUCCESS;
+		}
+
 		ret = show_ip_ospf_border_routers_common(vty, ospf, use_vrf);
 	}
 
@@ -9514,7 +9594,7 @@ DEFUN (show_ip_ospf_route,
 	int inst = 0;
 	int idx_vrf = 0;
 	u_char use_vrf = 0;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	json_object *json = NULL;
 
 	if (uj)
@@ -9524,11 +9604,13 @@ DEFUN (show_ip_ospf_route,
 
 	/* vrf input is provided could be all or specific vrf*/
 	if (vrf_name) {
+		bool ospf_output = FALSE;
 		use_vrf = 1;
 		if (all_vrf) {
 			for (ALL_LIST_ELEMENTS_RO(om->ospf, node, ospf)) {
 				if (!ospf->oi_running)
 					continue;
+				ospf_output = TRUE;
 				ret = show_ip_ospf_route_common(vty, ospf, json,
 								use_vrf);
 			}
@@ -9538,22 +9620,35 @@ DEFUN (show_ip_ospf_route,
 					json_object_to_json_string_ext(json,
 						  JSON_C_TO_STRING_PRETTY));
 				json_object_free(json);
-			}
+			} else if (!ospf_output)
+				vty_out(vty, "%% OSPF instance not found\n");
 
 			return ret;
 		}
 		ospf = ospf_lookup_by_inst_name(inst, vrf_name);
 		if (ospf == NULL || !ospf->oi_running) {
-			if (uj)
+			if (uj) {
+				vty_out(vty, "%s\n",
+					json_object_to_json_string_ext(
+						json, JSON_C_TO_STRING_PRETTY));
 				json_object_free(json);
+			} else
+				vty_out(vty, "%% OSPF instance not found \n");
+
 			return CMD_SUCCESS;
 		}
 	} else {
 		/* Display default ospf (instance 0) info */
 		ospf = ospf_lookup_by_vrf_id(VRF_DEFAULT);
 		if (ospf == NULL || !ospf->oi_running) {
-			if (uj)
+			if (uj) {
+				vty_out(vty, "%s\n",
+					json_object_to_json_string_ext(
+						json, JSON_C_TO_STRING_PRETTY));
 				json_object_free(json);
+			} else
+				vty_out(vty, "%% OSPF instance not found \n");
+
 			return CMD_SUCCESS;
 		}
 	}
@@ -9605,7 +9700,7 @@ DEFUN (show_ip_ospf_vrfs,
 	"Show OSPF VRFs \n"
 	JSON_STR)
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	json_object *json = NULL;
 	json_object *json_vrfs = NULL;
 	struct ospf *ospf = NULL;

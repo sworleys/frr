@@ -4603,10 +4603,8 @@ void zebra_vxlan_evpn_vrf_route_del(vrf_id_t vrf_id,
 
 }
 
-void zebra_vxlan_print_specific_rmac_l3vni(struct vty *vty,
-					   vni_t l3vni,
-					   struct ethaddr *rmac,
-					   u_char use_json)
+void zebra_vxlan_print_specific_rmac_l3vni(struct vty *vty, vni_t l3vni,
+					   struct ethaddr *rmac, bool use_json)
 {
 	zebra_l3vni_t *zl3vni = NULL;
 	zebra_mac_t *zrmac = NULL;
@@ -4651,9 +4649,7 @@ void zebra_vxlan_print_specific_rmac_l3vni(struct vty *vty,
 	}
 }
 
-void zebra_vxlan_print_rmacs_l3vni(struct vty *vty,
-				   vni_t l3vni,
-				   u_char use_json)
+void zebra_vxlan_print_rmacs_l3vni(struct vty *vty, vni_t l3vni, bool use_json)
 {
 	zebra_l3vni_t *zl3vni;
 	u_int32_t num_rmacs;
@@ -4698,8 +4694,7 @@ void zebra_vxlan_print_rmacs_l3vni(struct vty *vty,
 	}
 }
 
-void zebra_vxlan_print_rmacs_all_l3vni(struct vty *vty,
-				       u_char use_json)
+void zebra_vxlan_print_rmacs_all_l3vni(struct vty *vty, bool use_json)
 {
 	struct zebra_ns *zns = NULL;
 	json_object *json = NULL;
@@ -4735,10 +4730,8 @@ void zebra_vxlan_print_rmacs_all_l3vni(struct vty *vty,
 	}
 }
 
-void zebra_vxlan_print_specific_nh_l3vni(struct vty *vty,
-					 vni_t l3vni,
-					 struct ipaddr *ip,
-					 u_char use_json)
+void zebra_vxlan_print_specific_nh_l3vni(struct vty *vty, vni_t l3vni,
+					 struct ipaddr *ip, bool use_json)
 {
 	zebra_l3vni_t *zl3vni = NULL;
 	zebra_neigh_t *n = NULL;
@@ -4782,9 +4775,7 @@ void zebra_vxlan_print_specific_nh_l3vni(struct vty *vty,
 	}
 }
 
-void zebra_vxlan_print_nh_l3vni(struct vty *vty,
-				vni_t l3vni,
-				u_char use_json)
+void zebra_vxlan_print_nh_l3vni(struct vty *vty, vni_t l3vni, bool use_json)
 {
 	u_int32_t num_nh;
 	struct nh_walk_ctx wctx;
@@ -4829,8 +4820,7 @@ void zebra_vxlan_print_nh_l3vni(struct vty *vty,
 	}
 }
 
-void zebra_vxlan_print_nh_all_l3vni(struct vty *vty,
-				    u_char use_json)
+void zebra_vxlan_print_nh_all_l3vni(struct vty *vty, bool use_json)
 {
 	struct zebra_ns *zns = NULL;
 	json_object *json = NULL;
@@ -4866,7 +4856,7 @@ void zebra_vxlan_print_nh_all_l3vni(struct vty *vty,
 /*
  * Display L3 VNI information (VTY command handler).
  */
-void zebra_vxlan_print_l3vni(struct vty *vty, vni_t vni, u_char use_json)
+void zebra_vxlan_print_l3vni(struct vty *vty, vni_t vni, bool use_json)
 {
 	void *args[2];
 	json_object *json = NULL;
@@ -4943,7 +4933,7 @@ void zebra_vxlan_print_vrf_vni(struct vty *vty, struct zebra_vrf *zvrf,
  * Display Neighbors for a VNI (VTY command handler).
  */
 void zebra_vxlan_print_neigh_vni(struct vty *vty, struct zebra_vrf *zvrf,
-				 vni_t vni, u_char use_json)
+				 vni_t vni, bool use_json)
 {
 	zebra_vni_t *zvni;
 	u_int32_t num_neigh;
@@ -5000,7 +4990,7 @@ void zebra_vxlan_print_neigh_vni(struct vty *vty, struct zebra_vrf *zvrf,
  * Display neighbors across all VNIs (VTY command handler).
  */
 void zebra_vxlan_print_neigh_all_vni(struct vty *vty, struct zebra_vrf *zvrf,
-				     u_char use_json)
+				     bool use_json)
 {
 	json_object *json = NULL;
 	void *args[2];
@@ -5029,7 +5019,7 @@ void zebra_vxlan_print_neigh_all_vni(struct vty *vty, struct zebra_vrf *zvrf,
  */
 void zebra_vxlan_print_specific_neigh_vni(struct vty *vty,
 					  struct zebra_vrf *zvrf, vni_t vni,
-					  struct ipaddr *ip, u_char use_json)
+					  struct ipaddr *ip, bool use_json)
 {
 	zebra_vni_t *zvni;
 	zebra_neigh_t *n;
@@ -5071,7 +5061,7 @@ void zebra_vxlan_print_specific_neigh_vni(struct vty *vty,
  */
 void zebra_vxlan_print_neigh_vni_vtep(struct vty *vty, struct zebra_vrf *zvrf,
 				      vni_t vni, struct in_addr vtep_ip,
-				      u_char use_json)
+				      bool use_json)
 {
 	zebra_vni_t *zvni;
 	u_int32_t num_neigh;
@@ -5113,7 +5103,7 @@ void zebra_vxlan_print_neigh_vni_vtep(struct vty *vty, struct zebra_vrf *zvrf,
  * Display MACs for a VNI (VTY command handler).
  */
 void zebra_vxlan_print_macs_vni(struct vty *vty, struct zebra_vrf *zvrf,
-				vni_t vni, u_char use_json)
+				vni_t vni, bool use_json)
 {
 	zebra_vni_t *zvni;
 	u_int32_t num_macs;
@@ -5168,7 +5158,7 @@ void zebra_vxlan_print_macs_vni(struct vty *vty, struct zebra_vrf *zvrf,
  * Display MACs for all VNIs (VTY command handler).
  */
 void zebra_vxlan_print_macs_all_vni(struct vty *vty, struct zebra_vrf *zvrf,
-				    u_char use_json)
+				    bool use_json)
 {
 	struct mac_walk_ctx wctx;
 	json_object *json = NULL;
@@ -5198,8 +5188,7 @@ void zebra_vxlan_print_macs_all_vni(struct vty *vty, struct zebra_vrf *zvrf,
  */
 void zebra_vxlan_print_macs_all_vni_vtep(struct vty *vty,
 					 struct zebra_vrf *zvrf,
-					 struct in_addr vtep_ip,
-					 u_char use_json)
+					 struct in_addr vtep_ip, bool use_json)
 {
 	struct mac_walk_ctx wctx;
 	json_object *json = NULL;
@@ -5255,7 +5244,7 @@ void zebra_vxlan_print_specific_mac_vni(struct vty *vty, struct zebra_vrf *zvrf,
  */
 void zebra_vxlan_print_macs_vni_vtep(struct vty *vty, struct zebra_vrf *zvrf,
 				     vni_t vni, struct in_addr vtep_ip,
-				     u_char use_json)
+				     bool use_json)
 {
 	zebra_vni_t *zvni;
 	u_int32_t num_macs;
@@ -5305,7 +5294,7 @@ void zebra_vxlan_print_macs_vni_vtep(struct vty *vty, struct zebra_vrf *zvrf,
  * Display VNI information (VTY command handler).
  */
 void zebra_vxlan_print_vni(struct vty *vty, struct zebra_vrf *zvrf, vni_t vni,
-			   u_char use_json)
+			   bool use_json)
 {
 	json_object *json = NULL;
 	void *args[2];
@@ -5393,7 +5382,7 @@ void zebra_vxlan_print_evpn(struct vty *vty, u_char uj)
  * Display VNI hash table (VTY command handler).
  */
 void zebra_vxlan_print_vnis(struct vty *vty, struct zebra_vrf *zvrf,
-			    u_char use_json)
+			    bool use_json)
 {
 	json_object *json = NULL;
 	struct zebra_ns *zns = NULL;

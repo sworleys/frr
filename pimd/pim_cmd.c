@@ -3340,7 +3340,7 @@ DEFUN (show_ip_igmp_interface,
 {
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	if (!vrf)
 		return CMD_WARNING;
@@ -3367,7 +3367,7 @@ DEFUN (show_ip_igmp_interface_vrf_all,
        JSON_STR)
 {
 	int idx = 2;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	bool first = true;
 
@@ -3423,7 +3423,7 @@ DEFUN (show_ip_igmp_join_vrf_all,
        VRF_CMD_HELP_STR
        "IGMP static join information\n")
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	bool first = true;
 
@@ -3457,7 +3457,7 @@ DEFUN (show_ip_igmp_groups,
 {
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	if (!vrf)
 		return CMD_WARNING;
@@ -3477,7 +3477,7 @@ DEFUN (show_ip_igmp_groups_vrf_all,
        IGMP_GROUP_STR
        JSON_STR)
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	bool first = true;
 
@@ -3655,7 +3655,7 @@ DEFUN (show_ip_pim_interface,
 {
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	if (!vrf)
 		return CMD_WARNING;
@@ -3682,7 +3682,7 @@ DEFUN (show_ip_pim_interface_vrf_all,
        JSON_STR)
 {
 	int idx = 6;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	bool first = true;
 
@@ -3721,7 +3721,7 @@ DEFUN (show_ip_pim_join,
 {
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	if (!vrf)
 		return CMD_WARNING;
@@ -3741,7 +3741,7 @@ DEFUN (show_ip_pim_join_vrf_all,
        "PIM interface join information\n"
        JSON_STR)
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	bool first = true;
 
@@ -3775,7 +3775,7 @@ DEFUN (show_ip_pim_local_membership,
 {
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	if (!vrf)
 		return CMD_WARNING;
@@ -3799,7 +3799,7 @@ DEFUN (show_ip_pim_neighbor,
 {
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	if (!vrf)
 		return CMD_WARNING;
@@ -3826,7 +3826,7 @@ DEFUN (show_ip_pim_neighbor_vrf_all,
        JSON_STR)
 {
 	int idx = 2;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	bool first = true;
 
@@ -3889,7 +3889,7 @@ DEFUN (show_ip_pim_state,
 	const char *group = NULL;
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	if (!vrf)
 		return CMD_WARNING;
@@ -3923,7 +3923,7 @@ DEFUN (show_ip_pim_state_vrf_all,
 	const char *src_or_group = NULL;
 	const char *group = NULL;
 	int idx = 2;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	bool first = true;
 
@@ -3966,7 +3966,7 @@ DEFUN (show_ip_pim_upstream,
 {
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	if (!vrf)
 		return CMD_WARNING;
@@ -3986,7 +3986,7 @@ DEFUN (show_ip_pim_upstream_vrf_all,
        "PIM upstream information\n"
        JSON_STR)
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	bool first = true;
 
@@ -4018,7 +4018,7 @@ DEFUN (show_ip_pim_upstream_join_desired,
 {
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	if (!vrf)
 		return CMD_WARNING;
@@ -4040,7 +4040,7 @@ DEFUN (show_ip_pim_upstream_rpf,
 {
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	if (!vrf)
 		return CMD_WARNING;
@@ -4062,7 +4062,7 @@ DEFUN (show_ip_pim_rp,
 {
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	if (!vrf)
 		return CMD_WARNING;
@@ -4082,7 +4082,7 @@ DEFUN (show_ip_pim_rp_vrf_all,
        "PIM RP information\n"
        JSON_STR)
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	bool first = true;
 
@@ -4116,7 +4116,7 @@ DEFUN (show_ip_pim_rpf,
 {
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	if (!vrf)
 		return CMD_WARNING;
@@ -4136,7 +4136,7 @@ DEFUN (show_ip_pim_rpf_vrf_all,
        "PIM cached source rpf information\n"
        JSON_STR)
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	bool first = true;
 
@@ -4282,7 +4282,7 @@ DEFUN (show_ip_pim_interface_traffic,
 {
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	if (!vrf)
 		return CMD_WARNING;
@@ -4406,7 +4406,7 @@ DEFUN (show_ip_multicast_vrf_all,
        VRF_CMD_HELP_STR
        "Multicast global information\n")
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	bool first = true;
 
@@ -4761,7 +4761,7 @@ DEFUN (show_ip_mroute,
        "Fill in Assumed data\n"
        JSON_STR)
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	bool fill = false;
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
@@ -4786,7 +4786,7 @@ DEFUN (show_ip_mroute_vrf_all,
        "Fill in Assumed data\n"
        JSON_STR)
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	int idx = 4;
 	struct vrf *vrf;
 	bool first = true;
@@ -4894,7 +4894,7 @@ DEFUN (show_ip_mroute_count_vrf_all,
        VRF_CMD_HELP_STR
        "Route and packet count data\n")
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	bool first = true;
 
@@ -5508,7 +5508,7 @@ DEFUN (show_ip_pim_ssm_range,
 {
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	if (!vrf)
 		return CMD_WARNING;
@@ -5561,7 +5561,7 @@ DEFUN (show_ip_pim_group_type,
 {
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	if (!vrf)
 		return CMD_WARNING;
@@ -7889,7 +7889,7 @@ DEFUN (show_ip_msdp_mesh_group,
        "MSDP mesh-group information\n"
        JSON_STR)
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
 
@@ -7911,7 +7911,7 @@ DEFUN (show_ip_msdp_mesh_group_vrf_all,
        "MSDP mesh-group information\n"
        JSON_STR)
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	bool first = true;
 
@@ -8104,7 +8104,7 @@ DEFUN (show_ip_msdp_peer_detail,
        "peer ip address\n"
        JSON_STR)
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
 
@@ -8139,7 +8139,7 @@ DEFUN (show_ip_msdp_peer_detail_vrf_all,
        JSON_STR)
 {
 	int idx = 2;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	bool first = true;
 
@@ -8345,7 +8345,7 @@ DEFUN (show_ip_msdp_sa_detail,
        "Detailed output\n"
        JSON_STR)
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
 
@@ -8368,7 +8368,7 @@ DEFUN (show_ip_msdp_sa_detail_vrf_all,
        "Detailed output\n"
        JSON_STR)
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	bool first = true;
 
@@ -8460,7 +8460,7 @@ DEFUN (show_ip_msdp_sa_sg,
        "group ip\n"
        JSON_STR)
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	int idx = 2;
 
@@ -8497,7 +8497,7 @@ DEFUN (show_ip_msdp_sa_sg_vrf_all,
        "group ip\n"
        JSON_STR)
 {
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	bool first = true;
 	int idx = 2;
