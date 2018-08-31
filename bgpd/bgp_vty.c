@@ -306,11 +306,11 @@ int bgp_vty_find_and_parse_afi_safi_bgp(struct vty *vty,
 		else {
 			*bgp = bgp_lookup_by_name(vrf_name);
 			if (!*bgp) {
-				use_json
-					? vty_out(vty, "{}\n")
-					: vty_out(vty,
-						  "View/Vrf specified is unknown: %s\n",
-						  vrf_name);
+				if (use_json)
+					vty_out(vty, "{}\n");
+				else
+					vty_out(vty, "View/Vrf %s is unknown\n",
+						vrf_name);
 				*idx = 0;
 				return 0;
 			}
@@ -318,10 +318,11 @@ int bgp_vty_find_and_parse_afi_safi_bgp(struct vty *vty,
 	} else {
 		*bgp = bgp_get_default();
 		if (!*bgp) {
-			use_json
-				? vty_out(vty, "{}\n")
-				: vty_out(vty,
-					  "Unable to find default BGP instance\n");
+			if (use_json)
+				vty_out(vty, "{}\n");
+			else
+				vty_out(vty,
+					"Default BGP instance not found\n");
 			*idx = 0;
 			return 0;
 		}
@@ -7966,9 +7967,12 @@ static void bgp_show_summary_afi_safi(struct vty *vty, struct bgp *bgp, int afi,
 
 	if (use_json && is_wildcard)
 		vty_out(vty, "}\n");
-	else if (!nbr_output)
-		use_json ? vty_out(vty, "{}\n")
-			 : vty_out(vty, "%% No BGP neighbors found\n");
+	else if (!nbr_output) {
+		if (use_json)
+			vty_out(vty, "{}\n");
+		else
+			vty_out(vty, "%% No BGP neighbors found\n");
+	}
 }
 
 static void bgp_show_all_instances_summary_vty(struct vty *vty, afi_t afi,
@@ -8026,10 +8030,12 @@ int bgp_show_summary_vty(struct vty *vty, const char *name, afi_t afi,
 			bgp = bgp_lookup_by_name(name);
 
 			if (!bgp) {
-				use_json
-					? vty_out(vty, "{}\n")
-					: vty_out(vty,
-						  "%% BGP instance not found\n");
+				if (use_json)
+					vty_out(vty, "{}\n");
+				else
+					vty_out(vty,
+						"%% BGP instance not found\n");
+
 				return CMD_WARNING;
 			}
 
@@ -8044,8 +8050,10 @@ int bgp_show_summary_vty(struct vty *vty, const char *name, afi_t afi,
 	if (bgp)
 		bgp_show_summary_afi_safi(vty, bgp, afi, safi, use_json, NULL);
 	else {
-		use_json ? vty_out(vty, "{}\n")
-			 : vty_out(vty, "%% No such BGP instance exist\n");
+		if (use_json)
+			vty_out(vty, "{}\n");
+		else
+			vty_out(vty, "%% BGP instance not found\n");
 		return CMD_WARNING;
 	}
 
@@ -10715,8 +10723,10 @@ static int bgp_show_neighbor_vty(struct vty *vty, const char *name,
 		}
 		json_object_free(json);
 	} else {
-		use_json ? vty_out(vty, "{}\n")
-			 : vty_out(vty, "%% BGP instance not found\n");
+		if (use_json)
+			vty_out(vty, "{}\n");
+		else
+			vty_out(vty, "%% BGP instance not found\n");
 	}
 
 	return CMD_SUCCESS;
