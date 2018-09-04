@@ -30,6 +30,7 @@ This program
 
 import argparse
 import copy
+import json
 import logging
 import os
 import random
@@ -403,7 +404,7 @@ end
                 self.save_contexts(ctx_keys, current_context_lines)
                 new_ctx = True
 
-            elif line in ("end", "exit-vrf"):
+            elif line in ["end", "exit-vrf"]:
                 self.save_contexts(ctx_keys, current_context_lines)
                 log.debug('LINE %-50s: exiting old context, %-50s', line, ctx_keys)
 
@@ -413,7 +414,7 @@ end
                 ctx_keys = []
                 current_context_lines = []
 
-            elif line in ["exit-address-family", "exit", "exit-vnc", "exit-vni"]:
+            elif line in ["exit-address-family", "exit", "exit-vnc"]:
                 # if this exit is for address-family ipv4 unicast, ignore the pop
                 if main_ctx_key:
                     self.save_contexts(ctx_keys, current_context_lines)
@@ -422,6 +423,15 @@ end
                     ctx_keys = copy.deepcopy(main_ctx_key)
                     current_context_lines = []
                     log.debug('LINE %-50s: popping from subcontext to ctx%-50s', line, ctx_keys)
+
+            elif line == "exit-vni":
+                if sub_main_ctx_key:
+                    self.save_contexts(ctx_keys, current_context_lines)
+
+                    # Start a new context
+                    ctx_keys = copy.deepcopy(sub_main_ctx_key)
+                    current_context_lines = []
+                    log.debug('LINE %-50s: popping from sub-subcontext to ctx%-50s', line, ctx_keys)
 
             elif new_ctx is True:
                 if not main_ctx_key:
@@ -436,11 +446,7 @@ end
             elif (line.startswith("address-family ") or
                   line.startswith("vnc defaults") or
                   line.startswith("vnc l2-group") or
-                  line.startswith("vnc nve-group") or
-                  (line.startswith("vni ") and
-                   len(ctx_keys) == 2 and
-                   ctx_keys[0].startswith('router bgp') and
-                   ctx_keys[1] == 'address-family l2vpn evpn')):
+                  line.startswith("vnc nve-group")):
                 main_ctx_key = []
 
                 # Save old context first
@@ -457,6 +463,18 @@ end
                     ctx_keys.append("address-family l2vpn evpn")
                 else:
                     ctx_keys.append(line)
+
+            elif ((line.startswith("vni ") and
+                   len(ctx_keys) == 2 and
+                   ctx_keys[0].startswith('router bgp') and
+                   ctx_keys[1] == 'address-family l2vpn evpn')):
+
+                # Save old context first
+                self.save_contexts(ctx_keys, current_context_lines)
+                current_context_lines = []
+                sub_main_ctx_key = copy.deepcopy(ctx_keys)
+                log.debug('LINE %-50s: entering sub-sub-context, append to ctx_keys', line)
+                ctx_keys.append(line)
 
             else:
                 # Continuing in an existing context, add non-commented lines to it
@@ -906,6 +924,7 @@ def compare_context_objects(newconf, running):
     lines_to_add = []
     lines_to_del = []
     delete_bgpd = False
+    restart_frr = False
 
     # Find contexts that are in newconf but not in running
     # Find contexts that are in running but not in newconf
@@ -919,6 +938,7 @@ def compare_context_objects(newconf, running):
             # running but not in newconf.
             if "router bgp" in running_ctx_keys[0] and len(running_ctx_keys) == 1:
                 delete_bgpd = True
+                restart_frr = True
                 lines_to_del.append((running_ctx_keys, None))
 
             # We cannot do 'no interface' in FRR, and so deal with it
@@ -984,9 +1004,31 @@ def compare_context_objects(newconf, running):
     (lines_to_add, lines_to_del) = ignore_delete_re_add_lines(lines_to_add, lines_to_del)
     (lines_to_add, lines_to_del) = ignore_unconfigurable_lines(lines_to_add, lines_to_del)
 
-    return (lines_to_add, lines_to_del)
+    return (lines_to_add, lines_to_del, restart_frr)
 
 
+def is_evpn_enabled():
+    """
+    Returns True if bgpd is currently running with EVPN enabled
+    """
+
+    evpn_enabled = False
+    cmd = ['/usr/bin/vtysh', '-c', 'show bgp l2vpn evpn vni json']
+    output = ''
+    DEVNULL = open(os.devnull, 'wb')
+
+    try:
+        output = subprocess.check_output(cmd, stderr=DEVNULL).strip()
+    except:
+        pass
+
+    if output:
+        output = json.loads(output)
+        adv_vnis = output.get('advertiseAllVnis', '')
+        if 'Enabled' in adv_vnis:
+            evpn_enabled = True
+
+    return evpn_enabled
 
 def vtysh_config_available():
     """
@@ -1102,7 +1144,7 @@ if __name__ == '__main__':
         else:
             running.load_from_show_running()
 
-        (lines_to_add, lines_to_del) = compare_context_objects(newconf, running)
+        (lines_to_add, lines_to_del, restart_frr) = compare_context_objects(newconf, running)
         lines_to_configure = []
 
         if lines_to_del:
@@ -1181,7 +1223,18 @@ if __name__ == '__main__':
             running.load_from_show_running()
             log.debug('Running Frr Config (Pass #%d)\n%s', x, running.get_lines())
 
-            (lines_to_add, lines_to_del) = compare_context_objects(newconf, running)
+            (lines_to_add, lines_to_del, restart_frr) = compare_context_objects(newconf, running)
+            if restart_frr and is_evpn_enabled():
+                # currently EVPN has heavy dependencies on the BGP default
+                # instance i.e. FRR cannot survive a BGP default instance
+                # delete. so as a workaround we "silently" restart FRR
+                # if the change in config requires a bgp delete (and if
+                # EVPN is enabled).
+                log.info('EVPN is enabled and default instance del needed')
+                log.info('Restarting FRR')
+                subprocess.call('systemctl reset-failed frr.service'.split())
+                subprocess.call('systemctl --no-block restart frr.service'.split())
+                sys.exit(0)
 
             if x == 0:
                 lines_to_add_first_pass = lines_to_add

@@ -186,7 +186,7 @@ static void ares_address_cb(void *arg, int status, int timeouts, struct hostent 
 void resolver_resolve(struct resolver_query *query, int af, const char *hostname, void (*callback)(struct resolver_query *, int, union sockunion *))
 {
 	if (query->callback != NULL) {
-		zlog_ferr(NHRP_ERR_RESOLVER,
+		flog_err(NHRP_ERR_RESOLVER,
 			  "Trying to resolve '%s', but previous query was not finished yet",
 			  hostname);
 		return;

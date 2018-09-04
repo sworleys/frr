@@ -274,19 +274,12 @@ buffer_status_t buffer_flush_window(struct buffer *b, int fd, int width,
 	if (!b->head)
 		return BUFFER_EMPTY;
 
-	if (height < 1) {
-		zlog_warn(
-			"%s called with non-positive window height %d, forcing to 1",
-			__func__, height);
+	if (height < 1)
 		height = 1;
-	} else if (height >= 2)
+	else if (height >= 2)
 		height--;
-	if (width < 1) {
-		zlog_warn(
-			"%s called with non-positive window width %d, forcing to 1",
-			__func__, width);
+	if (width < 1)
 		width = 1;
-	}
 
 	/* For erase and more data add two to b's buffer_data count.*/
 	if (b->head->next == NULL) {
@@ -334,16 +327,11 @@ buffer_status_t buffer_flush_window(struct buffer *b, int fd, int width,
 		{
 			iov_alloc *= 2;
 			if (iov != small_iov) {
-				zlog_warn(
-					"%s: growing iov array to %d; "
-					"width %d, height %d, size %lu",
-					__func__, iov_alloc, width, height,
-					(u_long)b->size);
 				iov = XREALLOC(MTYPE_TMP, iov,
 					       iov_alloc * sizeof(*iov));
 			} else {
 				/* This should absolutely never occur. */
-				zlog_ferr(LIB_ERR_SYSTEM_CALL,
+				flog_err(LIB_ERR_SYSTEM_CALL,
 					  "%s: corruption detected: iov_small overflowed; "
 					  "head %p, tail %p, head->next %p",
 					  __func__, (void *)b->head,
@@ -376,8 +364,9 @@ buffer_status_t buffer_flush_window(struct buffer *b, int fd, int width,
 			iov_size =
 				((iov_index > IOV_MAX) ? IOV_MAX : iov_index);
 			if ((nbytes = writev(fd, c_iov, iov_size)) < 0) {
-				zlog_warn("%s: writev to fd %d failed: %s",
-					  __func__, fd, safe_strerror(errno));
+				flog_err(LIB_ERR_SOCKET,
+					 "%s: writev to fd %d failed: %s",
+					 __func__, fd, safe_strerror(errno));
 				break;
 			}
 
@@ -388,8 +377,9 @@ buffer_status_t buffer_flush_window(struct buffer *b, int fd, int width,
 	}
 #else  /* IOV_MAX */
 	if ((nbytes = writev(fd, iov, iov_index)) < 0)
-		zlog_warn("%s: writev to fd %d failed: %s", __func__, fd,
-			  safe_strerror(errno));
+		flog_err(LIB_ERR_SOCKET,
+			 "%s: writev to fd %d failed: %s", __func__, fd,
+			 safe_strerror(errno));
 #endif /* IOV_MAX */
 
 	/* Free printed buffer data. */
@@ -446,7 +436,8 @@ in one shot. */
 		if (ERRNO_IO_RETRY(errno))
 			/* Calling code should try again later. */
 			return BUFFER_PENDING;
-		zlog_warn("%s: write error on fd %d: %s", __func__, fd,
+		flog_err(LIB_ERR_SOCKET,
+			 "%s: write error on fd %d: %s", __func__, fd,
 			  safe_strerror(errno));
 		return BUFFER_ERROR;
 	}
@@ -455,7 +446,7 @@ in one shot. */
 	while (written > 0) {
 		struct buffer_data *d;
 		if (!(d = b->head)) {
-			zlog_ferr(
+			flog_err(
 				LIB_ERR_DEVELOPMENT,
 				"%s: corruption detected: buffer queue empty, but written is %lu",
 				__func__, (unsigned long)written);
@@ -501,8 +492,9 @@ buffer_status_t buffer_write(struct buffer *b, int fd, const void *p,
 		if (ERRNO_IO_RETRY(errno))
 			nbytes = 0;
 		else {
-			zlog_warn("%s: write error on fd %d: %s", __func__, fd,
-				  safe_strerror(errno));
+			flog_err(LIB_ERR_SOCKET,
+				 "%s: write error on fd %d: %s", __func__, fd,
+				 safe_strerror(errno));
 			return BUFFER_ERROR;
 		}
 	}

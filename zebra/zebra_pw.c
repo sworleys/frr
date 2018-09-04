@@ -247,8 +247,8 @@ static int zebra_pw_check_reachability(struct zebra_pw *pw)
 		       &pw->nexthop, NULL);
 	if (!re) {
 		if (IS_ZEBRA_DEBUG_PW)
-			zlog_warn("%s: no route found for %s", __func__,
-				  pw->ifname);
+			zlog_debug("%s: no route found for %s", __func__,
+				   pw->ifname);
 		return -1;
 	}
 
@@ -259,8 +259,8 @@ static int zebra_pw_check_reachability(struct zebra_pw *pw)
 	for (ALL_NEXTHOPS(re->ng, nexthop)) {
 		if (!nexthop->nh_label) {
 			if (IS_ZEBRA_DEBUG_PW)
-				zlog_warn("%s: unlabeled route for %s",
-					  __func__, pw->ifname);
+				zlog_debug("%s: unlabeled route for %s",
+					   __func__, pw->ifname);
 			return -1;
 		}
 	}

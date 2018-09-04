@@ -50,6 +50,7 @@
 #include "zebra/interface.h"
 #include "zebra/zebra_vxlan.h"
 #include "zebra/zebra_static.h"
+#include "zebra/zebra_errors.h"
 
 #define ZEBRA_PTM_SUPPORT
 
@@ -312,9 +313,9 @@ int if_subnet_delete(struct interface *ifp, struct connected *ifc)
 	/* Get address derived subnet node. */
 	rn = route_node_lookup(zebra_if->ipv4_subnets, &cp);
 	if (!(rn && rn->info)) {
-		zlog_warn(
-			"Trying to remove an address from an unknown subnet."
-			" (please report this bug)");
+		flog_warn(ZEBRA_ERR_REMOVE_ADDR_UNKNOWN_SUBNET,
+			  "Trying to remove an address from an unknown subnet."
+			  " (please report this bug)");
 		return -1;
 	}
 	route_unlock_node(rn);
@@ -326,7 +327,8 @@ int if_subnet_delete(struct interface *ifp, struct connected *ifc)
 	 * In any case, we shouldn't decrement the lock counter if the address
 	 * is unknown. */
 	if (!listnode_lookup(addr_list, ifc)) {
-		zlog_warn(
+		flog_warn(
+			ZEBRA_ERR_REMOVE_UNREGISTERED_ADDR,
 			"Trying to remove an address from a subnet where it is not"
 			" currently registered. (please report this bug)");
 		return -1;
@@ -472,7 +474,8 @@ static void if_addr_wakeup(struct interface *ifp)
 
 				ret = if_set_prefix(ifp, ifc);
 				if (ret < 0) {
-					zlog_warn(
+					flog_err_sys(
+						ZEBRA_ERR_IFACE_ADDR_ADD_FAILED,
 						"Can't set interface's address: %s",
 						safe_strerror(errno));
 					continue;
@@ -494,7 +497,8 @@ static void if_addr_wakeup(struct interface *ifp)
 
 				ret = if_prefix_add_ipv6(ifp, ifc);
 				if (ret < 0) {
-					zlog_warn(
+					flog_err_sys(
+						ZEBRA_ERR_IFACE_ADDR_ADD_FAILED,
 						"Can't set interface's address: %s",
 						safe_strerror(errno));
 					continue;
@@ -698,7 +702,7 @@ void if_delete_update(struct interface *ifp)
 	struct zebra_if *zif;
 
 	if (if_is_up(ifp)) {
-		zlog_ferr(
+		flog_err(
 			LIB_ERR_INTERFACE,
 			"interface %s vrf %u index %d is still up while being deleted.",
 			ifp->name, ifp->vrf_id, ifp->ifindex);
@@ -890,7 +894,8 @@ void if_up(struct interface *ifp)
 
 	/* Notify the protocol daemons. */
 	if (ifp->ptm_enable && (ifp->ptm_status == ZEBRA_PTM_STATUS_DOWN)) {
-		zlog_warn("%s: interface %s hasn't passed ptm check\n",
+		flog_warn(ZEBRA_ERR_PTM_NOT_READY,
+			  "%s: interface %s hasn't passed ptm check\n",
 			  __func__, ifp->name);
 		return;
 	}
@@ -1392,7 +1397,7 @@ DEFUN (show_interface,
 	interface_update_stats();
 
 	if (argc > 2)
-		VRF_GET_ID(vrf_id, argv[3]->arg);
+		VRF_GET_ID(vrf_id, argv[3]->arg, false);
 
 	/* All interface print. */
 	vrf = vrf_lookup_by_id(vrf_id);
@@ -1441,7 +1446,7 @@ DEFUN (show_interface_name_vrf,
 
 	interface_update_stats();
 
-	VRF_GET_ID(vrf_id, argv[idx_name]->arg);
+	VRF_GET_ID(vrf_id, argv[idx_name]->arg, false);
 
 	/* Specified interface print. */
 	ifp = if_lookup_by_name(argv[idx_ifname]->arg, vrf_id);
@@ -1535,7 +1540,7 @@ DEFUN (show_interface_desc,
 	vrf_id_t vrf_id = VRF_DEFAULT;
 
 	if (argc > 3)
-		VRF_GET_ID(vrf_id, argv[4]->arg);
+		VRF_GET_ID(vrf_id, argv[4]->arg, false);
 
 	if_show_description(vty, vrf_id);
 

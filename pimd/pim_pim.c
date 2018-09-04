@@ -116,7 +116,7 @@ void pim_sock_delete(struct interface *ifp, const char *delete_message)
 		  delete_message);
 
 	if (!ifp->info) {
-		zlog_ferr(PIM_ERR_CONFIG,
+		flog_err(PIM_ERR_CONFIG,
 			  "%s: %s: but PIM not enabled on interface %s (!)",
 			  __PRETTY_FUNCTION__, delete_message, ifp->name);
 		return;
@@ -655,7 +655,7 @@ static int pim_hello_send(struct interface *ifp, uint16_t holdtime)
 {
 	struct pim_interface *pim_ifp = ifp->info;
 
-	if (pim_if_is_loopback(ifp))
+	if (if_is_loopback_or_vrf(ifp))
 		return 0;
 
 	if (hello_send(ifp, holdtime)) {
@@ -757,7 +757,7 @@ void pim_hello_restart_triggered(struct interface *ifp)
 	/*
 	 * No need to ever start loopback or vrf device hello's
 	 */
-	if (pim_if_is_loopback(ifp))
+	if (if_is_loopback_or_vrf(ifp))
 		return;
 
 	/*

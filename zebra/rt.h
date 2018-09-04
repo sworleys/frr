@@ -111,11 +111,10 @@ extern int kernel_add_mac(struct interface *ifp, vlanid_t vid,
 			  struct ethaddr *mac, struct in_addr vtep_ip,
 			  u_char sticky);
 extern int kernel_del_mac(struct interface *ifp, vlanid_t vid,
-			  struct ethaddr *mac, struct in_addr vtep_ip,
-			  int local);
+			  struct ethaddr *mac, struct in_addr vtep_ip);
 
 extern int kernel_add_neigh(struct interface *ifp, struct ipaddr *ip,
-			    struct ethaddr *mac);
+			    struct ethaddr *mac, uint8_t flags);
 extern int kernel_del_neigh(struct interface *ifp, struct ipaddr *ip);
 
 /*

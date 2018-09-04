@@ -42,6 +42,7 @@
 
 #include "zebra_netns_notify.h"
 #include "zebra_netns_id.h"
+#include "zebra_errors.h"
 
 #ifdef HAVE_NETLINK
 
@@ -77,24 +78,27 @@ static void zebra_ns_notify_create_context_from_entry_name(const char *name)
 		return;
 
 	if (zserv_privs.change(ZPRIVS_RAISE))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 	ns_id = zebra_ns_id_get(netnspath);
 	if (zserv_privs.change(ZPRIVS_LOWER))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 	/* if VRF with NS ID already present */
 	vrf = vrf_lookup_by_id((vrf_id_t)ns_id);
 	if (vrf) {
-		zlog_warn("NS notify : same NSID used by VRF %s. Ignore NS %s creation",
-			  vrf->name, netnspath);
+		zlog_debug(
+			"NS notify : same NSID used by VRF %s. Ignore NS %s creation",
+			vrf->name, netnspath);
 		return;
 	}
 	if (vrf_handler_create(NULL, name, &vrf) != CMD_SUCCESS) {
-		zlog_warn("NS notify : failed to create VRF %s", name);
+		flog_warn(ZEBRA_ERR_NS_VRF_CREATION_FAILED,
+			  "NS notify : failed to create VRF %s", name);
 		return;
 	}
 	ret = vrf_netns_handler_create(NULL, vrf, netnspath, ns_id);
 	if (ret != CMD_SUCCESS) {
-		zlog_warn("NS notify : failed to create NS %s", netnspath);
+		flog_warn(ZEBRA_ERR_NS_VRF_CREATION_FAILED,
+			  "NS notify : failed to create NS %s", netnspath);
 		return;
 	}
 	zlog_info("NS notify : created VRF %s NS %s",
@@ -133,19 +137,19 @@ static int zebra_ns_ready_read(struct thread *t)
 	if (--zns_info->retries == 0)
 		stop_retry = 1;
 	if (zserv_privs.change(ZPRIVS_RAISE))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 	err = ns_switch_to_netns(netnspath);
 	if (zserv_privs.change(ZPRIVS_LOWER))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 	if (err < 0)
 		return zebra_ns_continue_read(zns_info, stop_retry);
 
 	/* go back to default ns */
 	if (zserv_privs.change(ZPRIVS_RAISE))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 	err = ns_switchback_to_initial();
 	if (zserv_privs.change(ZPRIVS_LOWER))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 	if (err < 0)
 		return zebra_ns_continue_read(zns_info, stop_retry);
 
@@ -166,8 +170,9 @@ static int zebra_ns_notify_read(struct thread *t)
 						     NULL, fd_monitor, NULL);
 	len = read(fd_monitor, buf, sizeof(buf));
 	if (len < 0) {
-		zlog_warn("NS notify read: failed to read (%s)",
-			  safe_strerror(errno));
+		flog_err_sys(ZEBRA_ERR_NS_NOTIFY_READ,
+			     "NS notify read: failed to read (%s)",
+			     safe_strerror(errno));
 		return 0;
 	}
 	for (event = (struct inotify_event *)buf;
@@ -199,7 +204,8 @@ void zebra_ns_notify_parse(void)
 	DIR *srcdir = opendir(NS_RUN_DIR);
 
 	if (srcdir == NULL) {
-		zlog_warn("NS parsing init: failed to parse %s", NS_RUN_DIR);
+		flog_err_sys(LIB_ERR_SYSTEM_CALL,
+			     "NS parsing init: failed to parse %s", NS_RUN_DIR);
 		return;
 	}
 	while ((dent = readdir(srcdir)) != NULL) {
@@ -209,13 +215,15 @@ void zebra_ns_notify_parse(void)
 		   || strcmp(dent->d_name, "..") == 0)
 			continue;
 		if (fstatat(dirfd(srcdir), dent->d_name, &st, 0) < 0) {
-			zlog_warn("NS parsing init: failed to parse entry %s",
-				  dent->d_name);
+			flog_err_sys(
+				LIB_ERR_SYSTEM_CALL,
+				"NS parsing init: failed to parse entry %s",
+				dent->d_name);
 			continue;
 		}
 		if (S_ISDIR(st.st_mode)) {
-			zlog_warn("NS parsing init: %s is not a NS",
-				  dent->d_name);
+			zlog_debug("NS parsing init: %s is not a NS",
+				   dent->d_name);
 			continue;
 		}
 		zebra_ns_notify_create_context_from_entry_name(dent->d_name);
@@ -230,12 +238,15 @@ void zebra_ns_notify_init(void)
 	zebra_netns_notify_current = NULL;
 	fd_monitor = inotify_init();
 	if (fd_monitor < 0) {
-		zlog_warn("NS notify init: failed to initialize inotify (%s)",
-			  safe_strerror(errno));
+		flog_err_sys(
+			LIB_ERR_SYSTEM_CALL,
+			"NS notify init: failed to initialize inotify (%s)",
+			safe_strerror(errno));
 	}
 	if (inotify_add_watch(fd_monitor, NS_RUN_DIR, IN_CREATE) < 0) {
-		zlog_warn("NS notify watch: failed to add watch (%s)",
-			  safe_strerror(errno));
+		flog_err_sys(LIB_ERR_SYSTEM_CALL,
+			     "NS notify watch: failed to add watch (%s)",
+			     safe_strerror(errno));
 	}
 	zebra_netns_notify_current = thread_add_read(zebrad.master,
 						     zebra_ns_notify_read,

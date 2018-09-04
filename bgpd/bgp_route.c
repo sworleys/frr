@@ -39,6 +39,7 @@
 #include "memory.h"
 #include "lib/json.h"
 #include "vxlan.h"
+#include "lib_errors.h"
 
 #include "bgpd/bgpd.h"
 #include "bgpd/bgp_table.h"
@@ -332,14 +333,9 @@ static void bgp_pcount_adjust(struct bgp_node *rn, struct bgp_info *ri)
 		/* slight hack, but more robust against errors. */
 		if (ri->peer->pcount[table->afi][table->safi])
 			ri->peer->pcount[table->afi][table->safi]--;
-		else {
-			zlog_warn(
-				"%s: Asked to decrement 0 prefix count for peer %s",
-				__func__, ri->peer->host);
-			zlog_backtrace(LOG_WARNING);
-			zlog_warn("%s: Please report to Quagga bugzilla",
-				  __func__);
-		}
+		else
+			flog_err(LIB_ERR_DEVELOPMENT,
+				 "Asked to decrement 0 prefix count for peer");
 	} else if (BGP_INFO_COUNTABLE(ri)
 		   && !CHECK_FLAG(ri->flags, BGP_INFO_COUNTED)) {
 		SET_FLAG(ri->flags, BGP_INFO_COUNTED);
@@ -1031,8 +1027,8 @@ static enum filter_type bgp_input_filter(struct peer *peer, struct prefix *p,
 
 #define FILTER_EXIST_WARN(F, f, filter)                                        \
 	if (BGP_DEBUG(update, UPDATE_IN) && !(F##_IN(filter)))                 \
-		zlog_warn("%s: Could not find configured input %s-list %s!",   \
-			  peer->host, #f, F##_IN_NAME(filter));
+		zlog_debug("%s: Could not find configured input %s-list %s!",  \
+			   peer->host, #f, F##_IN_NAME(filter));
 
 	if (DISTRIBUTE_IN_NAME(filter)) {
 		FILTER_EXIST_WARN(DISTRIBUTE, distribute, filter);
@@ -1070,8 +1066,8 @@ static enum filter_type bgp_output_filter(struct peer *peer, struct prefix *p,
 
 #define FILTER_EXIST_WARN(F, f, filter)                                        \
 	if (BGP_DEBUG(update, UPDATE_OUT) && !(F##_OUT(filter)))               \
-		zlog_warn("%s: Could not find configured output %s-list %s!",  \
-			  peer->host, #f, F##_OUT_NAME(filter));
+		zlog_debug("%s: Could not find configured output %s-list %s!", \
+			   peer->host, #f, F##_OUT_NAME(filter));
 
 	if (DISTRIBUTE_OUT_NAME(filter)) {
 		FILTER_EXIST_WARN(DISTRIBUTE, distribute, filter);
@@ -4191,7 +4187,7 @@ int bgp_nlri_parse_ip(struct peer *peer, struct attr *attr,
 
 		/* Prefix length check. */
 		if (p.prefixlen > prefix_blen(&p) * 8) {
-			zlog_ferr(
+			flog_err(
 				BGP_ERR_UPDATE_RCV,
 				"%s [Error] Update packet error (wrong prefix length %d for afi %u)",
 				peer->host, p.prefixlen, packet->afi);
@@ -4203,7 +4199,7 @@ int bgp_nlri_parse_ip(struct peer *peer, struct attr *attr,
 
 		/* When packet overflow occur return immediately. */
 		if (pnt + psize > lim) {
-			zlog_ferr(
+			flog_err(
 				BGP_ERR_UPDATE_RCV,
 				"%s [Error] Update packet error (prefix length %d overflows packet)",
 				peer->host, p.prefixlen);
@@ -4213,7 +4209,7 @@ int bgp_nlri_parse_ip(struct peer *peer, struct attr *attr,
 		/* Defensive coding, double-check the psize fits in a struct
 		 * prefix */
 		if (psize > (ssize_t)sizeof(p.u)) {
-			zlog_ferr(
+			flog_err(
 				BGP_ERR_UPDATE_RCV,
 				"%s [Error] Update packet error (prefix length %d too large for prefix storage %zu)",
 				peer->host, p.prefixlen, sizeof(p.u));
@@ -4235,7 +4231,7 @@ int bgp_nlri_parse_ip(struct peer *peer, struct attr *attr,
 				 * be logged locally, and the prefix SHOULD be
 				 * ignored.
 				 */
-				zlog_ferr(
+				flog_err(
 					BGP_ERR_UPDATE_RCV,
 					"%s: IPv4 unicast NLRI is multicast address %s, ignoring",
 					peer->host, inet_ntoa(p.u.prefix4));
@@ -4248,7 +4244,7 @@ int bgp_nlri_parse_ip(struct peer *peer, struct attr *attr,
 			if (IN6_IS_ADDR_LINKLOCAL(&p.u.prefix6)) {
 				char buf[BUFSIZ];
 
-				zlog_ferr(
+				flog_err(
 					BGP_ERR_UPDATE_RCV,
 					"%s: IPv6 unicast NLRI is link-local address %s, ignoring",
 					peer->host,
@@ -4260,7 +4256,7 @@ int bgp_nlri_parse_ip(struct peer *peer, struct attr *attr,
 			if (IN6_IS_ADDR_MULTICAST(&p.u.prefix6)) {
 				char buf[BUFSIZ];
 
-				zlog_ferr(
+				flog_err(
 					BGP_ERR_UPDATE_RCV,
 					"%s: IPv6 unicast NLRI is multicast address %s, ignoring",
 					peer->host,
@@ -4290,7 +4286,7 @@ int bgp_nlri_parse_ip(struct peer *peer, struct attr *attr,
 
 	/* Packet length consistency check. */
 	if (pnt != lim) {
-		zlog_ferr(
+		flog_err(
 			BGP_ERR_UPDATE_RCV,
 			"%s [Error] Update packet error (prefix length mismatch with total length)",
 			peer->host);
@@ -7608,13 +7604,6 @@ void route_vty_out_detail(struct vty *vty, struct bgp *bgp, struct prefix *p,
 			else
 				vty_out(vty, ", localpref %u",
 					attr->local_pref);
-		} else {
-			if (json_paths)
-				json_object_int_add(json_path, "localpref",
-						    bgp->default_local_pref);
-			else
-				vty_out(vty, ", localpref %u",
-					bgp->default_local_pref);
 		}
 
 		if (attr->weight != 0) {
@@ -8073,8 +8062,9 @@ static int bgp_show_table(struct vty *vty, struct bgp *bgp, safi_t safi,
 			"{\n \"vrfId\": %d,\n \"vrfName\": \"%s\",\n \"tableVersion\": %" PRId64
 			",\n \"routerId\": \"%s\",\n \"routes\": { ",
 			bgp->vrf_id == VRF_UNKNOWN ? -1 : (int)bgp->vrf_id,
-			bgp->inst_type == BGP_INSTANCE_TYPE_DEFAULT ? "Default"
-								    : bgp->name,
+			bgp->inst_type == BGP_INSTANCE_TYPE_DEFAULT
+						? VRF_DEFAULT_NAME
+						: bgp->name,
 			table->version, inet_ntoa(bgp->router_id));
 		*json_header_depth = 2;
 		if (rd) {
@@ -8424,12 +8414,12 @@ static void bgp_show_all_instances_routes_vty(struct vty *vty, afi_t afi,
 
 			vty_out(vty, "\"%s\":",
 				(bgp->inst_type == BGP_INSTANCE_TYPE_DEFAULT)
-					? "Default"
+					? VRF_DEFAULT_NAME
 					: bgp->name);
 		} else {
 			vty_out(vty, "\nInstance %s:\n",
 				(bgp->inst_type == BGP_INSTANCE_TYPE_DEFAULT)
-					? "Default"
+					? VRF_DEFAULT_NAME
 					: bgp->name);
 		}
 		bgp_show(vty, bgp, afi, safi, bgp_show_type_normal, NULL,
@@ -8552,7 +8542,7 @@ void route_vty_out_detail_header(struct vty *vty, struct bgp *bgp,
 				vty_out(vty, ", table %s",
 					(bgp->inst_type
 					 == BGP_INSTANCE_TYPE_DEFAULT)
-						? "Default-IP-Routing-Table"
+						? VRF_DEFAULT_NAME
 						: bgp->name);
 		} else
 			vty_out(vty, ", no best path");
@@ -9694,8 +9684,6 @@ static int bgp_peer_count_walker(struct thread *t)
 				pc->count[PCOUNT_ADJ_IN]++;
 
 		for (ri = rn->info; ri; ri = ri->next) {
-			char buf[SU_ADDRSTRLEN];
-
 			if (ri->peer != peer)
 				continue;
 
@@ -9717,22 +9705,12 @@ static int bgp_peer_count_walker(struct thread *t)
 			if (CHECK_FLAG(ri->flags, BGP_INFO_COUNTED)) {
 				pc->count[PCOUNT_COUNTED]++;
 				if (CHECK_FLAG(ri->flags, BGP_INFO_UNUSEABLE))
-					zlog_warn(
-						"%s [pcount] %s/%d is counted but flags 0x%x",
-						peer->host,
-						inet_ntop(rn->p.family,
-							  &rn->p.u.prefix, buf,
-							  SU_ADDRSTRLEN),
-						rn->p.prefixlen, ri->flags);
+					flog_err(LIB_ERR_DEVELOPMENT,
+						 "Attempting to count but flags say it is unusable");
 			} else {
 				if (!CHECK_FLAG(ri->flags, BGP_INFO_UNUSEABLE))
-					zlog_warn(
-						"%s [pcount] %s/%d not counted but flags 0x%x",
-						peer->host,
-						inet_ntop(rn->p.family,
-							  &rn->p.u.prefix, buf,
-							  SU_ADDRSTRLEN),
-						rn->p.prefixlen, ri->flags);
+					flog_err(LIB_ERR_DEVELOPMENT,
+						 "Not counted but flags say we should");
 			}
 		}
 	}

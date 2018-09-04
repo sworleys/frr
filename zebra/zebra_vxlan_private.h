@@ -262,6 +262,10 @@ struct zebra_mac_t_ {
 		struct in_addr r_vtep_ip;
 	} fwd_info;
 
+	/* Mobility sequence numbers associated with this entry. */
+	uint32_t rem_seq;
+	uint32_t loc_seq;
+
 	/* List of neigh associated with this mac */
 	struct list *neigh_list;
 
@@ -333,11 +337,22 @@ struct zebra_neigh_t_ {
 #define ZEBRA_NEIGH_REMOTE    0x02
 #define ZEBRA_NEIGH_REMOTE_NH    0x04 /* neigh entry for remote vtep */
 #define ZEBRA_NEIGH_DEF_GW    0x08
+#define ZEBRA_NEIGH_ROUTER_FLAG 0x10
 
 	enum zebra_neigh_state state;
 
 	/* Remote VTEP IP - applicable only for remote neighbors. */
 	struct in_addr r_vtep_ip;
+
+	/*
+	 * Mobility sequence numbers associated with this entry. The rem_seq
+	 * represents the sequence number from the client (BGP) for the most
+	 * recent add or update of this entry while the loc_seq represents
+	 * the sequence number informed (or to be informed) by zebra to BGP
+	 * for this entry.
+	 */
+	uint32_t rem_seq;
+	uint32_t loc_seq;
 
 	/* list of hosts pointing to this remote NH entry */
 	struct host_rb_entry_rb host_rb;

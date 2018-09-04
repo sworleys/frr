@@ -57,12 +57,17 @@ void pim_rp_list_hash_clean(void *data)
 	hash_clean(pnc->upstream_hash, NULL);
 	hash_free(pnc->upstream_hash);
 	pnc->upstream_hash = NULL;
+	if (pnc->nexthop)
+		nexthops_free(pnc->nexthop);
 
 	XFREE(MTYPE_PIM_NEXTHOP_CACHE, pnc);
 }
 
 static void pim_rp_info_free(struct rp_info *rp_info)
 {
+	if (rp_info->plist)
+		XFREE(MTYPE_PIM_FILTER_NAME, rp_info->plist);
+
 	XFREE(MTYPE_PIM_RP, rp_info);
 }
 
@@ -108,7 +113,7 @@ void pim_rp_init(struct pim_instance *pim)
 	rp_info = XCALLOC(MTYPE_PIM_RP, sizeof(*rp_info));
 
 	if (!str2prefix("224.0.0.0/4", &rp_info->group)) {
-		zlog_ferr(LIB_ERR_DEVELOPMENT,
+		flog_err(LIB_ERR_DEVELOPMENT,
 			  "Unable to convert 224.0.0.0/4 to prefix");
 		list_delete_and_null(&pim->rp_list);
 		route_table_finish(pim->rp_table);
@@ -228,7 +233,7 @@ static struct rp_info *pim_rp_find_match_group(struct pim_instance *pim,
 
 	rn = route_node_match(pim->rp_table, group);
 	if (!rn) {
-		zlog_ferr(
+		flog_err(
 			LIB_ERR_DEVELOPMENT,
 			"%s: BUG We should have found default group information\n",
 			__PRETTY_FUNCTION__);
@@ -586,7 +591,6 @@ int pim_rp_del(struct pim_instance *pim, const char *rp,
 
 	if (rp_info->plist) {
 		XFREE(MTYPE_PIM_FILTER_NAME, rp_info->plist);
-		rp_info->plist = NULL;
 		was_plist = true;
 	}
 
@@ -620,7 +624,7 @@ int pim_rp_del(struct pim_instance *pim, const char *rp,
 		rn = route_node_get(pim->rp_table, &rp_info->group);
 		if (rn) {
 			if (rn->info != rp_info)
-				zlog_ferr(
+				flog_err(
 					LIB_ERR_DEVELOPMENT,
 					"Expected rn->info to be equal to rp_info");
 

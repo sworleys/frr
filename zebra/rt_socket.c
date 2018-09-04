@@ -72,10 +72,10 @@ static int kernel_rtm_add_labels(struct mpls_label_stack *nh_label,
 				 struct sockaddr_mpls *smpls)
 {
 	if (nh_label->num_labels > 1) {
-		zlog_warn(
-			"%s: can't push %u labels at "
-			"once (maximum is 1)",
-			__func__, nh_label->num_labels);
+		flog_warn(ZEBRA_ERR_MAX_LABELS_PUSH,
+			  "%s: can't push %u labels at "
+			  "once (maximum is 1)",
+			  __func__, nh_label->num_labels);
 		return -1;
 	}
 
@@ -212,7 +212,7 @@ static int kernel_rtm_ipv4(int cmd, struct prefix *p, struct route_entry *re)
 			 */
 			case ZEBRA_ERR_RTEXIST:
 				if (cmd != RTM_ADD)
-					zlog_ferr(
+					flog_err(
 						LIB_ERR_SYSTEM_CALL,
 						"%s: rtm_write() returned %d for command %d",
 						__func__, error, cmd);
@@ -226,7 +226,7 @@ static int kernel_rtm_ipv4(int cmd, struct prefix *p, struct route_entry *re)
 			case ZEBRA_ERR_RTNOEXIST:
 			case ZEBRA_ERR_RTUNREACH:
 			default:
-				zlog_ferr(
+				flog_err(
 					LIB_ERR_SYSTEM_CALL,
 					"%s: %s: rtm_write() unexpectedly returned %d for command %s",
 					__func__,
@@ -397,12 +397,13 @@ void kernel_route_rib(struct route_node *rn, struct prefix *p,
 	int route = 0;
 
 	if (src_p && src_p->prefixlen) {
-		zlog_warn("route add: IPv6 sourcedest routes unsupported!");
+		flog_warn(ZEBRA_ERR_UNSUPPORTED_V6_SRCDEST,
+			  "%s: IPv6 sourcedest routes unsupported!", __func__);
 		return;
 	}
 
 	if (zserv_privs.change(ZPRIVS_RAISE))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 
 	if (old)
 		route |= kernel_rtm(RTM_DELETE, p, old);
@@ -411,7 +412,7 @@ void kernel_route_rib(struct route_node *rn, struct prefix *p,
 		route |= kernel_rtm(RTM_ADD, p, new);
 
 	if (zserv_privs.change(ZPRIVS_LOWER))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 
 	if (new) {
 		kernel_route_rib_pass_fail(rn, p, new,
@@ -461,7 +462,7 @@ int kernel_del_mac(struct interface *ifp, vlanid_t vid, struct ethaddr *mac,
 }
 
 int kernel_add_neigh(struct interface *ifp, struct ipaddr *ip,
-		     struct ethaddr *mac)
+		     struct ethaddr *mac, uint8_t flags)
 {
 	return 0;
 }

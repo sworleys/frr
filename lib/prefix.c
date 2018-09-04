@@ -314,7 +314,7 @@ int is_zero_mac(struct ethaddr *mac)
 	return 1;
 }
 
-unsigned int prefix_bit(const u_char *prefix, const u_char prefixlen)
+unsigned int prefix_bit(const u_char *prefix, const uint16_t prefixlen)
 {
 	unsigned int offset = prefixlen / 8;
 	unsigned int shift = 7 - (prefixlen % 8);
@@ -322,7 +322,8 @@ unsigned int prefix_bit(const u_char *prefix, const u_char prefixlen)
 	return (prefix[offset] >> shift) & 1;
 }
 
-unsigned int prefix6_bit(const struct in6_addr *prefix, const u_char prefixlen)
+unsigned int prefix6_bit(const struct in6_addr *prefix,
+			 const uint16_t prefixlen)
 {
 	return prefix_bit((const u_char *)&prefix->s6_addr, prefixlen);
 }
@@ -489,7 +490,7 @@ void prefix_copy(struct prefix *dest, const struct prefix *src)
 		dest->u.lp.id = src->u.lp.id;
 		dest->u.lp.adv_router = src->u.lp.adv_router;
 	} else {
-		zlog_ferr(LIB_ERR_DEVELOPMENT,
+		flog_err(LIB_ERR_DEVELOPMENT,
 			  "prefix_copy(): Unknown address family %d",
 			  src->family);
 		assert(0);
@@ -771,18 +772,12 @@ void masklen2ip(const int masklen, struct in_addr *netmask)
 }
 
 /* Convert IP address's netmask into integer. We assume netmask is
-   sequential one. Argument netmask should be network byte order. */
+ * sequential one. Argument netmask should be network byte order. */
 u_char ip_masklen(struct in_addr netmask)
 {
 	uint32_t tmp = ~ntohl(netmask.s_addr);
-	if (tmp)
-		/* clz: count leading zeroes. sadly, the behaviour of this
-		 * builtin
-		 * is undefined for a 0 argument, even though most CPUs give 32
-		 */
-		return __builtin_clz(tmp);
-	else
-		return 32;
+
+	return tmp ? __builtin_clz(tmp) : 32;
 }
 
 /* Apply mask to IPv4 prefix (network byte order). */

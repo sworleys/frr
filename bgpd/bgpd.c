@@ -1881,7 +1881,7 @@ static int peer_activate_af(struct peer *peer, afi_t afi, safi_t safi)
 	int active;
 
 	if (CHECK_FLAG(peer->sflags, PEER_STATUS_GROUP)) {
-		zlog_ferr(BGP_ERR_PEER_GROUP, "%s was called for peer-group %s",
+		flog_err(BGP_ERR_PEER_GROUP, "%s was called for peer-group %s",
 			  __func__, peer->host);
 		return 1;
 	}
@@ -1991,7 +1991,7 @@ static int non_peergroup_deactivate_af(struct peer *peer, afi_t afi,
 				       safi_t safi)
 {
 	if (CHECK_FLAG(peer->sflags, PEER_STATUS_GROUP)) {
-		zlog_ferr(BGP_ERR_PEER_GROUP, "%s was called for peer-group %s",
+		flog_err(BGP_ERR_PEER_GROUP, "%s was called for peer-group %s",
 			  __func__, peer->host);
 		return 1;
 	}
@@ -2004,7 +2004,7 @@ static int non_peergroup_deactivate_af(struct peer *peer, afi_t afi,
 	peer->afc[afi][safi] = 0;
 
 	if (peer_af_delete(peer, afi, safi) != 0) {
-		zlog_ferr(BGP_ERR_PEER_DELETE,
+		flog_err(BGP_ERR_PEER_DELETE,
 			  "couldn't delete af structure for peer %s",
 			  peer->host);
 		return 1;
@@ -2055,7 +2055,7 @@ int peer_deactivate(struct peer *peer, afi_t afi, safi_t safi)
 		group = peer->group;
 
 		if (peer_af_delete(peer, afi, safi) != 0) {
-			zlog_ferr(BGP_ERR_PEER_DELETE,
+			flog_err(BGP_ERR_PEER_DELETE,
 				  "couldn't delete af structure for peer %s",
 				  peer->host);
 		}
@@ -2802,7 +2802,7 @@ int peer_group_unbind(struct bgp *bgp, struct peer *peer,
 			peer_af_flag_reset(peer, afi, safi);
 
 			if (peer_af_delete(peer, afi, safi) != 0) {
-				zlog_ferr(
+				flog_err(
 					BGP_ERR_PEER_DELETE,
 					"couldn't delete af structure for peer %s",
 					peer->host);
@@ -3337,14 +3337,14 @@ int bgp_delete(struct bgp *bgp)
 #endif
 	bgp_cleanup_routes(bgp);
 
+	/* Deregister from Zebra, if needed */
+	if (IS_BGP_INST_KNOWN_TO_ZEBRA(bgp))
+		bgp_zebra_instance_deregister(bgp);
+
 	/* Remove visibility via the master list - there may however still be
 	 * routes to be processed still referencing the struct bgp.
 	 */
 	listnode_delete(bm->bgp, bgp);
-
-	/* Deregister from Zebra, if needed */
-	if (IS_BGP_INST_KNOWN_TO_ZEBRA(bgp))
-		bgp_zebra_instance_deregister(bgp);
 
 	/* Free interfaces in this instance. */
 	bgp_if_finish(bgp);
@@ -6395,15 +6395,8 @@ char *peer_uptime(time_t uptime2, char *buf, size_t len, u_char use_json,
 	struct tm *tm;
 
 	/* Check buffer length. */
-	if (len < BGP_UPTIME_LEN) {
-		if (!use_json) {
-			zlog_warn("peer_uptime (): buffer shortage %lu",
-				  (u_long)len);
-			/* XXX: should return status instead of buf... */
-			snprintf(buf, len, "<error> ");
-		}
-		return buf;
-	}
+	if (len < BGP_UPTIME_LEN)
+		assert("peer_uptime: buffer is too small" == NULL);
 
 	/* If there is no connection has been done before print `never'. */
 	if (uptime2 == 0) {

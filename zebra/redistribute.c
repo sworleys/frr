@@ -42,6 +42,7 @@
 #include "zebra/router-id.h"
 #include "zebra/zebra_memory.h"
 #include "zebra/zebra_vxlan.h"
+#include "zebra/zebra_errors.h"
 
 #define ZEBRA_PTM_SUPPORT
 
@@ -162,7 +163,8 @@ void redistribute_update(struct prefix *p, struct prefix *src_p,
 
 	afi = family2afi(p->family);
 	if (!afi) {
-		zlog_warn("%s: Unknown AFI/SAFI prefix received\n",
+		flog_warn(ZEBRA_ERR_REDISTRIBUTE_UNKNOWN_AF,
+			  "%s: Unknown AFI/SAFI prefix received\n",
 			  __FUNCTION__);
 		return;
 	}
@@ -223,7 +225,8 @@ void redistribute_delete(struct prefix *p, struct prefix *src_p,
 
 	afi = family2afi(p->family);
 	if (!afi) {
-		zlog_warn("%s: Unknown AFI/SAFI prefix received\n",
+		flog_warn(ZEBRA_ERR_REDISTRIBUTE_UNKNOWN_AF,
+			  "%s: Unknown AFI/SAFI prefix received\n",
 			  __FUNCTION__);
 		return;
 	}
@@ -262,15 +265,16 @@ void zebra_redistribute_add(int command, struct zserv *client, int length,
 			__func__, zebra_route_string(client->proto), afi,
 			zebra_route_string(type), zvrf_id(zvrf), instance);
 
-	if (afi == 0 || afi > AFI_MAX) {
-		zlog_warn("%s: Specified afi %d does not exist",
+	if (afi == 0 || afi >= AFI_MAX) {
+		flog_warn(ZEBRA_ERR_REDISTRIBUTE_UNKNOWN_AF,
+			  "%s: Specified afi %d does not exist",
 			  __PRETTY_FUNCTION__, afi);
 		return;
 	}
 
 	if (type == 0 || type >= ZEBRA_ROUTE_MAX) {
-		zlog_warn("%s: Specified Route Type %d does not exist",
-			  __PRETTY_FUNCTION__, type);
+		zlog_debug("%s: Specified Route Type %d does not exist",
+			   __PRETTY_FUNCTION__, type);
 		return;
 	}
 
@@ -309,15 +313,16 @@ void zebra_redistribute_delete(int command, struct zserv *client, int length,
 	STREAM_GETC(client->ibuf, type);
 	STREAM_GETW(client->ibuf, instance);
 
-	if (afi == 0 || afi > AFI_MAX) {
-		zlog_warn("%s: Specified afi %d does not exist",
+	if (afi == 0 || afi >= AFI_MAX) {
+		flog_warn(ZEBRA_ERR_REDISTRIBUTE_UNKNOWN_AF,
+			  "%s: Specified afi %d does not exist",
 			  __PRETTY_FUNCTION__, afi);
 		return;
 	}
 
 	if (type == 0 || type >= ZEBRA_ROUTE_MAX) {
-		zlog_warn("%s: Specified Route Type %d does not exist",
-			  __PRETTY_FUNCTION__, type);
+		zlog_debug("%s: Specified Route Type %d does not exist",
+			   __PRETTY_FUNCTION__, type);
 		return;
 	}
 
@@ -431,7 +436,8 @@ void zebra_interface_address_add_update(struct interface *ifp,
 	}
 
 	if (!CHECK_FLAG(ifc->conf, ZEBRA_IFC_REAL))
-		zlog_warn(
+		flog_warn(
+			ZEBRA_ERR_ADVERTISING_UNUSABLE_ADDR,
 			"WARNING: advertising address to clients that is not yet usable.");
 
 	zebra_vxlan_add_del_gw_macip(ifp, ifc->address, 1);

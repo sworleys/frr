@@ -73,7 +73,7 @@ static int pim_is_grp_standard_ssm(struct prefix *group)
 
 	if (first) {
 		if (!str2prefix(PIM_SSM_STANDARD_RANGE, &group_ssm))
-			zlog_ferr(LIB_ERR_DEVELOPMENT,
+			flog_err(LIB_ERR_DEVELOPMENT,
 				  "%s: Failure to Read Group Address: %s",
 				  __PRETTY_FUNCTION__, PIM_SSM_STANDARD_RANGE);
 
@@ -148,6 +148,11 @@ void *pim_ssm_init(void)
 
 void pim_ssm_terminate(struct pim_ssm *ssm)
 {
-	if (ssm && ssm->plist_name)
+	if (!ssm)
+		return;
+
+	if (ssm->plist_name)
 		XFREE(MTYPE_PIM_FILTER_NAME, ssm->plist_name);
+
+	XFREE(MTYPE_PIM_SSM_INFO, ssm);
 }

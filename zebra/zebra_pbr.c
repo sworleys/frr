@@ -173,8 +173,8 @@ void zebra_pbr_del_rule(struct zebra_ns *zns, struct zebra_pbr_rule *rule)
 		hash_release(zns->rules_hash, lookup);
 		XFREE(MTYPE_TMP, lookup);
 	} else
-		zlog_warn("%s: Rule being deleted we know nothing about",
-			  __PRETTY_FUNCTION__);
+		zlog_debug("%s: Rule being deleted we know nothing about",
+			   __PRETTY_FUNCTION__);
 }
 
 static void zebra_pbr_cleanup_rules(struct hash_backet *b, void *data)

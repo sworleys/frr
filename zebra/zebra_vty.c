@@ -1126,7 +1126,8 @@ static void vty_show_ip_route_detail(struct vty *vty, struct route_node *rn,
 				break;
 			}
 
-			if (re->vrf_id != nexthop->vrf_id) {
+			if ((re->vrf_id != nexthop->vrf_id)
+			     && (nexthop->type != NEXTHOP_TYPE_BLACKHOLE)) {
 				struct vrf *vrf =
 					vrf_lookup_by_id(nexthop->vrf_id);
 
@@ -1336,7 +1337,8 @@ static void vty_show_ip_route(struct vty *vty, struct route_node *rn,
 				break;
 			}
 
-			if (nexthop->vrf_id != re->vrf_id) {
+			if ((nexthop->vrf_id != re->vrf_id)
+			     && (nexthop->type != NEXTHOP_TYPE_BLACKHOLE)) {
 				struct vrf *vrf =
 					vrf_lookup_by_id(nexthop->vrf_id);
 
@@ -1489,7 +1491,8 @@ static void vty_show_ip_route(struct vty *vty, struct route_node *rn,
 			break;
 		}
 
-		if (nexthop->vrf_id != re->vrf_id) {
+		if ((nexthop->vrf_id != re->vrf_id)
+		     && (nexthop->type != NEXTHOP_TYPE_BLACKHOLE)) {
 			struct vrf *vrf = vrf_lookup_by_id(nexthop->vrf_id);
 
 			if (vrf)
@@ -1719,7 +1722,7 @@ DEFUN (show_ip_nht,
 	vrf_id_t vrf_id = VRF_DEFAULT;
 
 	if (argc == 5)
-		VRF_GET_ID(vrf_id, argv[idx_vrf]->arg);
+		VRF_GET_ID(vrf_id, argv[idx_vrf]->arg, false);
 
 	zebra_print_rnh_table(vrf_id, AF_INET, vty, RNH_NEXTHOP_TYPE);
 	return CMD_SUCCESS;
@@ -1759,7 +1762,7 @@ DEFUN (show_ipv6_nht,
 	vrf_id_t vrf_id = VRF_DEFAULT;
 
 	if (argc == 5)
-		VRF_GET_ID(vrf_id, argv[idx_vrf]->arg);
+		VRF_GET_ID(vrf_id, argv[idx_vrf]->arg, false);
 
 	zebra_print_rnh_table(vrf_id, AF_INET6, vty, RNH_NEXTHOP_TYPE);
 	return CMD_SUCCESS;
@@ -1925,7 +1928,7 @@ DEFPY (show_route,
 		vrf_id_t vrf_id = VRF_DEFAULT;
 
 		if (vrf_name)
-			VRF_GET_ID(vrf_id, vrf_name);
+			VRF_GET_ID(vrf_id, vrf_name, !!json);
 		vrf = vrf_lookup_by_id(vrf_id);
 		do_show_ip_route(vty, vrf->name, afi, SAFI_UNICAST, !!fib,
 				 !!json, tag, prefix_str ? prefix : NULL,
@@ -1999,7 +2002,7 @@ DEFPY (show_route_detail,
 		vrf_id_t vrf_id = VRF_DEFAULT;
 
 		if (vrf_name)
-			VRF_GET_ID(vrf_id, vrf_name);
+			VRF_GET_ID(vrf_id, vrf_name, false);
 
 		table = zebra_vrf_table(afi, SAFI_UNICAST, vrf_id);
 		if (!table)
@@ -2066,7 +2069,7 @@ DEFPY (show_route_summary,
 		vrf_id_t vrf_id = VRF_DEFAULT;
 
 		if (vrf_name)
-			VRF_GET_ID(vrf_id, vrf_name);
+			VRF_GET_ID(vrf_id, vrf_name, false);
 
 		table = zebra_vrf_table(afi, SAFI_UNICAST, vrf_id);
 		if (!table)
@@ -2632,7 +2635,7 @@ DEFUN (show_ipv6_mroute,
 	vrf_id_t vrf_id = VRF_DEFAULT;
 
 	if (argc == 5)
-		VRF_GET_ID(vrf_id, argv[4]->arg);
+		VRF_GET_ID(vrf_id, argv[4]->arg, false);
 
 	table = zebra_vrf_table(AFI_IP6, SAFI_MULTICAST, vrf_id);
 	if (!table)

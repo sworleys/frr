@@ -147,7 +147,7 @@ int bgp_nlri_parse_vpn(struct peer *peer, struct attr *attr,
 		psize = PSIZE(prefixlen);
 
 		if (prefixlen < VPN_PREFIXLEN_MIN_BYTES * 8) {
-			zlog_ferr(
+			flog_err(
 				BGP_ERR_UPDATE_RCV,
 				"%s [Error] Update packet error / VPN (prefix length %d less than VPN min length)",
 				peer->host, prefixlen);
@@ -156,7 +156,7 @@ int bgp_nlri_parse_vpn(struct peer *peer, struct attr *attr,
 
 		/* sanity check against packet data */
 		if ((pnt + psize) > lim) {
-			zlog_ferr(
+			flog_err(
 				BGP_ERR_UPDATE_RCV,
 				"%s [Error] Update packet error / VPN (prefix length %d exceeds packet size %u)",
 				peer->host, prefixlen, (uint)(lim - pnt));
@@ -165,7 +165,7 @@ int bgp_nlri_parse_vpn(struct peer *peer, struct attr *attr,
 
 		/* sanity check against storage for the IP address portion */
 		if ((psize - VPN_PREFIXLEN_MIN_BYTES) > (ssize_t)sizeof(p.u)) {
-			zlog_ferr(
+			flog_err(
 				BGP_ERR_UPDATE_RCV,
 				"%s [Error] Update packet error / VPN (psize %d exceeds storage size %zu)",
 				peer->host,
@@ -176,7 +176,7 @@ int bgp_nlri_parse_vpn(struct peer *peer, struct attr *attr,
 
 		/* Sanity check against max bitlen of the address family */
 		if ((psize - VPN_PREFIXLEN_MIN_BYTES) > prefix_blen(&p)) {
-			zlog_ferr(
+			flog_err(
 				BGP_ERR_UPDATE_RCV,
 				"%s [Error] Update packet error / VPN (psize %d exceeds family (%u) max byte len %u)",
 				peer->host,
@@ -214,7 +214,7 @@ int bgp_nlri_parse_vpn(struct peer *peer, struct attr *attr,
 #endif
 
 		default:
-			zlog_ferr(BGP_ERR_UPDATE_RCV, "Unknown RD type %d",
+			flog_err(BGP_ERR_UPDATE_RCV, "Unknown RD type %d",
 				  type);
 			break; /* just report */
 		}
@@ -237,7 +237,7 @@ int bgp_nlri_parse_vpn(struct peer *peer, struct attr *attr,
 	}
 	/* Packet length consistency check. */
 	if (pnt != lim) {
-		zlog_ferr(
+		flog_err(
 			BGP_ERR_UPDATE_RCV,
 			"%s [Error] Update packet error / VPN (%zu data remaining after parsing)",
 			peer->host, lim - pnt);
@@ -383,7 +383,7 @@ leak_update(
 	 * (only one hop back to ultimate parent for vrf-vpn-vrf scheme).
 	 * Using a loop here supports more complex intra-bgp import-export
 	 * schemes that could be implemented in the future.
-	 * 
+	 *
 	 */
 	for (bi_ultimate = source_bi;
 		bi_ultimate->extra && bi_ultimate->extra->parent;
@@ -466,7 +466,7 @@ leak_update(
 			zlog_debug("%s: ->%s: %s Found route, changed attr",
 				   __func__, bgp->name_pretty, buf_prefix);
 
-		return NULL;
+		return bi;
 	}
 
 	new = info_make(ZEBRA_ROUTE_BGP, BGP_ROUTE_IMPORTED, 0,
@@ -1226,6 +1226,8 @@ void vpn_leak_to_vrf_update_all(struct bgp *bgp_vrf, /* to */
 	struct bgp_node *prn;
 	safi_t safi = SAFI_MPLS_VPN;
 
+	assert(bgp_vpn);
+
 	/*
 	 * Walk vpn table
 	 */
@@ -1367,7 +1369,7 @@ void vrf_import_from_vrf(struct bgp *bgp, struct bgp *vrf_bgp,
 	struct ecommunity *ecom;
 	bool first_export = false;
 
-	export_name = bgp->name ? bgp->name : BGP_DEFAULT_NAME;
+	export_name = bgp->name ? bgp->name : VRF_DEFAULT_NAME;
 	idir = BGP_VPN_POLICY_DIR_FROMVPN;
 	edir = BGP_VPN_POLICY_DIR_TOVPN;
 
@@ -1376,7 +1378,7 @@ void vrf_import_from_vrf(struct bgp *bgp, struct bgp *vrf_bgp,
 	 * any VRF is importing from "import_vrf".
 	 */
 	vname = (vrf_bgp->name ? XSTRDUP(MTYPE_TMP, vrf_bgp->name)
-			       : XSTRDUP(MTYPE_TMP, BGP_DEFAULT_NAME));
+			       : XSTRDUP(MTYPE_TMP, VRF_DEFAULT_NAME));
 
 	listnode_add(bgp->vpn_policy[afi].import_vrf, vname);
 
@@ -1430,8 +1432,8 @@ void vrf_unimport_from_vrf(struct bgp *bgp, struct bgp *vrf_bgp,
 	struct ecommunity *ecom;
 	struct listnode *node;
 
-	export_name = bgp->name ? bgp->name : BGP_DEFAULT_NAME;
-	tmp_name = vrf_bgp->name ? vrf_bgp->name : BGP_DEFAULT_NAME;
+	export_name = bgp->name ? bgp->name : VRF_DEFAULT_NAME;
+	tmp_name = vrf_bgp->name ? vrf_bgp->name : VRF_DEFAULT_NAME;
 	idir = BGP_VPN_POLICY_DIR_FROMVPN;
 	edir = BGP_VPN_POLICY_DIR_TOVPN;
 
@@ -2074,4 +2076,67 @@ void bgp_mplsvpn_init(void)
 	install_element(VIEW_NODE,
 			&show_ip_bgp_vpn_rd_neighbor_advertised_routes_cmd);
 #endif /* KEEP_OLD_VPN_COMMANDS */
+}
+
+/*
+ * The purpose of this function is to process leaks that were deferred
+ * from earlier per-vrf configuration due to not-yet-existing default
+ * vrf, in other words, configuration such as:
+ *
+ *     router bgp MMM vrf FOO
+ *       address-family ipv4 unicast
+ *         rd vpn export 1:1
+ *       exit-address-family
+ *
+ *     router bgp NNN
+ *       ...
+ *
+ * This function gets called when the default instance ("router bgp NNN")
+ * is created.
+ */
+void vpn_leak_postchange_all(void)
+{
+	struct listnode *next;
+	struct bgp *bgp;
+	struct bgp *bgp_default = bgp_get_default();
+
+	assert(bgp_default);
+
+	/* First, do any exporting from VRFs to the single VPN RIB */
+	for (ALL_LIST_ELEMENTS_RO(bm->bgp, next, bgp)) {
+
+		if (bgp->inst_type != BGP_INSTANCE_TYPE_VRF)
+			continue;
+
+		vpn_leak_postchange(
+			BGP_VPN_POLICY_DIR_TOVPN,
+			AFI_IP,
+			bgp_default,
+			bgp);
+
+		vpn_leak_postchange(
+			BGP_VPN_POLICY_DIR_TOVPN,
+			AFI_IP6,
+			bgp_default,
+			bgp);
+	}
+
+	/* Now, do any importing to VRFs from the single VPN RIB */
+	for (ALL_LIST_ELEMENTS_RO(bm->bgp, next, bgp)) {
+
+		if (bgp->inst_type != BGP_INSTANCE_TYPE_VRF)
+			continue;
+
+		vpn_leak_postchange(
+			BGP_VPN_POLICY_DIR_FROMVPN,
+			AFI_IP,
+			bgp_default,
+			bgp);
+
+		vpn_leak_postchange(
+			BGP_VPN_POLICY_DIR_FROMVPN,
+			AFI_IP6,
+			bgp_default,
+			bgp);
+	}
 }

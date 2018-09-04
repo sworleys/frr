@@ -1520,7 +1520,7 @@ static inline void zfpm_init_message_format(const char *format)
 
 	if (!strcmp("netlink", format)) {
 		if (!have_netlink) {
-			zlog_ferr(
+			flog_err(
 				ZEBRA_ERR_NETLINK_NOT_AVAILABLE,
 				"FPM netlink message format is not available");
 			return;
@@ -1531,7 +1531,7 @@ static inline void zfpm_init_message_format(const char *format)
 
 	if (!strcmp("protobuf", format)) {
 		if (!have_protobuf) {
-			zlog_ferr(
+			flog_err(
 				ZEBRA_ERR_PROTOBUF_NOT_AVAILABLE,
 				"FPM protobuf message format is not available");
 			return;
@@ -1540,7 +1540,8 @@ static inline void zfpm_init_message_format(const char *format)
 		return;
 	}
 
-	zlog_warn("Unknown fpm format '%s'", format);
+	flog_warn(ZEBRA_ERR_FPM_FORMAT_UNKNOWN, "Unknown fpm format '%s'",
+		  format);
 }
 
 /**

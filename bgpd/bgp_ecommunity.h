@@ -38,8 +38,11 @@
 #define ECOMMUNITY_EVPN_SUBTYPE_ES_IMPORT_RT 0x02
 #define ECOMMUNITY_EVPN_SUBTYPE_ROUTERMAC    0x03
 #define ECOMMUNITY_EVPN_SUBTYPE_DEF_GW       0x0d
+#define ECOMMUNITY_EVPN_SUBTYPE_ND           0x08
 
 #define ECOMMUNITY_EVPN_SUBTYPE_MACMOBILITY_FLAG_STICKY 0x01
+#define ECOMMUNITY_EVPN_SUBTYPE_ND_ROUTER_FLAG		0x01
+#define ECOMMUNITY_EVPN_SUBTYPE_ND_OVERRIDE_FLAG	0x02
 
 /* Low-order octet of the Extended Communities type field for OPAQUE types */
 #define ECOMMUNITY_OPAQUE_SUBTYPE_ENCAP     0x0c
@@ -53,7 +56,7 @@
 #define ECOMMUNITY_SIZE                        8
 
 /* Extended Communities type flag.  */
-#define ECOMMUNITY_FLAG_NON_TRANSITIVE      0x40  
+#define ECOMMUNITY_FLAG_NON_TRANSITIVE      0x40
 
 /* Extended Communities attribute.  */
 struct ecommunity {

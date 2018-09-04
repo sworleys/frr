@@ -90,7 +90,7 @@ static int send_receive(int sock, struct nlmsghdr *nlh,
 	ret = sendto(sock, (const void *)nlh, (size_t)nlh->nlmsg_len, 0,
 		     (struct sockaddr *) &snl, (socklen_t)sizeof(snl));
 	if (ret < 0) {
-		zlog_ferr(LIB_ERR_SOCKET, "netlink( %u) sendmsg() error: %s",
+		flog_err(LIB_ERR_SOCKET, "netlink( %u) sendmsg() error: %s",
 			  sock, safe_strerror(errno));
 		return -1;
 	}
@@ -112,18 +112,18 @@ static int send_receive(int sock, struct nlmsghdr *nlh,
 	};
 	ret = recvmsg(sock, &msg, 0);
 	if (ret < 0) {
-		zlog_ferr(LIB_ERR_SOCKET,
+		flog_err(LIB_ERR_SOCKET,
 			  "netlink recvmsg: error %d (errno %u)", ret, errno);
 		return -1;
 	}
 	if (msg.msg_flags & MSG_TRUNC) {
-		zlog_ferr(ZEBRA_ERR_NETLINK_LENGTH_ERROR,
+		flog_err(ZEBRA_ERR_NETLINK_LENGTH_ERROR,
 			  "netlink recvmsg : error message truncated");
 		return -1;
 	}
 	/* nlh already points to buf */
 	if (nlh->nlmsg_seq != seq) {
-		zlog_ferr(
+		flog_err(
 			ZEBRA_ERR_NETLINK_BAD_SEQUENCE,
 			"netlink recvmsg: bad sequence number %x (expected %x)",
 			seq, nlh->nlmsg_seq);
@@ -178,7 +178,7 @@ ns_id_t zebra_ns_id_get(const char *netnspath)
 	/* netlink socket */
 	sock = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
 	if (sock < 0) {
-		zlog_ferr(LIB_ERR_SOCKET,"netlink( %u) socket() error: %s",
+		flog_err(LIB_ERR_SOCKET,"netlink( %u) socket() error: %s",
 			  sock, safe_strerror(errno));
 		return NS_UNKNOWN;
 	}
@@ -188,7 +188,7 @@ ns_id_t zebra_ns_id_get(const char *netnspath)
 	snl.nl_pid = 0; /* AUTO PID */
 	ret = bind(sock, (struct sockaddr *)&snl, sizeof(snl));
 	if (ret < 0) {
-		zlog_ferr(LIB_ERR_SOCKET,
+		flog_err(LIB_ERR_SOCKET,
 			  "netlink( %u) socket() bind error: %s", sock,
 			  safe_strerror(errno));
 		close(sock);
@@ -261,14 +261,14 @@ ns_id_t zebra_ns_id_get(const char *netnspath)
 
 	if (ret <= 0) {
 		if (errno != EEXIST && ret != 0) {
-			zlog_ferr(
+			flog_err(
 				LIB_ERR_SOCKET,
 				"netlink( %u) recvfrom() error 2 when reading: %s",
 				fd, safe_strerror(errno));
 			close(sock);
 			close(fd);
 			if (errno == ENOTSUP) {
-				zlog_warn("NEWNSID locally generated");
+				zlog_debug("NEWNSID locally generated");
 				return zebra_ns_id_get_fallback(netnspath);
 			}
 			return NS_UNKNOWN;
@@ -333,7 +333,8 @@ static void zebra_ns_create_netns_directory(void)
 	/* S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH */
 	if (mkdir(NS_RUN_DIR, 0755)) {
 		if (errno != EEXIST) {
-			zlog_warn("NS check: failed to access %s", NS_RUN_DIR);
+			flog_warn(ZEBRA_ERR_NAMESPACE_DIR_INACCESSIBLE,
+				  "NS check: failed to access %s", NS_RUN_DIR);
 			return;
 		}
 	}

@@ -59,7 +59,7 @@ int eigrp_sock_init(void)
 	int ret, hincl = 1;
 
 	if (eigrpd_privs.change(ZPRIVS_RAISE))
-		zlog_ferr(LIB_ERR_PRIVILEGES,
+		flog_err(LIB_ERR_PRIVILEGES,
 			  "eigrp_sock_init: could not raise privs, %s",
 			  safe_strerror(errno));
 
@@ -67,10 +67,10 @@ int eigrp_sock_init(void)
 	if (eigrp_sock < 0) {
 		int save_errno = errno;
 		if (eigrpd_privs.change(ZPRIVS_LOWER))
-			zlog_ferr(LIB_ERR_PRIVILEGES,
+			flog_err(LIB_ERR_PRIVILEGES,
 				  "eigrp_sock_init: could not lower privs, %s",
 				  safe_strerror(errno));
-		zlog_ferr(LIB_ERR_SOCKET, "eigrp_read_sock_init: socket: %s",
+		flog_err(LIB_ERR_SOCKET, "eigrp_read_sock_init: socket: %s",
 			  safe_strerror(save_errno));
 		exit(1);
 	}
@@ -82,7 +82,7 @@ int eigrp_sock_init(void)
 	if (ret < 0) {
 		int save_errno = errno;
 		if (eigrpd_privs.change(ZPRIVS_LOWER))
-			zlog_ferr(LIB_ERR_PRIVILEGES,
+			flog_err(LIB_ERR_PRIVILEGES,
 				  "eigrp_sock_init: could not lower privs, %s",
 				  safe_strerror(errno));
 		zlog_warn("Can't set IP_HDRINCL option for fd %d: %s",
@@ -95,7 +95,7 @@ int eigrp_sock_init(void)
 	if (ret < 0) {
 		int save_errno = errno;
 		if (eigrpd_privs.change(ZPRIVS_LOWER))
-			zlog_ferr(LIB_ERR_PRIVILEGES,
+			flog_err(LIB_ERR_PRIVILEGES,
 				  "eigrpd_sock_init: could not lower privs, %s",
 				  safe_strerror(errno));
 		zlog_warn("can't set sockopt IP_TOS %d to socket %d: %s", tos,
@@ -114,7 +114,7 @@ int eigrp_sock_init(void)
 		zlog_warn("Can't set pktinfo option for fd %d", eigrp_sock);
 
 	if (eigrpd_privs.change(ZPRIVS_LOWER)) {
-		zlog_ferr(LIB_ERR_PRIVILEGES,
+		flog_err(LIB_ERR_PRIVILEGES,
 			  "eigrp_sock_init: could not lower privs, %s",
 			  safe_strerror(errno));
 	}
@@ -129,7 +129,7 @@ void eigrp_adjust_sndbuflen(struct eigrp *eigrp, unsigned int buflen)
 	if (eigrp->maxsndbuflen >= buflen)
 		return;
 	if (eigrpd_privs.change(ZPRIVS_RAISE))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "%s: could not raise privs, %s",
+		flog_err(LIB_ERR_PRIVILEGES, "%s: could not raise privs, %s",
 			  __func__, safe_strerror(errno));
 
 	/* Now we try to set SO_SNDBUF to what our caller has requested
@@ -149,7 +149,7 @@ void eigrp_adjust_sndbuflen(struct eigrp *eigrp, unsigned int buflen)
 	else
 		zlog_warn("%s: failed to get SO_SNDBUF", __func__);
 	if (eigrpd_privs.change(ZPRIVS_LOWER))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "%s: could not lower privs, %s",
+		flog_err(LIB_ERR_PRIVILEGES, "%s: could not lower privs, %s",
 			  __func__, safe_strerror(errno));
 }
 

@@ -7,7 +7,6 @@
  * under the terms of the GNU General Public License as published by the
  * Free Software Foundation; either version 2, or (at your option) any
  * later version.
- *
  * GNU Zebra is distributed in the hope that it will be useful, but
  * WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
@@ -24,6 +23,7 @@
 
 #include "privs.h"
 #include "zebra/ipforward.h"
+#include "zebra/zebra_errors.h"
 
 #include "log.h"
 #include "lib_errors.h"
@@ -42,7 +42,7 @@ int ipforward(void)
 
 	len = sizeof ipforwarding;
 	if (sysctl(mib, MIB_SIZ, &ipforwarding, &len, 0, 0) < 0) {
-		zlog_warn("Can't get ipforwarding value");
+		flog_err_sys(LIB_ERR_SYSCALL, "Can't get ipforwarding value");
 		return -1;
 	}
 	return ipforwarding;
@@ -55,15 +55,15 @@ int ipforward_on(void)
 
 	len = sizeof ipforwarding;
 	if (zserv_privs.change(ZPRIVS_RAISE))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 	if (sysctl(mib, MIB_SIZ, NULL, NULL, &ipforwarding, len) < 0) {
 		if (zserv_privs.change(ZPRIVS_LOWER))
-			zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
-		zlog_warn("Can't set ipforwarding on");
+			flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		flog_err_sys(LIB_ERR_SYSCALL, "Can't set ipforwarding on");
 		return -1;
 	}
 	if (zserv_privs.change(ZPRIVS_LOWER))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 	return ipforwarding;
 }
 
@@ -74,15 +74,15 @@ int ipforward_off(void)
 
 	len = sizeof ipforwarding;
 	if (zserv_privs.change(ZPRIVS_RAISE))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 	if (sysctl(mib, MIB_SIZ, NULL, NULL, &ipforwarding, len) < 0) {
 		if (zserv_privs.change(ZPRIVS_LOWER))
-			zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
-		zlog_warn("Can't set ipforwarding on");
+			flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		flog_err_sys(LIB_ERR_SYSCALL, "Can't set ipforwarding on");
 		return -1;
 	}
 	if (zserv_privs.change(ZPRIVS_LOWER))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 	return ipforwarding;
 }
 
@@ -102,15 +102,15 @@ int ipforward_ipv6(void)
 
 	len = sizeof ip6forwarding;
 	if (zserv_privs.change(ZPRIVS_RAISE))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 	if (sysctl(mib_ipv6, MIB_SIZ, &ip6forwarding, &len, 0, 0) < 0) {
 		if (zserv_privs.change(ZPRIVS_LOWER))
-			zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
-		zlog_warn("can't get ip6forwarding value");
+			flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		flog_err_sys(_LIB_ERR_SYSCALL, "can't get ip6forwarding value");
 		return -1;
 	}
 	if (zserv_privs.change(ZPRIVS_LOWER))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 	return ip6forwarding;
 }
 
@@ -121,15 +121,15 @@ int ipforward_ipv6_on(void)
 
 	len = sizeof ip6forwarding;
 	if (zserv_privs.change(ZPRIVS_RAISE))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 	if (sysctl(mib_ipv6, MIB_SIZ, NULL, NULL, &ip6forwarding, len) < 0) {
 		if (zserv_privs.change(ZPRIVS_LOWER))
-			zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
-		zlog_warn("can't get ip6forwarding value");
+			flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		flog_err_sys(LIB_ERR_SYSCALL, "can't get ip6forwarding value");
 		return -1;
 	}
 	if (zserv_privs.change(ZPRIVS_LOWER))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 	return ip6forwarding;
 }
 
@@ -140,15 +140,15 @@ int ipforward_ipv6_off(void)
 
 	len = sizeof ip6forwarding;
 	if (zserv_privs.change(ZPRIVS_RAISE))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 	if (sysctl(mib_ipv6, MIB_SIZ, NULL, NULL, &ip6forwarding, len) < 0) {
 		if (zserv_privs.change(ZPRIVS_LOWER))
-			zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
-		zlog_warn("can't get ip6forwarding value");
+			flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		flog_err_sys(LIB_ERR_SYSCALL, "can't get ip6forwarding value");
 		return -1;
 	}
 	if (zserv_privs.change(ZPRIVS_LOWER))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 	return ip6forwarding;
 }
 

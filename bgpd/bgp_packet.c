@@ -1089,7 +1089,7 @@ static int bgp_open_receive(struct peer *peer, bgp_size_t size)
 	/* Just in case we have a silly peer who sends AS4 capability set to 0
 	 */
 	if (CHECK_FLAG(peer->cap, PEER_CAP_AS4_RCV) && !as4) {
-		zlog_ferr(BGP_ERR_PKT_OPEN,
+		flog_err(BGP_ERR_PKT_OPEN,
 			  "%s bad OPEN, got AS4 capability, but AS4 set to 0",
 			  peer->host);
 		bgp_notify_send_with_data(peer, BGP_NOTIFY_OPEN_ERR,
@@ -1104,7 +1104,7 @@ static int bgp_open_receive(struct peer *peer, bgp_size_t size)
 		 * BGP_AS_TRANS, for some unknown reason.
 		 */
 		if (as4 == BGP_AS_TRANS) {
-			zlog_ferr(
+			flog_err(
 				BGP_ERR_PKT_OPEN,
 				"%s [AS4] NEW speaker using AS_TRANS for AS4, not allowed",
 				peer->host);
@@ -1134,7 +1134,7 @@ static int bgp_open_receive(struct peer *peer, bgp_size_t size)
 		if (CHECK_FLAG(peer->cap, PEER_CAP_AS4_RCV)
 		    && as4 != remote_as) {
 			/* raise error, log this, close session */
-			zlog_ferr(
+			flog_err(
 				BGP_ERR_PKT_OPEN,
 				"%s bad OPEN, got AS4 capability, but remote_as %u"
 				" mismatch with 16bit 'myasn' %u in open",
@@ -1298,7 +1298,7 @@ static int bgp_open_receive(struct peer *peer, bgp_size_t size)
 
 	/* Get sockname. */
 	if ((ret = bgp_getsockname(peer)) < 0) {
-		zlog_ferr(LIB_ERR_SOCKET,
+		flog_err(LIB_ERR_SOCKET,
 			  "%s: bgp_getsockname() failed for peer: %s",
 			  __FUNCTION__, peer->host);
 		return BGP_Stop;
@@ -1313,7 +1313,7 @@ static int bgp_open_receive(struct peer *peer, bgp_size_t size)
 	    || peer->afc_nego[AFI_IP][SAFI_ENCAP]) {
 		if (!peer->nexthop.v4.s_addr) {
 #if defined(HAVE_CUMULUS)
-			zlog_ferr(
+			flog_err(
 				BGP_ERR_SND_FAIL,
 				"%s: No local IPv4 addr resetting connection, fd %d",
 				peer->host, peer->fd);
@@ -1330,7 +1330,7 @@ static int bgp_open_receive(struct peer *peer, bgp_size_t size)
 	    || peer->afc_nego[AFI_IP6][SAFI_ENCAP]) {
 		if (IN6_IS_ADDR_UNSPECIFIED(&peer->nexthop.v6_global)) {
 #if defined(HAVE_CUMULUS)
-			zlog_ferr(
+			flog_err(
 				BGP_ERR_SND_FAIL,
 				"%s: No local IPv6 addr resetting connection, fd %d",
 				peer->host, peer->fd);
@@ -1393,7 +1393,7 @@ static int bgp_update_receive(struct peer *peer, bgp_size_t size)
 
 	/* Status must be Established. */
 	if (peer->status != Established) {
-		zlog_ferr(BGP_ERR_INVALID_STATUS,
+		flog_err(BGP_ERR_INVALID_STATUS,
 			  "%s [FSM] Update packet received under status %s",
 			  peer->host,
 			  lookup_msg(bgp_status_msg, peer->status, NULL));
@@ -1417,7 +1417,7 @@ static int bgp_update_receive(struct peer *peer, bgp_size_t size)
 	   Attribute Length + 23 exceeds the message Length), then the Error
 	   Subcode is set to Malformed Attribute List.  */
 	if (stream_pnt(s) + 2 > end) {
-		zlog_ferr(BGP_ERR_UPDATE_RCV,
+		flog_err(BGP_ERR_UPDATE_RCV,
 			  "%s [Error] Update packet error"
 			  " (packet length is short for unfeasible length)",
 			  peer->host);
@@ -1431,7 +1431,7 @@ static int bgp_update_receive(struct peer *peer, bgp_size_t size)
 
 	/* Unfeasible Route Length check. */
 	if (stream_pnt(s) + withdraw_len > end) {
-		zlog_ferr(BGP_ERR_UPDATE_RCV,
+		flog_err(BGP_ERR_UPDATE_RCV,
 			  "%s [Error] Update packet error"
 			  " (packet unfeasible length overflow %d)",
 			  peer->host, withdraw_len);
@@ -1451,10 +1451,9 @@ static int bgp_update_receive(struct peer *peer, bgp_size_t size)
 
 	/* Attribute total length check. */
 	if (stream_pnt(s) + 2 > end) {
-		zlog_warn(
-			"%s [Error] Packet Error"
-			" (update packet is short for attribute length)",
-			peer->host);
+		flog_warn(BGP_WARN_UPDATE_PACKET_SHORT,
+			  "%s [Error] Packet Error (update packet is short for attribute length)",
+			  peer->host);
 		bgp_notify_send(peer, BGP_NOTIFY_UPDATE_ERR,
 				BGP_NOTIFY_UPDATE_MAL_ATTR);
 		return BGP_Stop;
@@ -1465,10 +1464,9 @@ static int bgp_update_receive(struct peer *peer, bgp_size_t size)
 
 	/* Attribute length check. */
 	if (stream_pnt(s) + attribute_len > end) {
-		zlog_warn(
-			"%s [Error] Packet Error"
-			" (update packet attribute length overflow %d)",
-			peer->host, attribute_len);
+		flog_warn(BGP_WARN_UPDATE_PACKET_LONG,
+			  "%s [Error] Packet Error (update packet attribute length overflow %d)",
+			  peer->host, attribute_len);
 		bgp_notify_send(peer, BGP_NOTIFY_UPDATE_ERR,
 				BGP_NOTIFY_UPDATE_MAL_ATTR);
 		return BGP_Stop;
@@ -1505,7 +1503,7 @@ static int bgp_update_receive(struct peer *peer, bgp_size_t size)
 		ret = bgp_dump_attr(&attr, peer->rcvd_attr_str, BUFSIZ);
 
 		if (attr_parse_ret == BGP_ATTR_PARSE_WITHDRAW)
-			zlog_ferr(
+			flog_err(
 				BGP_ERR_UPDATE_RCV,
 				"%s rcvd UPDATE with errors in attr(s)!! Withdrawing route.",
 				peer->host);
@@ -1566,7 +1564,7 @@ static int bgp_update_receive(struct peer *peer, bgp_size_t size)
 		}
 
 		if (nlri_ret < 0) {
-			zlog_ferr(BGP_ERR_UPDATE_RCV,
+			flog_err(BGP_ERR_UPDATE_RCV,
 				  "%s [Error] Error parsing NLRI", peer->host);
 			if (peer->status == Established)
 				bgp_notify_send(
@@ -1739,7 +1737,7 @@ static int bgp_route_refresh_receive(struct peer *peer, bgp_size_t size)
 
 	/* If peer does not have the capability, send notification. */
 	if (!CHECK_FLAG(peer->cap, PEER_CAP_REFRESH_ADV)) {
-		zlog_ferr(BGP_ERR_NO_CAP,
+		flog_err(BGP_ERR_NO_CAP,
 			  "%s [Error] BGP route refresh is not enabled",
 			  peer->host);
 		bgp_notify_send(peer, BGP_NOTIFY_HEADER_ERR,
@@ -1749,7 +1747,7 @@ static int bgp_route_refresh_receive(struct peer *peer, bgp_size_t size)
 
 	/* Status must be Established. */
 	if (peer->status != Established) {
-		zlog_ferr(
+		flog_err(
 			BGP_ERR_INVALID_STATUS,
 			"%s [Error] Route refresh packet received under status %s",
 			peer->host,
@@ -2099,9 +2097,9 @@ static int bgp_capability_msg_parse(struct peer *peer, u_char *pnt,
 					return BGP_Stop;
 			}
 		} else {
-			zlog_warn(
-				"%s unrecognized capability code: %d - ignored",
-				peer->host, hdr->code);
+			flog_warn(BGP_WARN_UNRECOGNIZED_CAPABILITY,
+				  "%s unrecognized capability code: %d - ignored",
+				  peer->host, hdr->code);
 		}
 	}
 
@@ -2130,7 +2128,7 @@ int bgp_capability_receive(struct peer *peer, bgp_size_t size)
 
 	/* If peer does not have the capability, send notification. */
 	if (!CHECK_FLAG(peer->cap, PEER_CAP_DYNAMIC_ADV)) {
-		zlog_ferr(BGP_ERR_NO_CAP,
+		flog_err(BGP_ERR_NO_CAP,
 			  "%s [Error] BGP dynamic capability is not enabled",
 			  peer->host);
 		bgp_notify_send(peer, BGP_NOTIFY_HEADER_ERR,
@@ -2140,7 +2138,7 @@ int bgp_capability_receive(struct peer *peer, bgp_size_t size)
 
 	/* Status must be Established. */
 	if (peer->status != Established) {
-		zlog_ferr(
+		flog_err(
 			BGP_ERR_NO_CAP,
 			"%s [Error] Dynamic capability packet received under status %s",
 			peer->host,
@@ -2222,7 +2220,7 @@ int bgp_process_packet(struct thread *thread)
 						  memory_order_relaxed);
 			mprc = bgp_open_receive(peer, size);
 			if (mprc == BGP_Stop)
-				zlog_ferr(
+				flog_err(
 					BGP_ERR_PKT_OPEN,
 					"%s: BGP OPEN receipt failed for peer: %s",
 					__FUNCTION__, peer->host);
@@ -2233,7 +2231,7 @@ int bgp_process_packet(struct thread *thread)
 			peer->readtime = monotime(NULL);
 			mprc = bgp_update_receive(peer, size);
 			if (mprc == BGP_Stop)
-				zlog_ferr(
+				flog_err(
 					BGP_ERR_UPDATE_RCV,
 					"%s: BGP UPDATE receipt failed for peer: %s",
 					__FUNCTION__, peer->host);
@@ -2243,7 +2241,7 @@ int bgp_process_packet(struct thread *thread)
 						  memory_order_relaxed);
 			mprc = bgp_notify_receive(peer, size);
 			if (mprc == BGP_Stop)
-				zlog_ferr(
+				flog_err(
 					BGP_ERR_NOTIFY_RCV,
 					"%s: BGP NOTIFY receipt failed for peer: %s",
 					__FUNCTION__, peer->host);
@@ -2254,7 +2252,7 @@ int bgp_process_packet(struct thread *thread)
 						  memory_order_relaxed);
 			mprc = bgp_keepalive_receive(peer, size);
 			if (mprc == BGP_Stop)
-				zlog_ferr(
+				flog_err(
 					BGP_ERR_KEEP_RCV,
 					"%s: BGP KEEPALIVE receipt failed for peer: %s",
 					__FUNCTION__, peer->host);
@@ -2265,7 +2263,7 @@ int bgp_process_packet(struct thread *thread)
 						  memory_order_relaxed);
 			mprc = bgp_route_refresh_receive(peer, size);
 			if (mprc == BGP_Stop)
-				zlog_ferr(
+				flog_err(
 					BGP_ERR_RFSH_RCV,
 					"%s: BGP ROUTEREFRESH receipt failed for peer: %s",
 					__FUNCTION__, peer->host);
@@ -2275,7 +2273,7 @@ int bgp_process_packet(struct thread *thread)
 						  memory_order_relaxed);
 			mprc = bgp_capability_receive(peer, size);
 			if (mprc == BGP_Stop)
-				zlog_ferr(
+				flog_err(
 					BGP_ERR_CAP_RCV,
 					"%s: BGP CAPABILITY receipt failed for peer: %s",
 					__FUNCTION__, peer->host);

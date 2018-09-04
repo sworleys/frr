@@ -211,6 +211,40 @@ u_int32_t bgp_attr_mac_mobility_seqnum(struct attr *attr, u_char *sticky)
 	return 0;
 }
 
+/*
+ * return true if attr contains router flag extended community
+ */
+void bgp_attr_evpn_na_flag(struct attr *attr, uint8_t *router_flag)
+{
+	struct ecommunity *ecom;
+	int i;
+	u_char val;
+
+	ecom = attr->ecommunity;
+	if (!ecom || !ecom->size)
+		return;
+
+	/* If there is a default gw extendd community return true otherwise
+	 * return 0 */
+	for (i = 0; i < ecom->size; i++) {
+		u_char *pnt;
+		u_char type, sub_type;
+
+		pnt = (ecom->val + (i * ECOMMUNITY_SIZE));
+		type = *pnt++;
+		sub_type = *pnt++;
+
+		if (type == ECOMMUNITY_ENCODE_EVPN &&
+		    sub_type == ECOMMUNITY_EVPN_SUBTYPE_ND) {
+			val = *pnt++;
+			if (val & ECOMMUNITY_EVPN_SUBTYPE_ND_ROUTER_FLAG) {
+				*router_flag = 1;
+				break;
+			}
+		}
+	}
+}
+
 /* dst prefix must be AF_INET or AF_INET6 prefix, to forge EVPN prefix */
 extern int bgp_build_evpn_prefix(int evpn_type, uint32_t eth_tag,
 				 struct prefix *dst)

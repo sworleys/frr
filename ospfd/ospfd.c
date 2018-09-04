@@ -309,12 +309,8 @@ static struct ospf *ospf_new(u_short instance, const char *name)
 			 new->lsa_refresh_interval, &new->t_lsa_refresher);
 	new->lsa_refresher_started = monotime(NULL);
 
-	if ((new->ibuf = stream_new(OSPF_MAX_PACKET_SIZE + 1)) == NULL) {
-		zlog_err(
-			"ospf_new: fatal error: stream_new(%u) failed allocating ibuf",
-			OSPF_MAX_PACKET_SIZE + 1);
-		exit(1);
-	}
+	new->ibuf = stream_new(OSPF_MAX_PACKET_SIZE + 1);
+
 	new->t_read = NULL;
 	new->oi_write_q = list_new();
 	new->write_oi_count = OSPF_WRITE_INTERFACE_COUNT_DEFAULT;
@@ -329,9 +325,10 @@ static struct ospf *ospf_new(u_short instance, const char *name)
 	new->fd = -1;
 	if ((ospf_sock_init(new)) < 0) {
 		if (new->vrf_id != VRF_UNKNOWN)
-			zlog_warn(
-				  "%s: ospf_sock_init is unable to open a socket",
-				  __func__);
+			flog_err(
+				LIB_ERR_SOCKET,
+				"%s: ospf_sock_init is unable to open a socket",
+				__func__);
 		return new;
 	}
 	thread_add_read(master, ospf_read, new, new->fd, &new->t_read);
@@ -560,9 +557,6 @@ void ospf_terminate(void)
 		ospf_finish(ospf);
 
 	/* Cleanup route maps */
-	route_map_add_hook(NULL);
-	route_map_delete_hook(NULL);
-	route_map_event_hook(NULL);
 	route_map_finish();
 
 	/* reverse prefix_list_init */
@@ -2090,7 +2084,7 @@ static int ospf_vrf_enable(struct vrf *vrf)
 
 		if (old_vrf_id != ospf->vrf_id) {
 			if (ospfd_privs.change(ZPRIVS_RAISE))
-				zlog_ferr(
+				flog_err(
 					LIB_ERR_PRIVILEGES,
 					"ospf_vrf_link: could not raise privs");
 
@@ -2104,7 +2098,7 @@ static int ospf_vrf_enable(struct vrf *vrf)
 
 			ret = ospf_sock_init(ospf);
 			if (ospfd_privs.change(ZPRIVS_LOWER))
-				zlog_ferr(
+				flog_err(
 					LIB_ERR_PRIVILEGES,
 					"ospf_sock_init: could not lower privs");
 

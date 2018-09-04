@@ -297,7 +297,7 @@ DECLARE_QOBJ_TYPE(interface)
 
 #define IFNAME_RB_INSERT(vrf, ifp)                                             \
 	if (RB_INSERT(if_name_head, &vrf->ifaces_by_name, (ifp)))              \
-		zlog_ferr(                                                     \
+		flog_err(                                                     \
 			LIB_ERR_INTERFACE,                                     \
 			"%s(%s): corruption detected -- interface with this "  \
 			"name exists already in VRF %u!",                      \
@@ -305,7 +305,7 @@ DECLARE_QOBJ_TYPE(interface)
 
 #define IFNAME_RB_REMOVE(vrf, ifp)                                             \
 	if (RB_REMOVE(if_name_head, &vrf->ifaces_by_name, (ifp)) == NULL)      \
-		zlog_ferr(                                                     \
+		flog_err(                                                     \
 			LIB_ERR_INTERFACE,                                     \
 			"%s(%s): corruption detected -- interface with this "  \
 			"name doesn't exist in VRF %u!",                       \
@@ -313,7 +313,7 @@ DECLARE_QOBJ_TYPE(interface)
 
 #define IFINDEX_RB_INSERT(vrf, ifp)                                            \
 	if (RB_INSERT(if_index_head, &vrf->ifaces_by_index, (ifp)))            \
-		zlog_ferr(                                                     \
+		flog_err(                                                     \
 			LIB_ERR_INTERFACE,                                     \
 			"%s(%u): corruption detected -- interface with this "  \
 			"ifindex exists already in VRF %u!",                   \
@@ -321,7 +321,7 @@ DECLARE_QOBJ_TYPE(interface)
 
 #define IFINDEX_RB_REMOVE(vrf, ifp)                                            \
 	if (RB_REMOVE(if_index_head, &vrf->ifaces_by_index, (ifp)) == NULL)    \
-		zlog_ferr(                                                     \
+		flog_err(                                                     \
 			LIB_ERR_INTERFACE,                                     \
 			"%s(%u): corruption detected -- interface with this "  \
 			"ifindex doesn't exist in VRF %u!",                    \
@@ -497,6 +497,7 @@ extern int if_is_operative(struct interface *);
 extern int if_is_no_ptm_operative(struct interface *);
 extern int if_is_loopback(struct interface *);
 extern int if_is_vrf(struct interface *ifp);
+extern bool if_is_loopback_or_vrf(struct interface *ifp);
 extern int if_is_broadcast(struct interface *);
 extern int if_is_pointopoint(struct interface *);
 extern int if_is_multicast(struct interface *);

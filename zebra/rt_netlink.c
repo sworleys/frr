@@ -64,6 +64,7 @@
 #include "zebra/rt_netlink.h"
 #include "zebra/zebra_mroute.h"
 #include "zebra/zebra_vxlan.h"
+#include "zebra/zebra_errors.h"
 
 #ifndef AF_MPLS
 #define AF_MPLS 28
@@ -143,6 +144,15 @@ static inline int zebra2proto(int proto)
 		proto = RTPROT_SHARP;
 		break;
 	default:
+		/*
+		 * When a user adds a new protocol this will show up
+		 * to let them know to do something about it.  This
+		 * is intentionally a warn because we should see
+		 * this as part of development of a new protocol
+		 */
+		zlog_debug(
+			"%s: Please add this protocol(%d) to proper rt_netlink.c handling",
+			__PRETTY_FUNCTION__, proto);
 		proto = RTPROT_ZEBRA;
 		break;
 	}
@@ -185,6 +195,15 @@ static inline int proto2zebra(int proto, int family)
 		proto = ZEBRA_ROUTE_STATIC;
 		break;
 	default:
+		/*
+		 * When a user adds a new protocol this will show up
+		 * to let them know to do something about it.  This
+		 * is intentionally a warn because we should see
+		 * this as part of development of a new protocol
+		 */
+		zlog_debug(
+			"%s: Please add this protocol(%d) to proper rt_netlink.c handling",
+			__PRETTY_FUNCTION__, proto);
 		proto = ZEBRA_ROUTE_KERNEL;
 		break;
 	}
@@ -496,7 +515,8 @@ static int netlink_route_change_read_unicast(struct sockaddr_nl *snl,
 					if (ifp)
 						nh_vrf_id = ifp->vrf_id;
 					else {
-						zlog_warn(
+						flog_warn(
+							ZEBRA_ERR_UNKNOWN_INTERFACE,
 							"%s: Unknown interface %u specified, defaulting to VRF_DEFAULT",
 							__PRETTY_FUNCTION__,
 							index);
@@ -702,7 +722,7 @@ int netlink_route_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 
 	if (!(h->nlmsg_type == RTM_NEWROUTE || h->nlmsg_type == RTM_DELROUTE)) {
 		/* If this is not route add/delete message print warning. */
-		zlog_warn("Kernel message: %d NS %u\n", h->nlmsg_type, ns_id);
+		zlog_debug("Kernel message: %d NS %u\n", h->nlmsg_type, ns_id);
 		return 0;
 	}
 
@@ -1832,10 +1852,10 @@ static int netlink_macfdb_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 
 	zif = (struct zebra_if *)ifp->info;
 	if ((br_if = zif->brslave_info.br_if) == NULL) {
-		zlog_warn("%s family %s IF %s(%u) brIF %u - no bridge master",
-			  nl_msg_type_to_str(h->nlmsg_type),
-			  nl_family_to_str(ndm->ndm_family), ifp->name,
-			  ndm->ndm_ifindex, zif->brslave_info.bridge_ifindex);
+		zlog_debug("%s family %s IF %s(%u) brIF %u - no bridge master",
+			   nl_msg_type_to_str(h->nlmsg_type),
+			   nl_family_to_str(ndm->ndm_family), ifp->name,
+			   ndm->ndm_ifindex, zif->brslave_info.bridge_ifindex);
 		return 0;
 	}
 
@@ -1844,15 +1864,15 @@ static int netlink_macfdb_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	netlink_parse_rtattr(tb, NDA_MAX, NDA_RTA(ndm), len);
 
 	if (!tb[NDA_LLADDR]) {
-		zlog_warn("%s family %s IF %s(%u) brIF %u - no LLADDR",
-			  nl_msg_type_to_str(h->nlmsg_type),
-			  nl_family_to_str(ndm->ndm_family), ifp->name,
-			  ndm->ndm_ifindex, zif->brslave_info.bridge_ifindex);
+		zlog_debug("%s family %s IF %s(%u) brIF %u - no LLADDR",
+			   nl_msg_type_to_str(h->nlmsg_type),
+			   nl_family_to_str(ndm->ndm_family), ifp->name,
+			   ndm->ndm_ifindex, zif->brslave_info.bridge_ifindex);
 		return 0;
 	}
 
 	if (RTA_PAYLOAD(tb[NDA_LLADDR]) != ETH_ALEN) {
-		zlog_warn(
+		zlog_debug(
 			"%s family %s IF %s(%u) brIF %u - LLADDR is not MAC, len %lu",
 			nl_msg_type_to_str(h->nlmsg_type),
 			nl_family_to_str(ndm->ndm_family), ifp->name,
@@ -2028,7 +2048,7 @@ int netlink_macfdb_read_for_bridge(struct zebra_ns *zns, struct interface *ifp,
 
 static int netlink_macfdb_update(struct interface *ifp, vlanid_t vid,
 				 struct ethaddr *mac, struct in_addr vtep_ip,
-				 int local, int cmd, u_char sticky)
+				 int cmd, u_char sticky)
 {
 	struct zebra_ns *zns;
 	struct {
@@ -2049,9 +2069,9 @@ static int netlink_macfdb_update(struct interface *ifp, vlanid_t vid,
 	zns = zvrf->zns;
 	zif = ifp->info;
 	if ((br_if = zif->brslave_info.br_if) == NULL) {
-		zlog_warn("MAC %s on IF %s(%u) - no mapping to bridge",
-			  (cmd == RTM_NEWNEIGH) ? "add" : "del", ifp->name,
-			  ifp->ifindex);
+		zlog_debug("MAC %s on IF %s(%u) - no mapping to bridge",
+			   (cmd == RTM_NEWNEIGH) ? "add" : "del", ifp->name,
+			   ifp->ifindex);
 		return -1;
 	}
 
@@ -2074,12 +2094,10 @@ static int netlink_macfdb_update(struct interface *ifp, vlanid_t vid,
 
 	addattr_l(&req.n, sizeof(req), NDA_LLADDR, mac, 6);
 	req.ndm.ndm_ifindex = ifp->ifindex;
-	if (!local) {
-		dst_alen = 4; // TODO: hardcoded
-		addattr_l(&req.n, sizeof(req), NDA_DST, &vtep_ip, dst_alen);
-		dst_present = 1;
-		sprintf(dst_buf, " dst %s", inet_ntoa(vtep_ip));
-	}
+	dst_alen = 4; // TODO: hardcoded
+	addattr_l(&req.n, sizeof(req), NDA_DST, &vtep_ip, dst_alen);
+	dst_present = 1;
+	sprintf(dst_buf, " dst %s", inet_ntoa(vtep_ip));
 	br_zif = (struct zebra_if *)br_if->info;
 	if (IS_ZEBRA_IF_BRIDGE_VLAN_AWARE(br_zif) && vid > 0) {
 		addattr16(&req.n, sizeof(req), NDA_VLAN, vid);
@@ -2119,6 +2137,7 @@ static int netlink_ipneigh_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	char buf2[INET6_ADDRSTRLEN];
 	int mac_present = 0;
 	u_char ext_learned;
+	uint8_t router_flag;
 
 	ndm = NLMSG_DATA(h);
 
@@ -2135,10 +2154,10 @@ static int netlink_ipneigh_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	netlink_parse_rtattr(tb, NDA_MAX, NDA_RTA(ndm), len);
 
 	if (!tb[NDA_DST]) {
-		zlog_warn("%s family %s IF %s(%u) - no DST",
-			  nl_msg_type_to_str(h->nlmsg_type),
-			  nl_family_to_str(ndm->ndm_family), ifp->name,
-			  ndm->ndm_ifindex);
+		zlog_debug("%s family %s IF %s(%u) - no DST",
+			   nl_msg_type_to_str(h->nlmsg_type),
+			   nl_family_to_str(ndm->ndm_family), ifp->name,
+			   ndm->ndm_ifindex);
 		return 0;
 	}
 
@@ -2194,7 +2213,7 @@ static int netlink_ipneigh_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	if (h->nlmsg_type == RTM_NEWNEIGH) {
 		if (tb[NDA_LLADDR]) {
 			if (RTA_PAYLOAD(tb[NDA_LLADDR]) != ETH_ALEN) {
-				zlog_warn(
+				zlog_debug(
 					"%s family %s IF %s(%u) - LLADDR is not MAC, len %lu",
 					nl_msg_type_to_str(h->nlmsg_type),
 					nl_family_to_str(ndm->ndm_family),
@@ -2208,6 +2227,7 @@ static int netlink_ipneigh_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 		}
 
 		ext_learned = (ndm->ndm_flags & NTF_EXT_LEARNED) ? 1 : 0;
+		router_flag = (ndm->ndm_flags & NTF_ROUTER) ? 1 : 0;
 
 		if (IS_ZEBRA_DEBUG_KERNEL)
 			zlog_debug(
@@ -2230,7 +2250,7 @@ static int netlink_ipneigh_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 		if (ndm->ndm_state & NUD_VALID)
 			return zebra_vxlan_handle_kernel_neigh_update(
 				ifp, link_if, &ip, &mac, ndm->ndm_state,
-				ext_learned);
+				ext_learned, router_flag);
 
 		return zebra_vxlan_handle_kernel_neigh_del(ifp, link_if, &ip);
 	}
@@ -2356,7 +2376,8 @@ int netlink_neigh_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 }
 
 static int netlink_neigh_update2(struct interface *ifp, struct ipaddr *ip,
-				 struct ethaddr *mac, u_int32_t flags, int cmd)
+				 struct ethaddr *mac, uint8_t flags,
+				 uint16_t state, int cmd)
 {
 	struct {
 		struct nlmsghdr n;
@@ -2380,11 +2401,10 @@ static int netlink_neigh_update2(struct interface *ifp, struct ipaddr *ip,
 		req.n.nlmsg_flags |= (NLM_F_CREATE | NLM_F_REPLACE);
 	req.n.nlmsg_type = cmd; // RTM_NEWNEIGH or RTM_DELNEIGH
 	req.ndm.ndm_family = IS_IPADDR_V4(ip) ? AF_INET : AF_INET6;
-	req.ndm.ndm_state = flags;
+	req.ndm.ndm_state = state;
 	req.ndm.ndm_ifindex = ifp->ifindex;
 	req.ndm.ndm_type = RTN_UNICAST;
-	req.ndm.ndm_flags = NTF_EXT_LEARNED;
-
+	req.ndm.ndm_flags = flags;
 
 	ipa_len = IS_IPADDR_V4(ip) ? IPV4_MAX_BYTELEN : IPV6_MAX_BYTELEN;
 	addattr_l(&req.n, sizeof(req), NDA_DST, &ip->ip.addr, ipa_len);
@@ -2392,12 +2412,12 @@ static int netlink_neigh_update2(struct interface *ifp, struct ipaddr *ip,
 		addattr_l(&req.n, sizeof(req), NDA_LLADDR, mac, 6);
 
 	if (IS_ZEBRA_DEBUG_KERNEL)
-		zlog_debug("Tx %s family %s IF %s(%u) Neigh %s MAC %s",
+		zlog_debug("Tx %s family %s IF %s(%u) Neigh %s MAC %s flags 0x%x",
 			   nl_msg_type_to_str(cmd),
 			   nl_family_to_str(req.ndm.ndm_family), ifp->name,
 			   ifp->ifindex, ipaddr2str(ip, buf, sizeof(buf)),
 			   mac ? prefix_mac2str(mac, buf2, sizeof(buf2))
-			       : "null");
+			       : "null", flags);
 
 	return netlink_talk(netlink_talk_filter, &req.n, &zns->netlink_cmd, zns,
 			    0);
@@ -2406,26 +2426,26 @@ static int netlink_neigh_update2(struct interface *ifp, struct ipaddr *ip,
 int kernel_add_mac(struct interface *ifp, vlanid_t vid, struct ethaddr *mac,
 		   struct in_addr vtep_ip, u_char sticky)
 {
-	return netlink_macfdb_update(ifp, vid, mac, vtep_ip, 0, RTM_NEWNEIGH,
+	return netlink_macfdb_update(ifp, vid, mac, vtep_ip, RTM_NEWNEIGH,
 				     sticky);
 }
 
 int kernel_del_mac(struct interface *ifp, vlanid_t vid, struct ethaddr *mac,
-		   struct in_addr vtep_ip, int local)
+		   struct in_addr vtep_ip)
 {
-	return netlink_macfdb_update(ifp, vid, mac, vtep_ip, local,
-				     RTM_DELNEIGH, 0);
+	return netlink_macfdb_update(ifp, vid, mac, vtep_ip, RTM_DELNEIGH, 0);
 }
 
 int kernel_add_neigh(struct interface *ifp, struct ipaddr *ip,
-		     struct ethaddr *mac)
+		     struct ethaddr *mac, uint8_t flags)
 {
-	return netlink_neigh_update2(ifp, ip, mac, NUD_NOARP, RTM_NEWNEIGH);
+	return netlink_neigh_update2(ifp, ip, mac, flags,
+				     NUD_NOARP, RTM_NEWNEIGH);
 }
 
 int kernel_del_neigh(struct interface *ifp, struct ipaddr *ip)
 {
-	return netlink_neigh_update2(ifp, ip, NULL, 0, RTM_DELNEIGH);
+	return netlink_neigh_update2(ifp, ip, NULL, 0, 0, RTM_DELNEIGH);
 }
 
 /*

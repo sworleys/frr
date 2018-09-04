@@ -1030,7 +1030,7 @@ static int lsp_processq_add(zebra_lsp_t *lsp)
 		return 0;
 
 	if (zebrad.lsp_process_q == NULL) {
-		zlog_ferr(ZEBRA_ERR_WQ_NONEXISTENT,
+		flog_err(ZEBRA_ERR_WQ_NONEXISTENT,
 			  "%s: work_queue does not exist!", __func__);
 		return -1;
 	}
@@ -1673,7 +1673,7 @@ static int mpls_processq_init(struct zebra_t *zebra)
 {
 	zebra->lsp_process_q = work_queue_new(zebra->master, "LSP processing");
 	if (!zebra->lsp_process_q) {
-		zlog_ferr(ZEBRA_ERR_WQ_NONEXISTENT,
+		flog_err(ZEBRA_ERR_WQ_NONEXISTENT,
 			  "%s: could not initialise work queue!", __func__);
 		return -1;
 	}
@@ -1704,7 +1704,8 @@ void kernel_lsp_pass_fail(zebra_lsp_t *lsp,
 	case SOUTHBOUND_INSTALL_FAILURE:
 		UNSET_FLAG(lsp->flags, LSP_FLAG_INSTALLED);
 		clear_nhlfe_installed(lsp);
-		zlog_warn("LSP Install Failure: %u", lsp->ile.in_label);
+		flog_warn(ZEBRA_ERR_LSP_INSTALL_FAILURE,
+			  "LSP Install Failure: %u", lsp->ile.in_label);
 		break;
 	case SOUTHBOUND_INSTALL_SUCCESS:
 		SET_FLAG(lsp->flags, LSP_FLAG_INSTALLED);
@@ -1722,7 +1723,8 @@ void kernel_lsp_pass_fail(zebra_lsp_t *lsp,
 		clear_nhlfe_installed(lsp);
 		break;
 	case SOUTHBOUND_DELETE_FAILURE:
-		zlog_warn("LSP Deletion Failure: %u", lsp->ile.in_label);
+		flog_warn(ZEBRA_ERR_LSP_DELETE_FAILURE,
+			  "LSP Deletion Failure: %u", lsp->ile.in_label);
 		break;
 	}
 }
@@ -1887,7 +1889,7 @@ int zebra_mpls_fec_register(struct zebra_vrf *zvrf, struct prefix *p,
 		fec = fec_add(table, p, MPLS_INVALID_LABEL, 0, label_index);
 		if (!fec) {
 			prefix2str(p, buf, BUFSIZ);
-			zlog_ferr(
+			flog_err(
 				ZEBRA_ERR_FEC_ADD_FAILED,
 				"Failed to add FEC %s upon register, client %s",
 				buf, zebra_route_string(client->proto));
@@ -1968,7 +1970,7 @@ int zebra_mpls_fec_unregister(struct zebra_vrf *zvrf, struct prefix *p,
 	fec = fec_find(table, p);
 	if (!fec) {
 		prefix2str(p, buf, BUFSIZ);
-		zlog_ferr(ZEBRA_ERR_FEC_RM_FAILED,
+		flog_err(ZEBRA_ERR_FEC_RM_FAILED,
 			  "Failed to find FEC %s upon unregister, client %s",
 			  buf, zebra_route_string(client->proto));
 		return -1;
@@ -2100,7 +2102,7 @@ int zebra_mpls_static_fec_add(struct zebra_vrf *zvrf, struct prefix *p,
 			      MPLS_INVALID_LABEL_INDEX);
 		if (!fec) {
 			prefix2str(p, buf, BUFSIZ);
-			zlog_ferr(ZEBRA_ERR_FEC_ADD_FAILED,
+			flog_err(ZEBRA_ERR_FEC_ADD_FAILED,
 				  "Failed to add FEC %s upon config", buf);
 			return -1;
 		}
@@ -2148,7 +2150,7 @@ int zebra_mpls_static_fec_del(struct zebra_vrf *zvrf, struct prefix *p)
 	fec = fec_find(table, p);
 	if (!fec) {
 		prefix2str(p, buf, BUFSIZ);
-		zlog_ferr(ZEBRA_ERR_FEC_RM_FAILED,
+		flog_err(ZEBRA_ERR_FEC_RM_FAILED,
 			  "Failed to find FEC %s upon delete", buf);
 		return -1;
 	}
@@ -2999,7 +3001,8 @@ void zebra_mpls_init(void)
 	mpls_enabled = 0;
 
 	if (mpls_kernel_init() < 0) {
-		zlog_warn("Disabling MPLS support (no kernel support)");
+		flog_warn(ZEBRA_ERR_MPLS_SUPPORT_DISABLED,
+			  "Disabling MPLS support (no kernel support)");
 		return;
 	}
 

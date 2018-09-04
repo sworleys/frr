@@ -187,11 +187,12 @@ static int bgp_nlri_get_labels(struct peer *peer, u_char *pnt, u_char plen,
 	/* If we RX multiple labels we will end up keeping only the last
 	 * one. We do not yet support a label stack greater than 1. */
 	if (label_depth > 1)
-		zlog_warn("%s rcvd UPDATE with label stack %d deep", peer->host,
+		zlog_info("%s rcvd UPDATE with label stack %d deep", peer->host,
 			  label_depth);
 
 	if (!(bgp_is_withdraw_label(label) || label_bos(label)))
-		zlog_warn(
+		flog_warn(
+			BGP_WARN_INVALID_LABEL_STACK,
 			"%s rcvd UPDATE with invalid label stack - no bottom of stack",
 			peer->host);
 
@@ -245,7 +246,7 @@ int bgp_nlri_parse_label(struct peer *peer, struct attr *attr,
 
 		/* sanity check against packet data */
 		if ((pnt + psize) > lim) {
-			zlog_ferr(
+			flog_err(
 				BGP_ERR_UPDATE_RCV,
 				"%s [Error] Update packet error / L-U (prefix length %d exceeds packet size %u)",
 				peer->host, prefixlen, (uint)(lim - pnt));
@@ -258,7 +259,7 @@ int bgp_nlri_parse_label(struct peer *peer, struct attr *attr,
 
 		/* There needs to be at least one label */
 		if (prefixlen < 24) {
-			zlog_ferr(BGP_ERR_UPDATE_RCV,
+			flog_err(BGP_ERR_UPDATE_RCV,
 				  "%s [Error] Update packet error"
 				  " (wrong label length %d)",
 				  peer->host, prefixlen);
@@ -286,7 +287,7 @@ int bgp_nlri_parse_label(struct peer *peer, struct attr *attr,
 				 * be logged locally, and the prefix SHOULD be
 				 * ignored.
 				  */
-				zlog_ferr(
+				flog_err(
 					BGP_ERR_UPDATE_RCV,
 					"%s: IPv4 labeled-unicast NLRI is multicast address %s, ignoring",
 					peer->host, inet_ntoa(p.u.prefix4));
@@ -299,7 +300,7 @@ int bgp_nlri_parse_label(struct peer *peer, struct attr *attr,
 			if (IN6_IS_ADDR_LINKLOCAL(&p.u.prefix6)) {
 				char buf[BUFSIZ];
 
-				zlog_ferr(
+				flog_err(
 					BGP_ERR_UPDATE_RCV,
 					"%s: IPv6 labeled-unicast NLRI is link-local address %s, ignoring",
 					peer->host,
@@ -312,7 +313,7 @@ int bgp_nlri_parse_label(struct peer *peer, struct attr *attr,
 			if (IN6_IS_ADDR_MULTICAST(&p.u.prefix6)) {
 				char buf[BUFSIZ];
 
-				zlog_ferr(
+				flog_err(
 					BGP_ERR_UPDATE_RCV,
 					"%s: IPv6 unicast NLRI is multicast address %s, ignoring",
 					peer->host,
@@ -336,7 +337,7 @@ int bgp_nlri_parse_label(struct peer *peer, struct attr *attr,
 
 	/* Packet length consistency check. */
 	if (pnt != lim) {
-		zlog_ferr(
+		flog_err(
 			BGP_ERR_UPDATE_RCV,
 			"%s [Error] Update packet error / L-U (%zu data remaining after parsing)",
 			peer->host, lim - pnt);

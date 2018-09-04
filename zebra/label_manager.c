@@ -77,7 +77,7 @@ static int relay_response_back(struct zserv *zserv)
 	ret = zclient_read_header(src, zclient->sock, &size, &marker, &version,
 				  &vrf_id, &resp_cmd);
 	if (ret < 0 && errno != EAGAIN) {
-		zlog_ferr(ZEBRA_ERR_LM_RESPONSE,
+		flog_err(ZEBRA_ERR_LM_RESPONSE,
 			  "Error reading Label Manager response: %s",
 			  strerror(errno));
 		return -1;
@@ -91,7 +91,7 @@ static int relay_response_back(struct zserv *zserv)
 	stream_copy(dst, src);
 	ret = writen(zserv->sock, dst->data, stream_get_endp(dst));
 	if (ret <= 0) {
-		zlog_ferr(ZEBRA_ERR_LM_RELAY_FAILED,
+		flog_err(ZEBRA_ERR_LM_RELAY_FAILED,
 			  "Error relaying LM response %s",
 			  strerror(errno));
 		return -1;
@@ -152,7 +152,7 @@ int zread_relay_label_manager_request(int cmd, struct zserv *zserv,
 	int ret = 0;
 
 	if (zclient->sock < 0) {
-		zlog_ferr(ZEBRA_ERR_LM_NO_SOCKET,
+		flog_err(ZEBRA_ERR_LM_NO_SOCKET,
 			  "Unable to relay LM request: no socket");
 		reply_error(cmd, zserv, vrf_id);
 		return -1;
@@ -170,7 +170,7 @@ int zread_relay_label_manager_request(int cmd, struct zserv *zserv,
 
 	ret = writen(zclient->sock, dst->data, stream_get_endp(dst));
 	if (ret <= 0) {
-		zlog_ferr(ZEBRA_ERR_LM_RELAY_FAILED,
+		flog_err(ZEBRA_ERR_LM_RELAY_FAILED,
 			  "%s: Error relaying label chunk request: %s",
 			  __func__, strerror(errno));
 		reply_error(cmd, zserv, vrf_id);
@@ -199,7 +199,7 @@ static int lm_zclient_connect(struct thread *t)
 		return 0;
 
 	if (zclient_socket_connect(zclient) < 0) {
-		zlog_ferr(ZEBRA_ERR_LM_CLIENT_CONNECTION_FAILED,
+		flog_err(ZEBRA_ERR_LM_CLIENT_CONNECTION_FAILED,
 			  "Error connecting synchronous zclient!");
 		thread_add_timer(zebrad.master, lm_zclient_connect, zclient,
 				 CONNECTION_DELAY, &zclient->t_connect);
@@ -207,9 +207,7 @@ static int lm_zclient_connect(struct thread *t)
 	}
 
 	/* make socket non-blocking */
-	if (set_nonblocking(zclient->sock) < 0)
-		zlog_warn("%s: set_nonblocking(%d) failed", __func__,
-			  zclient->sock);
+	(void)set_nonblocking(zclient->sock);
 
 	return 0;
 }
@@ -292,7 +290,7 @@ struct label_manager_chunk *assign_label_chunk(u_char proto, u_short instance,
 				     ->end
 			     + 1;
 	if (lmc->start > MPLS_LABEL_UNRESERVED_MAX - size + 1) {
-		zlog_ferr(ZEBRA_ERR_LM_EXHAUSTED_LABELS,
+		flog_err(ZEBRA_ERR_LM_EXHAUSTED_LABELS,
 			  "Reached max labels. Start: %u, size: %u", lmc->start,
 			  size);
 		XFREE(MTYPE_LM_CHUNK, lmc);
@@ -332,7 +330,7 @@ int release_label_chunk(u_char proto, u_short instance, uint32_t start,
 		if (lmc->end != end)
 			continue;
 		if (lmc->proto != proto || lmc->instance != instance) {
-			zlog_ferr(ZEBRA_ERR_LM_DAEMON_MISMATCH,
+			flog_err(ZEBRA_ERR_LM_DAEMON_MISMATCH,
 				  "%s: Daemon mismatch!!", __func__);
 			continue;
 		}
@@ -343,7 +341,7 @@ int release_label_chunk(u_char proto, u_short instance, uint32_t start,
 		break;
 	}
 	if (ret != 0)
-		zlog_ferr(ZEBRA_ERR_LM_UNRELEASED_CHUNK,
+		flog_err(ZEBRA_ERR_LM_UNRELEASED_CHUNK,
 			  "%s: Label chunk not released!!", __func__);
 
 	return ret;

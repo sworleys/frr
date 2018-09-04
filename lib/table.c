@@ -277,8 +277,8 @@ struct route_node *route_node_get(struct route_table *const table,
 	struct route_node *node;
 	struct route_node *match;
 	struct route_node *inserted;
-	u_char prefixlen = p->prefixlen;
-	const u_char *prefix = &p->u.prefix;
+	uint16_t prefixlen = p->prefixlen;
+	const uint8_t *prefix = &p->u.prefix;
 
 	apply_mask((struct prefix *)p);
 	node = hash_get(table->hash, (void *)p, NULL);

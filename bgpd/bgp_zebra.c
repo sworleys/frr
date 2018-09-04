@@ -1942,7 +1942,8 @@ static int bgp_zebra_process_local_macip(int command, struct zclient *zclient,
 	int ipa_len;
 	char buf[ETHER_ADDR_STRLEN];
 	char buf1[INET6_ADDRSTRLEN];
-	u_char flags;
+	uint8_t flags = 0;
+	uint32_t seqnum = 0;
 
 	memset(&ip, 0, sizeof(ip));
 	s = zclient->ibuf;
@@ -1951,7 +1952,7 @@ static int bgp_zebra_process_local_macip(int command, struct zclient *zclient,
 	ipa_len = stream_getl(s);
 	if (ipa_len != 0 && ipa_len != IPV4_MAX_BYTELEN
 	    && ipa_len != IPV6_MAX_BYTELEN) {
-		zlog_ferr(BGP_ERR_MACIP_LEN,
+		flog_err(BGP_ERR_MACIP_LEN,
 			  "%u:Recv MACIP %s with invalid IP addr length %d",
 			  vrf_id, (command == ZEBRA_MACIP_ADD) ? "Add" : "Del",
 			  ipa_len);
@@ -1963,20 +1964,24 @@ static int bgp_zebra_process_local_macip(int command, struct zclient *zclient,
 			(ipa_len == IPV4_MAX_BYTELEN) ? IPADDR_V4 : IPADDR_V6;
 		stream_get(&ip.ip.addr, s, ipa_len);
 	}
-	flags = stream_getc(s);
+	if (command == ZEBRA_MACIP_ADD) {
+		flags = stream_getc(s);
+		seqnum = stream_getl(s);
+	}
 
 	bgp = bgp_lookup_by_vrf_id(vrf_id);
 	if (!bgp)
 		return 0;
 
 	if (BGP_DEBUG(zebra, ZEBRA))
-		zlog_debug("%u:Recv MACIP %s flags 0x%x MAC %s IP %s VNI %u",
+		zlog_debug("%u:Recv MACIP %s flags 0x%x MAC %s IP %s VNI %u seq %u",
 			   vrf_id, (command == ZEBRA_MACIP_ADD) ? "Add" : "Del",
 			   flags, prefix_mac2str(&mac, buf, sizeof(buf)),
-			   ipaddr2str(&ip, buf1, sizeof(buf1)), vni);
+			   ipaddr2str(&ip, buf1, sizeof(buf1)), vni, seqnum);
 
 	if (command == ZEBRA_MACIP_ADD)
-		return bgp_evpn_local_macip_add(bgp, vni, &mac, &ip, flags);
+		return bgp_evpn_local_macip_add(bgp, vni, &mac, &ip,
+						flags, seqnum);
 	else
 		return bgp_evpn_local_macip_del(bgp, vni, &mac, &ip);
 }

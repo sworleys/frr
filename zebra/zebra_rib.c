@@ -1048,8 +1048,9 @@ void kernel_route_rib_pass_fail(struct route_node *rn, struct prefix *p,
 		dest->selected_fib = re;
 
 		zsend_route_notify_owner(re, p, ZAPI_ROUTE_FAIL_INSTALL);
-		zlog_warn("%u:%s: Route install failed", re->vrf_id,
-			  prefix2str(p, buf, sizeof(buf)));
+		flog_err(ZEBRA_ERR_DP_INSTALL_FAIL,
+			 "%u:%s: Route install failed", re->vrf_id,
+			 prefix2str(p, buf, sizeof(buf)));
 		break;
 	case SOUTHBOUND_DELETE_SUCCESS:
 		/*
@@ -1072,8 +1073,9 @@ void kernel_route_rib_pass_fail(struct route_node *rn, struct prefix *p,
 		 * delete fails?
 		 */
 		dest->selected_fib = NULL;
-		zlog_warn("%u:%s: Route Deletion failure", re->vrf_id,
-			  prefix2str(p, buf, sizeof(buf)));
+		flog_err(ZEBRA_ERR_DP_DELETE_FAIL,
+			 "%u:%s: Route Deletion failure", re->vrf_id,
+			 prefix2str(p, buf, sizeof(buf)));
 
 		zsend_route_notify_owner(re, p, ZAPI_ROUTE_REMOVE_FAIL);
 		break;
@@ -1480,17 +1482,37 @@ static struct route_entry *rib_choose_best(struct route_entry *current,
 
 	/* filter route selection in following order:
 	 * - connected beats other types
+	 * - if both connected, loopback or vrf wins
 	 * - lower distance beats higher
 	 * - lower metric beats higher for equal distance
 	 * - last, hence oldest, route wins tie break.
 	 */
 
-	/* Connected routes. Pick the last connected
+	/* Connected routes. Check to see if either are a vrf
+	 * or loopback interface.  If not, pick the last connected
 	 * route of the set of lowest metric connected routes.
 	 */
 	if (alternate->type == ZEBRA_ROUTE_CONNECT) {
-		if (current->type != ZEBRA_ROUTE_CONNECT
-		    || alternate->metric <= current->metric)
+		if (current->type != ZEBRA_ROUTE_CONNECT)
+			return alternate;
+
+		/* both are connected.  are either loop or vrf? */
+		struct nexthop *nexthop = NULL;
+
+		for (ALL_NEXTHOPS(alternate->ng, nexthop)) {
+			if (if_is_loopback_or_vrf(if_lookup_by_index(
+				    nexthop->ifindex, alternate->vrf_id)))
+				return alternate;
+		}
+
+		for (ALL_NEXTHOPS(current->ng, nexthop)) {
+			if (if_is_loopback_or_vrf(if_lookup_by_index(
+				    nexthop->ifindex, current->vrf_id)))
+				return current;
+		}
+
+		/* Neither are loop or vrf so pick best metric  */
+		if (alternate->metric <= current->metric)
 			return alternate;
 
 		return current;
@@ -1923,7 +1945,7 @@ void rib_queue_add(struct route_node *rn)
 	}
 
 	if (zebrad.ribq == NULL) {
-		zlog_ferr(ZEBRA_ERR_WQ_NONEXISTENT,
+		flog_err(ZEBRA_ERR_WQ_NONEXISTENT,
 			  "%s: work_queue does not exist!", __func__);
 		return;
 	}
@@ -1979,7 +2001,7 @@ static void rib_queue_init(struct zebra_t *zebra)
 
 	if (!(zebra->ribq =
 		      work_queue_new(zebra->master, "route_node processing"))) {
-		zlog_ferr(ZEBRA_ERR_WQ_NONEXISTENT,
+		flog_err(ZEBRA_ERR_WQ_NONEXISTENT,
 			  "%s: could not initialise work queue!", __func__);
 		return;
 	}
@@ -1993,7 +2015,7 @@ static void rib_queue_init(struct zebra_t *zebra)
 	zebra->ribq->spec.hold = ZEBRA_RIB_PROCESS_HOLD_TIME;
 
 	if (!(zebra->mq = meta_queue_new())) {
-		zlog_ferr(ZEBRA_ERR_WQ_NONEXISTENT,
+		flog_err(ZEBRA_ERR_WQ_NONEXISTENT,
 			  "%s: could not initialise meta queue!", __func__);
 		return;
 	}
@@ -2224,7 +2246,7 @@ void rib_lookup_and_dump(struct prefix_ipv4 *p, vrf_id_t vrf_id)
 	/* Lookup table.  */
 	table = zebra_vrf_table(AFI_IP, SAFI_UNICAST, vrf_id);
 	if (!table) {
-		zlog_ferr(ZEBRA_ERR_TABLE_LOOKUP_FAILED,
+		flog_err(ZEBRA_ERR_TABLE_LOOKUP_FAILED,
 			  "%s:%u zebra_vrf_table() returned NULL", __func__,
 			  vrf_id);
 		return;
@@ -2271,7 +2293,7 @@ void rib_lookup_and_pushup(struct prefix_ipv4 *p, vrf_id_t vrf_id)
 	rib_dest_t *dest;
 
 	if (NULL == (table = zebra_vrf_table(AFI_IP, SAFI_UNICAST, vrf_id))) {
-		zlog_ferr(ZEBRA_ERR_TABLE_LOOKUP_FAILED,
+		flog_err(ZEBRA_ERR_TABLE_LOOKUP_FAILED,
 			  "%s:%u zebra_vrf_table() returned NULL", __func__,
 			  vrf_id);
 		return;

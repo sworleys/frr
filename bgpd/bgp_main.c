@@ -278,6 +278,14 @@ static int bgp_vrf_enable(struct vrf *vrf)
 		bgp_instance_up(bgp);
 		vpn_leak_zebra_vrf_label_update(bgp, AFI_IP);
 		vpn_leak_zebra_vrf_label_update(bgp, AFI_IP6);
+		vpn_leak_postchange(BGP_VPN_POLICY_DIR_TOVPN, AFI_IP,
+				    bgp_get_default(), bgp);
+		vpn_leak_postchange(BGP_VPN_POLICY_DIR_FROMVPN, AFI_IP,
+				    bgp_get_default(), bgp);
+		vpn_leak_postchange(BGP_VPN_POLICY_DIR_TOVPN, AFI_IP6,
+				    bgp_get_default(), bgp);
+		vpn_leak_postchange(BGP_VPN_POLICY_DIR_FROMVPN, AFI_IP6,
+				    bgp_get_default(), bgp);
 	}
 
 	return 0;
@@ -299,6 +307,14 @@ static int bgp_vrf_disable(struct vrf *vrf)
 
 		vpn_leak_zebra_vrf_label_withdraw(bgp, AFI_IP);
 		vpn_leak_zebra_vrf_label_withdraw(bgp, AFI_IP6);
+		vpn_leak_prechange(BGP_VPN_POLICY_DIR_TOVPN, AFI_IP,
+				   bgp_get_default(), bgp);
+		vpn_leak_prechange(BGP_VPN_POLICY_DIR_FROMVPN, AFI_IP,
+				   bgp_get_default(), bgp);
+		vpn_leak_prechange(BGP_VPN_POLICY_DIR_TOVPN, AFI_IP6,
+				   bgp_get_default(), bgp);
+		vpn_leak_prechange(BGP_VPN_POLICY_DIR_FROMVPN, AFI_IP6,
+				   bgp_get_default(), bgp);
 
 		old_vrf_id = bgp->vrf_id;
 		bgp_handle_socket(bgp, vrf, VRF_UNKNOWN, false);
@@ -376,7 +392,7 @@ int main(int argc, char **argv)
 			multipath_num = atoi(optarg);
 			if (multipath_num > MULTIPATH_NUM
 			    || multipath_num <= 0) {
-				zlog_ferr(
+				flog_err(
 					BGP_ERR_MULTIPATH,
 					"Multipath Number specified must be less than %d and greater than 0",
 					MULTIPATH_NUM);

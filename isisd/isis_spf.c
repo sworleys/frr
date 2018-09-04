@@ -416,7 +416,7 @@ static void isis_vertex_id_init(struct isis_vertex *vertex, void *id, enum verte
 		memcpy(&vertex->N.prefix, (struct prefix *)id,
 		       sizeof(struct prefix));
 	} else {
-		zlog_ferr(LIB_ERR_DEVELOPMENT, "Unknown Vertex Type");
+		flog_err(LIB_ERR_DEVELOPMENT, "Unknown Vertex Type");
 	}
 }
 

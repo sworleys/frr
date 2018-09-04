@@ -60,16 +60,15 @@ static int interface_list_ioctl(int af)
 	char *buf = NULL;
 
 	if (zserv_privs.change(ZPRIVS_RAISE))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 
 	sock = socket(af, SOCK_DGRAM, 0);
 	if (sock < 0) {
-		zlog_warn("Can't make %s socket stream: %s",
-			  (af == AF_INET ? "AF_INET" : "AF_INET6"),
-			  safe_strerror(errno));
-
+		flog_err_sys(LIB_ERR_SOCKET, "Can't make %s socket stream: %s",
+			     (af == AF_INET ? "AF_INET" : "AF_INET6"),
+			     safe_strerror(errno));
 		if (zserv_privs.change(ZPRIVS_LOWER))
-			zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+			flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 
 		return -1;
 	}
@@ -81,11 +80,12 @@ calculate_lifc_len: /* must hold privileges to enter here */
 	save_errno = errno;
 
 	if (zserv_privs.change(ZPRIVS_LOWER))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 
 	if (ret < 0) {
-		zlog_warn("interface_list_ioctl: SIOCGLIFNUM failed %s",
-			  safe_strerror(save_errno));
+		flog_err_sys(LIB_ERR_SYSTEM_CALL,
+			     "interface_list_ioctl: SIOCGLIFNUM failed %s",
+			     safe_strerror(save_errno));
 		close(sock);
 		return -1;
 	}
@@ -111,7 +111,7 @@ calculate_lifc_len: /* must hold privileges to enter here */
 	lifconf.lifc_buf = buf;
 
 	if (zserv_privs.change(ZPRIVS_RAISE))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't raise privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't raise privileges");
 
 	ret = ioctl(sock, SIOCGLIFCONF, &lifconf);
 
@@ -120,16 +120,17 @@ calculate_lifc_len: /* must hold privileges to enter here */
 			goto calculate_lifc_len; /* deliberately hold privileges
 						    */
 
-		zlog_warn("SIOCGLIFCONF: %s", safe_strerror(errno));
+		flog_err_sys(LIB_ERR_SYSTEM_CALL, "SIOCGLIFCONF: %s",
+			     safe_strerror(errno));
 
 		if (zserv_privs.change(ZPRIVS_LOWER))
-			zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+			flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 
 		goto end;
 	}
 
 	if (zserv_privs.change(ZPRIVS_LOWER))
-		zlog_ferr(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
 
 	/* Allocate interface. */
 	lifreq = lifconf.lifc_req;
@@ -218,7 +219,8 @@ static int if_get_index(struct interface *ifp)
 		ret = -1;
 
 	if (ret < 0) {
-		zlog_warn("SIOCGLIFINDEX(%s) failed", ifp->name);
+		flog_err_sys(LIB_ERR_SYSTEM_CALL, "SIOCGLIFINDEX(%s) failed",
+			     ifp->name);
 		return ret;
 	}
 
@@ -280,8 +282,9 @@ static int if_get_addr(struct interface *ifp, struct sockaddr *addr,
 
 		if (ret < 0) {
 			if (errno != EADDRNOTAVAIL) {
-				zlog_warn("SIOCGLIFNETMASK (%s) fail: %s",
-					  ifp->name, safe_strerror(errno));
+				flog_err_sys(LIB_ERR_SYSTEM_CALL,
+					     "SIOCGLIFNETMASK (%s) fail: %s",
+					     ifp->name, safe_strerror(errno));
 				return ret;
 			}
 			return 0;
@@ -300,8 +303,9 @@ static int if_get_addr(struct interface *ifp, struct sockaddr *addr,
 			if (ifp->flags & IFF_POINTOPOINT)
 				prefixlen = IPV6_MAX_BITLEN;
 			else
-				zlog_warn("SIOCGLIFSUBNET (%s) fail: %s",
-					  ifp->name, safe_strerror(errno));
+				flog_err_sys(LIB_ERR_SYSTEM_CALL,
+					     "SIOCGLIFSUBNET (%s) fail: %s",
+					     ifp->name, safe_strerror(errno));
 		} else {
 			prefixlen = lifreq.lifr_addrlen;
 		}
@@ -331,7 +335,7 @@ static void interface_info_ioctl(struct interface *ifp)
 void interface_list(struct zebra_ns *zns)
 {
 	if (zns->ns_id != NS_DEFAULT) {
-		zlog_warn("interface_list: ignore NS %u", zns->ns_id);
+		zlog_debug("interface_list: ignore NS %u", zns->ns_id);
 		return;
 	}
 	interface_list_ioctl(AF_INET);
