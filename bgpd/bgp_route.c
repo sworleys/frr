@@ -8754,7 +8754,7 @@ static int bgp_show_route(struct vty *vty, struct bgp *bgp, const char *ip_str,
 
 static int bgp_show_lcommunity(struct vty *vty, struct bgp *bgp, int argc,
 			       struct cmd_token **argv, afi_t afi, safi_t safi,
-			       u_char uj)
+			       bool uj)
 {
 	struct lcommunity *lcom;
 	struct buffer *b;
@@ -8791,7 +8791,7 @@ static int bgp_show_lcommunity(struct vty *vty, struct bgp *bgp, int argc,
 
 static int bgp_show_lcommunity_list(struct vty *vty, struct bgp *bgp,
 				    const char *lcom, afi_t afi, safi_t safi,
-				    u_char uj)
+				    bool uj)
 {
 	struct community_list *list;
 

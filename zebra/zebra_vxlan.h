@@ -62,7 +62,7 @@ extern int zebra_vxlan_vrf_disable(struct zebra_vrf *zvrf);
 extern int zebra_vxlan_vrf_delete(struct zebra_vrf *zvrf);
 extern void zebra_vxlan_print_specific_nh_l3vni(struct vty *vty, vni_t l3vni,
 						struct ipaddr *ip, bool uj);
-extern void zebra_vxlan_print_evpn(struct vty *vty, u_char uj);
+extern void zebra_vxlan_print_evpn(struct vty *vty, bool uj);
 extern void zebra_vxlan_print_specific_rmac_l3vni(struct vty *vty, vni_t l3vni,
 						  struct ethaddr *rmac,
 						  bool use_json);

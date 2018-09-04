@@ -5333,7 +5333,7 @@ void zebra_vxlan_print_vni(struct vty *vty, struct zebra_vrf *zvrf, vni_t vni,
 }
 
 /* Display all global details for EVPN */
-void zebra_vxlan_print_evpn(struct vty *vty, u_char uj)
+void zebra_vxlan_print_evpn(struct vty *vty, bool uj)
 {
 	int num_l2vnis = 0;
 	int num_l3vnis = 0;

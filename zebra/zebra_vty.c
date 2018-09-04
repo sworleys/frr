@@ -2990,7 +2990,7 @@ DEFUN (show_evpn_rmac_vni,
        JSON_STR)
 {
 	vni_t l3vni = 0;
-	u_char uj = use_json(argc, argv);
+	bool uj = use_json(argc, argv);
 
 	l3vni = strtoul(argv[4]->arg, NULL, 10);
 	zebra_vxlan_print_rmacs_l3vni(vty, l3vni, uj);
