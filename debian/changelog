@@ -1,12 +1,32 @@
 frr (4.0+cl3u6) RELEASED; urgency=medium
 
-  * Fixes: Lots of stuff
+  * New Enabled: Warning Messaging
+  * New Enabled: EVPN extended Mobility support
+  * Fixes: CM-22229 bgpd: Fix host support of v6 RMAC
+  * Fixes: CM-22130 zebra: Uninstall RMAC's from kernel appropriately
+  * Fixes: CM-21718 zebra: Check router_flag change for neigh update
+  * Fixes: CM-21566 bgpd: unregister VNI learning on default instance delete
+  * Fixes: CM-22170 ospfd: interface speed change during int add
+  * Fixes: CM-21598 pimd: Modify order of command output
+  * Fixes: CM-20259 bgpd: Add json output to route-leak show command
+  * Fixes: CM-21684 bgpd: issues with vrf imports with restart
+  * Fixes: CM-21996 tools: correct frr-reload.py handling of bgp vni/exit-vni
+  * Fixes: CM-21875 bgpd: cleanup evpn prefix debugging commands
+  * Fixes: CM-12769 bgpd: route detail output local pref display
+  * Fixes: CM-21895 bgpd: Intentionally stop some timers on instance removal
+  * Fixes: CM-20456 zebra: Display consistent mac count
+  * Fixes: CM-21644 pimd: RPT prunes do not need to be figured for a *,G prune
+  * Fixes: CM-14476 bgpd: Add evpn prefix to debug bgp updates
+  * Fixes: CM-21722 zebra: remove default vrf output for kernel vrf ipv6 blackhole
+  * Fixes: CM-21048 tools: handle exit-vrf as end of context block
+  * Fixes: CM-21712 bgpd: Support evpn nd ext community
+  * Fixes: CM-21791 bgpd: make name of default vrf/bgp instance consistent
 
  -- dev-support <dev-support@cumulusnetworks.com>  Tue, 03 Sep 2018 15:14:40 -0400
 
 frr (4.0+cl3u5) RELEASED; urgency=medium
 
-  * Fixes:
+  * New Enabled: Evpn code fix
 
  -- dev-support <dev-support@cumulusnetworks.com>  Thu, 25 Jul 2018 15:13:67 -0400
 
