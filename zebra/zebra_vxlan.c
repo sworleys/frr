@@ -2093,35 +2093,36 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 		n->ifindex = ifp->ifindex;
 	} else {
 		if (CHECK_FLAG(n->flags, ZEBRA_NEIGH_LOCAL)) {
-			/* If there is no MAC change, BGP isn't interested. */
-			if (memcmp(n->emac.octet, macaddr->octet,
-				   ETH_ALEN) == 0) {
-				/* Update any params and return - client doesn't
-				 * care about a purely local change.
-				 */
-				n->ifindex = ifp->ifindex;
-				/* Router flag (R-bit) has changed
-				 * update to client.
-				 */
-				if (is_router !=
-				    (CHECK_FLAG(n->flags,
-					ZEBRA_NEIGH_ROUTER_FLAG) ? 1 : 0)) {
-					/* Mark Router flag (R-bit) */
-					if (is_router)
-						SET_FLAG(n->flags,
-						ZEBRA_NEIGH_ROUTER_FLAG);
-					else
-						UNSET_FLAG(n->flags,
-						ZEBRA_NEIGH_ROUTER_FLAG);
+			bool mac_different;
+			bool cur_is_router;
 
-					return zvni_neigh_send_add_to_client(
-							zvni->vni, ip, macaddr,
-							n->flags, n->loc_seq);
-				}
+			/* Note any changes and see if of interest to BGP. */
+			mac_different = (memcmp(n->emac.octet,
+					macaddr->octet, ETH_ALEN) != 0) ? 1 : 0;
+			cur_is_router = !!CHECK_FLAG(n->flags,
+						     ZEBRA_NEIGH_ROUTER_FLAG);
+			if (!mac_different && is_router == cur_is_router) {
+				n->ifindex = ifp->ifindex;
 				return 0;
 			}
 
-			/* If the MAC has changed, need to issue a delete
+			if (!mac_different) {
+				/* Only the router flag has changed. */
+				if (is_router)
+					SET_FLAG(n->flags,
+						ZEBRA_NEIGH_ROUTER_FLAG);
+				else
+					UNSET_FLAG(n->flags,
+						ZEBRA_NEIGH_ROUTER_FLAG);
+
+				if (IS_ZEBRA_NEIGH_ACTIVE(n))
+					return zvni_neigh_send_add_to_client(
+							zvni->vni, ip, macaddr,
+							n->flags, n->loc_seq);
+				return 0;
+			}
+
+			/* The MAC has changed, need to issue a delete
 			 * first as this means a different MACIP route.
 			 * Also, need to do some unlinking/relinking.
 			 * We also need to update the MAC's sequence number
