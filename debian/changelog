@@ -21,6 +21,8 @@ frr (4.0+cl3u6) RELEASED; urgency=medium
   * Fixes: CM-21048 tools: handle exit-vrf as end of context block
   * Fixes: CM-21712 bgpd: Support evpn nd ext community
   * Fixes: CM-21791 bgpd: make name of default vrf/bgp instance consistent
+  * Fixes: CM-21040 bgpd/ospfd: Make json a bit more consistent
+  * Fixes: CM-22288 zebra: Fix neighbor update to bgp
 
  -- dev-support <dev-support@cumulusnetworks.com>  Tue, 03 Sep 2018 15:14:40 -0400
 
