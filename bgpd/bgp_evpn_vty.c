@@ -756,6 +756,8 @@ static void show_vni_entry(struct hash_backet *backet, void *args[])
 				       inet_ntoa(vpn->originator_ip));
 		json_object_string_add(json_vni, "originatorIp",
 				       inet_ntoa(vpn->originator_ip));
+		json_object_string_add(json_vni, "advertiseGatewayMacip",
+				      vpn->advertise_gw_macip ? "Yes" : "No");
 		json_object_string_add(
 			json_vni, "rd",
 			prefix_rd2str(&vpn->prd, buf2, sizeof(buf2)));
