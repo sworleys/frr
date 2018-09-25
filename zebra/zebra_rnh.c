@@ -674,7 +674,6 @@ static void zebra_rnh_process_static_routes(vrf_id_t vrfid, int family,
 						vrfid, bufn, bufs);
 			}
 
-			SET_FLAG(sre->status, ROUTE_ENTRY_CHANGED);
 			SET_FLAG(sre->status, ROUTE_ENTRY_NEXTHOPS_CHANGED);
 		}
 
