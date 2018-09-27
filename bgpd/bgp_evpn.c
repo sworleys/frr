@@ -1891,6 +1891,8 @@ static int install_evpn_route_entry_in_vrf(struct bgp *bgp_vrf,
 		ri->uptime = bgp_clock();
 	}
 
+	bgp_aggregate_increment(bgp_vrf, &rn->p, ri, afi, safi);
+
 	/* Perform route selection and update zebra, if required. */
 	bgp_process(bgp_vrf, rn, afi, safi);
 
@@ -2023,6 +2025,8 @@ static int uninstall_evpn_route_entry_in_vrf(struct bgp *bgp_vrf,
 
 	/* Mark entry for deletion */
 	bgp_info_delete(rn, ri);
+
+	bgp_aggregate_decrement(bgp_vrf, &rn->p, ri, afi, safi);
 
 	/* Perform route selection and update zebra, if required. */
 	bgp_process(bgp_vrf, rn, afi, safi);
