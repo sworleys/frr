@@ -1,6 +1,5 @@
 frr (4.0+cl3u7) RELEASED; urgency=medium
 
-  * Fixes: CM-21379 zebra: Allow admin distance static routes to be used
   * Fixes: CM-20585 bgpd: enable aggregation in EVPN
   * Fixes: CM-22509 bgpd: Solve issue entering aggregate twice
   * Fixes: CM-19714 bgpd: Martian Nexthops not being updated appropriately
