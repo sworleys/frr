@@ -3,6 +3,7 @@ frr (4.0+cl3u7) RELEASED; urgency=medium
   * Fixes: CM-20585 bgpd: enable aggregation in EVPN
   * Fixes: CM-22509 bgpd: Solve issue entering aggregate twice
   * Fixes: CM-19714 bgpd: Martian Nexthops not being updated appropriately
+  * Fixes: CM-22630 ospf6d: Fix crash in lsa processing
 
  -- dev-support <dev-support@cumulusnetworks.com>  Thu, 04 Oct 2018 09:35:45 -0400
 
