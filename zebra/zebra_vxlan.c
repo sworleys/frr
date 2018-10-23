@@ -6167,6 +6167,18 @@ void zebra_vxlan_print_evpn(struct vty *vty, bool uj)
 		vty_out(vty, "L3 VNIs: %u\n", num_l3vnis);
 		vty_out(vty, "Advertise gateway mac-ip: %s\n",
 			zvrf->advertise_gw_macip ? "Yes" : "No");
+		vty_out(vty, "Duplicate address detection: %s\n",
+			zvrf->dup_addr_detect ? "Enable" : "Disable");
+		vty_out(vty, "  Detection max-moves %u, time %d\n",
+			zvrf->dad_max_moves, zvrf->dad_time);
+		if (zvrf->dad_freeze) {
+			if (zvrf->dad_freeze_time)
+				vty_out(vty, "  Detection freeze %u secs\n",
+					zvrf->dad_freeze_time);
+			else
+				vty_out(vty, "  Detection freeze %s\n",
+					"permanent");
+		}
 	}
 
 	if (uj) {
