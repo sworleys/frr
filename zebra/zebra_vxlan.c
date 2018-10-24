@@ -1579,7 +1579,8 @@ static void zvni_process_neigh_on_local_mac_change(zebra_vni_t *zvni,
 			if (IS_ZEBRA_NEIGH_INACTIVE(n) || seq_change) {
 				ZEBRA_NEIGH_SET_ACTIVE(n);
 				n->loc_seq = zmac->loc_seq;
-				if (!(zvrf->dad_freeze && !!CHECK_FLAG(n->flags,
+				if (!(zvrf->dup_addr_detect &&
+				      zvrf->dad_freeze && !!CHECK_FLAG(n->flags,
 						ZEBRA_NEIGH_DUPLICATE)))
 					zvni_neigh_send_add_to_client(
 						zvni->vni, &n->ip, &n->emac,
@@ -2123,7 +2124,7 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 	bool upd_mac_seq = false;
 	bool neigh_mac_change = false;
 	bool neigh_on_hold = false;
-	bool is_p_remote_nm_change = false;
+	bool neigh_was_remote = false;
 	struct in_addr vtep_ip = {.s_addr = 0};
 	struct timeval elapsed = {0, 0};
 
@@ -2211,8 +2212,9 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 				/* Neigh is in freeze state and freeze action
 				 * is enabled, do not send update to client.
 				 */
-				is_neigh_freezed = (zvrf->dad_freeze &&
-						    !!CHECK_FLAG(n->flags,
+				is_neigh_freezed = (zvrf->dup_addr_detect &&
+						    zvrf->dad_freeze &&
+						    CHECK_FLAG(n->flags,
 							ZEBRA_NEIGH_DUPLICATE));
 
 				if (IS_ZEBRA_NEIGH_ACTIVE(n) &&
@@ -2273,10 +2275,12 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 				memcpy(&n->emac, macaddr, ETH_ALEN);
 				listnode_add_sort(zmac->neigh_list, n);
 			}
-
+			/* Based on Mobility event Scenario-B from the
+			 * draft, neigh's previous state was remote treat this
+			 * event for DAD.
+			 */
+			neigh_was_remote = true;
 			vtep_ip = n->r_vtep_ip;
-
-			is_p_remote_nm_change = true;
 			/* Mark appropriately */
 			UNSET_FLAG(n->flags, ZEBRA_NEIGH_REMOTE);
 			n->r_vtep_ip.s_addr = 0;
@@ -2314,12 +2318,13 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 		return 0;
 	}
 
-	/* Duplicate detection is enabled and MAC's state was
-	 * in remote state.
-	 * RFC-7432: A PE/VTEP that detects a MAC mobility event
-	 * via local learning starts an M-second timer.
+	/* Duplicate Address Detection (DAD) is enabled.
+	 * Based on Mobility event Scenario-B from the
+	 * draft, IP/Neigh's MAC binding changed and
+	 * neigh's previous state was remote treat this
+	 * event as duplicate detection.
 	 */
-	if (zvrf->dup_addr_detect && is_p_remote_nm_change) {
+	if (zvrf->dup_addr_detect && neigh_mac_change && neigh_was_remote) {
 		if (zvrf->dad_freeze &&
 		    CHECK_FLAG(n->flags, ZEBRA_NEIGH_DUPLICATE)) {
 			if (IS_ZEBRA_DEBUG_VXLAN)
@@ -4380,7 +4385,7 @@ static void process_remote_macip_add(vni_t vni,
 	bool sticky;
 	bool remote_gw;
 	bool is_router;
-	bool is_prev_local = false;
+	bool do_dad = false;
 	bool is_dup_detect = false;
 	struct listnode *node = NULL;
 	struct timeval elapsed = {0, 0};
@@ -4457,18 +4462,6 @@ static void process_remote_macip_add(vni_t vni,
 	    || seq != mac->rem_seq)
 		update_mac = 1;
 
-	/* Check MAC's curent state is local (this is the case where
-	 * MAC has moved from L->R) and check previous detection started
-	 * via local learning.
-	 * RFC-7432: A PE/VTEP that detects a MAC mobility event
-	 * via local learning starts an M-second timer.
-	 *
-	 * VTEP-IP or seq. change along is not considered for dup. detection.
-	 */
-	if (mac && (!CHECK_FLAG(mac->flags, ZEBRA_MAC_REMOTE))
-	    && mac->dad_count)
-		is_prev_local = true;
-
 	if (update_mac) {
 		if (!mac) {
 			mac = zvni_mac_add(zvni, macaddr);
@@ -4518,6 +4511,19 @@ static void process_remote_macip_add(vni_t vni,
 			}
 		}
 
+		/* Check MAC's curent state is local (this is the case
+		 * where MAC has moved from L->R) and check previous
+		 * detection started via local learning.
+		 * RFC-7432: A PE/VTEP that detects a MAC mobility
+		 * event via local learning starts an M-second timer.
+		 *
+		 * VTEP-IP or seq. change along is not considered
+		 * for dup. detection.
+		 */
+		if ((!CHECK_FLAG(mac->flags, ZEBRA_MAC_REMOTE)) &&
+		    mac->dad_count)
+			do_dad = true;
+
 		/* Remove local MAC from BGP. */
 		if (CHECK_FLAG(mac->flags, ZEBRA_MAC_LOCAL))
 			zvni_mac_send_del_to_client(zvni->vni, macaddr);
@@ -4538,7 +4544,7 @@ static void process_remote_macip_add(vni_t vni,
 		else
 			UNSET_FLAG(mac->flags, ZEBRA_MAC_REMOTE_DEF_GW);
 
-		if (zvrf->dup_addr_detect && is_prev_local) {
+		if (zvrf->dup_addr_detect && do_dad) {
 			/* MAC is detected as duplicate, hold on to
 			 * install as remote entry.
 			 */
@@ -4580,7 +4586,7 @@ static void process_remote_macip_add(vni_t vni,
 
 			if (mac->dad_count >= zvrf->dad_max_moves) {
 				flog_warn(ZEBRA_ERR_DUP_MAC_DETECTED,
-					"VNI %u: MAC %s detected as duplicate during remote update, last VTEP %s",
+					"VNI %u: MAC %s detected as duplicate during remote update, from VTEP %s",
 					zvni->vni,
 					prefix_mac2str(&mac->macaddr,
 						       buf, sizeof(buf)),
@@ -4651,18 +4657,6 @@ process_neigh:
 	    || seq != n->rem_seq)
 		update_neigh = 1;
 
-	/* Check Neigh's curent state is local (this is the case where
-	 * neigh/host has moved from L->R) and check previous detction
-	 * started via local learning.
-	 * RFC-7432: A PE/VTEP that detects a MAC mobility event
-	 * via local learning starts an M-second timer.
-	 *
-	 * VTEP-IP or seq. change along is not considered for dup. detection.
-	 */
-	is_prev_local = false;
-	if (n && (!CHECK_FLAG(n->flags, ZEBRA_NEIGH_REMOTE)) && n->dad_count)
-		is_prev_local = true;
-
 	if (update_neigh) {
 		if (!n) {
 			n = zvni_neigh_add(zvni, ipaddr, macaddr);
@@ -4727,6 +4721,24 @@ process_neigh:
 				}
 				listnode_add_sort(mac->neigh_list, n);
 				memcpy(&n->emac, macaddr, ETH_ALEN);
+
+				/* Check Neigh's curent state is local
+				 * (this is the case where neigh/host has moved
+				 * from L->R) and check previous detction
+				 * started via local learning.
+				 *
+				 * RFC-7432: A PE/VTEP that detects a MAC mobility
+				 * event via local learning starts an M-second timer.
+				 * VTEP-IP or seq. change along is not considered
+				 * for dup. detection.
+				 *
+				 * Mobilty event scenario-B IP-MAC binding
+				 * changed.
+				 */
+				do_dad = false;
+				if ((!CHECK_FLAG(n->flags, ZEBRA_NEIGH_REMOTE))
+				    && n->dad_count)
+					do_dad = true;
 			}
 		}
 
@@ -4741,7 +4753,7 @@ process_neigh:
 		else
 			UNSET_FLAG(n->flags, ZEBRA_NEIGH_ROUTER_FLAG);
 
-		if (zvrf->dup_addr_detect && is_prev_local) {
+		if (zvrf->dup_addr_detect && do_dad) {
 			/* IP is detected as duplicate, hold on to
 			 * install as remote entry only if freeze is
 			 * enabled.
