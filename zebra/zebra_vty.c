@@ -910,7 +910,6 @@ DEFPY(ip_route,
 	  |vrf NAME                                    \
 	  |label WORD                                  \
 	  |nexthop-vrf NAME                            \
-	  |onlink$onlink                               \
           }]",
       NO_STR IP_STR
       "Establish static routes\n"
@@ -924,8 +923,7 @@ DEFPY(ip_route,
       "Distance value for this route\n"
       VRF_CMD_HELP_STR
       MPLS_LABEL_HELPSTR
-      VRF_CMD_HELP_STR
-      "Treat the nexthop as directly attached to the interface")
+      VRF_CMD_HELP_STR)
 {
 	struct zebra_vrf *zvrf;
 	struct zebra_vrf *nh_zvrf;
@@ -958,7 +956,7 @@ DEFPY(ip_route,
 	return zebra_static_route_leak(vty, zvrf, nh_zvrf, AFI_IP, SAFI_UNICAST,
 				       no, prefix, mask_str, NULL, gate_str,
 				       ifname, flag, tag_str, distance_str,
-				       label, !!onlink);
+				       label, false);
 }
 
 DEFPY(ip_route_vrf,
