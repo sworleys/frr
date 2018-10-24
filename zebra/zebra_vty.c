@@ -2280,7 +2280,9 @@ int static_config(struct vty *vty, struct zebra_vrf *zvrf,
 		if (shr->label_str)
 			vty_out(vty, "label %s ", shr->label_str);
 		if (strcmp(shr->vrf_name, shr->nhvrf_name) != 0)
-			vty_out(vty, "nexthop-vrf %s", shr->nhvrf_name);
+			vty_out(vty, "nexthop-vrf %s ", shr->nhvrf_name);
+		if (shr->onlink)
+			vty_out(vty, "onlink");
 		vty_out(vty, "\n");
 	}
 
@@ -2350,6 +2352,9 @@ int static_config(struct vty *vty, struct zebra_vrf *zvrf,
 					mpls_label2str(si->snh_label.num_labels,
 						       si->snh_label.label,
 						       buf, sizeof buf, 0));
+
+			if (si->onlink)
+				vty_out(vty, " onlink");
 
 			vty_out(vty, "\n");
 
