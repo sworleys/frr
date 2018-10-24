@@ -1579,8 +1579,7 @@ static void zvni_process_neigh_on_local_mac_change(zebra_vni_t *zvni,
 			if (IS_ZEBRA_NEIGH_INACTIVE(n) || seq_change) {
 				ZEBRA_NEIGH_SET_ACTIVE(n);
 				n->loc_seq = zmac->loc_seq;
-				if (!(zvrf->dad_freeze &&
-				    CHECK_FLAG(n->flags,
+				if (!(zvrf->dad_freeze && !!CHECK_FLAG(n->flags,
 						ZEBRA_NEIGH_DUPLICATE)))
 					zvni_neigh_send_add_to_client(
 						zvni->vni, &n->ip, &n->emac,
@@ -2162,6 +2161,10 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 		}
 	}
 
+	zvrf = vrf_info_lookup(zvni->vrf_id);
+	if (!zvrf)
+		return -1;
+
 	/* Check if the neighbor exists. */
 	n = zvni_neigh_lookup(zvni, ip);
 	if (!n) {
@@ -2195,6 +2198,8 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 			}
 
 			if (!mac_different) {
+				bool is_neigh_freezed = false;
+
 				/* Only the router flag has changed. */
 				if (is_router)
 					SET_FLAG(n->flags,
@@ -2203,7 +2208,15 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 					UNSET_FLAG(n->flags,
 						ZEBRA_NEIGH_ROUTER_FLAG);
 
-				if (IS_ZEBRA_NEIGH_ACTIVE(n))
+				/* Neigh is in freeze state and freeze action
+				 * is enabled, do not send update to client.
+				 */
+				is_neigh_freezed = (zvrf->dad_freeze &&
+						    !!CHECK_FLAG(n->flags,
+							ZEBRA_NEIGH_DUPLICATE));
+
+				if (IS_ZEBRA_NEIGH_ACTIVE(n) &&
+				    !is_neigh_freezed)
 					return zvni_neigh_send_add_to_client(
 							zvni->vni, ip, macaddr,
 							n->flags, n->loc_seq);
@@ -2300,10 +2313,6 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 		zmac->loc_seq = mac_new_seq;
 		return 0;
 	}
-
-	zvrf = vrf_info_lookup(zvni->vxlan_if->vrf_id);
-	if (!zvrf)
-		return -1;
 
 	/* Duplicate detection is enabled and MAC's state was
 	 * in remote state.
@@ -4534,7 +4543,7 @@ static void process_remote_macip_add(vni_t vni,
 			 * install as remote entry.
 			 */
 			if (zvrf->dad_freeze &&
-			    CHECK_FLAG(mac->flags, ZEBRA_MAC_DUPLICATE)) {
+			    !!CHECK_FLAG(mac->flags, ZEBRA_MAC_DUPLICATE)) {
 				if (IS_ZEBRA_DEBUG_VXLAN)
 					zlog_debug(
 						   "%s: duplicate addr MAC %s skip installing, learn count %u recover time %u",
@@ -4616,7 +4625,7 @@ process_neigh:
 		zvni_process_neigh_on_remote_mac_add(zvni, mac);
 
 		/* Install the entry. */
-		if (is_dup_detect)
+		if (!is_dup_detect)
 			zvni_mac_install(zvni, mac);
 
 	}
@@ -6173,7 +6182,7 @@ void zebra_vxlan_print_evpn(struct vty *vty, bool uj)
 			zvrf->dad_max_moves, zvrf->dad_time);
 		if (zvrf->dad_freeze) {
 			if (zvrf->dad_freeze_time)
-				vty_out(vty, "  Detection freeze %u secs\n",
+				vty_out(vty, "  Detection freeze %u\n",
 					zvrf->dad_freeze_time);
 			else
 				vty_out(vty, "  Detection freeze %s\n",
@@ -6882,7 +6891,7 @@ int zebra_vxlan_local_mac_add_update(struct interface *ifp,
 				 * advertising to BGP.
 				 */
 				if (zvrf->dad_freeze &&
-				    CHECK_FLAG(mac->flags,
+				    !!CHECK_FLAG(mac->flags,
 					       ZEBRA_MAC_DUPLICATE)) {
 					if (IS_ZEBRA_DEBUG_VXLAN)
 						zlog_debug(

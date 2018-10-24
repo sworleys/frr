@@ -2854,7 +2854,7 @@ DEFPY (no_dup_addr_detection,
 			if (bgp_vrf->evpn_info->dad_max_moves != max_moves) {
 				vty_out(vty,
 				"%% Value does not match with config\n");
-				return CMD_WARNING_CONFIG_FAILED;
+				return CMD_SUCCESS;
 			}
 			bgp_vrf->evpn_info->dad_max_moves =
 				EVPN_DAD_DEFAULT_MAX_MOVES;
@@ -2864,7 +2864,7 @@ DEFPY (no_dup_addr_detection,
 			if (bgp_vrf->evpn_info->dad_time != time_val) {
 				vty_out(vty,
 				"%% Value does not match with config\n");
-				return CMD_WARNING_CONFIG_FAILED;
+				return CMD_SUCCESS;
 			}
 			bgp_vrf->evpn_info->dad_time = EVPN_DAD_DEFAULT_TIME;
 		}
@@ -2874,7 +2874,7 @@ DEFPY (no_dup_addr_detection,
 			    != freeze_time) {
 				vty_out(vty,
 				"%% Value does not match with config\n");
-				return CMD_WARNING_CONFIG_FAILED;
+				return CMD_SUCCESS;
 			}
 			bgp_vrf->evpn_info->dad_freeze_time = 0;
 			bgp_vrf->evpn_info->dad_freeze = false;
@@ -2884,7 +2884,7 @@ DEFPY (no_dup_addr_detection,
 			if (bgp_vrf->evpn_info->dad_freeze_time) {
 				vty_out(vty,
 				"%% Value does not match with config\n");
-				return CMD_WARNING_CONFIG_FAILED;
+				return CMD_SUCCESS;
 			}
 			bgp_vrf->evpn_info->dad_freeze = false;
 		}
