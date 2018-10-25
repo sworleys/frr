@@ -166,7 +166,7 @@ static int static_list_compare(void *arg1, void *arg2)
 	if (ret)
 		return ret;
 
-	ret = shr1->safi - shr2->afi;
+	ret = shr1->safi - shr2->safi;
 	if (ret)
 		return ret;
 
