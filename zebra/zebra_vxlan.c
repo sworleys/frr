@@ -2325,8 +2325,7 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 	 * event as duplicate detection.
 	 */
 	if (zvrf->dup_addr_detect && neigh_mac_change && neigh_was_remote) {
-		if (zvrf->dad_freeze &&
-		    CHECK_FLAG(n->flags, ZEBRA_NEIGH_DUPLICATE)) {
+		if (CHECK_FLAG(n->flags, ZEBRA_NEIGH_DUPLICATE)) {
 			if (IS_ZEBRA_DEBUG_VXLAN)
 				zlog_debug(
 					   "%s: duplicate addr MAC %s IP %s skip update to client, learn count %u recover time %u",
@@ -2337,7 +2336,11 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 					   n->dad_count,
 					   zvrf->dad_freeze_time);
 
-			neigh_on_hold = true;
+			/* In case of warn-only, inform client and update neigh
+			 */
+			if (zvrf->dad_freeze)
+				neigh_on_hold = true;
+
 			goto send_notif;
 		}
 
@@ -4548,8 +4551,7 @@ static void process_remote_macip_add(vni_t vni,
 			/* MAC is detected as duplicate, hold on to
 			 * install as remote entry.
 			 */
-			if (zvrf->dad_freeze &&
-			    !!CHECK_FLAG(mac->flags, ZEBRA_MAC_DUPLICATE)) {
+			if (CHECK_FLAG(mac->flags, ZEBRA_MAC_DUPLICATE)) {
 				if (IS_ZEBRA_DEBUG_VXLAN)
 					zlog_debug(
 						   "%s: duplicate addr MAC %s skip installing, learn count %u recover time %u",
@@ -4570,19 +4572,23 @@ static void process_remote_macip_add(vni_t vni,
 			monotime_since(&mac->detect_start_time, &elapsed);
 			if (elapsed.tv_sec > zvrf->dad_time) {
 				if (IS_ZEBRA_DEBUG_VXLAN)
-					zlog_debug("%s: duplicate addr MAC %s detection time passed, reset learn count %u",
+					zlog_debug("%s: duplicate addr MAC %s flags 0%x detection time passed, reset learn count %u",
 						   __PRETTY_FUNCTION__,
 						   prefix_mac2str(macaddr, buf,
 								  sizeof(buf)),
-						   mac->dad_count);
+						   mac->flags, mac->dad_count);
 				/* Reset learn count but do not start detection
 				 * during remote learn.
+				 * Next local learn event start time wil be
+				 * resetted.
 				 */
 				mac->dad_count = 0;
+			} else {
+				/* Increment detection count while in probe
+				 * window
+				 */
+				mac->dad_count++;
 			}
-
-			/* Increment move count */
-			mac->dad_count++;
 
 			if (mac->dad_count >= zvrf->dad_max_moves) {
 				flog_warn(ZEBRA_ERR_DUP_MAC_DETECTED,
@@ -4723,14 +4729,15 @@ process_neigh:
 				memcpy(&n->emac, macaddr, ETH_ALEN);
 
 				/* Check Neigh's curent state is local
-				 * (this is the case where neigh/host has moved
+				 * (this is the case where neigh/host has  moved
 				 * from L->R) and check previous detction
 				 * started via local learning.
 				 *
-				 * RFC-7432: A PE/VTEP that detects a MAC mobility
-				 * event via local learning starts an M-second timer.
-				 * VTEP-IP or seq. change along is not considered
-				 * for dup. detection.
+				 * RFC-7432: A PE/VTEP that detects a MAC
+				 * mobilit event via local learning starts
+				 * an M-second timer.
+				 * VTEP-IP or seq. change along is not
+				 * considered for dup. detection.
 				 *
 				 * Mobilty event scenario-B IP-MAC binding
 				 * changed.
@@ -4758,8 +4765,7 @@ process_neigh:
 			 * install as remote entry only if freeze is
 			 * enabled.
 			 */
-			if (zvrf->dad_freeze &&
-			    CHECK_FLAG(n->flags, ZEBRA_NEIGH_DUPLICATE)) {
+			if (CHECK_FLAG(n->flags, ZEBRA_NEIGH_DUPLICATE)) {
 				if (IS_ZEBRA_DEBUG_VXLAN)
 					zlog_debug(
 						   "%s: duplicate addr MAC %s IP %s skip installing, learn count %u recover time %u",
@@ -4770,9 +4776,12 @@ process_neigh:
 							   sizeof(buf1)),
 						n->dad_count,
 						zvrf->dad_freeze_time);
-				/* Update seq number. */
-				n->rem_seq = seq;
-				return;
+				/* In case of warn-only, neigh will be
+				 * installed.
+				 * In case of freeze enabled and detected
+				 * as duplicate, it wil not be installed.
+				 */
+				goto install_neigh;
 			}
 
 			/* Check if detection time (M-secs) expired.
@@ -4783,25 +4792,28 @@ process_neigh:
 			monotime_since(&n->detect_start_time, &elapsed);
 			if (elapsed.tv_sec > zvrf->dad_time) {
 				if (IS_ZEBRA_DEBUG_VXLAN)
-					zlog_debug("%s: duplicate addr MAC %s IP %s detection time passed, reset learn count %u",
+					zlog_debug("%s: duplicate addr MAC %s IP %s flags 0x%x detection time passed, reset learn count %u",
 						   __PRETTY_FUNCTION__,
 						   prefix_mac2str(macaddr, buf,
 								  sizeof(buf)),
 						   ipaddr2str(ipaddr, buf1,
 							      sizeof(buf1)),
+						   n->flags,
 						   n->dad_count);
 				/* Reset learn count but do not start detection
 				 * during remote learn event.
 				 */
 				n->dad_count = 0;
+			} else {
+				/* Increment detection count while in probe
+				 * window
+				 **/
+				n->dad_count++;
 			}
-
-			/* Increment move count */
-			n->dad_count++;
 
 			if (n->dad_count >= zvrf->dad_max_moves) {
 				flog_warn(ZEBRA_ERR_DUP_IP_DETECTED,
-					  "VNI %u: MAC %s IP %s detected as duplicate during remote update, last VTEP %s",
+					  "VNI %u: MAC %s IP %s detected as duplicate during remote update, from VTEP %s",
 					  zvni->vni,
 					  prefix_mac2str(&mac->macaddr,
 							buf, sizeof(buf)),
@@ -4837,6 +4849,7 @@ process_neigh:
 			}
 
 		}
+install_neigh:
 		/* Install the entry. */
 		if (!is_dup_detect)
 			zvni_neigh_install(zvni, n);
@@ -6902,8 +6915,7 @@ int zebra_vxlan_local_mac_add_update(struct interface *ifp,
 				/* MAC is detected as duplicate, hold on
 				 * advertising to BGP.
 				 */
-				if (zvrf->dad_freeze &&
-				    !!CHECK_FLAG(mac->flags,
+				if (CHECK_FLAG(mac->flags,
 					       ZEBRA_MAC_DUPLICATE)) {
 					if (IS_ZEBRA_DEBUG_VXLAN)
 						zlog_debug(
@@ -6917,7 +6929,9 @@ int zebra_vxlan_local_mac_add_update(struct interface *ifp,
 					 * client but update neigh due to
 					 * this MAC update.
 					 */
-					inform_client = false;
+					if (zvrf->dad_freeze)
+						inform_client = false;
+
 					goto send_notif;
 				}
 
@@ -6930,11 +6944,12 @@ int zebra_vxlan_local_mac_add_update(struct interface *ifp,
 				    elapsed.tv_sec >= zvrf->dad_time) {
 
 					if (IS_ZEBRA_DEBUG_VXLAN)
-						zlog_debug("%s: duplicate addr MAC %s detection time passed, reset learn count %u",
+						zlog_debug("%s: duplicate addr MAC %s flags 0x%x detection time passed, reset learn count %u",
 						   __PRETTY_FUNCTION__,
 						   prefix_mac2str(
 							macaddr, buf,
 							sizeof(buf)),
+						   mac->flags,
 						   mac->dad_count);
 
 					mac->dad_count = 0;
