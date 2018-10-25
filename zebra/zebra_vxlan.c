@@ -64,6 +64,7 @@ static int ip_prefix_send_to_client(vrf_id_t vrf_id,
 					     uint16_t cmd);
 static void zvni_print_neigh(zebra_neigh_t *n, void *ctxt, json_object *json);
 static void zvni_print_neigh_hash(struct hash_backet *backet, void *ctxt);
+static void zvni_print_dad_neigh_hash(struct hash_backet *backet, void *ctxt);
 static void zvni_print_neigh_hash_all_vni(struct hash_backet *backet,
 					  void **args);
 static void zl3vni_print_nh(zebra_neigh_t *n, struct vty *vty,
@@ -565,9 +566,11 @@ static void zvni_print_neigh_hash_all_vni(struct hash_backet *backet,
 	u_int32_t num_neigh;
 	struct neigh_walk_ctx wctx;
 	char vni_str[VNI_STR_LEN];
+	uint32_t print_dup;
 
 	vty = (struct vty *)args[0];
 	json = (json_object *)args[1];
+	print_dup = (uint32_t)(uintptr_t)args[2];
 
 	zvni = (zebra_vni_t *)backet->data;
 	if (!zvni) {
@@ -576,6 +579,10 @@ static void zvni_print_neigh_hash_all_vni(struct hash_backet *backet,
 		return;
 	}
 	num_neigh = hashcount(zvni->neigh_table);
+
+	if (print_dup && num_dup_detected_neighs(zvni) == 0)
+		return;
+
 	if (json == NULL) {
 		vty_out(vty,
 			"\nVNI %u #ARP (IPv4 and IPv6, local and remote) %u\n\n",
@@ -607,7 +614,11 @@ static void zvni_print_neigh_hash_all_vni(struct hash_backet *backet,
 			-wctx.addr_width, "IP", "Type",
 			"State", "MAC", "Remote VTEP");
 	}
-	hash_iterate(zvni->neigh_table, zvni_print_neigh_hash, &wctx);
+	if (print_dup)
+		hash_iterate(zvni->neigh_table, zvni_print_dad_neigh_hash,
+			     &wctx);
+	else
+		hash_iterate(zvni->neigh_table, zvni_print_neigh_hash, &wctx);
 
 	if (json)
 		json_object_object_add(json, vni_str, json_vni);
@@ -924,6 +935,9 @@ static void zvni_print_mac_hash_all_vni(struct hash_backet *backet, void *ctxt)
 	if (!num_macs)
 		return;
 
+	if (wctx->print_dup && (num_dup_detected_macs(zvni) == 0))
+		return;
+
 	if (json) {
 		json_vni = json_object_new_object();
 		json_mac = json_object_new_object();
@@ -944,7 +958,10 @@ static void zvni_print_mac_hash_all_vni(struct hash_backet *backet, void *ctxt)
 	 * next vni information.
 	 */
 	wctx->json = json_mac;
-	hash_iterate(zvni->mac_table, zvni_print_mac_hash, wctx);
+	if (wctx->print_dup)
+		hash_iterate(zvni->mac_table, zvni_print_dad_mac_hash, wctx);
+	else
+		hash_iterate(zvni->mac_table, zvni_print_mac_hash, wctx);
 	wctx->json = json;
 	if (json) {
 		if (wctx->count)
@@ -5556,10 +5573,10 @@ void zebra_vxlan_print_neigh_vni(struct vty *vty, struct zebra_vrf *zvrf,
  * Display neighbors across all VNIs (VTY command handler).
  */
 void zebra_vxlan_print_neigh_all_vni(struct vty *vty, struct zebra_vrf *zvrf,
-				     bool use_json)
+				     bool print_dup, bool use_json)
 {
 	json_object *json = NULL;
-	void *args[2];
+	void *args[3];
 
 	if (!is_evpn_enabled())
 		return;
@@ -5569,6 +5586,8 @@ void zebra_vxlan_print_neigh_all_vni(struct vty *vty, struct zebra_vrf *zvrf,
 
 	args[0] = vty;
 	args[1] = json;
+	args[2] = (void *)(ptrdiff_t)print_dup;
+
 	hash_iterate(zvrf->vni_table,
 		     (void (*)(struct hash_backet *,
 			       void *))zvni_print_neigh_hash_all_vni,
@@ -5781,7 +5800,7 @@ void zebra_vxlan_print_macs_vni(struct vty *vty, struct zebra_vrf *zvrf,
  * Display MACs for all VNIs (VTY command handler).
  */
 void zebra_vxlan_print_macs_all_vni(struct vty *vty, struct zebra_vrf *zvrf,
-				    bool use_json)
+				    bool print_dup, bool use_json)
 {
 	struct mac_walk_ctx wctx;
 	json_object *json = NULL;
@@ -5797,6 +5816,7 @@ void zebra_vxlan_print_macs_all_vni(struct vty *vty, struct zebra_vrf *zvrf,
 	memset(&wctx, 0, sizeof(struct mac_walk_ctx));
 	wctx.vty = vty;
 	wctx.json = json;
+	wctx.print_dup = print_dup;
 	hash_iterate(zvrf->vni_table, zvni_print_mac_hash_all_vni, &wctx);
 
 	if (use_json) {

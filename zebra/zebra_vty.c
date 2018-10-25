@@ -3127,7 +3127,7 @@ DEFUN (show_evpn_mac_vni_all,
 	bool uj = use_json(argc, argv);
 
 	zvrf = vrf_info_lookup(VRF_DEFAULT);
-	zebra_vxlan_print_macs_all_vni(vty, zvrf, uj);
+	zebra_vxlan_print_macs_all_vni(vty, zvrf, false, uj);
 	return CMD_SUCCESS;
 }
 
@@ -3213,6 +3213,26 @@ DEFUN (show_evpn_mac_vni_vtep,
 	return CMD_SUCCESS;
 }
 
+DEFPY (show_evpn_mac_vni_all_dad,
+       show_evpn_mac_vni_all_dad_cmd,
+       "show evpn mac vni all duplicate [json]",
+       SHOW_STR
+       "EVPN\n"
+       "MAC addresses\n"
+       "VxLAN Network Identifier\n"
+       "All VNIs\n"
+       "Duplicate address list\n"
+       JSON_STR)
+{
+	struct zebra_vrf *zvrf;
+	bool uj = use_json(argc, argv);
+
+	zvrf = vrf_info_lookup(VRF_DEFAULT);
+	zebra_vxlan_print_macs_all_vni(vty, zvrf, true, uj);
+	return CMD_SUCCESS;
+}
+
+
 DEFPY (show_evpn_mac_vni_dad,
        show_evpn_mac_vni_dad_cmd,
        "show evpn mac vni " CMD_VNI_RANGE " duplicate" "[json]",
@@ -3257,6 +3277,25 @@ DEFPY (show_evpn_neigh_vni_dad,
 	return CMD_SUCCESS;
 }
 
+DEFPY (show_evpn_neigh_vni_all_dad,
+       show_evpn_neigh_vni_all_dad_cmd,
+       "show evpn arp-cache vni all duplicate [json]",
+       SHOW_STR
+       "EVPN\n"
+       "ARP and ND cache\n"
+       "VxLAN Network Identifier\n"
+       "All VNIs\n"
+       "Duplicate address list\n"
+       JSON_STR)
+{
+	struct zebra_vrf *zvrf;
+	bool uj = use_json(argc, argv);
+
+	zvrf = vrf_info_lookup(VRF_DEFAULT);
+	zebra_vxlan_print_neigh_all_vni(vty, zvrf, true, uj);
+	return CMD_SUCCESS;
+}
+
 
 DEFUN (show_evpn_neigh_vni,
        show_evpn_neigh_vni_cmd,
@@ -3292,7 +3331,7 @@ DEFUN (show_evpn_neigh_vni_all,
 	bool uj = use_json(argc, argv);
 
 	zvrf = vrf_info_lookup(VRF_DEFAULT);
-	zebra_vxlan_print_neigh_all_vni(vty, zvrf, uj);
+	zebra_vxlan_print_neigh_all_vni(vty, zvrf, false, uj);
 	return CMD_SUCCESS;
 }
 
@@ -3899,11 +3938,13 @@ void zebra_vty_init(void)
 	install_element(VIEW_NODE, &show_evpn_mac_vni_mac_cmd);
 	install_element(VIEW_NODE, &show_evpn_mac_vni_vtep_cmd);
 	install_element(VIEW_NODE, &show_evpn_mac_vni_dad_cmd);
+	install_element(VIEW_NODE, &show_evpn_mac_vni_all_dad_cmd);
 	install_element(VIEW_NODE, &show_evpn_neigh_vni_cmd);
 	install_element(VIEW_NODE, &show_evpn_neigh_vni_all_cmd);
 	install_element(VIEW_NODE, &show_evpn_neigh_vni_neigh_cmd);
 	install_element(VIEW_NODE, &show_evpn_neigh_vni_vtep_cmd);
 	install_element(VIEW_NODE, &show_evpn_neigh_vni_dad_cmd);
+	install_element(VIEW_NODE, &show_evpn_neigh_vni_all_dad_cmd);
 	install_element(ENABLE_NODE, &clear_evpn_dup_addr_cmd);
 
 	install_element(CONFIG_NODE, &default_vrf_vni_mapping_cmd);

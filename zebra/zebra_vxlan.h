@@ -79,6 +79,7 @@ extern void zebra_vxlan_print_macs_vni(struct vty *vty, struct zebra_vrf *zvrf,
 				       vni_t vni, bool use_json);
 extern void zebra_vxlan_print_macs_all_vni(struct vty *vty,
 					   struct zebra_vrf *zvrf,
+					   bool print_dup,
 					   bool use_json);
 extern void zebra_vxlan_print_macs_all_vni_vtep(struct vty *vty,
 						struct zebra_vrf *zvrf,
@@ -98,6 +99,7 @@ extern void zebra_vxlan_print_neigh_vni(struct vty *vty, struct zebra_vrf *zvrf,
 					vni_t vni, bool use_json);
 extern void zebra_vxlan_print_neigh_all_vni(struct vty *vty,
 					    struct zebra_vrf *zvrf,
+					    bool print_dup,
 					    bool use_json);
 extern void zebra_vxlan_print_specific_neigh_vni(struct vty *vty,
 						 struct zebra_vrf *zvrf,
