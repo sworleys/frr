@@ -5936,7 +5936,9 @@ void zebra_vxlan_clear_dup_detect_vni_ip(struct vty *vty,
 {
 	zebra_vni_t *zvni;
 	zebra_neigh_t *nbr;
+	zebra_mac_t *mac;
 	char buf[INET6_ADDRSTRLEN];
+	char buf2[ETHER_ADDR_STRLEN];
 
 	if (!is_evpn_enabled())
 		return;
@@ -5961,6 +5963,14 @@ void zebra_vxlan_clear_dup_detect_vni_ip(struct vty *vty,
 		vty_out(vty,
 			"%% Requsted host IP %s is not duplicate detected\n",
 			buf);
+		return;
+	}
+
+	mac = zvni_mac_lookup(zvni, &nbr->emac);
+
+	if (CHECK_FLAG(mac->flags, ZEBRA_MAC_DUPLICATE)) {
+		vty_out(vty, "%% Requested IP's associated MAC %s is still in duplicate state\n",
+			prefix_mac2str(&nbr->emac, buf2, sizeof(buf2)));
 		return;
 	}
 
