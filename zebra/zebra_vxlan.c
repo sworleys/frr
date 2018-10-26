@@ -4650,6 +4650,14 @@ static void process_remote_macip_add(vni_t vni,
 							  node, n)) {
 					SET_FLAG(n->flags,
 						 ZEBRA_NEIGH_DUPLICATE);
+
+					flog_warn(ZEBRA_ERR_DUP_IP_INHERIT_DETECTED,
+						  "VNI %u: MAC %s IP %s detected as duplicate during remote update, inherit duplicate from MAC",
+						  zvni->vni,
+						  prefix_mac2str(&mac->macaddr,
+							buf, sizeof(buf)),
+						  ipaddr2str(&n->ip, buf1,
+							     sizeof(buf1)));
 				}
 
 				/* Start auto recovery timer for this
@@ -6857,6 +6865,7 @@ int zebra_vxlan_local_mac_add_update(struct interface *ifp,
 	struct listnode *node = NULL;
 	struct in_addr vtep_ip = {.s_addr = 0};
 	struct timeval elapsed = {0, 0};
+	char buf2[INET6_ADDRSTRLEN];
 
 	/* We are interested in MACs only on ports or (port, VLAN) that
 	 * map to a VNI.
@@ -7064,6 +7073,14 @@ int zebra_vxlan_local_mac_add_update(struct interface *ifp,
 							node, n)) {
 						SET_FLAG(n->flags,
 							 ZEBRA_NEIGH_DUPLICATE);
+
+						flog_warn(ZEBRA_ERR_DUP_IP_INHERIT_DETECTED,
+						  "VNI %u: MAC %s IP %s detected as duplicate during local update, inherit duplicate from MAC",
+						  zvni->vni,
+						  prefix_mac2str(&mac->macaddr,
+							buf, sizeof(buf)),
+						  ipaddr2str(&n->ip, buf2,
+							     sizeof(buf2)));
 					}
 
 					/* Start auto recovery timer for this

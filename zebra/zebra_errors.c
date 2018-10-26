@@ -704,6 +704,15 @@ static struct ferr_ref ferr_zebra_err[] = {
 			"Check network topology to detect duplicate host MAC for correctness.",
 	},
 	{
+		.code = ZEBRA_ERR_DUP_IP_INHERIT_DETECTED,
+		.title =
+			"EVPN IP is detected duplicate by MAC",
+		.description =
+			"Zebra has hit duplicate address detection threshold which means MAC-IP pair is moving.",
+		.suggestion =
+			"Check network topology to detect duplicate host MAC for correctness.",
+	},
+	{
 		.code = ZEBRA_ERR_DUP_IP_DETECTED,
 		.title =
 			"EVPN IP is detected duplicate",
