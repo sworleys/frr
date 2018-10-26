@@ -3217,41 +3217,45 @@ DEFUN (show_evpn_mac_vni_vtep,
 
 DEFPY (show_evpn_mac_vni_dad,
        show_evpn_mac_vni_dad_cmd,
-       "show evpn mac vni " CMD_VNI_RANGE " duplicate",
+       "show evpn mac vni " CMD_VNI_RANGE " duplicate" "[json]",
        SHOW_STR
        "EVPN\n"
        "MAC addresses\n"
        "VxLAN Network Identifier\n"
        "VNI number\n"
-       "Duplicate address list\n")
+       "Duplicate address list\n"
+       JSON_STR)
 {
 	struct zebra_vrf *zvrf;
 	vni_t vni;
+	bool uj = use_json(argc, argv);
 
 	vni = strtoul(argv[4]->arg, NULL, 10);
 	zvrf = vrf_info_lookup(VRF_DEFAULT);
 
-	zebra_vxlan_print_macs_vni_dad(vty, zvrf, vni);
+	zebra_vxlan_print_macs_vni_dad(vty, zvrf, vni, uj);
 
 	return CMD_SUCCESS;
 }
 
 DEFPY (show_evpn_neigh_vni_dad,
        show_evpn_neigh_vni_dad_cmd,
-       "show evpn arp-cache vni " CMD_VNI_RANGE "duplicate",
+       "show evpn arp-cache vni " CMD_VNI_RANGE "duplicate" "[json]",
        SHOW_STR
        "EVPN\n"
        "ARP and ND cache\n"
        "VxLAN Network Identifier\n"
        "VNI number\n"
-       "Duplicate address list\n")
+       "Duplicate address list\n"
+       JSON_STR)
 {
 	struct zebra_vrf *zvrf;
 	vni_t vni;
+	bool uj = use_json(argc, argv);
 
 	vni = strtoul(argv[4]->arg, NULL, 10);
 	zvrf = vrf_info_lookup(VRF_DEFAULT);
-	zebra_vxlan_print_neigh_vni_dad(vty, zvrf, vni);
+	zebra_vxlan_print_neigh_vni_dad(vty, zvrf, vni, uj);
 	return CMD_SUCCESS;
 }
 
