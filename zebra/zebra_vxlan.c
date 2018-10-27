@@ -6974,6 +6974,7 @@ int zebra_vxlan_local_mac_add_update(struct interface *ifp,
 
 		} else if (CHECK_FLAG(mac->flags, ZEBRA_MAC_REMOTE) ||
 			   CHECK_FLAG(mac->flags, ZEBRA_MAC_AUTO)) {
+			bool do_dad = false;
 
 			/*
 			 * MAC has either moved or was "internally" created due
@@ -6997,6 +6998,8 @@ int zebra_vxlan_local_mac_add_update(struct interface *ifp,
 				mac->loc_seq = MAX(mac->rem_seq + 1,
 						   mac->loc_seq);
 				vtep_ip = mac->fwd_info.r_vtep_ip;
+				/* Trigger DAD for remote MAC */
+				do_dad = true;
 			}
 
 			UNSET_FLAG(mac->flags, ZEBRA_MAC_REMOTE);
@@ -7016,7 +7019,7 @@ int zebra_vxlan_local_mac_add_update(struct interface *ifp,
 			inform_client = true;
 			upd_neigh = true;
 
-			if (zvrf->dup_addr_detect) {
+			if (zvrf->dup_addr_detect && do_dad) {
 				/* MAC is detected as duplicate, hold on
 				 * advertising to BGP.
 				 */
