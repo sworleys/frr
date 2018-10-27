@@ -320,6 +320,44 @@ static int advertise_gw_macip_enabled(zebra_vni_t *zvni)
 	return 0;
 }
 
+static int zebra_vxlan_ip_inherit_dad_from_mac(struct zebra_vrf *zvrf,
+						zebra_mac_t *old_zmac,
+						zebra_mac_t *new_zmac,
+						zebra_neigh_t *nbr)
+{
+	bool is_old_mac_dup = false;
+        bool is_new_mac_dup = false;
+
+	if (!zvrf->dup_addr_detect)
+		return 0;
+	/* Check old or new MAC is detected as duplicate
+	 * mark this neigh as duplicate
+	 */
+	if (old_zmac)
+		is_old_mac_dup = CHECK_FLAG(old_zmac->flags,
+					    ZEBRA_MAC_DUPLICATE);
+	if (new_zmac)
+		is_new_mac_dup = CHECK_FLAG(new_zmac->flags,
+					    ZEBRA_MAC_DUPLICATE);
+	/* Old and/or new MAC can be in duplicate state,
+	 * based on that IP/Neigh Inherits the flag.
+	 * If New MAC is marked duplicate, inherit to the IP.
+	 * If old MAC is duplicate but new MAC is not, clear
+	 * duplicate flag for IP and reset detection params
+	 * and let IP DAD retrigger.
+	 */
+	if (is_new_mac_dup) {
+		SET_FLAG(nbr->flags, ZEBRA_NEIGH_DUPLICATE);
+		return 1;
+	}else if (is_old_mac_dup && !is_new_mac_dup) {
+		UNSET_FLAG(nbr->flags, ZEBRA_NEIGH_DUPLICATE);
+		nbr->dad_count = 0;
+		nbr->detect_start_time.tv_sec = 0;
+		nbr->detect_start_time.tv_usec = 0;
+	}
+	return 0;
+}
+
 /*
  * Helper function to determine maximum width of neighbor IP address for
  * display - just because we're dealing with IPv6 addresses that can
@@ -2346,6 +2384,17 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 			      MAX(seq1, seq2) : zmac->loc_seq;
 	}
 
+	/* Check old and/or new MAC detected as duplicate mark
+	 * the neigh as duplicate
+	 */
+	if (zebra_vxlan_ip_inherit_dad_from_mac(zvrf, old_zmac, zmac, n)) {
+		flog_warn(ZEBRA_ERR_DUP_IP_INHERIT_DETECTED,
+			"VNI %u: MAC %s IP %s detected as duplicate during local update, inherit duplicate from MAC",
+			zvni->vni,
+			prefix_mac2str(macaddr, buf, sizeof(buf)),
+			ipaddr2str(&n->ip, buf2, sizeof(buf2)));
+	}
+
 	/* Mark Router flag (R-bit) */
 	if (is_router)
 		SET_FLAG(n->flags, ZEBRA_NEIGH_ROUTER_FLAG);
@@ -2365,10 +2414,12 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 	/* Duplicate Address Detection (DAD) is enabled.
 	 * Based on Mobility event Scenario-B from the
 	 * draft, IP/Neigh's MAC binding changed and
-	 * neigh's previous state was remote treat this
-	 * event as duplicate detection.
+	 * neigh's previous state was remote, trigger DAD.
 	 */
-	if (zvrf->dup_addr_detect && neigh_mac_change && neigh_was_remote) {
+	if (zvrf->dup_addr_detect) {
+		/* Neigh could have inherit dup flag or IP DAD
+		 * detected earlier
+		 */
 		if (CHECK_FLAG(n->flags, ZEBRA_NEIGH_DUPLICATE)) {
 			if (IS_ZEBRA_DEBUG_VXLAN)
 				zlog_debug(
@@ -2387,6 +2438,9 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 
 			goto send_notif;
 		}
+		/* MAC binding changed and previous state was remote */
+		if (!(neigh_mac_change && neigh_was_remote))
+			goto send_notif;
 
 		/* First check if neigh is already marked duplicate via
 		 * MAC dup detection, before firing M Seconds
@@ -4420,7 +4474,7 @@ static void process_remote_macip_add(vni_t vni,
 {
 	zebra_vni_t *zvni;
 	zebra_vtep_t *zvtep;
-	zebra_mac_t *mac, *old_mac;
+	zebra_mac_t *mac, *old_mac = NULL;
 	zebra_neigh_t *n = NULL;
 	int update_mac = 0, update_neigh = 0;
 	char buf[ETHER_ADDR_STRLEN];
@@ -4798,7 +4852,19 @@ process_neigh:
 				if ((!CHECK_FLAG(n->flags, ZEBRA_NEIGH_REMOTE))
 				    && n->dad_count)
 					do_dad = true;
+
 			}
+		}
+
+		/* Check old or new MAC detected as duplicate,
+		 * inherit duplicate flag to this neigh.
+		 */
+		if (zebra_vxlan_ip_inherit_dad_from_mac(zvrf, old_mac, mac, n)) {
+			flog_warn(ZEBRA_ERR_DUP_IP_INHERIT_DETECTED,
+				"VNI %u: MAC %s IP %s detected as duplicate during remote update, inherit duplicate from MAC",
+				zvni->vni,
+				prefix_mac2str(&mac->macaddr, buf, sizeof(buf)),
+				ipaddr2str(&n->ip, buf1, sizeof(buf1)));
 		}
 
 		/* Set "remote" forwarding info. */
@@ -4812,10 +4878,10 @@ process_neigh:
 		else
 			UNSET_FLAG(n->flags, ZEBRA_NEIGH_ROUTER_FLAG);
 
-		if (zvrf->dup_addr_detect && do_dad) {
-			/* IP is detected as duplicate, hold on to
-			 * install as remote entry only if freeze is
-			 * enabled.
+		if (zvrf->dup_addr_detect) {
+			/* IP is detected as duplicate or inherit dup
+			 * state, hold on to install as remote entry
+			 * only if freeze is enabled.
 			 */
 			if (CHECK_FLAG(n->flags, ZEBRA_NEIGH_DUPLICATE)) {
 				if (IS_ZEBRA_DEBUG_VXLAN)
@@ -4828,13 +4894,14 @@ process_neigh:
 							   sizeof(buf1)),
 						n->dad_count,
 						zvrf->dad_freeze_time);
-				/* In case of warn-only, neigh will be
-				 * installed.
-				 * In case of freeze enabled and detected
-				 * as duplicate, it wil not be installed.
+				/* warn-only action, neigh will be installed.
+				 * freeze action, neigh wil not be installed.
 				 */
 				goto install_neigh;
 			}
+
+			if (!do_dad)
+				goto install_neigh;
 
 			/* Check if detection time (M-secs) expired.
 			 * Reset learn count and detection start time.
@@ -4859,7 +4926,7 @@ process_neigh:
 			} else {
 				/* Increment detection count while in probe
 				 * window
-				 **/
+				 */
 				n->dad_count++;
 			}
 
