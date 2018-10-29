@@ -1,3 +1,9 @@
+frr (4.0+cl3u8) RELEASED; urgency=medium
+
+  * Fixes: Lots of stuff
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Mon, 29 Oct 2018 18:10:00 -0400
+
 frr (4.0+cl3u7) RELEASED; urgency=medium
 
   * Fixes: CM-20585 bgpd: enable aggregation in EVPN

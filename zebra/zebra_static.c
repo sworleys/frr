@@ -95,6 +95,12 @@ void static_install_route(afi_t afi, safi_t safi, struct prefix *p,
 		if (re->tag != si->tag)
 			re->tag = si->tag;
 
+		/* update onlink flag value */
+		if (si->onlink)
+			SET_FLAG(re->flags, ZEBRA_FLAG_ONLINK);
+		else
+			UNSET_FLAG(re->flags, ZEBRA_FLAG_ONLINK);
+
 		/* Same distance static route is there.  Update it with new
 		   nexthop. */
 		route_unlock_node(rn);
@@ -176,6 +182,8 @@ void static_install_route(afi_t afi, safi_t safi, struct prefix *p,
 				: zebrad.rtm_table_default;
 		re->nexthop_num = 0;
 		re->tag = si->tag;
+		if (si->onlink)
+			SET_FLAG(re->flags, ZEBRA_FLAG_ONLINK);
 
 		switch (si->type) {
 		case STATIC_IPV4_GATEWAY:
@@ -395,7 +403,7 @@ int static_add_route(afi_t afi, safi_t safi, u_char type, struct prefix *p,
 		     const char *ifname, enum static_blackhole_type bh_type,
 		     route_tag_t tag, u_char distance, struct zebra_vrf *zvrf,
 		     struct zebra_vrf *nh_zvrf,
-		     struct static_nh_label *snh_label)
+		     struct static_nh_label *snh_label, bool onlink)
 {
 	struct route_node *rn;
 	struct static_route *si;
@@ -434,7 +442,7 @@ int static_add_route(afi_t afi, safi_t safi, u_char type, struct prefix *p,
 			if ((distance == si->distance) && (tag == si->tag)
 			    && !memcmp(&si->snh_label, snh_label,
 				       sizeof(struct static_nh_label))
-			    && si->bh_type == bh_type) {
+			    && si->bh_type == bh_type && si->onlink == onlink) {
 				route_unlock_node(rn);
 				return 0;
 			} else
@@ -457,6 +465,7 @@ int static_add_route(afi_t afi, safi_t safi, u_char type, struct prefix *p,
 	si->tag = tag;
 	si->vrf_id = zvrf_id(zvrf);
 	si->nh_vrf_id = zvrf_id(nh_zvrf);
+	si->onlink = onlink;
 	strcpy(si->nh_vrfname, nh_zvrf->vrf->name);
 
 	if (ifname)

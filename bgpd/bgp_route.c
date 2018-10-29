@@ -429,6 +429,7 @@ static int bgp_info_cmp(struct bgp *bgp, struct bgp_info *new,
 	char exist_buf[PATH_ADDPATH_STR_BUFFER];
 	u_int32_t new_mm_seq;
 	u_int32_t exist_mm_seq;
+	int nh_cmp;
 
 	*paths_eq = 0;
 
@@ -516,6 +517,26 @@ static int bgp_info_cmp(struct bgp *bgp, struct bgp_info *new,
 					"%s: %s loses to %s due to MM seq %u < %u",
 					pfx_buf, new_buf, exist_buf, new_mm_seq,
 					exist_mm_seq);
+			return 0;
+		}
+
+		/* if sequence numbers are the same path with the lowest IP
+		 * wins */
+		nh_cmp = bgp_info_nexthop_cmp(new, exist);
+		if (nh_cmp < 0) {
+			if (debug)
+				zlog_debug(
+					"%s: %s wins over %s due to same MM seq %u and lower IP %s",
+					pfx_buf, new_buf, exist_buf, new_mm_seq,
+					inet_ntoa(new->attr->nexthop));
+			return 1;
+		}
+		if (nh_cmp > 0) {
+			if (debug)
+				zlog_debug(
+					"%s: %s loses to %s due to same MM seq %u and higher IP %s",
+					pfx_buf, new_buf, exist_buf, new_mm_seq,
+					inet_ntoa(new->attr->nexthop));
 			return 0;
 		}
 	}

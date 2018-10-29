@@ -52,8 +52,6 @@ static void unregister_zebra_rnh(struct bgp_nexthop_cache *bnc,
 				 int is_bgp_static_route);
 static void evaluate_paths(struct bgp_nexthop_cache *bnc);
 static int make_prefix(int afi, struct bgp_info *ri, struct prefix *p);
-static void path_nh_map(struct bgp_info *path, struct bgp_nexthop_cache *bnc,
-			int keep);
 
 static int bgp_isvalid_nexthop(struct bgp_nexthop_cache *bnc)
 {
@@ -112,7 +110,7 @@ void bgp_unlink_nexthop(struct bgp_info *path)
 	if (!bnc)
 		return;
 
-	path_nh_map(path, NULL, 0);
+	path_nh_map(path, NULL, false);
 
 	bgp_unlink_nexthop_check(bnc);
 }
@@ -171,11 +169,6 @@ int bgp_find_or_add_nexthop(struct bgp *bgp_route, struct bgp *bgp_nexthop,
 		if (make_prefix(afi, ri, &p) < 0)
 			return 1;
 	} else if (peer) {
-		/* Don't register link local NH */
-		if (afi == AFI_IP6
-		    && IN6_IS_ADDR_LINKLOCAL(&peer->su.sin6.sin6_addr))
-			return 1;
-
 		if (!sockunion2hostprefix(&peer->su, &p)) {
 			if (BGP_DEBUG(nht, NHT)) {
 				zlog_debug(
@@ -260,7 +253,8 @@ int bgp_find_or_add_nexthop(struct bgp *bgp_route, struct bgp *bgp_nexthop,
 		 */
 		bgp_unlink_nexthop(ri);
 
-		path_nh_map(ri, bnc, 1); /* updates NHT ri list reference */
+		/* updates NHT pi list reference */
+		path_nh_map(ri, bnc, true);
 
 		if (CHECK_FLAG(bnc->flags, BGP_NEXTHOP_VALID) && bnc->metric)
 			(bgp_info_extra_get(ri))->igpmetric = bnc->metric;
@@ -287,10 +281,6 @@ void bgp_delete_connected_nexthop(afi_t afi, struct peer *peer)
 	struct prefix p;
 
 	if (!peer)
-		return;
-
-	/* We don't register link local address for NHT */
-	if (afi == AFI_IP6 && IN6_IS_ADDR_LINKLOCAL(&peer->su.sin6.sin6_addr))
 		return;
 
 	if (!sockunion2hostprefix(&peer->su, &p))
@@ -402,6 +392,8 @@ void bgp_parse_nexthop_update(int command, vrf_id_t vrf_id)
 		bnc->change_flags |= BGP_NEXTHOP_CHANGED;
 
 	if (nhr.nexthop_num) {
+		struct peer *peer = bnc->nht_info;
+
 		/* notify bgp fsm if nbr ip goes from invalid->valid */
 		if (!bnc->nexthop_num)
 			UNSET_FLAG(bnc->flags, BGP_NEXTHOP_PEER_NOTIFIED);
@@ -417,6 +409,23 @@ void bgp_parse_nexthop_update(int command, vrf_id_t vrf_id)
 
 			nexthop = nexthop_from_zapi_nexthop(&nhr.nexthops[i]);
 
+			/*
+			 * Turn on RA for the v6 nexthops
+			 * we receive from bgp.  This is to allow us
+			 * to work with v4 routing over v6 nexthops
+			 */
+			if (peer && !peer->ifp
+			    && CHECK_FLAG(peer->flags,
+					  PEER_FLAG_CAPABILITY_ENHE)
+			    && nhr.prefix.family == AF_INET6) {
+				struct interface *ifp;
+
+				ifp = if_lookup_by_index(nexthop->ifindex,
+							 nexthop->vrf_id);
+				zclient_send_interface_radv_req(
+					zclient, nexthop->vrf_id, ifp, true,
+					BGP_UNNUM_DEFAULT_RA_INTERVAL);
+			}
 			/* There is at least one label-switched path */
 			if (nexthop->nh_label &&
 				nexthop->nh_label->num_labels) {
@@ -525,11 +534,6 @@ static int make_prefix(int afi, struct bgp_info *ri, struct prefix *p)
 		}
 		break;
 	case AFI_IP6:
-		/* We don't register link local NH */
-		if (ri->attr->mp_nexthop_len != BGP_ATTR_NHLEN_IPV6_GLOBAL
-		    || IN6_IS_ADDR_LINKLOCAL(&ri->attr->mp_nexthop_global))
-			return -1;
-
 		p->family = AF_INET6;
 
 		if (is_bgp_static) {
@@ -768,8 +772,8 @@ static void evaluate_paths(struct bgp_nexthop_cache *bnc)
  *   make - if set, make the association. if unset, just break the existing
  *          association.
  */
-static void path_nh_map(struct bgp_info *path, struct bgp_nexthop_cache *bnc,
-			int make)
+void path_nh_map(struct bgp_info *path, struct bgp_nexthop_cache *bnc,
+		 bool make)
 {
 	if (path->nexthop) {
 		LIST_REMOVE(path, nh_thread);

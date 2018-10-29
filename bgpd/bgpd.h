@@ -431,6 +431,13 @@ struct bgp {
 	/* EVPN enable - advertise local VNIs and their MACs etc. */
 	int advertise_all_vni;
 
+	struct bgp_evpn_info *evpn_info;
+
+	/*
+	 * Flooding mechanism for BUM packets for VxLAN-EVPN.
+	 */
+	enum vxlan_flood_control vxlan_flood_ctrl;
+
 	/* Hash table of Import RTs to EVIs */
 	struct hash *import_rt_hash;
 

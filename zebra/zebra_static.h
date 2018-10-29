@@ -77,6 +77,13 @@ struct static_route {
 
 	/* Label information */
 	struct static_nh_label snh_label;
+
+	/*
+	 * Whether to pretend the nexthop is directly attached to the specified
+	 * link. Only meaningful when both a gateway address and interface name
+	 * are specified.
+	 */
+	bool onlink;
 };
 
 extern void static_install_route(afi_t afi, safi_t safi, struct prefix *p,
@@ -92,7 +99,7 @@ extern int static_add_route(afi_t, safi_t safi, u_char type, struct prefix *p,
 			    enum static_blackhole_type bh_type, route_tag_t tag,
 			    u_char distance, struct zebra_vrf *zvrf,
 			    struct zebra_vrf *nh_zvrf,
-			    struct static_nh_label *snh_label);
+			    struct static_nh_label *snh_label, bool onlink);
 
 extern int static_delete_route(afi_t, safi_t safi, u_char type,
 			       struct prefix *p, struct prefix_ipv6 *src_p,
