@@ -282,6 +282,8 @@ struct zebra_mac_t_ {
 	struct thread *dad_mac_auto_recovery_timer;
 
 	struct timeval detect_start_time;
+
+	time_t dad_dup_detect_time;
 };
 
 /*
@@ -378,6 +380,8 @@ struct zebra_neigh_t_ {
 	struct thread *dad_ip_auto_recovery_timer;
 
 	struct timeval detect_start_time;
+
+	time_t dad_dup_detect_time;
 };
 
 /*
