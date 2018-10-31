@@ -3186,18 +3186,20 @@ DEFUN (show_evpn_mac_vni_all_vtep,
 
 DEFUN (show_evpn_mac_vni_mac,
        show_evpn_mac_vni_mac_cmd,
-       "show evpn mac vni " CMD_VNI_RANGE " mac WORD",
+       "show evpn mac vni " CMD_VNI_RANGE " mac WORD [json]",
        SHOW_STR
        "EVPN\n"
        "MAC addresses\n"
        "VxLAN Network Identifier\n"
        "VNI number\n"
        "MAC\n"
-       "MAC address (e.g., 00:e0:ec:20:12:62)\n")
+       "MAC address (e.g., 00:e0:ec:20:12:62)\n"
+       JSON_STR)
 {
 	struct zebra_vrf *zvrf;
 	vni_t vni;
 	struct ethaddr mac;
+	bool uj = use_json(argc, argv);
 
 	vni = strtoul(argv[4]->arg, NULL, 10);
 	if (!prefix_str2mac(argv[6]->arg, &mac)) {
@@ -3205,7 +3207,7 @@ DEFUN (show_evpn_mac_vni_mac,
 		return CMD_WARNING;
 	}
 	zvrf = vrf_info_lookup(VRF_DEFAULT);
-	zebra_vxlan_print_specific_mac_vni(vty, zvrf, vni, &mac);
+	zebra_vxlan_print_specific_mac_vni(vty, zvrf, vni, &mac, uj);
 	return CMD_SUCCESS;
 }
 

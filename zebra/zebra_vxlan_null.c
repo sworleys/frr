@@ -46,7 +46,8 @@ void zebra_vxlan_print_macs_all_vni_vtep(struct vty *vty,
 }
 
 void zebra_vxlan_print_specific_mac_vni(struct vty *vty, struct zebra_vrf *zvrf,
-					vni_t vni, struct ethaddr *mac)
+					vni_t vni, struct ethaddr *mac,
+					bool use_json)
 {
 }
 
