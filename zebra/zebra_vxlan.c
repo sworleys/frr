@@ -347,7 +347,7 @@ static int zebra_vxlan_ip_inherit_dad_from_mac(struct zebra_vrf *zvrf,
 	 * duplicate flag for IP and reset detection params
 	 * and let IP DAD retrigger.
 	 */
-	if (is_new_mac_dup) {
+	if (is_new_mac_dup && !CHECK_FLAG(nbr->flags, ZEBRA_NEIGH_DUPLICATE)) {
 		SET_FLAG(nbr->flags, ZEBRA_NEIGH_DUPLICATE);
 		/* Capture Duplicate detection time */
 		nbr->dad_dup_detect_time = monotime(NULL);
