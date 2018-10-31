@@ -448,12 +448,12 @@ static void zvni_print_neigh(zebra_neigh_t *n, void *ctxt, json_object *json)
 		if (CHECK_FLAG(n->flags, ZEBRA_NEIGH_DUPLICATE)) {
 			vty_out(vty, " Duplicate, detected at %s",
 				time_to_string(n->dad_dup_detect_time));
-		} else if (n->dad_count) {
+		} else if (n->dad_count < zvrf->dad_max_moves) {
 			monotime_since(&n->detect_start_time,
 				       &detect_start_time);
 			if (detect_start_time.tv_sec <= zvrf->dad_time) {
-				char *buf = time_to_string(detect_start_time.
-							   tv_sec);
+				char *buf = time_to_string(n->
+						detect_start_time.tv_sec);
 				char tmp_buf[30];
 
 				strncpy(tmp_buf, buf, strlen(buf) - 1);
@@ -462,7 +462,6 @@ static void zvni_print_neigh(zebra_neigh_t *n, void *ctxt, json_object *json)
 					tmp_buf, n->dad_count);
 			}
 		}
-
 	} else {
 		json_object_int_add(json, "localSequence", n->loc_seq);
 		json_object_int_add(json, "remoteSequence", n->rem_seq);
@@ -878,12 +877,12 @@ static void zvni_print_mac(zebra_mac_t *mac, void *ctxt, json_object *json)
 		if (CHECK_FLAG(mac->flags, ZEBRA_MAC_DUPLICATE)) {
 			vty_out(vty, " Duplicate, detected at %s",
 				time_to_string(mac->dad_dup_detect_time));
-		} else if (mac->dad_count) {
+		} else if (mac->dad_count < zvrf->dad_max_moves) {
 			monotime_since(&mac->detect_start_time,
 				&detect_start_time);
 			if (detect_start_time.tv_sec <= zvrf->dad_time) {
-				char *buf = time_to_string(detect_start_time.
-						   tv_sec);
+				char *buf = time_to_string(mac->
+						detect_start_time.tv_sec);
 				char tmp_buf[30];
 
 				strncpy(tmp_buf, buf, strlen(buf) - 1);
