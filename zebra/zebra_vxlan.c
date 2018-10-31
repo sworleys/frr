@@ -71,7 +71,7 @@ static void zl3vni_print_nh(zebra_neigh_t *n, struct vty *vty,
 			    json_object *json);
 static void zl3vni_print_rmac(zebra_mac_t *zrmac, struct vty *vty,
 			      json_object *json);
-static void zvni_print_mac(zebra_mac_t *mac, void *ctxt);
+static void zvni_print_mac(zebra_mac_t *mac, void *ctxt, json_object *json);
 static void zvni_print_mac_hash(struct hash_backet *backet, void *ctxt);
 static void zvni_print_mac_hash_all_vni(struct hash_backet *backet, void *ctxt);
 static void zvni_print(zebra_vni_t *zvni, void **ctxt);
@@ -349,6 +349,8 @@ static int zebra_vxlan_ip_inherit_dad_from_mac(struct zebra_vrf *zvrf,
 	 */
 	if (is_new_mac_dup) {
 		SET_FLAG(nbr->flags, ZEBRA_NEIGH_DUPLICATE);
+		/* Capture Duplicate detection time */
+		nbr->dad_dup_detect_time = monotime(NULL);
 		return 1;
 	}else if (is_old_mac_dup && !is_new_mac_dup) {
 		UNSET_FLAG(nbr->flags, ZEBRA_NEIGH_DUPLICATE);
@@ -392,7 +394,10 @@ static void zvni_print_neigh(zebra_neigh_t *n, void *ctxt, json_object *json)
 	const char *type_str;
 	const char *state_str;
 	bool flags_present = false;
+	struct zebra_vrf *zvrf;
+	struct timeval detect_start_time = {0, 0};
 
+	zvrf = zebra_vrf_lookup_by_id(n->zvni->vrf_id);
 	ipaddr2str(&n->ip, buf2, sizeof(buf2));
 	prefix_mac2str(&n->emac, buf1, sizeof(buf1));
 	type_str = CHECK_FLAG(n->flags, ZEBRA_NEIGH_LOCAL) ?
@@ -440,8 +445,23 @@ static void zvni_print_neigh(zebra_neigh_t *n, void *ctxt, json_object *json)
 		vty_out(vty, " Local Seq: %u Remote Seq: %u\n",
 			n->loc_seq, n->rem_seq);
 
-		if (CHECK_FLAG(n->flags, ZEBRA_NEIGH_DUPLICATE))
-			vty_out(vty, " Duplicate\n");
+		if (CHECK_FLAG(n->flags, ZEBRA_NEIGH_DUPLICATE)) {
+			vty_out(vty, " Duplicate, detected at %s",
+				time_to_string(n->dad_dup_detect_time));
+		} else if (n->dad_count) {
+			monotime_since(&n->detect_start_time,
+				       &detect_start_time);
+			if (detect_start_time.tv_sec <= zvrf->dad_time) {
+				char *buf = time_to_string(detect_start_time.
+							   tv_sec);
+				char tmp_buf[30];
+
+				strncpy(tmp_buf, buf, strlen(buf) - 1);
+				vty_out(vty,
+					" Duplicate detection started at %s, detection count %u\n",
+					tmp_buf, n->dad_count);
+			}
+		}
 
 	} else {
 		json_object_int_add(json, "localSequence", n->loc_seq);
@@ -452,6 +472,7 @@ static void zvni_print_neigh(zebra_neigh_t *n, void *ctxt, json_object *json)
 			json_object_boolean_true_add(json, "isDuplicate");
 		else
 			json_object_boolean_false_add(json, "isDuplicate");
+
 
 	}
 }
@@ -718,68 +739,176 @@ static void zl3vni_print_rmac(zebra_mac_t *zrmac,
 /*
  * Print a specific MAC entry.
  */
-static void zvni_print_mac(zebra_mac_t *mac, void *ctxt)
+static void zvni_print_mac(zebra_mac_t *mac, void *ctxt, json_object *json)
 {
 	struct vty *vty;
 	zebra_neigh_t *n = NULL;
 	struct listnode *node = NULL;
 	char buf1[20];
 	char buf2[INET6_ADDRSTRLEN];
+	struct zebra_vrf *zvrf;
+	struct timeval detect_start_time = {0, 0};
+
+	zvrf = zebra_vrf_lookup_by_id(mac->zvni->vrf_id);
 
 	vty = (struct vty *)ctxt;
-	vty_out(vty, "MAC: %s\n",
-		prefix_mac2str(&mac->macaddr, buf1, sizeof(buf1)));
-	if (CHECK_FLAG(mac->flags, ZEBRA_MAC_LOCAL)) {
-		struct zebra_ns *zns;
-		struct interface *ifp;
-		ifindex_t ifindex;
+	prefix_mac2str(&mac->macaddr, buf1, sizeof(buf1));
 
-		ifindex = mac->fwd_info.local.ifindex;
-		zns = zebra_ns_lookup(NS_DEFAULT);
-		ifp = if_lookup_by_index_per_ns(zns, ifindex);
-		if (!ifp) // unexpected
-			return;
-		vty_out(vty, " Intf: %s(%u)", ifp->name, ifindex);
-		if (mac->fwd_info.local.vid)
-			vty_out(vty, " VLAN: %u", mac->fwd_info.local.vid);
-	} else if (CHECK_FLAG(mac->flags, ZEBRA_MAC_REMOTE)) {
-		vty_out(vty, " Remote VTEP: %s",
-			inet_ntoa(mac->fwd_info.r_vtep_ip));
-	} else if (CHECK_FLAG(mac->flags, ZEBRA_MAC_AUTO)) {
-		vty_out(vty, " Auto Mac ");
-	}
+	if (json) {
+		json_object *json_mac = json_object_new_object();
 
-	if (CHECK_FLAG(mac->flags, ZEBRA_MAC_STICKY))
-		vty_out(vty, " Sticky Mac ");
+		if (CHECK_FLAG(mac->flags, ZEBRA_MAC_LOCAL)) {
+			struct zebra_ns *zns;
+			struct interface *ifp;
+			ifindex_t ifindex;
 
-	if (CHECK_FLAG(mac->flags, ZEBRA_MAC_DEF_GW))
-		vty_out(vty, " Default-gateway Mac ");
+			ifindex = mac->fwd_info.local.ifindex;
+			zns = zebra_ns_lookup(NS_DEFAULT);
+			ifp = if_lookup_by_index_per_ns(zns, ifindex);
+			if (!ifp)
+				return;
+			json_object_string_add(json_mac, "type", "local");
+			json_object_string_add(json_mac, "intf", ifp->name);
+			json_object_int_add(json_mac, "ifindex", ifindex);
+			if (mac->fwd_info.local.vid)
+				json_object_int_add(json_mac, "vlan",
+						    mac->fwd_info.local.vid);
+		} else if (CHECK_FLAG(mac->flags, ZEBRA_MAC_REMOTE)) {
+			json_object_string_add(json_mac, "type", "remote");
+			json_object_string_add(
+				json_mac, "remoteVtep",
+				inet_ntoa(mac->fwd_info.r_vtep_ip));
+		} else if (CHECK_FLAG(mac->flags, ZEBRA_MAC_AUTO))
+			json_object_string_add(json_mac, "type", "auto");
 
-	if (CHECK_FLAG(mac->flags, ZEBRA_MAC_REMOTE_DEF_GW))
-		vty_out(vty, " Remote-gateway Mac ");
+		if (CHECK_FLAG(mac->flags, ZEBRA_MAC_STICKY))
+			json_object_boolean_true_add(json_mac, "stickyMac");
 
-	vty_out(vty, "\n");
-	vty_out(vty, " Local Seq: %u Remote Seq: %u",
-		mac->loc_seq, mac->rem_seq);
-	vty_out(vty, "\n");
+		if (CHECK_FLAG(mac->flags, ZEBRA_MAC_DEF_GW))
+			json_object_boolean_true_add(json_mac,
+						     "defaultGateway");
 
-	if (CHECK_FLAG(mac->flags, ZEBRA_MAC_DUPLICATE))
-		vty_out(vty, " Duplicate\n");
+		if (CHECK_FLAG(mac->flags, ZEBRA_MAC_REMOTE_DEF_GW))
+			json_object_boolean_true_add(json_mac,
+						     "remoteGatewayMac");
 
-	/* print all the associated neigh */
-	vty_out(vty, " Neighbors:\n");
-	if (!listcount(mac->neigh_list))
-		vty_out(vty, "    No Neighbors\n");
-	else {
-		for (ALL_LIST_ELEMENTS_RO(mac->neigh_list, node, n)) {
-			vty_out(vty, "    %s %s\n",
-				ipaddr2str(&n->ip, buf2, sizeof(buf2)),
-				(IS_ZEBRA_NEIGH_ACTIVE(n)
-					   ? "Active" : "Inactive"));
+		if (CHECK_FLAG(mac->flags, ZEBRA_MAC_DUPLICATE))
+			json_object_boolean_true_add(json_mac, "isDuplicate");
+
+		json_object_int_add(json_mac, "localSequence", mac->loc_seq);
+		json_object_int_add(json_mac, "remoteSequence", mac->rem_seq);
+
+		/* print all the associated neigh */
+		if (!listcount(mac->neigh_list))
+			json_object_string_add(json_mac, "neighbors", "none");
+		else {
+			json_object *json_active_nbrs = json_object_new_array();
+			json_object *json_inactive_nbrs =
+				json_object_new_array();
+			json_object *json_nbrs = json_object_new_object();
+
+			for (ALL_LIST_ELEMENTS_RO(mac->neigh_list, node, n)) {
+				if (IS_ZEBRA_NEIGH_ACTIVE(n))
+					json_object_array_add(
+						json_active_nbrs,
+						json_object_new_string(
+							ipaddr2str(
+								&n->ip, buf2,
+								sizeof(buf2))));
+				else
+					json_object_array_add(
+						json_inactive_nbrs,
+						json_object_new_string(
+							ipaddr2str(
+								&n->ip, buf2,
+								sizeof(buf2))));
+			}
+
+			json_object_object_add(json_nbrs, "active",
+					       json_active_nbrs);
+			json_object_object_add(json_nbrs, "inactive",
+					       json_inactive_nbrs);
+			json_object_object_add(json_mac, "neighbors",
+					       json_nbrs);
 		}
-	}
 
-	vty_out(vty, "\n");
+		json_object_object_add(json, buf1, json_mac);
+		vty_out(vty, "%s\n",
+			json_object_to_json_string_ext(
+				json, JSON_C_TO_STRING_PRETTY));
+		json_object_free(json);
+	 } else {
+		vty_out(vty, "MAC: %s\n", buf1);
+
+		if (CHECK_FLAG(mac->flags, ZEBRA_MAC_LOCAL)) {
+			struct zebra_ns *zns;
+			struct interface *ifp;
+			ifindex_t ifindex;
+
+			ifindex = mac->fwd_info.local.ifindex;
+			zns = zebra_ns_lookup(NS_DEFAULT);
+			ifp = if_lookup_by_index_per_ns(zns, ifindex);
+			if (!ifp)
+				return;
+			vty_out(vty, " Intf: %s(%u)", ifp->name, ifindex);
+			if (mac->fwd_info.local.vid)
+				vty_out(vty, " VLAN: %u",
+					mac->fwd_info.local.vid);
+		} else if (CHECK_FLAG(mac->flags, ZEBRA_MAC_REMOTE)) {
+			vty_out(vty, " Remote VTEP: %s",
+				inet_ntoa(mac->fwd_info.r_vtep_ip));
+		} else if (CHECK_FLAG(mac->flags, ZEBRA_MAC_AUTO)) {
+			vty_out(vty, " Auto Mac ");
+		}
+
+		if (CHECK_FLAG(mac->flags, ZEBRA_MAC_STICKY))
+			vty_out(vty, " Sticky Mac ");
+
+		if (CHECK_FLAG(mac->flags, ZEBRA_MAC_DEF_GW))
+			vty_out(vty, " Default-gateway Mac ");
+
+		if (CHECK_FLAG(mac->flags, ZEBRA_MAC_REMOTE_DEF_GW))
+			vty_out(vty, " Remote-gateway Mac ");
+
+		vty_out(vty, "\n");
+		vty_out(vty, " Local Seq: %u Remote Seq: %u", mac->loc_seq,
+			mac->rem_seq);
+		vty_out(vty, "\n");
+
+		if (CHECK_FLAG(mac->flags, ZEBRA_MAC_DUPLICATE)) {
+			vty_out(vty, " Duplicate, detected at %s",
+				time_to_string(mac->dad_dup_detect_time));
+		} else if (mac->dad_count) {
+			monotime_since(&mac->detect_start_time,
+				&detect_start_time);
+			if (detect_start_time.tv_sec <= zvrf->dad_time) {
+				char *buf = time_to_string(detect_start_time.
+						   tv_sec);
+				char tmp_buf[30];
+
+				strncpy(tmp_buf, buf, strlen(buf) - 1);
+				vty_out(vty,
+				" Duplicate detection started at %s, detection count %u\n",
+				tmp_buf, mac->dad_count);
+			}
+		}
+
+		/* print all the associated neigh */
+		vty_out(vty, " Neighbors:\n");
+		if (!listcount(mac->neigh_list))
+			vty_out(vty, "    No Neighbors\n");
+		else {
+			for (ALL_LIST_ELEMENTS_RO(mac->neigh_list, node, n)) {
+				vty_out(vty, "    %s %s\n",
+					ipaddr2str(&n->ip, buf2, sizeof(buf2)),
+					(IS_ZEBRA_NEIGH_ACTIVE(n)
+						 ? "Active"
+						 : "Inactive"));
+			}
+		}
+
+		vty_out(vty, "\n");
+	}
 }
 
 /*
@@ -885,6 +1014,7 @@ static void zvni_print_mac_hash(struct hash_backet *backet, void *ctxt)
 			else
 				json_object_boolean_false_add(json_mac,
 							      "isDuplicate");
+
 		}
 
 		wctx->count++;
@@ -2493,6 +2623,9 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 
 			/* Mark Duplicate */
 			SET_FLAG(n->flags, ZEBRA_NEIGH_DUPLICATE);
+
+			/* Capture Duplicate detection time */
+			n->dad_dup_detect_time = monotime(NULL);
 
 			/* Start auto recovery timer for this IP */
 			THREAD_OFF(n->dad_ip_auto_recovery_timer);
@@ -4714,6 +4847,10 @@ static void process_remote_macip_add(vni_t vni,
 					inet_ntoa(mac->fwd_info.r_vtep_ip));
 
 				SET_FLAG(mac->flags, ZEBRA_MAC_DUPLICATE);
+
+				/* Capture Duplicate detection time */
+				mac->dad_dup_detect_time = monotime(NULL);
+
 				/* Mark all IPs/Neighs as duplicate associcated
 				 * with this MAC
 				 */
@@ -4721,6 +4858,9 @@ static void process_remote_macip_add(vni_t vni,
 							  node, n)) {
 					SET_FLAG(n->flags,
 						 ZEBRA_NEIGH_DUPLICATE);
+
+					/* Capture Duplicate detection time */
+					n->dad_dup_detect_time = monotime(NULL);
 
 					flog_warn(ZEBRA_ERR_DUP_IP_INHERIT_DETECTED,
 						  "VNI %u: MAC %s IP %s detected as duplicate during remote update, inherit duplicate from MAC",
@@ -4958,6 +5098,9 @@ process_neigh:
 					  inet_ntoa(n->r_vtep_ip));
 
 				SET_FLAG(n->flags, ZEBRA_NEIGH_DUPLICATE);
+
+				/* Capture Duplicate detection time */
+				n->dad_dup_detect_time = monotime(NULL);
 
 				/* Start auto recovery timer for this IP */
 				THREAD_OFF(n->dad_ip_auto_recovery_timer);
@@ -5860,26 +6003,38 @@ void zebra_vxlan_print_macs_all_vni_vtep(struct vty *vty,
  * Display specific MAC for a VNI, if present (VTY command handler).
  */
 void zebra_vxlan_print_specific_mac_vni(struct vty *vty, struct zebra_vrf *zvrf,
-					vni_t vni, struct ethaddr *macaddr)
+					vni_t vni, struct ethaddr *macaddr,
+					bool use_json)
 {
 	zebra_vni_t *zvni;
 	zebra_mac_t *mac;
+	json_object *json = NULL;
 
 	if (!is_evpn_enabled())
 		return;
 	zvni = zvni_lookup(vni);
 	if (!zvni) {
-		vty_out(vty, "%% VNI %u does not exist\n", vni);
+		if (use_json)
+			vty_out(vty, "{}\n");
+		else
+			vty_out(vty, "%% VNI %u does not exist\n", vni);
 		return;
 	}
 	mac = zvni_mac_lookup(zvni, macaddr);
 	if (!mac) {
-		vty_out(vty, "%% Requested MAC does not exist in VNI %u\n",
-			vni);
+		if (use_json)
+			vty_out(vty, "{}\n");
+		else
+			vty_out(vty,
+				"%% Requested MAC does not exist in VNI %u\n",
+				vni);
 		return;
 	}
 
-	zvni_print_mac(mac, vty);
+	if (use_json)
+		json = json_object_new_object();
+
+	zvni_print_mac(mac, vty, json);
 }
 
 
@@ -5988,12 +6143,14 @@ void zebra_vxlan_clear_dup_detect_vni_mac(struct vty *vty,
 		UNSET_FLAG(nbr->flags, ZEBRA_NEIGH_DUPLICATE);
 		nbr->dad_count = 0;
 		nbr->detect_start_time.tv_sec = 0;
+		nbr->dad_dup_detect_time = 0;
 	}
 
 	UNSET_FLAG(mac->flags, ZEBRA_MAC_DUPLICATE);
 	mac->dad_count = 0;
 	mac->detect_start_time.tv_sec = 0;
 	mac->detect_start_time.tv_usec = 0;
+	mac->dad_dup_detect_time = 0;
 	THREAD_OFF(mac->dad_mac_auto_recovery_timer);
 
 	/* Local: Notify Peer VTEPs, Remote: Install the entry */
@@ -6070,6 +6227,7 @@ void zebra_vxlan_clear_dup_detect_vni_ip(struct vty *vty,
 	nbr->dad_count = 0;
 	nbr->detect_start_time.tv_sec = 0;
 	nbr->detect_start_time.tv_usec = 0;
+	nbr->dad_dup_detect_time = 0;
 	THREAD_OFF(nbr->dad_ip_auto_recovery_timer);
 
 	if (!!CHECK_FLAG(nbr->flags, ZEBRA_NEIGH_LOCAL)) {
@@ -6103,6 +6261,7 @@ static void zvni_clear_dup_mac_hash(struct hash_backet *backet, void *ctxt)
 	mac->dad_count = 0;
 	mac->detect_start_time.tv_sec = 0;
 	mac->detect_start_time.tv_usec = 0;
+	mac->dad_dup_detect_time = 0;
 	THREAD_OFF(mac->dad_mac_auto_recovery_timer);
 
 	/* Remove all IPs as duplicate associcated with this MAC */
@@ -6114,6 +6273,7 @@ static void zvni_clear_dup_mac_hash(struct hash_backet *backet, void *ctxt)
 		UNSET_FLAG(nbr->flags, ZEBRA_NEIGH_DUPLICATE);
 		nbr->dad_count = 0;
 		nbr->detect_start_time.tv_sec = 0;
+		nbr->dad_dup_detect_time = 0;
 	}
 
 	/* Local: Notify Peer VTEPs, Remote: Install the entry */
@@ -6163,6 +6323,7 @@ static void zvni_clear_dup_neigh_hash(struct hash_backet *backet, void *ctxt)
 	nbr->dad_count = 0;
 	nbr->detect_start_time.tv_sec = 0;
 	nbr->detect_start_time.tv_usec = 0;
+	nbr->dad_dup_detect_time = 0;
 	THREAD_OFF(nbr->dad_ip_auto_recovery_timer);
 
 	if (CHECK_FLAG(nbr->flags, ZEBRA_NEIGH_LOCAL)) {
@@ -7165,6 +7326,11 @@ int zebra_vxlan_local_mac_add_update(struct interface *ifp,
 
 					SET_FLAG(mac->flags,
 						 ZEBRA_MAC_DUPLICATE);
+
+					/* Capture Duplicate detection time */
+					mac->dad_dup_detect_time =
+						monotime(NULL);
+
 					/* Mark all IPs/Neighs as duplicate
 					 * associcated with this MAC
 					 */
@@ -7173,6 +7339,9 @@ int zebra_vxlan_local_mac_add_update(struct interface *ifp,
 							node, n)) {
 						SET_FLAG(n->flags,
 							 ZEBRA_NEIGH_DUPLICATE);
+
+						n->dad_dup_detect_time =
+							monotime(NULL);
 
 						flog_warn(ZEBRA_ERR_DUP_IP_INHERIT_DETECTED,
 						  "VNI %u: MAC %s IP %s detected as duplicate during local update, inherit duplicate from MAC",
@@ -8604,6 +8773,7 @@ static int zebra_vxlan_dad_ip_auto_recovery_exp(struct thread *t)
 	nbr->dad_count = 0;
 	nbr->detect_start_time.tv_sec = 0;
 	nbr->detect_start_time.tv_usec = 0;
+	nbr->dad_dup_detect_time = 0;
 	nbr->dad_ip_auto_recovery_timer = NULL;
 
 	/* Send to BGP */
@@ -8662,12 +8832,14 @@ static int zebra_vxlan_dad_mac_auto_recovery_exp(struct thread *t)
 		UNSET_FLAG(nbr->flags, ZEBRA_NEIGH_DUPLICATE);
 		nbr->dad_count = 0;
 		nbr->detect_start_time.tv_sec = 0;
+		nbr->dad_dup_detect_time = 0;
 	}
 
 	UNSET_FLAG(mac->flags, ZEBRA_MAC_DUPLICATE);
 	mac->dad_count = 0;
 	mac->detect_start_time.tv_sec = 0;
 	mac->detect_start_time.tv_usec = 0;
+	mac->dad_dup_detect_time = 0;
 	mac->dad_mac_auto_recovery_timer = NULL;
 
 	if (CHECK_FLAG(mac->flags, ZEBRA_MAC_LOCAL)) {
