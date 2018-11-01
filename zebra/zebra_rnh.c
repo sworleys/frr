@@ -1089,6 +1089,7 @@ static int send_client(struct rnh *rnh, struct zserv *client, rnh_type_t type,
 			if ((CHECK_FLAG(nh->flags, NEXTHOP_FLAG_FIB)
 			     || CHECK_FLAG(nh->flags, NEXTHOP_FLAG_RECURSIVE))
 			    && CHECK_FLAG(nh->flags, NEXTHOP_FLAG_ACTIVE)) {
+				stream_putl(s, nh->vrf_id);
 				stream_putc(s, nh->type);
 				switch (nh->type) {
 				case NEXTHOP_TYPE_IPV4:
