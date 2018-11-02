@@ -456,6 +456,7 @@ static void zvni_print_neigh(zebra_neigh_t *n, void *ctxt, json_object *json)
 						detect_start_time.tv_sec);
 				char tmp_buf[30];
 
+				memset(tmp_buf, 0, 30);
 				strncpy(tmp_buf, buf, strlen(buf) - 1);
 				vty_out(vty,
 					" Duplicate detection started at %s, detection count %u\n",
@@ -885,6 +886,7 @@ static void zvni_print_mac(zebra_mac_t *mac, void *ctxt, json_object *json)
 						detect_start_time.tv_sec);
 				char tmp_buf[30];
 
+				memset(tmp_buf, 0, 30);
 				strncpy(tmp_buf, buf, strlen(buf) - 1);
 				vty_out(vty,
 				" Duplicate detection started at %s, detection count %u\n",
