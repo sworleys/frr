@@ -708,6 +708,39 @@ static void static_enable_vrf(struct zebra_vrf *zvrf,
 }
 
 /*
+ * This function enables static routes when an interface it relies
+ * on in a different vrf is coming up.
+ *
+ * zvrf -> The zvrf that ifp is being brought up
+ * stable -> The stable we are looking at.
+ * ifp -> interface coming up
+ * afi -> the afi in question
+ * safi -> the safi in question
+ */
+static void static_fixup_intf_nh(struct zebra_vrf *zvrf,
+				 struct route_table *stable,
+				 struct interface *ifp,
+				 afi_t afi, safi_t safi)
+{
+	struct route_node *rn;
+	struct static_route *si;
+	struct vrf *vrf = zvrf->vrf;
+
+	for (rn = route_top(stable); rn; rn = route_next(rn)) {
+		for (si = rn->info; si; si = si->next) {
+			if (si->nh_vrf_id != vrf->vrf_id)
+				continue;
+
+			if (si->ifindex != ifp->ifindex)
+				continue;
+
+			static_install_route(afi, safi, &rn->p, NULL, si);
+		}
+	}
+}
+
+
+/*
  * When a vrf is being enabled by the kernel, go through all the
  * static routes in the system that use this vrf (both nexthops vrfs
  * and the routes vrf )
@@ -738,6 +771,40 @@ void static_fixup_vrf_ids(struct zebra_vrf *enable_zvrf)
 				if (enable_zvrf == zvrf)
 					static_enable_vrf(zvrf, stable,
 							  afi, safi);
+			}
+		}
+	}
+}
+
+/*
+ * This function enables static routes that rely on an interface in
+ * a different vrf when that interface comes up.
+ */
+void static_install_intf_nh(struct interface *ifp)
+{
+	struct route_table *stable;
+	struct vrf *vrf;
+	afi_t afi;
+	safi_t safi;
+	struct zebra_vrf *if_zvrf = vrf_info_lookup(ifp->vrf_id);
+
+	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name) {
+		struct zebra_vrf *zvrf;
+
+		zvrf = vrf->info;
+
+		if (zvrf == if_zvrf)
+			continue;
+
+		/* Install any static routes configured for this interface. */
+		for (afi = AFI_IP; afi < AFI_MAX; afi++) {
+			for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++) {
+				stable = zvrf->stable[afi][safi];
+				if (!stable)
+					continue;
+
+				static_fixup_intf_nh(if_zvrf, stable, ifp, afi,
+						     safi);
 			}
 		}
 	}

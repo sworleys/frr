@@ -943,6 +943,9 @@ void if_up(struct interface *ifp)
 		static_config_install_delayed_routes(zvrf);
 	}
 
+	/* Install any static reliant on this interface coming up */
+	static_install_intf_nh(ifp);
+
 	if (IS_ZEBRA_DEBUG_RIB_DETAILED)
 		zlog_debug("%u: IF %s up, scheduling RIB processing",
 			   ifp->vrf_id, ifp->name);

@@ -111,5 +111,6 @@ extern int static_delete_route(afi_t, safi_t safi, u_char type,
 extern void static_ifindex_update(struct interface *ifp, bool up);
 
 extern void static_cleanup_vrf_ids(struct zebra_vrf *zvrf);
+extern void static_install_intf_nh(struct interface *ifp);
 extern void static_fixup_vrf_ids(struct zebra_vrf *zvrf);
 #endif
