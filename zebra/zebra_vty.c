@@ -2283,8 +2283,6 @@ int static_config(struct vty *vty, struct zebra_vrf *zvrf,
 			vty_out(vty, "%s ", pb);
 		}
 
-		if (shr->dest_str)
-			vty_out(vty, "%s ", shr->dest_str);
 		if (shr->mask_str)
 			vty_out(vty, "%s ", shr->mask_str);
 

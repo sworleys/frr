@@ -347,7 +347,7 @@ static int zebra_vxlan_ip_inherit_dad_from_mac(struct zebra_vrf *zvrf,
 	 * duplicate flag for IP and reset detection params
 	 * and let IP DAD retrigger.
 	 */
-	if (is_new_mac_dup) {
+	if (is_new_mac_dup && !CHECK_FLAG(nbr->flags, ZEBRA_NEIGH_DUPLICATE)) {
 		SET_FLAG(nbr->flags, ZEBRA_NEIGH_DUPLICATE);
 		/* Capture Duplicate detection time */
 		nbr->dad_dup_detect_time = monotime(NULL);
@@ -452,17 +452,17 @@ static void zvni_print_neigh(zebra_neigh_t *n, void *ctxt, json_object *json)
 			monotime_since(&n->detect_start_time,
 				       &detect_start_time);
 			if (detect_start_time.tv_sec <= zvrf->dad_time) {
-				char *buf = time_to_string(detect_start_time.
-							   tv_sec);
+				char *buf = time_to_string(n->
+						detect_start_time.tv_sec);
 				char tmp_buf[30];
 
+				memset(tmp_buf, 0, 30);
 				strncpy(tmp_buf, buf, strlen(buf) - 1);
 				vty_out(vty,
 					" Duplicate detection started at %s, detection count %u\n",
 					tmp_buf, n->dad_count);
 			}
 		}
-
 	} else {
 		json_object_int_add(json, "localSequence", n->loc_seq);
 		json_object_int_add(json, "remoteSequence", n->rem_seq);
@@ -882,10 +882,11 @@ static void zvni_print_mac(zebra_mac_t *mac, void *ctxt, json_object *json)
 			monotime_since(&mac->detect_start_time,
 				&detect_start_time);
 			if (detect_start_time.tv_sec <= zvrf->dad_time) {
-				char *buf = time_to_string(detect_start_time.
-						   tv_sec);
+				char *buf = time_to_string(mac->
+						detect_start_time.tv_sec);
 				char tmp_buf[30];
 
+				memset(tmp_buf, 0, 30);
 				strncpy(tmp_buf, buf, strlen(buf) - 1);
 				vty_out(vty,
 				" Duplicate detection started at %s, detection count %u\n",
@@ -2548,16 +2549,6 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 	else
 		UNSET_FLAG(n->flags, ZEBRA_NEIGH_ROUTER_FLAG);
 
-	/* Before we program this in BGP, we need to check if MAC is locally
-	 * learnt. If not, force neighbor to be inactive and reset its seq.
-	 */
-	if (!CHECK_FLAG(zmac->flags, ZEBRA_MAC_LOCAL)) {
-		ZEBRA_NEIGH_SET_INACTIVE(n);
-		n->loc_seq = 0;
-		zmac->loc_seq = mac_new_seq;
-		return 0;
-	}
-
 	/* Duplicate Address Detection (DAD) is enabled.
 	 * Based on Mobility event Scenario-B from the
 	 * draft, IP/Neigh's MAC binding changed and
@@ -2585,6 +2576,7 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 
 			goto send_notif;
 		}
+
 		/* MAC binding changed and previous state was remote */
 		if (!(neigh_mac_change && neigh_was_remote))
 			goto send_notif;
@@ -2653,6 +2645,17 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 	}
 
 send_notif:
+
+	/* Before we program this in BGP, we need to check if MAC is locally
+	 * learnt. If not, force neighbor to be inactive and reset its seq.
+	 */
+	if (!CHECK_FLAG(zmac->flags, ZEBRA_MAC_LOCAL)) {
+		ZEBRA_NEIGH_SET_INACTIVE(n);
+		n->loc_seq = 0;
+		zmac->loc_seq = mac_new_seq;
+		return 0;
+	}
+
 	/* If the MAC's sequence number has changed, inform the MAC and all
 	 * neighbors associated with the MAC to BGP, else just inform this
 	 * neighbor.
@@ -4624,7 +4627,7 @@ static void process_remote_macip_add(vni_t vni,
 {
 	zebra_vni_t *zvni;
 	zebra_vtep_t *zvtep;
-	zebra_mac_t *mac, *old_mac = NULL;
+	zebra_mac_t *mac = NULL, *old_mac = NULL;
 	zebra_neigh_t *n = NULL;
 	int update_mac = 0, update_neigh = 0;
 	char buf[ETHER_ADDR_STRLEN];
