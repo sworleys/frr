@@ -1,14 +1,26 @@
-frr (4.0+cl3u9) RELEASED; urgency=medium
-
-  * Fixes: Lots of stuff
-
- -- dev-support <dev-support@cumulusnetworks.com>  Thu, 25 Jul 2018 18:10:00 -0400
-
 frr (4.0+cl3u8) RELEASED; urgency=medium
 
-  * Fixes: Lots of stuff
+  * New Enabled: EVPN DAD
+  * New Enabled: EVPN local mac suppression
+  * New Enabled: EVPN Bum suppression
+  * New Enabled: rfc 5549 v6 GUA
+  * Fixes: CM-22878 bgpd: Late registration of extended nexthop for RA's
+  * Fixes: CM-22828 zebra: Install static routes when nexthop ifp comes up
+  * Fixes: CM-22835 zebra: Eliminate duplicated prefix in vrf static config
+  * Fixes: CM-22874 lib,zebra: Encode nexthop vrf in nht updates
+  * Fixes: CM-22647 zebra: Add json support to evpn command
+  * Fixes: CM-20318 zebra: Apply mask when displaying held statics
+  * Fixes: CM-21931 zebra: Ensure onlink is printed
+  * Fixes: CM-22748 pim, vtysh: Fix exit-vrf printing
+  * Fixes: CM-21931 zebra: Support onlink static routes
+  * Fixes: CM-22707 zebra: set remoteseq to 0 when remote mac is deleted
+  * Fixes: CM-22700 zebra: Make neigh active when it is moved local->remote
+  * Fixes: CM-22674 bgpd: Use ip address as tie breaker in some situations
+  * Fixes: CM-22685 bgpd: perform route selection again when local is deleted
+  * Fixes: CM-22687 zebra: send a local-mac del to bgp on mac modify
+  * Fixes: CM-22604 zebra: Force neighbor entry reinstallation
 
- -- dev-support <dev-support@cumulusnetworks.com>  Mon, 29 Oct 2018 18:10:00 -0400
+ -- dev-support <dev-support@cumulusnetworks.com>  Wed, 7 Nov 2018 18:10:00 -0400
 
 frr (4.0+cl3u7) RELEASED; urgency=medium
 
