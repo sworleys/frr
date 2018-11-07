@@ -601,8 +601,8 @@ static void zvni_print_neigh_hash_all_vni(struct hash_backet *backet,
 	}
 	num_neigh = hashcount(zvni->neigh_table);
 
-	if (print_dup && num_dup_detected_neighs(zvni) == 0)
-		return;
+	if (print_dup)
+		num_neigh = num_dup_detected_neighs(zvni);
 
 	if (json == NULL) {
 		vty_out(vty,
@@ -1066,13 +1066,21 @@ static void zvni_print_mac_hash_all_vni(struct hash_backet *backet, void *ctxt)
 	if (!num_macs)
 		return;
 
-	if (wctx->print_dup && (num_dup_detected_macs(zvni) == 0))
-		return;
+	if (wctx->print_dup)
+		num_macs = num_dup_detected_macs(zvni);
 
 	if (json) {
 		json_vni = json_object_new_object();
 		json_mac = json_object_new_object();
 		snprintf(vni_str, VNI_STR_LEN, "%u", zvni->vni);
+	}
+
+	if (!num_macs) {
+		if (json) {
+			json_object_int_add(json_vni, "numMacs", num_macs);
+			json_object_object_add(json, vni_str, json_vni);
+		}
+		return;
 	}
 
 	if (!CHECK_FLAG(wctx->flags, SHOW_REMOTE_MAC_FROM_VTEP)) {
@@ -1084,6 +1092,7 @@ static void zvni_print_mac_hash_all_vni(struct hash_backet *backet, void *ctxt)
 		} else
 			json_object_int_add(json_vni, "numMacs", num_macs);
 	}
+
 	/* assign per-vni to wctx->json object to fill macs
 	 * under the vni. Re-assign primary json object to fill
 	 * next vni information.
