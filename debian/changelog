@@ -1,5 +1,11 @@
 frr (4.0+cl3u7) RELEASED; urgency=medium
 
+  * Fixes: CM-22932 Carry onlink if set from resolving nexthop
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Wed, 07 Nov 2018 09:35:45 -0400
+
+frr (4.0+cl3u7) RELEASED; urgency=medium
+
   * Fixes: CM-20585 bgpd: enable aggregation in EVPN
   * Fixes: CM-22509 bgpd: Solve issue entering aggregate twice
   * Fixes: CM-19714 bgpd: Martian Nexthops not being updated appropriately
