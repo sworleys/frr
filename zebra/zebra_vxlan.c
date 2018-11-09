@@ -4859,6 +4859,11 @@ static void process_remote_macip_add(vni_t vni,
 				 */
 				for (ALL_LIST_ELEMENTS_RO(mac->neigh_list,
 							  node, n)) {
+					/* Ony Mark IPs which are Remote */
+					if (!CHECK_FLAG(n->flags,
+						       ZEBRA_NEIGH_REMOTE))
+						continue;
+
 					SET_FLAG(n->flags,
 						 ZEBRA_NEIGH_DUPLICATE);
 
@@ -4917,6 +4922,8 @@ process_neigh:
 		return;
 	}
 
+	/* Reset flag */
+	do_dad = false;
 	/* Check if the remote neighbor itself is unknown or has a
 	 * change. If so, create or update and then install the entry.
 	 */
@@ -5016,17 +5023,6 @@ process_neigh:
 			}
 		}
 
-		/* Check old or new MAC detected as duplicate,
-		 * inherit duplicate flag to this neigh.
-		 */
-		if (zebra_vxlan_ip_inherit_dad_from_mac(zvrf, old_mac, mac, n)) {
-			flog_warn(ZEBRA_ERR_DUP_IP_INHERIT_DETECTED,
-				"VNI %u: MAC %s IP %s detected as duplicate during remote update, inherit duplicate from MAC",
-				zvni->vni,
-				prefix_mac2str(&mac->macaddr, buf, sizeof(buf)),
-				ipaddr2str(&n->ip, buf1, sizeof(buf1)));
-		}
-
 		/* Set "remote" forwarding info. */
 		UNSET_FLAG(n->flags, ZEBRA_NEIGH_LOCAL);
 		n->r_vtep_ip = vtep_ip;
@@ -5037,6 +5033,17 @@ process_neigh:
 			SET_FLAG(n->flags, ZEBRA_NEIGH_ROUTER_FLAG);
 		else
 			UNSET_FLAG(n->flags, ZEBRA_NEIGH_ROUTER_FLAG);
+
+		/* Check old or new MAC detected as duplicate,
+		 * inherit duplicate flag to this neigh.
+		 */
+		if (zebra_vxlan_ip_inherit_dad_from_mac(zvrf, old_mac, mac, n)) {
+			flog_warn(ZEBRA_ERR_DUP_IP_INHERIT_DETECTED,
+				"VNI %u: MAC %s IP %s detected as duplicate during remote update, inherit duplicate from MAC",
+				zvni->vni,
+				prefix_mac2str(&mac->macaddr, buf, sizeof(buf)),
+				ipaddr2str(&n->ip, buf1, sizeof(buf1)));
+		}
 
 		if (zvrf->dup_addr_detect) {
 			/* IP is detected as duplicate or inherit dup
@@ -7340,6 +7347,13 @@ int zebra_vxlan_local_mac_add_update(struct interface *ifp,
 					for (ALL_LIST_ELEMENTS_RO(
 							mac->neigh_list,
 							node, n)) {
+
+						/* Ony Mark IPs which are Local
+						 */
+						if (!CHECK_FLAG(n->flags,
+							ZEBRA_NEIGH_LOCAL))
+							continue;
+
 						SET_FLAG(n->flags,
 							 ZEBRA_NEIGH_DUPLICATE);
 
