@@ -792,11 +792,14 @@ static void zvni_print_mac(zebra_mac_t *mac, void *ctxt, json_object *json)
 			json_object_boolean_true_add(json_mac,
 						     "remoteGatewayMac");
 
-		if (CHECK_FLAG(mac->flags, ZEBRA_MAC_DUPLICATE))
-			json_object_boolean_true_add(json_mac, "isDuplicate");
-
 		json_object_int_add(json_mac, "localSequence", mac->loc_seq);
 		json_object_int_add(json_mac, "remoteSequence", mac->rem_seq);
+
+		json_object_int_add(json_mac, "detectionCount", mac->dad_count);
+		if (CHECK_FLAG(mac->flags, ZEBRA_MAC_DUPLICATE))
+			json_object_boolean_true_add(json_mac, "isDuplicate");
+		else
+			json_object_boolean_false_add(json_mac, "isDuplicate");
 
 		/* print all the associated neigh */
 		if (!listcount(mac->neigh_list))
