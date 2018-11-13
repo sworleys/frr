@@ -2544,6 +2544,12 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 			      MAX(seq1, seq2) : zmac->loc_seq;
 	}
 
+	/* Mark Router flag (R-bit) */
+	if (is_router)
+		SET_FLAG(n->flags, ZEBRA_NEIGH_ROUTER_FLAG);
+	else
+		UNSET_FLAG(n->flags, ZEBRA_NEIGH_ROUTER_FLAG);
+
 	/* Check old and/or new MAC detected as duplicate mark
 	 * the neigh as duplicate
 	 */
@@ -2554,12 +2560,6 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 			prefix_mac2str(macaddr, buf, sizeof(buf)),
 			ipaddr2str(&n->ip, buf2, sizeof(buf2)));
 	}
-
-	/* Mark Router flag (R-bit) */
-	if (is_router)
-		SET_FLAG(n->flags, ZEBRA_NEIGH_ROUTER_FLAG);
-	else
-		UNSET_FLAG(n->flags, ZEBRA_NEIGH_ROUTER_FLAG);
 
 	/* Duplicate Address Detection (DAD) is enabled.
 	 * Based on Mobility event Scenario-B from the
@@ -5073,8 +5073,11 @@ process_neigh:
 							   sizeof(buf1)),
 						n->dad_count,
 						zvrf->dad_freeze_time);
+
+				if (zvrf->dad_freeze)
+					is_dup_detect = true;
 				/* warn-only action, neigh will be installed.
-				 * freeze action, neigh wil not be installed.
+				 * freeze action, it wil not be installed.
 				 */
 				goto install_neigh;
 			}
@@ -5905,6 +5908,12 @@ void zebra_vxlan_print_neigh_vni_dad(struct vty *vty,
 		json_object_int_add(json, "numArpNd", num_neigh);
 
 	hash_iterate(zvni->neigh_table, zvni_print_dad_neigh_hash, &wctx);
+
+	if (use_json) {
+		vty_out(vty, "%s\n", json_object_to_json_string_ext(
+					     json, JSON_C_TO_STRING_PRETTY));
+		json_object_free(json);
+	}
 }
 
 /*
