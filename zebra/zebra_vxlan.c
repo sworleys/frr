@@ -5876,7 +5876,8 @@ void zebra_vxlan_print_neigh_vni_dad(struct vty *vty,
 	if (!num_neigh)
 		return;
 
-	if (num_dup_detected_neighs(zvni) == 0)
+	num_neigh = num_dup_detected_neighs(zvni);
+	if (!num_neigh)
 		return;
 
 	if (use_json)
@@ -6084,7 +6085,8 @@ void zebra_vxlan_print_macs_vni_dad(struct vty *vty,
 	if (!num_macs)
 		return;
 
-	if (num_dup_detected_macs(zvni) == 0)
+	num_macs = num_dup_detected_macs(zvni);
+	if (!num_macs)
 		return;
 
 	if (use_json) {
