@@ -6581,6 +6581,17 @@ void zebra_vxlan_print_evpn(struct vty *vty, bool uj)
 		json_object_int_add(json, "numVnis", num_vnis);
 		json_object_int_add(json, "numL2Vnis", num_l2vnis);
 		json_object_int_add(json, "numL3Vnis", num_l3vnis);
+		if (zvrf->dup_addr_detect)
+			json_object_boolean_true_add(json,
+						"isDuplicateAddrDetection");
+		else
+			json_object_boolean_false_add(json,
+						"isDuplicateAddrDetection");
+		json_object_int_add(json, "maxMoves", zvrf->dad_max_moves);
+		json_object_int_add(json, "detectionTime", zvrf->dad_time);
+		json_object_int_add(json, "detectionFreezeTime",
+				    zvrf->dad_freeze_time);
+
 	} else {
 		vty_out(vty, "L2 VNIs: %u\n", num_l2vnis);
 		vty_out(vty, "L3 VNIs: %u\n", num_l3vnis);
