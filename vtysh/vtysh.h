@@ -39,7 +39,7 @@ DECLARE_MGROUP(MVTYSH)
 #define VTYSH_BABELD    0x1000
 #define VTYSH_SHARPD    0x2000
 #define VTYSH_PBRD      0x4000
-
+#define VTYSH_VRRPD     0x40000
 
 /* commands in REALLYALL are crucial to correct vtysh operation */
 #define VTYSH_REALLYALL	  ~0U

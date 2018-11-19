@@ -56,6 +56,7 @@ include eigrpd/subdir.am
 include sharpd/subdir.am
 include pimd/subdir.am
 include pbrd/subdir.am
+include vrrpd/subdir.am
 
 SUBDIRS = . @LIBRFP@ @RFPTEST@ \
 	 @BGPD@ \
@@ -110,6 +111,7 @@ EXTRA_DIST += \
 	\
 	vtysh/Makefile.am \
 	vtysh/Makefile.in \
+	vrrpd/Makefile \
 	# end
 
 ACLOCAL_AMFLAGS = -I m4
