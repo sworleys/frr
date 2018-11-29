@@ -403,7 +403,10 @@ static inline int evpn_default_originate_set(struct bgp *bgp, afi_t afi,
 	return 0;
 }
 
-extern void evpn_rt_delete_auto(struct bgp*, vni_t, struct list*);
+extern void bgp_evpn_install_uninstall_default_route(struct bgp *bgp_vrf,
+						     afi_t afi, safi_t safi,
+						     bool add);
+extern void evpn_rt_delete_auto(struct bgp *, vni_t, struct list *);
 extern void bgp_evpn_configure_export_rt_for_vrf(struct bgp *bgp_vrf,
 						 struct ecommunity *ecomadd);
 extern void bgp_evpn_unconfigure_export_rt_for_vrf(struct bgp *bgp_vrf,
