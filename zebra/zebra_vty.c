@@ -3435,14 +3435,17 @@ DEFPY (clear_evpn_dup_addr,
 	struct zebra_vrf *zvrf;
 	vni_t vni = 0;
 	struct ipaddr host_ip = {.ipa_type = IPADDR_NONE };
+	int ret = CMD_SUCCESS;
 
 	zvrf = vrf_info_lookup(VRF_DEFAULT);
 	if (vni_val) {
 		vni = strtoul(vni_val, NULL, 10);
 
 		if (mac_val_str)
-			zebra_vxlan_clear_dup_detect_vni_mac(vty, zvrf, vni,
-							&mac_val->eth_addr);
+			ret = zebra_vxlan_clear_dup_detect_vni_mac(vty, zvrf,
+								   vni,
+								   &mac_val->
+								   eth_addr);
 		else if (ip) {
 			if (sockunion_family(ip) == AF_INET) {
 				host_ip.ipa_type = IPADDR_V4;
@@ -3452,16 +3455,17 @@ DEFPY (clear_evpn_dup_addr,
 				memcpy(&host_ip.ipaddr_v6, &ip->sin6.sin6_addr,
 				       sizeof(struct in6_addr));
 			}
-			zebra_vxlan_clear_dup_detect_vni_ip(vty, zvrf, vni,
-							    &host_ip);
+			ret = zebra_vxlan_clear_dup_detect_vni_ip(vty, zvrf,
+								  vni,
+								  &host_ip);
 		} else
-			zebra_vxlan_clear_dup_detect_vni(vty, zvrf, vni);
+			ret = zebra_vxlan_clear_dup_detect_vni(vty, zvrf, vni);
 
 	} else {
-		zebra_vxlan_clear_dup_detect_vni_all(vty, zvrf);
+		ret = zebra_vxlan_clear_dup_detect_vni_all(vty, zvrf);
 	}
 
-	return CMD_SUCCESS;
+	return ret;
 }
 
 
