@@ -1272,14 +1272,33 @@ static int update_evpn_route_entry(struct bgp *bgp, struct bgpevpn *vpn,
 	return route_change;
 }
 
+static void evpn_zebra_reinstall_best_route(struct bgp *bgp,
+				struct bgpevpn *vpn, struct bgp_node *rn)
+{
+	struct bgp_info *tmp_ri;
+	struct bgp_info *curr_select = NULL;
+
+	for (tmp_ri = rn->info; tmp_ri; tmp_ri = tmp_ri->next) {
+		if (CHECK_FLAG(tmp_ri->flags, BGP_INFO_SELECTED)) {
+			curr_select = tmp_ri;
+			break;
+		}
+	}
+
+	if (curr_select && curr_select->type == ZEBRA_ROUTE_BGP
+			&& curr_select->sub_type == BGP_ROUTE_IMPORTED) {
+		evpn_zebra_install(bgp, vpn,
+					(struct prefix_evpn *)&rn->p,
+					curr_select);
+	}
+}
+
 /* if the local route was not selected evict it and tell zebra
  * to add the best remote dest */
 static void evpn_cleanup_local_non_best_route(struct bgp *bgp,
 				struct bgpevpn *vpn, struct bgp_node *rn,
 				struct bgp_info *local_ri, int *route_change)
 {
-	struct bgp_info *tmp_ri;
-	struct bgp_info *curr_select = NULL;
 	char buf[PREFIX_STRLEN];
 
 	if (CHECK_FLAG(local_ri->flags, BGP_INFO_SELECTED)) {
@@ -1297,18 +1316,7 @@ static void evpn_cleanup_local_non_best_route(struct bgp *bgp,
 	bgp_info_reap(rn, local_ri);
 
 	/* tell zebra to re-add the best remote path */
-	for (tmp_ri = rn->info; tmp_ri; tmp_ri = tmp_ri->next) {
-		if (CHECK_FLAG(tmp_ri->flags, BGP_INFO_SELECTED)) {
-			curr_select = tmp_ri;
-			break;
-		}
-	}
-	if (curr_select && curr_select->type == ZEBRA_ROUTE_BGP
-			&& curr_select->sub_type == BGP_ROUTE_IMPORTED) {
-			evpn_zebra_install(bgp, vpn,
-					(struct prefix_evpn *)&rn->p,
-					curr_select);
-	}
+	evpn_zebra_reinstall_best_route(bgp, vpn, rn);
 }
 
 /*
@@ -4308,10 +4316,11 @@ int bgp_filter_evpn_routes_upon_martian_nh_change(struct bgp *bgp)
  * Handle del of a local MACIP.
  */
 int bgp_evpn_local_macip_del(struct bgp *bgp, vni_t vni, struct ethaddr *mac,
-			     struct ipaddr *ip)
+			     struct ipaddr *ip, int state)
 {
 	struct bgpevpn *vpn;
 	struct prefix_evpn p;
+	struct bgp_node *rn;
 
 	/* Lookup VNI hash - should exist. */
 	vpn = bgp_evpn_lookup_vni(bgp, vni);
@@ -4322,9 +4331,16 @@ int bgp_evpn_local_macip_del(struct bgp *bgp, vni_t vni, struct ethaddr *mac,
 		return -1;
 	}
 
-	/* Remove EVPN type-2 route and schedule for processing. */
 	build_evpn_type2_prefix(&p, mac, ip);
-	delete_evpn_route(bgp, vpn, &p);
+	if (state == ZEBRA_NEIGH_ACTIVE) {
+		/* Remove EVPN type-2 route and schedule for processing. */
+		delete_evpn_route(bgp, vpn, &p);
+	} else {
+		/* Re-instate the current remote best path if any */
+		rn = bgp_node_lookup(vpn->route_table, (struct prefix *)&p);
+		if (rn)
+			evpn_zebra_reinstall_best_route(bgp, vpn, rn);
+	}
 
 	return 0;
 }
