@@ -4705,7 +4705,7 @@ void bgp_config_write_evpn_info(struct vty *vty, struct bgp *bgp, afi_t afi,
 				       ecom)) {
 			ecom_str = ecommunity_ecom2str(
 				ecom, ECOMMUNITY_FORMAT_ROUTE_MAP, 0);
-			vty_out(vty, "   route-target import %s\n",
+			vty_out(vty, "  route-target import %s\n",
 				ecom_str);
 			XFREE(MTYPE_ECOMMUNITY_STR, ecom_str);
 		}
@@ -4721,7 +4721,7 @@ void bgp_config_write_evpn_info(struct vty *vty, struct bgp *bgp, afi_t afi,
 				       ecom)) {
 			ecom_str = ecommunity_ecom2str(
 				ecom, ECOMMUNITY_FORMAT_ROUTE_MAP, 0);
-			vty_out(vty, "   route-target export %s\n",
+			vty_out(vty, "  route-target export %s\n",
 				ecom_str);
 			XFREE(MTYPE_ECOMMUNITY_STR, ecom_str);
 		}
