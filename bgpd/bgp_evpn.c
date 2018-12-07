@@ -1932,6 +1932,7 @@ static int install_evpn_route_entry_in_vrf(struct bgp *bgp_vrf,
 				    &attr_new->mp_nexthop_global)))
 			SET_FLAG(ri->flags, BGP_INFO_IGP_CHANGED);
 
+		bgp_info_set_flag(rn, ri, BGP_INFO_ATTR_CHANGED);
 		/* Unintern existing, set to new. */
 		bgp_attr_unintern(&ri->attr);
 		ri->attr = attr_new;
