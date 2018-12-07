@@ -319,3 +319,18 @@ void list_sort(struct list *list, int (*cmp)(const void **, const void **))
 
 	XFREE(MTYPE_TMP, items);
 }
+
+void **list_to_array(struct list *list, void **arr, size_t arrlen)
+{
+	struct listnode *ln;
+	void *vp;
+	size_t idx = 0;
+
+	for (ALL_LIST_ELEMENTS_RO(list, ln, vp)) {
+		arr[idx++] = vp;
+		if (idx == arrlen)
+			break;
+	}
+
+	return arr;
+}

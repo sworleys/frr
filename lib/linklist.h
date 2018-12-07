@@ -235,6 +235,26 @@ CPP_NOTICE("list_delete without double pointer is deprecated, please fixup")
 #endif
 
 /*
+ * Convert a list to an array of void pointers.
+ *
+ * Starts from the list head and ends either on the last node of the list or
+ * when the provided array cannot store any more elements.
+ *
+ * list
+ *    list to convert
+ *
+ * arr
+ *    Pre-allocated array of void *
+ *
+ * arrlen
+ *    Number of elements in arr
+ *
+ * Returns:
+ *    arr
+ */
+void **list_to_array(struct list *list, void **arr, size_t arrlen);
+
+/*
  * Delete a list and NULL its pointer.
  *
  * If non-null, list->del is called with each data element.
