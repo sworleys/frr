@@ -1085,9 +1085,8 @@ static int send_client(struct rnh *rnh, struct zserv *client, rnh_type_t type,
 		num = 0;
 		nump = stream_get_endp(s);
 		stream_putc(s, 0);
-		for (nh = re->ng.nexthop; nh; nh = nh->next)
-			if ((CHECK_FLAG(nh->flags, NEXTHOP_FLAG_FIB)
-			     || CHECK_FLAG(nh->flags, NEXTHOP_FLAG_RECURSIVE))
+		for (ALL_NEXTHOPS(re->ng, nh))
+			if (CHECK_FLAG(nh->flags, NEXTHOP_FLAG_FIB)
 			    && CHECK_FLAG(nh->flags, NEXTHOP_FLAG_ACTIVE)) {
 				stream_putl(s, nh->vrf_id);
 				stream_putc(s, nh->type);
