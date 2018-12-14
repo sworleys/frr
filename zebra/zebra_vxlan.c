@@ -397,7 +397,7 @@ static void zebra_vxlan_dup_addr_detect_for_mac(struct zebra_vrf *zvrf,
 		 * this MAC update.
 		 */
 		if (zvrf->dad_freeze)
-			*is_dup_detect = false;
+			*is_dup_detect = true;
 
 		return;
 	}
@@ -510,7 +510,7 @@ static void zebra_vxlan_dup_addr_detect_for_mac(struct zebra_vrf *zvrf,
 		 * upd_neigh for neigh sequence change.
 		 */
 		if (zvrf->dad_freeze)
-			*is_dup_detect = false;
+			*is_dup_detect = true;
 	}
 }
 
@@ -5263,7 +5263,8 @@ static void process_remote_macip_add(vni_t vni,
 						    do_dad, &is_dup_detect,
 						    false);
 
-		zvni_process_neigh_on_remote_mac_add(zvni, mac);
+		if (!is_dup_detect)
+			zvni_process_neigh_on_remote_mac_add(zvni, mac);
 
 		/* Install the entry. */
 		if (!is_dup_detect)
@@ -9117,7 +9118,7 @@ static int zebra_vxlan_dad_mac_auto_recovery_exp(struct thread *t)
 
 	/* Remove all IPs as duplicate associcated with this MAC */
 	for (ALL_LIST_ELEMENTS_RO(mac->neigh_list, node, nbr)) {
-		if (nbr->dad_count) {
+		if (CHECK_FLAG(nbr->flags, ZEBRA_NEIGH_DUPLICATE)) {
 			if (CHECK_FLAG(nbr->flags, ZEBRA_NEIGH_LOCAL))
 				ZEBRA_NEIGH_SET_INACTIVE(nbr);
 			else if (CHECK_FLAG(nbr->flags, ZEBRA_NEIGH_REMOTE))
