@@ -449,11 +449,6 @@ static void zebra_vxlan_dup_addr_detect_for_mac(struct zebra_vrf *zvrf,
 	if (is_local)
 		mac->dad_count++;
 
-	zlog_debug("%s: MAC DAD %s dad_count %u ",
-		   __PRETTY_FUNCTION__,
-		   prefix_mac2str(&mac->macaddr, buf, sizeof(buf)),
-		   mac->dad_count);
-
 	if (mac->dad_count >= zvrf->dad_max_moves) {
 		flog_warn(ZEBRA_ERR_DUP_MAC_DETECTED,
 			  "VNI %u: MAC %s detected as duplicate during %s VTEP %s",
@@ -506,7 +501,8 @@ static void zebra_vxlan_dup_addr_detect_for_mac(struct zebra_vrf *zvrf,
 					 &mac->dad_mac_auto_recovery_timer);
 		}
 
-		/* Do not inform to client (BGPd),
+		/* In case of local update,
+		 * do not inform to client (BGPd),
 		 * upd_neigh for neigh sequence change.
 		 */
 		if (zvrf->dad_freeze)
@@ -7539,6 +7535,7 @@ int zebra_vxlan_local_mac_add_update(struct interface *ifp,
 	bool mac_sticky = false;
 	bool inform_client = false;
 	bool upd_neigh = false;
+	bool is_dup_detect = false;
 	struct in_addr vtep_ip = {.s_addr = 0};
 
 	/* We are interested in MACs only on ports or (port, VLAN) that
@@ -7685,8 +7682,13 @@ int zebra_vxlan_local_mac_add_update(struct interface *ifp,
 
 			zebra_vxlan_dup_addr_detect_for_mac(zvrf, mac, vtep_ip,
 							    do_dad,
-							    &inform_client,
+							    &is_dup_detect,
 							    true);
+			if (is_dup_detect) {
+				inform_client = false;
+				upd_neigh = false;
+			}
+
 		}
 	}
 
