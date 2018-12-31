@@ -2334,7 +2334,7 @@ static void zvni_process_neigh_on_local_mac_change(zebra_vni_t *zvni,
 	struct zebra_vrf *zvrf = NULL;
 	char buf[ETHER_ADDR_STRLEN];
 
-	zvrf = vrf_info_lookup(zvni->vrf_id);
+	zvrf = vrf_info_lookup(zvni->vxlan_if->vrf_id);
 
 	if (IS_ZEBRA_DEBUG_VXLAN)
 		zlog_debug("Processing neighbors on local MAC %s %s, VNI %u",
@@ -2936,7 +2936,7 @@ static int zvni_local_neigh_update(zebra_vni_t *zvni,
 		}
 	}
 
-	zvrf = vrf_info_lookup(zvni->vrf_id);
+	zvrf = vrf_info_lookup(zvni->vxlan_if->vrf_id);
 	if (!zvrf)
 		return -1;
 
@@ -5479,7 +5479,7 @@ static void process_remote_macip_del(vni_t vni,
 	if (!mac && !n)
 		return;
 
-	zvrf = vrf_info_lookup(zvni->vrf_id);
+	zvrf = vrf_info_lookup(zvni->vxlan_if->vrf_id);
 
 	/* Ignore the delete if this mac is a gateway mac-ip */
 	if (CHECK_FLAG(mac->flags, ZEBRA_MAC_LOCAL)
@@ -7078,7 +7078,7 @@ void zebra_vxlan_print_vnis_detail(struct vty *vty, struct zebra_vrf *zvrf,
 }
 
 int zebra_vxlan_dup_addr_detection(struct zserv *client, uint8_t length,
-					  struct zebra_vrf *zvrf)
+				   struct zebra_vrf *zvrf)
 {
 	struct stream *s;
 	int time = 0;
@@ -7108,8 +7108,8 @@ int zebra_vxlan_dup_addr_detection(struct zserv *client, uint8_t length,
 
 	if (IS_ZEBRA_DEBUG_VXLAN)
 		zlog_debug(
-			"%s: duplicate detect %s max_moves %u timeout %u freeze %s freeze_time %u",
-			__PRETTY_FUNCTION__,
+			"VRF %s duplicate detect %s max_moves %u timeout %u freeze %s freeze_time %u",
+			vrf_id_to_name(zvrf->vrf->vrf_id),
 			zvrf->dup_addr_detect ? "enable" : "disable",
 			zvrf->dad_max_moves,
 			zvrf->dad_time,
@@ -9092,16 +9092,16 @@ static int zebra_vxlan_dad_ip_auto_recovery_exp(struct thread *t)
 	nbr = THREAD_ARG(t);
 
 	/* since this is asynchronous we need sanity checks*/
-	zvrf = vrf_info_lookup(nbr->zvni->vrf_id);
-	if (!zvrf)
+	nbr = zvni_neigh_lookup(zvni, &nbr->ip);
+	if (!nbr)
 		goto exit;
 
 	zvni = zvni_lookup(nbr->zvni->vni);
 	if (!zvni)
 		goto exit;
 
-	nbr = zvni_neigh_lookup(zvni, &nbr->ip);
-	if (!nbr)
+	zvrf = vrf_info_lookup(zvni->vxlan_if->vrf_id);
+	if (!zvrf)
 		goto exit;
 
 	if (IS_ZEBRA_DEBUG_VXLAN)
@@ -9143,16 +9143,16 @@ static int zebra_vxlan_dad_mac_auto_recovery_exp(struct thread *t)
 	mac = THREAD_ARG(t);
 
 	/* since this is asynchronous we need sanity checks*/
-	zvrf = vrf_info_lookup(mac->zvni->vrf_id);
-	if (!zvrf)
+	mac = zvni_mac_lookup(zvni, &mac->macaddr);
+	if (!mac)
 		goto exit;
 
 	zvni = zvni_lookup(mac->zvni->vni);
 	if (!zvni)
 		goto exit;
 
-	mac = zvni_mac_lookup(zvni, &mac->macaddr);
-	if (!mac)
+	zvrf = vrf_info_lookup(zvni->vxlan_if->vrf_id);
+	if (!zvrf)
 		goto exit;
 
 	if (IS_ZEBRA_DEBUG_VXLAN)
