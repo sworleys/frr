@@ -674,7 +674,7 @@ static void zvni_print_neigh(zebra_neigh_t *n, void *ctxt, json_object *json)
 	struct zebra_vrf *zvrf;
 	struct timeval detect_start_time = {0, 0};
 
-	zvrf = zebra_vrf_lookup_by_id(n->zvni->vrf_id);
+	zvrf = zebra_vrf_lookup_by_id(VRF_DEFAULT);
 	ipaddr2str(&n->ip, buf2, sizeof(buf2));
 	prefix_mac2str(&n->emac, buf1, sizeof(buf1));
 	type_str = CHECK_FLAG(n->flags, ZEBRA_NEIGH_LOCAL) ?
@@ -1127,7 +1127,7 @@ static void zvni_print_mac(zebra_mac_t *mac, void *ctxt, json_object *json)
 	struct zebra_vrf *zvrf;
 	struct timeval detect_start_time = {0, 0};
 
-	zvrf = zebra_vrf_lookup_by_id(mac->zvni->vrf_id);
+	zvrf = zebra_vrf_lookup_by_id(VRF_DEFAULT);
 
 	vty = (struct vty *)ctxt;
 	prefix_mac2str(&mac->macaddr, buf1, sizeof(buf1));
