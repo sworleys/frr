@@ -1,3 +1,31 @@
+frr (4.0+cl3u9) RELEASED; urgency=medium
+
+  * New Enabled: "show evpn vni detail" command
+  * New Enabled: "show evpn mac vni all detail" command
+  * New Enabled: "show evpn arp-cache vni all detail" command
+  * Fixes: CM-22932 zebra: Carry onlink if set from resolving nexthop
+  * Fixes: CM-22946 zebra: dup addr detect fix inherit dup for IPs
+  * Fixes: CM-22852 zebra: dup addr detect display count correctly
+  * Fixes: CM-22876 zebra: dup detect addr display per mac json fields
+  * Fixes: CM-22852 zebra: dup addr detect fix specific vni output
+  * Fixes: CM-22924 zebra: dup addr detect fix freeze action
+  * Fixes: CM-23033 zebra: dup addr detect json for show evpn
+  * Fixes: CM-22924 zebra: dup addr detect neigh consolidation
+  * Fixes: CM-22924 zebra: dup addr detect mac consolidation
+  * Fixes: CM-22665 ospf6d: abr summary advertise best route
+  * Fixes: CM-22992 zebra: handle neighbor delete from kernel for ipv4
+  * Fixes: CM-23122 zebra: dup addr detect clear cmd non-zero return
+  * Fixes: CM-23008 bgpd: set attribute change flag to evpn imported
+  * Fixes: CM-23018 zebra: propagate inactive neigh deletes to bgpd
+  * Fixes: CM-21482 bgpd: l3vni add-del handle non-default rt
+  * Fixes: CM-23923 tools: stop frr-reload.py from trying to delete the vrf
+  * Fixes: CM-23316 zebra: dup addr detect fix clear mac command
+  * Fixes: CM-23110 zebra: For rnh handling use actual resolved nexthop
+  * Fixes: CM-23263 bgpd: route-map fails to filter type-5 routes
+  * Fixes: CM-18950 bgpd: evpn command to restrict to default vrf
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Fri, 4 Jan 2019 11:15:21 -0400
+
 frr (4.0+cl3u8) RELEASED; urgency=medium
 
   * New Enabled: EVPN DAD
