@@ -37,6 +37,8 @@
 #include "linklist.h"
 #include "memory_vty.h"
 #include "libfrr.h"
+#include "ferr.h"
+#include "lib_errors.h"
 
 #include "vtysh/vtysh.h"
 #include "vtysh/vtysh_user.h"
@@ -422,6 +424,10 @@ int main(int argc, char **argv, char **env)
 
 	/* Signal and others. */
 	vtysh_signal_init();
+
+	/* Error code library system */
+	ferr_ref_init();
+	lib_error_init();
 
 	/* Make vty structure and register commands. */
 	vtysh_init_vty();

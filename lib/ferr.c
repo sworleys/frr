@@ -122,10 +122,8 @@ void ferr_ref_display(struct vty *vty, uint32_t code, bool json)
 
 	if (code) {
 		ref = ferr_ref_get(code);
-		if (!ref) {
-			vty_out(vty, "Code %"PRIu32" - Unknown\n", code);
+		if (!ref)
 			return;
-		}
 		listnode_add(errlist, ref);
 	}
 
