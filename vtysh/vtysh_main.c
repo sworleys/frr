@@ -425,10 +425,6 @@ int main(int argc, char **argv, char **env)
 	/* Signal and others. */
 	vtysh_signal_init();
 
-	/* Error code library system */
-	ferr_ref_init();
-	lib_error_init();
-
 	/* Make vty structure and register commands. */
 	vtysh_init_vty();
 	vtysh_init_cmd();
@@ -436,6 +432,10 @@ int main(int argc, char **argv, char **env)
 	vtysh_config_init();
 
 	vty_init_vtysh();
+
+	/* Error code library system */
+	ferr_ref_init();
+	lib_error_init();
 
 	/* Read vtysh configuration file before connecting to daemons.
 	 * (file may not be readable to calling user in SUID mode) */
