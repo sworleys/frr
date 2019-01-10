@@ -173,10 +173,12 @@ void vrrp_garp_init(void)
 	/* Create the socket descriptor */
 	/* FIXME: why ETH_P_RARP? */
 	errno = 0;
-	frr_elevate_privs(&vrrp_privs) {
+	vrrp_privs.change(ZPRIVS_RAISE);
+	{
 		garp_fd = socket(PF_PACKET, SOCK_RAW | SOCK_CLOEXEC,
 				 htons(ETH_P_RARP));
 	}
+	vrrp_privs.change(ZPRIVS_LOWER);
 
 	if (garp_fd > 0)
 		zlog_info(VRRP_LOGPFX "Initialized gratuitous ARP socket");

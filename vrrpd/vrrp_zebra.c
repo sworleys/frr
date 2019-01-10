@@ -223,7 +223,7 @@ static int vrrp_zebra_if_address_del(int command, struct zclient *client,
 void vrrp_zebra_init(void)
 {
 	/* Socket for receiving updates from Zebra daemon */
-	zclient = zclient_new(master, &zclient_options_default);
+	zclient = zclient_new_notify(master, &zclient_options_default);
 
 	zclient->zebra_connected = vrrp_zebra_connected;
 	zclient->router_id_update = vrrp_router_id_update_zebra;

@@ -191,7 +191,7 @@ static void vrrp_router_destroy(struct vrrp_router *r)
 	if (r->sock >= 0)
 		close(r->sock);
 	/* FIXME: also delete list elements */
-	list_delete(&r->addrs);
+	list_delete_and_null(&r->addrs);
 	XFREE(MTYPE_TMP, r);
 }
 
@@ -362,9 +362,11 @@ static int vrrp_socket(struct vrrp_router *r)
 	bool failed = false;
 	struct connected *c;
 
-	frr_elevate_privs(&vrrp_privs) {
+	vrrp_privs.change(ZPRIVS_RAISE);
+	{
 		r->sock = socket(r->family, SOCK_RAW, IPPROTO_VRRP);
 	}
+	vrrp_privs.change(ZPRIVS_LOWER);
 
 	if (r->sock < 0) {
 		zlog_warn(VRRP_LOGPFX VRRP_LOGPFX_VRID
@@ -700,7 +702,7 @@ static unsigned int vrrp_hash_key(void *arg)
 	return vr->vrid;
 }
 
-static bool vrrp_hash_cmp(const void *arg1, const void *arg2)
+static int vrrp_hash_cmp(const void *arg1, const void *arg2)
 {
 	const struct vrrp_vrouter *vr1 = arg1;
 	const struct vrrp_vrouter *vr2 = arg2;
@@ -712,5 +714,5 @@ void vrrp_init(void)
 {
 	vrrp_vrouters_hash = hash_create(&vrrp_hash_key, vrrp_hash_cmp,
 					 "VRRP virtual router hash");
-	vrf_init(NULL, NULL, NULL, NULL, NULL);
+	vrf_init(NULL, NULL, NULL, NULL);
 }

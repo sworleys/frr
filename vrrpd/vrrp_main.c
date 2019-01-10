@@ -99,10 +99,6 @@ struct quagga_signal_t vrrp_signals[] = {
 	},
 };
 
-static const struct frr_yang_module_info *vrrp_yang_modules[] = {
-	&frr_interface_info,
-};
-
 #define VRRP_VTY_PORT 2617
 
 FRR_DAEMON_INFO(vrrpd, VRRP, .vty_port = VRRP_VTY_PORT,
@@ -110,8 +106,6 @@ FRR_DAEMON_INFO(vrrpd, VRRP, .vty_port = VRRP_VTY_PORT,
 		.signals = vrrp_signals,
 		.n_signals = array_size(vrrp_signals),
 		.privs = &vrrp_privs,
-		.yang_modules = vrrp_yang_modules,
-		.n_yang_modules = array_size(vrrp_yang_modules),
 )
 
 int main(int argc, char **argv, char **envp)
@@ -144,7 +138,6 @@ int main(int argc, char **argv, char **envp)
 
 	snprintf(backup_config_file, sizeof(backup_config_file),
 		 "%s/vrrpd.conf", frr_sysconfdir);
-	vrrpd_di.backup_config_file = backup_config_file;
 
 	frr_config_fork();
 	frr_run(master);
