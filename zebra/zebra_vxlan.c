@@ -8444,9 +8444,11 @@ int zebra_vxlan_if_update(struct interface *ifp, u_int16_t chgflags)
 
 		if (IS_ZEBRA_DEBUG_VXLAN)
 			zlog_debug(
-				"Update L2-VNI %u intf %s(%u) VLAN %u local IP %s master %u chg 0x%x",
+				"Update L2-VNI %u intf %s(%u) %s VLAN %u local IP %s (%s) master %u chg 0x%x",
 				vni, ifp->name, ifp->ifindex,
+				if_is_operative(ifp) ? "Up" : "Down",
 				vxl->access_vlan, inet_ntoa(vxl->vtep_ip),
+				inet_ntoa(zvni->local_vtep_ip),
 				zif->brslave_info.bridge_ifindex, chgflags);
 
 		/* Removed from bridge? Cleanup and return */
