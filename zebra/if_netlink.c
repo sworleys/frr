@@ -899,6 +899,7 @@ int netlink_interface_addr(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	u_char flags = 0;
 	char *label = NULL;
 	struct zebra_ns *zns;
+	uint32_t metric = METRIC_MAX;
 
 	zns = zebra_ns_lookup(ns_id);
 	ifa = NLMSG_DATA(h);
@@ -999,6 +1000,9 @@ int netlink_interface_addr(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	if (tb[IFA_LABEL])
 		label = (char *)RTA_DATA(tb[IFA_LABEL]);
 
+	if (tb[IFA_RT_PRIORITY])
+		metric = *(uint32_t *)RTA_DATA(tb[IFA_RT_PRIORITY]);
+
 	if (ifp && label && strcmp(ifp->name, label) == 0)
 		label = NULL;
 
@@ -1007,7 +1011,8 @@ int netlink_interface_addr(struct sockaddr_nl *snl, struct nlmsghdr *h,
 		if (h->nlmsg_type == RTM_NEWADDR)
 			connected_add_ipv4(ifp, flags, (struct in_addr *)addr,
 					   ifa->ifa_prefixlen,
-					   (struct in_addr *)broad, label);
+					   (struct in_addr *)broad, label,
+					   metric);
 		else
 			connected_delete_ipv4(
 				ifp, flags, (struct in_addr *)addr,
@@ -1025,7 +1030,8 @@ int netlink_interface_addr(struct sockaddr_nl *snl, struct nlmsghdr *h,
 			      & (IFA_F_DADFAILED | IFA_F_TENTATIVE)))
 				connected_add_ipv6(ifp, flags,
 						   (struct in6_addr *)addr,
-						   ifa->ifa_prefixlen, label);
+						   ifa->ifa_prefixlen, label,
+						   metric);
 		} else
 			connected_delete_ipv6(ifp, (struct in6_addr *)addr,
 					      ifa->ifa_prefixlen);
