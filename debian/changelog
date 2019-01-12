@@ -24,6 +24,7 @@ frr (4.0+cl3u9) RELEASED; urgency=medium
   * Fixes: CM-23263 bgpd: route-map fails to filter type-5 routes
   * Fixes: CM-18950 bgpd: evpn command to restrict to default vrf
   * Fixes: CM-23511 zebra: set connected route metric based on the devaddr metric
+  * Fixes: CM-23438 zebra: reinstate bgp route on local delete
 
  -- dev-support <dev-support@cumulusnetworks.com>  Fri, 4 Jan 2019 11:15:21 -0400
 
