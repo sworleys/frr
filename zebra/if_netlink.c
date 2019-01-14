@@ -1001,6 +1001,9 @@ int netlink_interface_addr(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	if (tb[IFA_LABEL])
 		label = (char *)RTA_DATA(tb[IFA_LABEL]);
 
+#ifndef IFA_RT_PRIORITY
+#define IFA_RT_PRIORITY 9
+#endif
 	if (tb[IFA_RT_PRIORITY])
 		metric = *(uint32_t *)RTA_DATA(tb[IFA_RT_PRIORITY]);
 
