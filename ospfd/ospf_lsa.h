@@ -294,6 +294,7 @@ extern int ospf_lsa_maxage_walker(struct thread *);
 extern struct ospf_lsa *ospf_lsa_refresh(struct ospf *, struct ospf_lsa *);
 
 extern void ospf_external_lsa_refresh_default(struct ospf *);
+extern void ospf_default_originate_lsa_update(struct ospf *ospf);
 
 extern void ospf_external_lsa_refresh_type(struct ospf *, u_char, u_short, int);
 extern struct ospf_lsa *ospf_external_lsa_refresh(struct ospf *,
