@@ -730,6 +730,9 @@ int ospf_redistribute_unset(struct ospf *ospf, int type, u_short instance)
 
 	ospf_asbr_status_update(ospf, --ospf->redistribute);
 
+	/* clean up maxage default originate external lsa */
+	ospf_default_originate_lsa_update(ospf);
+
 	return CMD_SUCCESS;
 }
 
