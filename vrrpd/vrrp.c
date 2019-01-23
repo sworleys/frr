@@ -666,6 +666,9 @@ static int vrrp_socket(struct vrrp_router *r)
 				r->vr->vrid);
 		}
 
+		/* Turn off multicast loop on Tx */
+		setsockopt_ipv4_multicast_loop(r->sock_tx, 0);
+
 		/* Bind Rx socket to exact interface */
 		vrrp_privs.change(ZPRIVS_RAISE);
 		{
@@ -752,6 +755,9 @@ static int vrrp_socket(struct vrrp_router *r)
 			failed = true;
 			goto done;
 		}
+
+		/* Turn off multicast loop on Tx */
+		setsockopt_ipv6_multicast_loop(r->sock_tx, 0);
 
 		/* Bind Rx socket to exact interface */
 		vrrp_privs.change(ZPRIVS_RAISE);
