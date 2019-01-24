@@ -112,6 +112,11 @@ struct zebra_router {
 	struct zebra_vrf *evpn_vrf;
 
 	uint32_t multipath_num;
+
+	/*
+	 * The hash of nexthop groups associated with this router
+	 */
+	struct hash *nhgs;
 };
 
 extern struct zebra_router zrouter;
