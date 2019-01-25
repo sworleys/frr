@@ -1156,10 +1156,14 @@ void bgp_zebra_announce(struct bgp_node *rn, struct prefix *p,
 
 	tag = info->attr->tag;
 
-	/* If the route's source is EVPN, flag as such. */
+	/* If the route's source is EVPN, flag as such and indicate that the
+	 * nexthop (which is the remote VTEP) is "onlink".
+	 */
 	is_evpn = is_route_parent_evpn(info);
-	if (is_evpn)
+	if (is_evpn) {
 		SET_FLAG(api.flags, ZEBRA_FLAG_EVPN_ROUTE);
+		SET_FLAG(api.flags, ZEBRA_FLAG_ONLINK);
+	}
 
 	if (peer->sort == BGP_PEER_IBGP || peer->sort == BGP_PEER_CONFED
 	    || info->sub_type == BGP_ROUTE_AGGREGATE) {
