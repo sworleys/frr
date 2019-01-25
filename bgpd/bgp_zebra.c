@@ -1321,9 +1321,10 @@ void bgp_zebra_announce(struct bgp_node *rn, struct prefix *p,
 
 		prefix2str(&api.prefix, prefix_buf, sizeof(prefix_buf));
 		zlog_debug("Tx route %s VRF %u %s metric %u tag %" ROUTE_TAG_PRI
-			   " count %d",
+			   " flags 0x%x nhnum %d",
 			   valid_nh_count ? "add" : "delete", bgp->vrf_id,
-			   prefix_buf, api.metric, api.tag, api.nexthop_num);
+			   prefix_buf, api.metric, api.tag,
+			   api.flags, api.nexthop_num);
 		for (i = 0; i < api.nexthop_num; i++) {
 			api_nh = &api.nexthops[i];
 
