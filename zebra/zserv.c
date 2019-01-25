@@ -1259,14 +1259,7 @@ static int zread_route_add(struct zserv *client, u_short length,
 			case NEXTHOP_TYPE_IPV4_IFINDEX:
 
 				memset(&vtep_ip, 0, sizeof(struct ipaddr));
-				if (CHECK_FLAG(api.flags,
-					       ZEBRA_FLAG_EVPN_ROUTE)) {
-					ifindex =
-						get_l3vni_svi_ifindex(vrf_id);
-				} else {
-					ifindex = api_nh->ifindex;
-				}
-
+				ifindex = api_nh->ifindex;
 				if (IS_ZEBRA_DEBUG_RECV) {
 					char nhbuf[INET6_ADDRSTRLEN] = {0};
 					inet_ntop(AF_INET, &api_nh->gate.ipv4,
@@ -1302,14 +1295,7 @@ static int zread_route_add(struct zserv *client, u_short length,
 				break;
 			case NEXTHOP_TYPE_IPV6_IFINDEX:
 				memset(&vtep_ip, 0, sizeof(struct ipaddr));
-				if (CHECK_FLAG(api.flags,
-					       ZEBRA_FLAG_EVPN_ROUTE)) {
-					ifindex =
-						get_l3vni_svi_ifindex(vrf_id);
-				} else {
-					ifindex = api_nh->ifindex;
-				}
-
+				ifindex = api_nh->ifindex;
 				nexthop = route_entry_nexthop_ipv6_ifindex_add(
 					re, &api_nh->gate.ipv6, ifindex,
 					api_nh->vrf_id);
