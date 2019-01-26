@@ -3414,11 +3414,13 @@ void bgp_evpn_withdraw_type5_routes(struct bgp *bgp_vrf,
 
 	table = bgp_vrf->rib[afi][safi];
 	for (rn = bgp_table_top(table); rn; rn = bgp_route_next(rn)) {
-		/* Only care about "selected" routes - non-imported. */
+		/* Only care about "selected" routes. Also perform a loop
+		 * check to ensure that only the right routes go into EVPN.
+		 */
 		/* TODO: Support for AddPath for EVPN. */
 		for (ri = rn->info; ri; ri = ri->next) {
 			if (CHECK_FLAG(ri->flags, BGP_INFO_SELECTED) &&
-			    (!ri->extra || !ri->extra->parent)) {
+			    is_route_injectable_into_evpn(ri)) {
 				bgp_evpn_withdraw_type5_route(bgp_vrf, &rn->p,
 							      afi, safi);
 				break;
@@ -3484,13 +3486,13 @@ void bgp_evpn_advertise_type5_routes(struct bgp *bgp_vrf,
 
 	table = bgp_vrf->rib[afi][safi];
 	for (rn = bgp_table_top(table); rn; rn = bgp_route_next(rn)) {
-		/* Need to identify the "selected" route entry to use its
-		 * attribute. Also, we only consider "non-imported" routes.
-		 * TODO: Support for AddPath for EVPN.
+		/* Only care about "selected" routes. Also perform a loop
+		 * check to ensure that only the right routes go into EVPN.
 		 */
+		/* TODO: Support for AddPath for EVPN. */
 		for (ri = rn->info; ri; ri = ri->next) {
 			if (CHECK_FLAG(ri->flags, BGP_INFO_SELECTED) &&
-			    (!ri->extra || !ri->extra->parent)) {
+			    is_route_injectable_into_evpn(ri)) {
 
 				/* apply the route-map */
 				if (bgp_vrf->adv_cmd_rmap[afi][safi].map) {
