@@ -196,6 +196,32 @@ static inline void vpn_leak_postchange(vpn_policy_direction_t direction,
 	}
 }
 
+/* Flag if the route is injectable into VPN. This would be either a
+ * non-imported route or a non-VPN imported route.
+ */
+static inline bool is_route_injectable_into_vpn(struct bgp_info *ri)
+{
+	struct bgp_info *parent_ri;
+	struct bgp_table *table;
+	struct bgp_node *rn;
+
+	if (ri->sub_type != BGP_ROUTE_IMPORTED ||
+	    !ri->extra ||
+	    !ri->extra->parent)
+		return true;
+
+	parent_ri = (struct bgp_info *)ri->extra->parent;
+	rn = parent_ri->net;
+	if (!rn)
+		return true;
+	table = bgp_node_table(rn);
+	if (table &&
+	    (table->afi == AFI_IP || table->afi == AFI_IP6) &&
+	    table->safi == SAFI_MPLS_VPN)
+		return false;
+	return true;
+}
+
 extern void vpn_policy_routemap_event(const char *rmap_name);
 
 extern void vpn_leak_postchange_all(void);

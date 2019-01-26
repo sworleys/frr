@@ -581,8 +581,8 @@ void vpn_leak_from_vrf_update(struct bgp *bgp_vpn,       /* to */
 		return;
 	}
 
-	/* loop check - should not be an imported route. */
-	if (info_vrf->extra && info_vrf->extra->bgp_orig)
+	/* Is this route exportable into the VPN table? */
+	if (!is_route_injectable_into_vpn(info_vrf))
 		return;
 
 
@@ -812,6 +812,10 @@ void vpn_leak_from_vrf_withdraw(struct bgp *bgp_vpn,       /* to */
 			zlog_debug("%s: can't get afi of prefix", __func__);
 		return;
 	}
+
+	/* Is this route exportable into the VPN table? */
+	if (!is_route_injectable_into_vpn(info_vrf))
+		return;
 
 	if (!vpn_leak_to_vpn_active(bgp_vrf, afi, &debugmsg)) {
 		if (debug)
