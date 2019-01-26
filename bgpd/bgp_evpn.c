@@ -1952,6 +1952,9 @@ static int install_evpn_route_entry_in_vrf(struct bgp *bgp_vrf,
 	/* Perform route selection and update zebra, if required. */
 	bgp_process(bgp_vrf, rn, afi, safi);
 
+	/* Process for route leaking. */
+	vpn_leak_from_vrf_update(bgp_get_default(), bgp_vrf, ri);
+
 	return ret;
 }
 
@@ -2078,6 +2081,9 @@ static int uninstall_evpn_route_entry_in_vrf(struct bgp *bgp_vrf,
 
 	if (!ri)
 		return 0;
+
+	/* Process for route leaking. */
+	vpn_leak_from_vrf_withdraw(bgp_get_default(), bgp_vrf, ri);
 
 	bgp_aggregate_decrement(bgp_vrf, &rn->p, ri, afi, safi);
 
