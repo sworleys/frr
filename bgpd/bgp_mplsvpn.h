@@ -222,6 +222,13 @@ static inline bool is_route_injectable_into_vpn(struct bgp_info *ri)
 	return true;
 }
 
+/* Flag if the route's family is VPN. */
+static inline bool is_ri_family_vpn(struct bgp_info *ri)
+{
+	return (is_ri_family_matching(ri, AFI_IP, SAFI_MPLS_VPN) ||
+		is_ri_family_matching(ri, AFI_IP6, SAFI_MPLS_VPN));
+}
+
 extern void vpn_policy_routemap_event(const char *rmap_name);
 
 extern void vpn_leak_postchange_all(void);

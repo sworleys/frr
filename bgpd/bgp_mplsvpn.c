@@ -1209,8 +1209,10 @@ void vpn_leak_to_vrf_withdraw_all(struct bgp *bgp_vrf, /* to */
 	     bn = bgp_route_next(bn)) {
 
 		for (bi = bn->info; bi; bi = bi->next) {
-			if (bi->extra && bi->extra->bgp_orig != bgp_vrf) {
-
+			if (bi->extra &&
+			    bi->extra->bgp_orig != bgp_vrf &&
+			    bi->extra->parent &&
+			    is_ri_family_vpn(bi->extra->parent)) {
 				/* delete route */
 				bgp_aggregate_decrement(bgp_vrf, &bn->p, bi,
 							afi, safi);
