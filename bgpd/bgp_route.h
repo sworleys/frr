@@ -325,6 +325,24 @@ static inline int bgp_fibupd_safi(safi_t safi)
 	return 0;
 }
 
+/* Flag if the route's family matches params. */
+static inline bool is_ri_family_matching(struct bgp_info *ri,
+					 afi_t afi, safi_t safi)
+{
+	struct bgp_table *table;
+	struct bgp_node *rn;
+
+	rn = ri->net;
+	if (!rn)
+		return false;
+	table = bgp_node_table(rn);
+	if (table &&
+	    table->afi == afi &&
+	    table->safi == safi)
+		return true;
+	return false;
+}
+
 /* Prototypes. */
 extern void bgp_rib_remove(struct bgp_node *rn, struct bgp_info *ri,
 			   struct peer *peer, afi_t afi, safi_t safi);

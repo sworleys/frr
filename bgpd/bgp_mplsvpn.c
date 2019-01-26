@@ -46,6 +46,7 @@
 #include "bgpd/bgp_zebra.h"
 #include "bgpd/bgp_nexthop.h"
 #include "bgpd/bgp_nht.h"
+#include "bgpd/bgp_evpn.h"
 
 #if ENABLE_BGP_VNC
 #include "bgpd/rfapi/rfapi_backend.h"
@@ -432,10 +433,14 @@ leak_update(
 		if (bi->extra && bi->extra->bgp_orig)
 			bgp_nexthop = bi->extra->bgp_orig;
 
-		/* No nexthop tracking for redistributed routes */
-		if (bi_ultimate->sub_type == BGP_ROUTE_REDISTRIBUTE)
+		/*
+		 * No nexthop tracking for redistributed routes or for
+		 * EVPN-imported routes that get leaked.
+		 */
+		if (bi_ultimate->sub_type == BGP_ROUTE_REDISTRIBUTE ||
+		    is_ri_family_evpn(bi_ultimate)) {
 			nh_valid = 1;
-		else {
+		} else {
 			struct bgp_info *bi_to_send = bi;
 
 			if (bi->extra && bi->extra->parent)
@@ -512,10 +517,13 @@ leak_update(
 	 * No nexthop tracking for redistributed routes because
 	 * their originating protocols will do the tracking and
 	 * withdraw those routes if the nexthops become unreachable
+	 * This also holds good for EVPN-imported routes that get
+	 * leaked.
 	 */
-	if (bi_ultimate->sub_type == BGP_ROUTE_REDISTRIBUTE)
+	if (bi_ultimate->sub_type == BGP_ROUTE_REDISTRIBUTE ||
+	    is_ri_family_evpn(bi_ultimate)) {
 		nh_valid = 1;
-	else
+	} else
 		/*
 		 * TBD do we need to do anything about the
 		 * 'connected' parameter?
