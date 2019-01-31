@@ -907,7 +907,7 @@ int netlink_route_read(struct zebra_ns *zns)
 	if (ret < 0)
 		return ret;
 	ret = netlink_parse_info(netlink_route_change_read_unicast,
-				 &zns->netlink_cmd, &dp_info, 0, 1);
+				 &zns->netlink_cmd, &dp_info, NULL, 0, 1);
 	if (ret < 0)
 		return ret;
 
@@ -916,7 +916,7 @@ int netlink_route_read(struct zebra_ns *zns)
 	if (ret < 0)
 		return ret;
 	ret = netlink_parse_info(netlink_route_change_read_unicast,
-				 &zns->netlink_cmd, &dp_info, 0, 1);
+				 &zns->netlink_cmd, &dp_info, NULL, 0, 1);
 	if (ret < 0)
 		return ret;
 
@@ -2163,7 +2163,7 @@ int netlink_macfdb_read(struct zebra_ns *zns)
 	/* We are reading entire table. */
 	filter_vlan = 0;
 	ret = netlink_parse_info(netlink_macfdb_table, &zns->netlink_cmd,
-				 &dp_info, 0, 1);
+				 &dp_info, NULL, 0, 1);
 
 	return ret;
 }
@@ -2197,7 +2197,7 @@ int netlink_macfdb_read_for_bridge(struct zebra_ns *zns, struct interface *ifp,
 	if (ret < 0)
 		return ret;
 	ret = netlink_parse_info(netlink_macfdb_table, &zns->netlink_cmd,
-				 &dp_info, 0, 0);
+				 &dp_info, NULL, 0, 0);
 
 	/* Reset VLAN filter. */
 	filter_vlan = 0;
@@ -2264,7 +2264,7 @@ int netlink_macfdb_read_specific_mac(struct zebra_ns *zns,
 		return ret;
 
 	ret = netlink_parse_info(netlink_macfdb_table, &zns->netlink_cmd,
-				 &dp_info, 1, 0);
+				 &dp_info, NULL, 1, 0);
 
 	return ret;
 }
@@ -2553,7 +2553,7 @@ int netlink_neigh_read(struct zebra_ns *zns)
 	if (ret < 0)
 		return ret;
 	ret = netlink_parse_info(netlink_neigh_table, &zns->netlink_cmd,
-				 &dp_info, 0, 1);
+				 &dp_info, NULL, 0, 1);
 
 	return ret;
 }
@@ -2574,7 +2574,7 @@ int netlink_neigh_read_for_vlan(struct zebra_ns *zns, struct interface *vlan_if)
 	if (ret < 0)
 		return ret;
 	ret = netlink_parse_info(netlink_neigh_table, &zns->netlink_cmd,
-				 &dp_info, 0, 0);
+				 &dp_info, NULL, 0, 0);
 
 	return ret;
 }
@@ -2641,7 +2641,7 @@ int netlink_neigh_read_specific_ip(struct ipaddr *ip,
 		return ret;
 
 	ret = netlink_parse_info(netlink_neigh_table, &zns->netlink_cmd,
-				 &dp_info, 1, 0);
+				 &dp_info, NULL, 1, 0);
 
 	return ret;
 }

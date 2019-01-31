@@ -324,7 +324,7 @@ void netlink_read_init(const char *fname)
 	zebra_dplane_info_from_zns(&dp_info, zns, false);
 
 	netlink_parse_info(netlink_information_fetch, &zns->netlink,
-			   &dp_info, 1, 0);
+			   &dp_info, NULL, 1, 0);
 }
 
 /**
@@ -386,7 +386,7 @@ static int kernel_read(struct thread *thread)
 	zebra_dplane_info_from_zns(&dp_info, zns, false);
 
 	netlink_parse_info(netlink_information_fetch, &zns->netlink, &dp_info,
-			   5, 0);
+			   NULL, 5, 0);
 	zns->t_netlink = NULL;
 	thread_add_read(zebrad.master, kernel_read, zns, zns->netlink.sock,
 			&zns->t_netlink);
@@ -685,6 +685,7 @@ static void netlink_parse_extended_ack(struct nlmsghdr *h)
  * filter  -> Function to call to read the results
  * nl      -> netlink socket information
  * zns     -> The zebra namespace data
+ * ctx     -> The dataplane context
  * count   -> How many we should read in, 0 means as much as possible
  * startup -> Are we reading in under startup conditions? passed to
  *            the filter.
@@ -692,7 +693,7 @@ static void netlink_parse_extended_ack(struct nlmsghdr *h)
 int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 		       const struct nlsock *nl,
 		       const struct zebra_dplane_info *zns,
-		       int count, int startup)
+		       struct zebra_dplane_ctx *ctx, int count, int startup)
 {
 	int status;
 	int ret = 0;
@@ -994,7 +995,7 @@ int netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 	 * Get reply from netlink socket.
 	 * The reply should either be an acknowlegement or an error.
 	 */
-	return netlink_parse_info(filter, nl, dp_info, 0, startup);
+	return netlink_parse_info(filter, nl, dp_info, ctx, 0, startup);
 }
 
 /*
