@@ -338,12 +338,13 @@ enum zebra_dplane_result dplane_ctx_get_status(
 	return ctx->zd_status;
 }
 
-void dplane_ctx_set_status(struct zebra_dplane_ctx *ctx,
-			   enum zebra_dplane_result status)
+enum zebra_dplane_result dplane_ctx_set_status(struct zebra_dplane_ctx *ctx,
+					       enum zebra_dplane_result status)
 {
 	DPLANE_CTX_VALID(ctx);
 
 	ctx->zd_status = status;
+	return ctx->zd_status;
 }
 
 /* Retrieve last/current provider id */
