@@ -109,6 +109,89 @@ enum dplane_op_e {
 };
 
 /*
+ * Route information captured for route updates.
+ */
+struct dplane_route_info {
+
+	/* Dest and (optional) source prefixes */
+	struct prefix zd_dest;
+	struct prefix zd_src;
+
+	afi_t zd_afi;
+	safi_t zd_safi;
+
+	int zd_type;
+	int zd_old_type;
+
+	route_tag_t zd_tag;
+	route_tag_t zd_old_tag;
+	uint32_t zd_metric;
+	uint32_t zd_old_metric;
+
+	uint16_t zd_instance;
+	uint16_t zd_old_instance;
+
+	uint8_t zd_distance;
+	uint8_t zd_old_distance;
+
+	uint32_t zd_mtu;
+	uint32_t zd_nexthop_mtu;
+
+	/* Nexthops */
+	struct nexthop_group zd_ng;
+
+	/* "Previous" nexthops, used only in route updates without netlink */
+	struct nexthop_group zd_old_ng;
+
+	/* TODO -- use fixed array of nexthops, to avoid mallocs? */
+
+};
+
+/*
+ * The context block used to exchange info about route updates across
+ * the boundary between the zebra main context (and pthread) and the
+ * dataplane layer (and pthread).
+ */
+struct zebra_dplane_ctx {
+
+	/* Operation code */
+	enum dplane_op_e zd_op;
+
+	/* Status on return */
+	enum zebra_dplane_result zd_status;
+
+	/* Dplane provider id */
+	uint32_t zd_provider;
+
+	/* Flags - used by providers, e.g. */
+	int zd_flags;
+
+	bool zd_is_update;
+
+	uint32_t zd_seq;
+	uint32_t zd_old_seq;
+
+	/* TODO -- internal/sub-operation status? */
+	enum zebra_dplane_result zd_remote_status;
+	enum zebra_dplane_result zd_kernel_status;
+
+	vrf_id_t zd_vrf_id;
+	uint32_t zd_table_id;
+
+	/* Support info for either route or LSP update */
+	union {
+		struct dplane_route_info rinfo;
+		zebra_lsp_t lsp;
+	} u;
+
+	/* Namespace info, used especially for netlink kernel communication */
+	struct zebra_dplane_info zd_ns_info;
+
+	/* Embedded list linkage */
+	TAILQ_ENTRY(zebra_dplane_ctx) zd_q_entries;
+};
+
+/*
  * The dataplane context struct is used to exchange info between the main zebra
  * context and the dataplane module(s). If these are two independent pthreads,
  * they cannot share existing global data structures safely.
