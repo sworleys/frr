@@ -250,8 +250,8 @@ struct zebra_dplane_ctx *dplane_ctx_dequeue(struct dplane_ctx_q *q);
  */
 enum zebra_dplane_result dplane_ctx_get_status(
 	const struct zebra_dplane_ctx *ctx);
-void dplane_ctx_set_status(struct zebra_dplane_ctx *ctx,
-			   enum zebra_dplane_result status);
+enum zebra_dplane_result dplane_ctx_set_status(struct zebra_dplane_ctx *ctx,
+					       enum zebra_dplane_result status);
 const char *dplane_res2str(enum zebra_dplane_result res);
 
 enum dplane_op_e dplane_ctx_get_op(const struct zebra_dplane_ctx *ctx);
