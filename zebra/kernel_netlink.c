@@ -314,6 +314,8 @@ bool netlink_read;
  */
 void netlink_read_init(const char *fname)
 {
+	/* Just fake the context */
+	struct zebra_dplane_ctx ctx;
 	struct zebra_dplane_info dp_info;
 
 	snprintf(netlink_fuzz_file, MAXPATHLEN, "%s", fname);
@@ -323,8 +325,8 @@ void netlink_read_init(const char *fname)
 	/* Capture key info from zns struct */
 	zebra_dplane_info_from_zns(&dp_info, zns, false);
 
-	netlink_parse_info(netlink_information_fetch, &zns->netlink,
-			   &dp_info, NULL, 1, 0);
+	netlink_parse_info(netlink_information_fetch, &zns->netlink, &dp_info,
+			   &ctx, 1, 0);
 }
 
 /**
@@ -380,13 +382,15 @@ static long netlink_read_file(char *buf, const char *fname)
 static int kernel_read(struct thread *thread)
 {
 	struct zebra_ns *zns = (struct zebra_ns *)THREAD_ARG(thread);
+	/* Just fake the context */
+	struct zebra_dplane_ctx ctx;
 	struct zebra_dplane_info dp_info;
 
 	/* Capture key info from ns struct */
 	zebra_dplane_info_from_zns(&dp_info, zns, false);
 
 	netlink_parse_info(netlink_information_fetch, &zns->netlink, &dp_info,
-			   NULL, 5, 0);
+			   &ctx, 5, 0);
 	zns->t_netlink = NULL;
 	thread_add_read(zebrad.master, kernel_read, zns, zns->netlink.sock,
 			&zns->t_netlink);
