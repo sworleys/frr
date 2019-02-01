@@ -746,6 +746,8 @@ static int netlink_request_intf_addr(struct nlsock *netlink_cmd, int family,
 int interface_lookup_netlink(struct zebra_ns *zns)
 {
 	int ret;
+	/* Just fake the context */
+	struct zebra_dplane_ctx ctx;
 	struct zebra_dplane_info dp_info;
 	struct nlsock *netlink_cmd = &zns->netlink_cmd;
 
@@ -756,7 +758,7 @@ int interface_lookup_netlink(struct zebra_ns *zns)
 	ret = netlink_request_intf_addr(netlink_cmd, AF_PACKET, RTM_GETLINK, 0);
 	if (ret < 0)
 		return ret;
-	ret = netlink_parse_info(netlink_interface, netlink_cmd, &dp_info, NULL,
+	ret = netlink_parse_info(netlink_interface, netlink_cmd, &dp_info, &ctx,
 				 0, 1);
 	if (ret < 0)
 		return ret;
@@ -766,7 +768,7 @@ int interface_lookup_netlink(struct zebra_ns *zns)
 					RTEXT_FILTER_BRVLAN);
 	if (ret < 0)
 		return ret;
-	ret = netlink_parse_info(netlink_interface, netlink_cmd, &dp_info, NULL,
+	ret = netlink_parse_info(netlink_interface, netlink_cmd, &dp_info, &ctx,
 				 0, 0);
 	if (ret < 0)
 		return ret;
@@ -776,7 +778,7 @@ int interface_lookup_netlink(struct zebra_ns *zns)
 					RTEXT_FILTER_BRVLAN);
 	if (ret < 0)
 		return ret;
-	ret = netlink_parse_info(netlink_interface, netlink_cmd, &dp_info, NULL,
+	ret = netlink_parse_info(netlink_interface, netlink_cmd, &dp_info, &ctx,
 				 0, 0);
 	if (ret < 0)
 		return ret;
@@ -789,7 +791,7 @@ int interface_lookup_netlink(struct zebra_ns *zns)
 	if (ret < 0)
 		return ret;
 	ret = netlink_parse_info(netlink_interface_addr, netlink_cmd, &dp_info,
-				 NULL, 0, 1);
+				 &ctx, 0, 1);
 	if (ret < 0)
 		return ret;
 
@@ -798,7 +800,7 @@ int interface_lookup_netlink(struct zebra_ns *zns)
 	if (ret < 0)
 		return ret;
 	ret = netlink_parse_info(netlink_interface_addr, netlink_cmd, &dp_info,
-				 NULL, 0, 1);
+				 &ctx, 0, 1);
 	if (ret < 0)
 		return ret;
 
