@@ -711,8 +711,11 @@ int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 				     .msg_iovlen = 1};
 		struct nlmsghdr *h;
 
-		if (count && read_in >= count)
+		if (count && read_in >= count) {
+			dplane_ctx_set_status(ctx,
+					      ZEBRA_DPLANE_REQUEST_SUCCESS);
 			return 0;
+		}
 
 #if defined(HANDLE_NETLINK_FUZZING)
 		/* Check if reading and filename is set */
@@ -739,12 +742,16 @@ int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 			 *  There is no good way to
 			 *  recover zebra at this point.
 			 */
+			dplane_ctx_set_status(ctx,
+					      ZEBRA_DPLANE_REQUEST_FAILURE);
 			exit(-1);
 			continue;
 		}
 
 		if (status == 0) {
 			flog_err_sys(EC_LIB_SOCKET, "%s EOF", nl->name);
+			dplane_ctx_set_status(ctx,
+					      ZEBRA_DPLANE_REQUEST_FAILURE);
 			return -1;
 		}
 
@@ -752,6 +759,8 @@ int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 			flog_err(EC_ZEBRA_NETLINK_LENGTH_ERROR,
 				 "%s sender address length error: length %d",
 				 nl->name, msg.msg_namelen);
+			dplane_ctx_set_status(ctx,
+					      ZEBRA_DPLANE_REQUEST_FAILURE);
 			return -1;
 		}
 
@@ -789,6 +798,9 @@ int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 					flog_err(EC_ZEBRA_NETLINK_LENGTH_ERROR,
 						 "%s error: message truncated",
 						 nl->name);
+					dplane_ctx_set_status(
+						ctx,
+						ZEBRA_DPLANE_REQUEST_FAILURE);
 					return -1;
 				}
 
@@ -818,8 +830,12 @@ int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 
 					/* return if not a multipart message,
 					 * otherwise continue */
-					if (!(h->nlmsg_flags & NLM_F_MULTI))
+					if (!(h->nlmsg_flags & NLM_F_MULTI)) {
+						dplane_ctx_set_status(
+							ctx,
+							ZEBRA_DPLANE_REQUEST_SUCCESS);
 						return 0;
+					}
 					continue;
 				}
 
@@ -842,6 +858,9 @@ int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 							msg_type,
 							err->msg.nlmsg_seq,
 							err->msg.nlmsg_pid);
+					dplane_ctx_set_status(
+						ctx,
+						ZEBRA_DPLANE_REQUEST_SUCCESS);
 					return 0;
 				}
 
@@ -879,6 +898,8 @@ int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 						msg_type, err->msg.nlmsg_seq,
 						err->msg.nlmsg_pid);
 
+				dplane_ctx_set_status(
+					ctx, ZEBRA_DPLANE_REQUEST_FAILURE);
 				return -1;
 			}
 
@@ -939,10 +960,10 @@ int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
  * startup  -> Are we reading in under startup conditions
  *             This is passed through eventually to filter.
  */
-int netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
-		      struct nlmsghdr *n,
-		      const struct zebra_dplane_info *dp_info,
-		      struct zebra_dplane_ctx *ctx, int startup)
+enum zebra_dplane_result
+netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
+		  struct nlmsghdr *n, const struct zebra_dplane_info *dp_info,
+		  struct zebra_dplane_ctx *ctx, int startup)
 {
 	int status = 0;
 	struct sockaddr_nl snl;
@@ -989,14 +1010,16 @@ int netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 	if (status < 0) {
 		flog_err_sys(EC_LIB_SOCKET, "netlink_talk sendmsg() error: %s",
 			     safe_strerror(save_errno));
-		return -1;
+		dplane_ctx_set_status(ctx, ZEBRA_DPLANE_REQUEST_FAILURE);
+		return dplane_ctx_get_status(ctx);
 	}
 
 	/*
 	 * Get reply from netlink socket.
 	 * The reply should either be an acknowlegement or an error.
 	 */
-	return netlink_parse_info(filter, nl, dp_info, ctx, 0, startup);
+	netlink_parse_info(filter, nl, dp_info, ctx, 0, startup);
+	return dplane_ctx_get_status(ctx);
 }
 
 /*
@@ -1007,8 +1030,10 @@ int netlink_talk(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 		 struct nlmsghdr *n, struct nlsock *nl, struct zebra_ns *zns,
 		 int startup)
 {
+	/* Fake ctx, it won't be used for anyting since synchronous */
+	struct zebra_dplane_ctx ctx;
 	struct zebra_dplane_info dp_info;
-
+	int res = 0;
 	/* Increment sequence number before capturing snapshot of ns socket
 	 * info.
 	 */
@@ -1017,7 +1042,12 @@ int netlink_talk(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 	/* Capture info in intermediate info struct */
 	zebra_dplane_info_from_zns(&dp_info, zns, (nl == &(zns->netlink_cmd)));
 
-	return netlink_talk_info(filter, n, &dp_info, NULL, startup);
+	res = netlink_talk_info(filter, n, &dp_info, &ctx, startup);
+
+	if (res == ZEBRA_DPLANE_REQUEST_FAILURE) {
+		return -1;
+	}
+	return 0;
 }
 
 /* Issue request message to kernel via netlink socket. GET messages
