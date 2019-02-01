@@ -1421,8 +1421,9 @@ static void _netlink_mpls_debug(int cmd, uint32_t label, const char *routedesc)
 			   nl_msg_type_to_str(cmd), label);
 }
 
-static int netlink_neigh_update(int cmd, int ifindex, uint32_t addr, char *lla,
-				int llalen, ns_id_t ns_id)
+static enum zebra_dplane_result netlink_neigh_update(int cmd, int ifindex,
+						     uint32_t addr, char *lla,
+						     int llalen, ns_id_t ns_id)
 {
 	struct {
 		struct nlmsghdr n;
@@ -1454,7 +1455,8 @@ static int netlink_neigh_update(int cmd, int ifindex, uint32_t addr, char *lla,
 /*
  * Routing table change via netlink interface, using a dataplane context object
  */
-static int netlink_route_multipath(int cmd, struct zebra_dplane_ctx *ctx)
+static enum zebra_dplane_result
+netlink_route_multipath(int cmd, struct zebra_dplane_ctx *ctx)
 {
 	int bytelen;
 	struct sockaddr_nl snl;
@@ -1763,7 +1765,7 @@ static int netlink_route_multipath(int cmd, struct zebra_dplane_ctx *ctx)
 		if (IS_ZEBRA_DEBUG_KERNEL)
 			zlog_debug(
 				"netlink_route_multipath(): No useful nexthop.");
-		return 0;
+		return dplane_ctx_set_status(ctx, ZEBRA_DPLANE_REQUEST_SUCCESS);
 	}
 
 skip:
@@ -1867,11 +1869,13 @@ enum zebra_dplane_result kernel_route_update(struct zebra_dplane_ctx *ctx)
 		}
 
 	} else {
-		return ZEBRA_DPLANE_REQUEST_FAILURE;
+		dplane_ctx_set_status(ctx, ZEBRA_DPLANE_REQUEST_FAILURE);
+		return dplane_ctx_get_status(ctx);
 	}
 
 	ret = netlink_route_multipath(cmd, ctx);
-	if ((cmd == RTM_NEWROUTE) && (ret == 0)) {
+	if ((cmd == RTM_NEWROUTE)
+	    && (dplane_ctx_get_status(ctx) == ZEBRA_DPLANE_REQUEST_SUCCESS)) {
 		/* Update installed nexthops to signal which have been
 		 * installed.
 		 */
@@ -1884,9 +1888,7 @@ enum zebra_dplane_result kernel_route_update(struct zebra_dplane_ctx *ctx)
 			}
 		}
 	}
-
-	return (ret == 0 ?
-		ZEBRA_DPLANE_REQUEST_SUCCESS : ZEBRA_DPLANE_REQUEST_FAILURE);
+	return ret;
 }
 
 int kernel_neigh_update(int add, int ifindex, uint32_t addr, char *lla,

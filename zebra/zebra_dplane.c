@@ -1432,11 +1432,8 @@ kernel_dplane_lsp_update(struct zebra_dplane_ctx *ctx)
 /*
  * Handler for kernel route updates
  */
-static enum zebra_dplane_result
-kernel_dplane_route_update(struct zebra_dplane_ctx *ctx)
+static void kernel_dplane_route_update(struct zebra_dplane_ctx *ctx)
 {
-	enum zebra_dplane_result res;
-
 	if (IS_ZEBRA_DEBUG_DPLANE_DETAIL) {
 		char dest_str[PREFIX_STRLEN];
 
@@ -1449,14 +1446,11 @@ kernel_dplane_route_update(struct zebra_dplane_ctx *ctx)
 	}
 
 	/* Call into the synchronous kernel-facing code here */
-	res = kernel_route_update(ctx);
+	kernel_route_update(ctx);
 
-	if (res != ZEBRA_DPLANE_REQUEST_SUCCESS)
-		atomic_fetch_add_explicit(
-			&zdplane_info.dg_route_errors, 1,
-			memory_order_relaxed);
-
-	return res;
+	if (dplane_ctx_get_status(ctx) != ZEBRA_DPLANE_REQUEST_SUCCESS)
+		atomic_fetch_add_explicit(&zdplane_info.dg_route_errors, 1,
+					  memory_order_relaxed);
 }
 
 /*
@@ -1464,7 +1458,6 @@ kernel_dplane_route_update(struct zebra_dplane_ctx *ctx)
  */
 static int kernel_dplane_process_func(struct zebra_dplane_provider *prov)
 {
-	enum zebra_dplane_result res;
 	struct zebra_dplane_ctx *ctx;
 	int counter, limit;
 
@@ -1486,13 +1479,13 @@ static int kernel_dplane_process_func(struct zebra_dplane_provider *prov)
 		case DPLANE_OP_ROUTE_INSTALL:
 		case DPLANE_OP_ROUTE_UPDATE:
 		case DPLANE_OP_ROUTE_DELETE:
-			res = kernel_dplane_route_update(ctx);
+			kernel_dplane_route_update(ctx);
 			break;
 
 		case DPLANE_OP_LSP_INSTALL:
 		case DPLANE_OP_LSP_UPDATE:
 		case DPLANE_OP_LSP_DELETE:
-			res = kernel_dplane_lsp_update(ctx);
+			kernel_dplane_lsp_update(ctx);
 			break;
 
 		default:
@@ -1500,11 +1493,11 @@ static int kernel_dplane_process_func(struct zebra_dplane_provider *prov)
 				&zdplane_info.dg_other_errors, 1,
 				memory_order_relaxed);
 
-			res = ZEBRA_DPLANE_REQUEST_FAILURE;
+			dplane_ctx_set_status(ctx,
+					      ZEBRA_DPLANE_REQUEST_FAILURE);
 			break;
 		}
 
-		dplane_ctx_set_status(ctx, res);
 
 		dplane_provider_enqueue_out_ctx(prov, ctx);
 	}
