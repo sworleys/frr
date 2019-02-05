@@ -236,6 +236,11 @@ void dplane_ctx_fini(struct zebra_dplane_ctx **pctx);
 void dplane_ctx_enqueue_tail(struct dplane_ctx_q *q,
 			     const struct zebra_dplane_ctx *ctx);
 
+/* Enqueue a context block to caller's head.
+ */
+void dplane_ctx_enqueue_head(struct dplane_ctx_q *q,
+			     const struct zebra_dplane_ctx *ctx);
+
 /* Append a list of context blocks to another list - again, just keeping
  * the context struct opaque.
  */

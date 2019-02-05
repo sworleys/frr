@@ -309,6 +309,12 @@ void dplane_ctx_enqueue_tail(struct dplane_ctx_q *q,
 	TAILQ_INSERT_TAIL(q, (struct zebra_dplane_ctx *)ctx, zd_q_entries);
 }
 
+/* Enqueue a context block onto the head of the queue */
+void dplane_ctx_enqueue_head(struct dplane_ctx_q *q,
+			     const struct zebra_dplane_ctx *ctx)
+{
+	TAILQ_INSERT_HEAD(q, (struct zebra_dplane_ctx *)ctx, zd_q_entries);
+}
 /* Append a list of context blocks to another list */
 void dplane_ctx_list_append(struct dplane_ctx_q *to_list,
 			    struct dplane_ctx_q *from_list)

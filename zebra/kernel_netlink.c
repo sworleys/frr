@@ -317,7 +317,7 @@ bool netlink_read;
 void netlink_read_init(const char *fname)
 {
 	/* Just fake the context */
-	struct zebra_dplane_ctx ctx;
+	struct dplane_ctx_q ctx_q;
 	struct zebra_dplane_info dp_info;
 
 	snprintf(netlink_fuzz_file, MAXPATHLEN, "%s", fname);
@@ -328,7 +328,7 @@ void netlink_read_init(const char *fname)
 	zebra_dplane_info_from_zns(&dp_info, zns, false);
 
 	netlink_parse_info(netlink_information_fetch, &zns->netlink, &dp_info,
-			   &ctx, 1, 0);
+			   ctx_q, 1, 0);
 }
 
 /**
@@ -389,14 +389,14 @@ static int kernel_read(struct thread *thread)
 {
 	struct zebra_ns *zns = (struct zebra_ns *)THREAD_ARG(thread);
 	/* Just fake the context */
-	struct zebra_dplane_ctx ctx;
+	struct dplane_ctx_q ctx_q;
 	struct zebra_dplane_info dp_info;
 
 	/* Capture key info from ns struct */
 	zebra_dplane_info_from_zns(&dp_info, zns, false);
 
 	netlink_parse_info(netlink_information_fetch, &zns->netlink, &dp_info,
-			   &ctx, 5, 0);
+			   ctx_q, 5, 0);
 	zns->t_netlink = NULL;
 	thread_add_read(zrouter.master, kernel_read, zns, zns->netlink.sock,
 			&zns->t_netlink);
@@ -405,16 +405,18 @@ static int kernel_read(struct thread *thread)
 }
 
 /*
- * Netlink talk response context. I'm sorry about the terrible name.
+ * Netlink talk response context.
  *
  * This struct just stores information on the appropriate callbacks, zns, etc
- * to use when processing ACKs from kernel commands.
+ * to use when processing ACKs from kernel commands and a queue of dataplane
+ * contexts that have been batched.
  */
 struct nltrsctx {
 	int (*filter)(struct nlmsghdr *h, ns_id_t ns_id, int startup);
-	struct zebra_ns *zns;
-	struct nlsock *nls;
+	const struct zebra_dplane_info *dp_info;
 	int startup;
+	/* list of contexts batched */
+	struct dplane_ctx_q ctx_q;
 };
 
 /* Filter out messages from self that occur on listener socket,
@@ -699,7 +701,7 @@ static void netlink_parse_extended_ack(struct nlmsghdr *h)
 }
 
 /*
- * netlink_parse_info
+ * netlink_parse_info()
  *
  * Receive message from netlink interface and pass those information
  *  to the given function.
@@ -707,7 +709,7 @@ static void netlink_parse_extended_ack(struct nlmsghdr *h)
  * filter  -> Function to call to read the results
  * nl      -> netlink socket information
  * zns     -> The zebra namespace data
- * ctx     -> The dataplane context
+ * ctx_q   -> The dataplane context tail queue
  * count   -> How many we should read in, 0 means as much as possible
  * startup -> Are we reading in under startup conditions? passed to
  *            the filter.
@@ -715,7 +717,7 @@ static void netlink_parse_extended_ack(struct nlmsghdr *h)
 int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 		       const struct nlsock *nl,
 		       const struct zebra_dplane_info *zns,
-		       struct zebra_dplane_ctx *ctx, int count, int startup)
+		       struct dplane_ctx_q ctx_q, int count, int startup)
 {
 	int status;
 	int ret = 0;
@@ -735,8 +737,6 @@ int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 		struct nlmsghdr *h;
 
 		if (count && read_in >= count) {
-			dplane_ctx_set_status(ctx,
-					      ZEBRA_DPLANE_REQUEST_SUCCESS);
 			return 0;
 		}
 
@@ -765,16 +765,14 @@ int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 			 *  There is no good way to
 			 *  recover zebra at this point.
 			 */
-			dplane_ctx_set_status(ctx,
-					      ZEBRA_DPLANE_REQUEST_FAILURE);
 			exit(-1);
 			continue;
 		}
 
 		if (status == 0) {
 			flog_err_sys(EC_LIB_SOCKET, "%s EOF", nl->name);
-			dplane_ctx_set_status(ctx,
-					      ZEBRA_DPLANE_REQUEST_FAILURE);
+			//dplane_ctx_set_status(&ctx,
+			//		      ZEBRA_DPLANE_REQUEST_FAILURE);
 			return -1;
 		}
 
@@ -782,8 +780,8 @@ int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 			flog_err(EC_ZEBRA_NETLINK_LENGTH_ERROR,
 				 "%s sender address length error: length %d",
 				 nl->name, msg.msg_namelen);
-			dplane_ctx_set_status(ctx,
-					      ZEBRA_DPLANE_REQUEST_FAILURE);
+			//dplane_ctx_set_status(&ctx,
+			//		      ZEBRA_DPLANE_REQUEST_FAILURE);
 			return -1;
 		}
 
@@ -796,8 +794,8 @@ int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 #if defined(HANDLE_NETLINK_FUZZING)
 		if (!netlink_read) {
 			zlog_debug("Writing incoming netlink message");
-			netlink_write_incoming(buf, status,
-					       netlink_file_counter++);
+			//netlink_write_incoming(buf, status,
+			//		       netlink_file_counter++);
 		}
 #endif /* HANDLE_NETLINK_FUZZING */
 
@@ -821,9 +819,9 @@ int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 					flog_err(EC_ZEBRA_NETLINK_LENGTH_ERROR,
 						 "%s error: message truncated",
 						 nl->name);
-					dplane_ctx_set_status(
-						ctx,
-						ZEBRA_DPLANE_REQUEST_FAILURE);
+					//dplane_ctx_set_status(
+					//	&ctx,
+					//	ZEBRA_DPLANE_REQUEST_FAILURE);
 					return -1;
 				}
 
@@ -872,9 +870,9 @@ int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 							msg_type,
 							err->msg.nlmsg_seq,
 							err->msg.nlmsg_pid);
-					dplane_ctx_set_status(
-						ctx,
-						ZEBRA_DPLANE_REQUEST_SUCCESS);
+					//dplane_ctx_set_status(
+					//	&ctx,
+					//	ZEBRA_DPLANE_REQUEST_SUCCESS);
 					return 0;
 				}
 
@@ -912,8 +910,8 @@ int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 						msg_type, err->msg.nlmsg_seq,
 						err->msg.nlmsg_pid);
 
-				dplane_ctx_set_status(
-					ctx, ZEBRA_DPLANE_REQUEST_FAILURE);
+				//dplane_ctx_set_status(
+				//	&ctx, ZEBRA_DPLANE_REQUEST_FAILURE);
 				return -1;
 			}
 
@@ -1087,8 +1085,6 @@ static void *mnl_nlmsg_batch_current(struct mnl_nlmsg_batch *b)
 
 /*
  * netlink_talk_info() - This function attempts to batch messages to netlink.
- * Messages are cached for sequential netlink_talk calls while:
- *
  * @filter:	The filter to read final results from kernel
  * @nlmsghdr:	The data to send to the kernel
  * @dp_info:	The dataplane and netlink socket information
@@ -1096,7 +1092,9 @@ static void *mnl_nlmsg_batch_current(struct mnl_nlmsg_batch *b)
  * @startup:	Are we reading in under startup conditions
  * Return:      Pointer to the current position in the buffer
  *              that is used to store the batch.
- *             This is passed through eventually to filter.
+ *             	This is passed through eventually to filter.
+ *
+ * Messages are cached for sequential netlink_talk calls while:
  *
  * 1. The provided nlsock, zns and startup flag are the same as the previous
  * call
@@ -1122,9 +1120,10 @@ netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 	static uint8_t buf[2 * NL_PKT_TXBUF_SIZE];
 	/* thread pointer */
 	static struct thread *expiry;
-	/* saved context */
-	static bool ctx_initialized;
-	static struct zebra_dplane_ctx *saved_ctx;
+	/* Batching context for determining when to flush */
+	static struct nltrsctx batch_ctx;
+	/* For reseting the batch_ctx */
+	static bool batch_ctx_initialized;
 
 	int status = 0;
 	int save_errno = 0;
@@ -1133,14 +1132,15 @@ netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 	struct sockaddr_nl snl;
 	struct iovec iov;
 	struct msghdr msg;
+	// TODO: If I have to iterates sequence, then change this and
+	// just force cast it
 	const struct nlsock *nl;
 
-	THREAD_OFF(expiry);
-
-	dp_info = dplane_ctx_get_ns(ctx);
-	nl = &(dp_info->nls);
-	n->nlmsg_seq = nl->seq;
-	n->nlmsg_pid = nl->snl.nl_pid;
+	if (expiry) {
+		thread_cancel_async(zebrad.master, &expiry, NULL);
+	}
+	//n->nlmsg_seq = nl->seq;
+	//n->nlmsg_pid = nl->snl.nl_pid;
 
 
 	/* Only create the batch once */
@@ -1148,29 +1148,40 @@ netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 		zlog_debug("Creating batch");
 		memset(&nl_batch, 0, sizeof(nl_batch));
 		mnl_nlmsg_batch_start(&nl_batch, buf, NL_PKT_TXBUF_SIZE);
+		/* Initialiaze the context queue */
+		TAILQ_INIT(&batch_ctx.ctx_q);
 		batch_init = true;
 	}
 
 
 	/* if context is different from currently cached messages, flush */
-	if (!(ctx_initialized
-	      && (ctx.filter != filter || ctx.zns != zns
-		  || ctx.startup != startup || ctx.nls != nl))) {
-		/* save context */
-		saved_ctx = ctx;
+	if (!batch_ctx_initialized
+	    || (dp_info && batch_ctx.filter == filter
+		&& batch_ctx.dp_info->ns_id == dp_info->ns_id
+		&& batch_ctx.startup == startup
+		&& batch_ctx.dp_info->nls.sock == dp_info->nls.sock)) {
 
-		ctx.filter = filter;
-		ctx.zns = zns;
-		ctx.nls = nl;
-		ctx.startup = startup;
+		batch_ctx.filter = filter;
+		batch_ctx.dp_info = dp_info;
+		batch_ctx.startup = startup;
+		batch_ctx_initialized = true;
 
-		ctx_initialized = true;
 
 		if (n) {
-			n->nlmsg_seq = ++nl->seq;
+			nl = &(dp_info->nls);
+			n->nlmsg_seq = nl->seq;
+			n->nlmsg_pid = nl->snl.nl_pid;
+			n->nlmsg_seq = nl->seq;
 			n->nlmsg_pid = nl->snl.nl_pid;
 			memcpy(mnl_nlmsg_batch_current(&nl_batch), n,
 			       n->nlmsg_len);
+			//if (!batch_ctx_initialized) {
+			//	dplane_ctx_enqueue_head(&(batch_ctx.ctx_q), ctx);
+			//} else {
+			//	dplane_ctx_enqueue_tail(&(batch_ctx.ctx_q), ctx);
+			//}
+			//TAILQ_INSERT_TAIL(&(batch_ctx.ctx_q), ctx, zd_q_entries);
+			dplane_ctx_enqueue_tail(&(batch_ctx.ctx_q), ctx);
 			cached++;
 
 			if (IS_ZEBRA_DEBUG_KERNEL) {
@@ -1205,20 +1216,9 @@ netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 
 	snl.nl_family = AF_NETLINK;
 
-	nl = &(dp_info->nls);
-	n->nlmsg_seq = nl->seq;
-	n->nlmsg_pid = nl->snl.nl_pid;
-
-	if (IS_ZEBRA_DEBUG_KERNEL)
-		zlog_debug(
-			"netlink_talk: %s type %s(%u), len=%d seq=%u flags 0x%x",
-			nl->name, nl_msg_type_to_str(n->nlmsg_type),
-			n->nlmsg_type, n->nlmsg_len, n->nlmsg_seq,
-			n->nlmsg_flags);
-
 	/* Send message to netlink interface. */
 	frr_elevate_privs(&zserv_privs) {
-		status = sendmsg(ctx.nls->sock, &msg, 0);
+		status = sendmsg(batch_ctx.dp_info->nls.sock, &msg, 0);
 		save_errno = errno;
 	}
 
@@ -1231,13 +1231,15 @@ netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 	if (status < 0) {
 		flog_err_sys(EC_LIB_SOCKET, "netlink_talk sendmsg() error: %s",
 			     safe_strerror(save_errno));
+		// TODO: Loop over all contexts and set them as failures
 		ret = dplane_ctx_set_status(ctx, ZEBRA_DPLANE_REQUEST_FAILURE);
 	} else {
 		// TODO: Fix the loggers
 		zlog_debug("wrote [%d] messages (%u bytes) to netlink", cached,
 			   status);
-		ret = netlink_parse_info(filter, ctx.nls, ctx.zns, 0,
-					 ctx.startup);
+		ret = netlink_parse_info(filter, &(batch_ctx.dp_info->nls),
+					 batch_ctx.dp_info, batch_ctx.ctx_q, 0,
+					 batch_ctx.startup);
 	}
 
 	/* flush cache */
@@ -1247,7 +1249,7 @@ netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 				      2000, &expiry);
 	} else {
 		cached = 0;
-		ctx_initialized = false;
+		batch_ctx_initialized = false;
 	}
 
 	return ret;

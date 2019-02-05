@@ -899,7 +899,7 @@ int netlink_route_read(struct zebra_ns *zns)
 {
 	int ret;
 	/* Just fake the context */
-	struct zebra_dplane_ctx ctx;
+	struct dplane_ctx_q ctx_q;
 	struct zebra_dplane_info dp_info;
 
 	zebra_dplane_info_from_zns(&dp_info, zns, true /*is_cmd*/);
@@ -909,7 +909,7 @@ int netlink_route_read(struct zebra_ns *zns)
 	if (ret < 0)
 		return ret;
 	ret = netlink_parse_info(netlink_route_change_read_unicast,
-				 &zns->netlink_cmd, &dp_info, &ctx, 0, 1);
+				 &zns->netlink_cmd, &dp_info, ctx_q, 0, 1);
 	if (ret < 0)
 		return ret;
 
@@ -918,7 +918,7 @@ int netlink_route_read(struct zebra_ns *zns)
 	if (ret < 0)
 		return ret;
 	ret = netlink_parse_info(netlink_route_change_read_unicast,
-				 &zns->netlink_cmd, &dp_info, &ctx, 0, 1);
+				 &zns->netlink_cmd, &dp_info, ctx_q, 0, 1);
 	if (ret < 0)
 		return ret;
 
@@ -1559,7 +1559,7 @@ netlink_route_multipath(int cmd, struct zebra_dplane_ctx *ctx)
 		rta->rta_len = RTA_LENGTH(0);
 		rta_addattr_l(rta, NL_PKT_TXBUF_SIZE, RTAX_MTU, &mtu,
 			      sizeof(mtu));
-		addattr_l(&req.n, NL_PKT_BUF_SIZE, RTA_METRICS, RTA_DATA(rta),
+		addattr_l(&req.n, NL_PKT_RXBUF_SIZE, RTA_METRICS, RTA_DATA(rta),
 			  RTA_PAYLOAD(rta));
 	}
 
@@ -2137,7 +2137,7 @@ int netlink_macfdb_read(struct zebra_ns *zns)
 {
 	int ret;
 	/* Just fake the context */
-	struct zebra_dplane_ctx ctx;
+	struct dplane_ctx_q ctx_q;
 	struct zebra_dplane_info dp_info;
 
 	zebra_dplane_info_from_zns(&dp_info, zns, true /*is_cmd*/);
@@ -2150,7 +2150,7 @@ int netlink_macfdb_read(struct zebra_ns *zns)
 	/* We are reading entire table. */
 	filter_vlan = 0;
 	ret = netlink_parse_info(netlink_macfdb_table, &zns->netlink_cmd,
-				 &dp_info, &ctx, 0, 1);
+				 &dp_info, ctx_q, 0, 1);
 
 	return ret;
 }
@@ -2166,7 +2166,7 @@ int netlink_macfdb_read_for_bridge(struct zebra_ns *zns, struct interface *ifp,
 	struct zebra_if *zif;
 	struct zebra_l2info_vxlan *vxl;
 	/* Just fake the context */
-	struct zebra_dplane_ctx ctx;
+	struct dplane_ctx_q ctx_q;
 	struct zebra_dplane_info dp_info;
 	int ret = 0;
 
@@ -2186,7 +2186,7 @@ int netlink_macfdb_read_for_bridge(struct zebra_ns *zns, struct interface *ifp,
 	if (ret < 0)
 		return ret;
 	ret = netlink_parse_info(netlink_macfdb_table, &zns->netlink_cmd,
-				 &dp_info, &ctx, 0, 0);
+				 &dp_info, ctx_q, 0, 0);
 
 	/* Reset VLAN filter. */
 	filter_vlan = 0;
@@ -2241,7 +2241,7 @@ int netlink_macfdb_read_specific_mac(struct zebra_ns *zns,
 {
 	int ret = 0;
 	/* Just fake the context */
-	struct zebra_dplane_ctx ctx;
+	struct dplane_ctx_q ctx_q;
 	struct zebra_dplane_info dp_info;
 
 	zebra_dplane_info_from_zns(&dp_info, zns, true /*is_cmd*/);
@@ -2255,7 +2255,7 @@ int netlink_macfdb_read_specific_mac(struct zebra_ns *zns,
 		return ret;
 
 	ret = netlink_parse_info(netlink_macfdb_table, &zns->netlink_cmd,
-				 &dp_info, &ctx, 1, 0);
+				 &dp_info, ctx_q, 1, 0);
 
 	return ret;
 }
@@ -2535,7 +2535,7 @@ int netlink_neigh_read(struct zebra_ns *zns)
 {
 	int ret;
 	/* Just fake the context */
-	struct zebra_dplane_ctx ctx;
+	struct dplane_ctx_q ctx_q;
 	struct zebra_dplane_info dp_info;
 
 	zebra_dplane_info_from_zns(&dp_info, zns, true /*is_cmd*/);
@@ -2546,7 +2546,7 @@ int netlink_neigh_read(struct zebra_ns *zns)
 	if (ret < 0)
 		return ret;
 	ret = netlink_parse_info(netlink_neigh_table, &zns->netlink_cmd,
-				 &dp_info, &ctx, 0, 1);
+				 &dp_info, ctx_q, 0, 1);
 
 	return ret;
 }
@@ -2559,7 +2559,7 @@ int netlink_neigh_read_for_vlan(struct zebra_ns *zns, struct interface *vlan_if)
 {
 	int ret = 0;
 	/* Just fake the context */
-	struct zebra_dplane_ctx ctx;
+	struct dplane_ctx_q ctx_q;
 	struct zebra_dplane_info dp_info;
 
 	zebra_dplane_info_from_zns(&dp_info, zns, true /*is_cmd*/);
@@ -2569,7 +2569,7 @@ int netlink_neigh_read_for_vlan(struct zebra_ns *zns, struct interface *vlan_if)
 	if (ret < 0)
 		return ret;
 	ret = netlink_parse_info(netlink_neigh_table, &zns->netlink_cmd,
-				 &dp_info, &ctx, 0, 0);
+				 &dp_info, ctx_q, 0, 0);
 
 	return ret;
 }
@@ -2618,7 +2618,7 @@ int netlink_neigh_read_specific_ip(struct ipaddr *ip,
 	struct zebra_vrf *zvrf = zebra_vrf_lookup_by_id(vlan_if->vrf_id);
 	char buf[INET6_ADDRSTRLEN];
 	/* Just fake the context */
-	struct zebra_dplane_ctx ctx;
+	struct dplane_ctx_q ctx_q;
 	struct zebra_dplane_info dp_info;
 
 	zns = zvrf->zns;
@@ -2638,7 +2638,7 @@ int netlink_neigh_read_specific_ip(struct ipaddr *ip,
 		return ret;
 
 	ret = netlink_parse_info(netlink_neigh_table, &zns->netlink_cmd,
-				 &dp_info, &ctx, 1, 0);
+				 &dp_info, ctx_q, 1, 0);
 
 	return ret;
 }
