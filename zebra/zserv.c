@@ -1136,6 +1136,32 @@ int zsend_pw_update(struct zserv *client, struct zebra_pw *pw)
 	return zebra_server_send_message(client);
 }
 
+/*
+ * Handle message requesting interface be set up or down.
+ */
+static int zread_interface_set_protodown(struct zserv *client, u_short length,
+					 struct zebra_vrf *zvrf)
+{
+	ifindex_t ifindex;
+	struct interface *ifp;
+	char down;
+
+	struct stream *s = client->ibuf;
+
+	STREAM_GETL(s, ifindex);
+	STREAM_GETC(s, down);
+
+	/* set ifdown */
+	ifp = if_lookup_by_index_per_ns(zebra_ns_lookup(NS_DEFAULT), ifindex);
+	zlog_info("Setting interface %s (%u): protodown %s", ifp->name, ifindex,
+		  down ? "on" : "off");
+
+	zebra_if_set_protodown(ifp, down);
+
+stream_failure:
+	return 0;
+}
+
 /* Register zebra server interface information.  Send current all
    interface and address information. */
 static int zread_interface_add(struct zserv *client, u_short length,
@@ -2769,6 +2795,9 @@ static inline void zserv_handle_commands(struct zserv *client, uint16_t command,
 		break;
 	case ZEBRA_INTERFACE_DELETE:
 		zread_interface_delete(client, length, zvrf);
+		break;
+	case ZEBRA_INTERFACE_SET_PROTODOWN:
+		zread_interface_set_protodown(client, length, zvrf);
 		break;
 	case ZEBRA_ROUTE_ADD:
 		zread_route_add(client, length, zvrf);
