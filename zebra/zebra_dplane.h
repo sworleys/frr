@@ -241,6 +241,10 @@ void dplane_ctx_enqueue_tail(struct dplane_ctx_q *q,
 void dplane_ctx_enqueue_head(struct dplane_ctx_q *q,
 			     const struct zebra_dplane_ctx *ctx);
 
+/* Set the status for all contexts in the queue. */
+void dplane_ctx_set_status_all(struct dplane_ctx_q *q,
+			       enum zebra_dplane_result zd_status);
+
 /* Append a list of context blocks to another list - again, just keeping
  * the context struct opaque.
  */

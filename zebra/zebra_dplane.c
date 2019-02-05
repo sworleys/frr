@@ -315,6 +315,17 @@ void dplane_ctx_enqueue_head(struct dplane_ctx_q *q,
 {
 	TAILQ_INSERT_HEAD(q, (struct zebra_dplane_ctx *)ctx, zd_q_entries);
 }
+
+/* Set the status for all contexts in the queue. */
+void dplane_ctx_set_status_all(struct dplane_ctx_q *q,
+			       enum zebra_dplane_result status)
+{
+	struct zebra_dplane_ctx *ctx;
+	TAILQ_FOREACH(ctx, q, zd_q_entries) {
+		dplane_ctx_set_status(ctx, status);
+	}
+}
+
 /* Append a list of context blocks to another list */
 void dplane_ctx_list_append(struct dplane_ctx_q *to_list,
 			    struct dplane_ctx_q *from_list)
