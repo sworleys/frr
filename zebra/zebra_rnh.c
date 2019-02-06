@@ -191,8 +191,6 @@ struct rnh *zebra_add_rnh(struct prefix *p, vrf_id_t vrfid, rnh_type_t type,
 		rnh->client_list = list_new();
 		rnh->vrf_id = vrfid;
 		rnh->type = type;
-		rnh->seqno = 0;
-		rnh->afi = afi;
 		rnh->zebra_pseudowire_list = list_new();
 		route_lock_node(rn);
 		rn->info = rnh;
