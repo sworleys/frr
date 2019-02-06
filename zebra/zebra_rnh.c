@@ -501,7 +501,7 @@ static void zebra_rnh_eval_import_check_entry(struct zebra_vrf *zvrf, afi_t afi,
 	if (state_changed || force) {
 		if (IS_ZEBRA_DEBUG_NHT) {
 			prefix2str(&nrn->p, bufn, INET6_ADDRSTRLEN);
-			zlog_debug("%u:%s: Route import check %s %s",
+			zlog_debug("%u:%s: Route import check %s %s\n",
 				   zvrf->vrf->vrf_id,
 				   bufn, rnh->state ? "passed" : "failed",
 				   state_changed ? "(state changed)" : "");
