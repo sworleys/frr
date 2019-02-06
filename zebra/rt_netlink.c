@@ -1815,26 +1815,45 @@ int kernel_get_ipmr_sg_stats(struct zebra_vrf *zvrf, void *in)
 	return suc;
 }
 
-/*
- * Update or delete a prefix from the kernel,
- * using info from a dataplane context.
+/**
+ * get_ctx_route_command() - Get the netlink route command to be used from ctx.
+ *
+ * @ctx:	Pointer to dataplane context
+ * Return:	Netlink route command
  */
-enum zebra_dplane_result kernel_route_update(struct zebra_dplane_ctx *ctx)
+static int get_ctx_route_command(struct zebra_dplane_ctx *ctx)
 {
-	int cmd, ret;
-	const struct prefix *p = dplane_ctx_get_dest(ctx);
-	struct nexthop *nexthop;
+	int cmd;
 
 	if (dplane_ctx_get_op(ctx) == DPLANE_OP_ROUTE_DELETE) {
 		cmd = RTM_DELROUTE;
 	} else if (dplane_ctx_get_op(ctx) == DPLANE_OP_ROUTE_INSTALL) {
 		cmd = RTM_NEWROUTE;
 	} else if (dplane_ctx_get_op(ctx) == DPLANE_OP_ROUTE_UPDATE) {
+		cmd = RTM_NEWROUTE;
+	} else {
+		dplane_ctx_set_status(ctx, ZEBRA_DPLANE_REQUEST_FAILURE);
+		cmd = -1;
+	}
+	return cmd;
 
-		if (p->family == AF_INET || v6_rr_semantics) {
-			/* Single 'replace' operation */
-			cmd = RTM_NEWROUTE;
-		} else {
+}
+
+/**
+ * kernel_route_update() - Send the kernel a route update
+ * update
+ *
+ * @ctx:	Pointer to dataplane context
+ * Return:	Status result set in context
+ */
+enum zebra_dplane_result kernel_route_update(struct zebra_dplane_ctx *ctx)
+{
+	int cmd, ret;
+	const struct prefix *p = dplane_ctx_get_dest(ctx);
+
+	cmd = get_ctx_route_command(ctx);
+	if (dplane_ctx_get_op(ctx) == DPLANE_OP_ROUTE_UPDATE) {
+		if (!(p->family == AF_INET || v6_rr_semantics)) {
 			/*
 			 * So v6 route replace semantics are not in
 			 * the kernel at this point as I understand it.
@@ -1848,15 +1867,31 @@ enum zebra_dplane_result kernel_route_update(struct zebra_dplane_ctx *ctx)
 			 * screwed.
 			 */
 			(void)netlink_route_multipath(RTM_DELROUTE, ctx);
-			cmd = RTM_NEWROUTE;
 		}
-
-	} else {
-		dplane_ctx_set_status(ctx, ZEBRA_DPLANE_REQUEST_FAILURE);
-		return dplane_ctx_get_status(ctx);
 	}
 
-	ret = netlink_route_multipath(cmd, ctx);
+	if (cmd > 0) {
+		ret = netlink_route_multipath(cmd, ctx);
+	} else {
+		/* The command must have been invalid */
+		ret = dplane_ctx_get_status(ctx);
+	}
+	return ret;
+}
+
+/**
+ * kernel_route_update_handle() - Handle the status result of the ctx route
+ * update
+ *
+ * @ctx:	Pointer to dataplane context
+ * Return:	Result status of the context
+ */
+enum zebra_dplane_result kernel_route_update_handle(struct zebra_dplane_ctx *ctx)
+{
+	struct nexthop *nexthop;
+	int cmd;
+
+	cmd = get_ctx_route_command(ctx);
 	if ((cmd == RTM_NEWROUTE)
 	    && (dplane_ctx_get_status(ctx) == ZEBRA_DPLANE_REQUEST_SUCCESS)) {
 		/* Update installed nexthops to signal which have been
@@ -1871,7 +1906,7 @@ enum zebra_dplane_result kernel_route_update(struct zebra_dplane_ctx *ctx)
 			}
 		}
 	}
-	return ret;
+	return dplane_ctx_get_status(ctx);
 }
 
 int kernel_neigh_update(int add, int ifindex, uint32_t addr, char *lla,
@@ -2764,7 +2799,8 @@ int kernel_upd_neigh(struct interface *ifp, struct ipaddr *ip,
  * MPLS label forwarding table change via netlink interface, using dataplane
  * context information.
  */
-int netlink_mpls_multipath(int cmd, struct zebra_dplane_ctx *ctx)
+enum zebra_dplane_result netlink_mpls_multipath(int cmd,
+						struct zebra_dplane_ctx *ctx)
 {
 	mpls_lse_t lse;
 	zebra_nhlfe_t *nhlfe;

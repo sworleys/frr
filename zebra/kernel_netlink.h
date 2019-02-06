@@ -56,11 +56,12 @@ extern const char *nl_rttype_to_str(uint8_t rttype);
 extern bool netlink_read;
 extern void netlink_read_init(const char *fname);
 #endif /* HANDLE_NETLINK_FUZZING */
-extern int netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
-			      const struct nlsock *nl,
-			      const struct zebra_dplane_info *dp_info,
-			      struct dplane_ctx_q ctx_q,
-			      int count, int startup);
+extern enum zebra_dplane_result netlink_batch_expire(void);
+extern enum zebra_dplane_result
+netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
+		   const struct nlsock *nl,
+		   const struct zebra_dplane_info *dp_info,
+		   struct dplane_ctx_q ctx_q, int count, int startup);
 extern int netlink_talk_filter(struct nlmsghdr *h, ns_id_t ns, int startup);
 extern int netlink_talk(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 			struct nlmsghdr *n, struct nlsock *nl,

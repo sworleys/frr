@@ -242,8 +242,8 @@ void dplane_ctx_enqueue_head(struct dplane_ctx_q *q,
 			     const struct zebra_dplane_ctx *ctx);
 
 /* Set the status for all contexts in the queue. */
-void dplane_ctx_set_status_all(struct dplane_ctx_q *q,
-			       enum zebra_dplane_result zd_status);
+enum zebra_dplane_result dplane_ctx_set_status_all(
+	struct dplane_ctx_q *q, enum zebra_dplane_result zd_status);
 
 /* Append a list of context blocks to another list - again, just keeping
  * the context struct opaque.
@@ -473,6 +473,11 @@ int dplane_provider_dequeue_in_list(struct zebra_dplane_provider *prov,
 /* Enqueue, maintain associated counter and locking */
 void dplane_provider_enqueue_out_ctx(struct zebra_dplane_provider *prov,
 				     struct zebra_dplane_ctx *ctx);
+
+/* Append, maintain associated counter and locking */
+void dplane_provider_append_enqueue_out_ctx(struct zebra_dplane_provider *prov,
+					    struct dplane_ctx_q *from_q,
+					    int count);
 
 /*
  * Initialize the dataplane modules at zebra startup. This is currently called

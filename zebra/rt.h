@@ -37,6 +37,8 @@
  */
 extern enum zebra_dplane_result kernel_route_update(
 	struct zebra_dplane_ctx *ctx);
+extern enum zebra_dplane_result
+kernel_route_update_handle(struct zebra_dplane_ctx *ctx);
 
 extern enum zebra_dplane_result kernel_lsp_update(
 	struct zebra_dplane_ctx *ctx);

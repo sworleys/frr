@@ -29,6 +29,7 @@
 #include "zebra/zebra_router.h"
 #include "zebra/zebra_dplane.h"
 #include "zebra/rt.h"
+#include "zebra/kernel_netlink.h"
 #include "zebra/debug.h"
 
 /* Memory type for context blocks */
@@ -317,13 +318,20 @@ void dplane_ctx_enqueue_head(struct dplane_ctx_q *q,
 }
 
 /* Set the status for all contexts in the queue. */
-void dplane_ctx_set_status_all(struct dplane_ctx_q *q,
+/**
+ * zebra_dplane_result_dplane_ctx_set_status_all() - Sets status on all ctx in queue
+ * @q:		Tail queue of dataplane contexts to set status on
+ * @status:	Status to set
+ * Return:	Return the status that was set
+ */
+enum zebra_dplane_result dplane_ctx_set_status_all(struct dplane_ctx_q *q,
 			       enum zebra_dplane_result status)
 {
 	struct zebra_dplane_ctx *ctx;
 	TAILQ_FOREACH(ctx, q, zd_q_entries) {
 		dplane_ctx_set_status(ctx, status);
 	}
+	return status;
 }
 
 /* Append a list of context blocks to another list */
@@ -1554,6 +1562,24 @@ void dplane_provider_enqueue_out_ctx(struct zebra_dplane_provider *prov,
 }
 
 /*
+ * dplane_provider_append_enqueue_out_ctx() - Appends to the context out queue,
+ * 	maintaining associated counter
+ * @prov:	Dataplane provider struct
+ * @from_q:	Tail queue we are appending to the out queue
+ */
+void dplane_provider_append_enqueue_out_ctx(struct zebra_dplane_provider *prov,
+					    struct dplane_ctx_q *from_q,
+					    int count)
+{
+	dplane_provider_lock(prov);
+	dplane_ctx_list_append(&(prov->dp_ctx_out_q), from_q);
+	dplane_provider_unlock(prov);
+
+	atomic_fetch_add_explicit(&(prov->dp_out_counter), count,
+				  memory_order_relaxed);
+}
+
+/*
  * Accessor for provider object
  */
 bool dplane_provider_is_threaded(const struct zebra_dplane_provider *prov)
@@ -1600,8 +1626,11 @@ int dplane_provider_work_ready(void)
  * Kernel dataplane provider
  */
 
-/*
- * Handler for kernel LSP updates
+/**
+ * kernel_dplane_lsp_update() - Dispatch dataplane context lsp update to the
+ * kernel
+ *
+ * Return:	Status result set in the context
  */
 static enum zebra_dplane_result
 kernel_dplane_lsp_update(struct zebra_dplane_ctx *ctx)
@@ -1611,12 +1640,27 @@ kernel_dplane_lsp_update(struct zebra_dplane_ctx *ctx)
 	/* Call into the synchronous kernel-facing code here */
 	res = kernel_lsp_update(ctx);
 
+	return res;
+}
+
+/**
+ * kernel_dplane_lsp_update_handle() - Handle the result of the lsp update
+ *
+ * @ctx:	Pointer to dataplane context
+ * Return:	Status result set in the context
+ */
+static enum zebra_dplane_result
+kernel_dplane_lsp_update_handle(struct zebra_dplane_ctx *ctx)
+{
+	enum zebra_dplane_result res;
+
+	res = dplane_ctx_get_status(ctx);
 	if (res != ZEBRA_DPLANE_REQUEST_SUCCESS)
-		atomic_fetch_add_explicit(
-			&zdplane_info.dg_lsp_errors, 1,
-			memory_order_relaxed);
+		atomic_fetch_add_explicit(&zdplane_info.dg_lsp_errors, 1,
+					  memory_order_relaxed);
 
 	return res;
+
 }
 
 /*
@@ -1645,10 +1689,15 @@ kernel_dplane_pw_update(struct zebra_dplane_ctx *ctx)
 	return res;
 }
 
-/*
- * Handler for kernel route updates
+/**
+ * kernel_dplane_route_update() - Dispatch dataplane context route update to the
+ * kernel
+ *
+ * @ctx:	Pointer to dataplane context
+ * Return:	Status result set in the context
  */
-static void kernel_dplane_route_update(struct zebra_dplane_ctx *ctx)
+static enum zebra_dplane_result
+kernel_dplane_route_update(struct zebra_dplane_ctx *ctx)
 {
 	if (IS_ZEBRA_DEBUG_DPLANE_DETAIL) {
 		char dest_str[PREFIX_STRLEN];
@@ -1662,34 +1711,45 @@ static void kernel_dplane_route_update(struct zebra_dplane_ctx *ctx)
 	}
 
 	/* Call into the synchronous kernel-facing code here */
-	kernel_route_update(ctx);
+	return kernel_route_update(ctx);
 
-	if (dplane_ctx_get_status(ctx) != ZEBRA_DPLANE_REQUEST_SUCCESS)
-		atomic_fetch_add_explicit(&zdplane_info.dg_route_errors, 1,
-					  memory_order_relaxed);
 }
 
-/*
- * Kernel provider callback
+/**
+ * kernel_dplane_route_update_handle() - Handle the result of the route update
+ *
+ * @ctx:	Pointer to dataplane context
+ * Return:	Status result set in the context
  */
-static int kernel_dplane_process_func(struct zebra_dplane_provider *prov)
+static enum zebra_dplane_result
+kernel_dplane_route_update_handle(struct zebra_dplane_ctx *ctx)
+{
+	enum zebra_dplane_result res;
+
+	kernel_route_update_handle(ctx);
+	res = dplane_ctx_get_status(ctx);
+	if (res != ZEBRA_DPLANE_REQUEST_SUCCESS)
+		atomic_fetch_add_explicit(&zdplane_info.dg_route_errors, 1,
+					  memory_order_relaxed);
+	return res;
+}
+
+/**
+ * kernel_dplane_process_batch() - Sends the dataplane contexts to the kernel
+ * via batched netlink messages.
+ *
+ * @q:		Tail queue of contexts to batch
+ * Return:	Returns a status integer
+ */
+static int kernel_dplane_process_batch(struct dplane_ctx_q *q)
 {
 	struct zebra_dplane_ctx *ctx;
-	int counter, limit;
+	struct zebra_dplane_ctx *tmp_ctx;
+	int count = 0;
+	for (ctx = TAILQ_FIRST(q); ctx != NULL; ctx = tmp_ctx) {
+		count++;
+		tmp_ctx = TAILQ_NEXT(ctx, zd_q_entries);
 
-	limit = dplane_provider_get_work_limit(prov);
-
-	if (IS_ZEBRA_DEBUG_DPLANE_DETAIL)
-		zlog_debug("dplane provider '%s': processing",
-			   dplane_provider_get_name(prov));
-
-	for (counter = 0; counter < limit; counter++) {
-
-		ctx = dplane_provider_dequeue_in_ctx(prov);
-		if (ctx == NULL)
-			break;
-
-		/* Dispatch to appropriate kernel-facing apis */
 		switch (dplane_ctx_get_op(ctx)) {
 
 		case DPLANE_OP_ROUTE_INSTALL:
@@ -1718,18 +1778,121 @@ static int kernel_dplane_process_func(struct zebra_dplane_provider *prov)
 					      ZEBRA_DPLANE_REQUEST_FAILURE);
 			break;
 		}
-
-
-		dplane_provider_enqueue_out_ctx(prov, ctx);
 	}
+	zlog_debug("Looped %d times", count);
+	/* Flush the netlink batch */
+	return netlink_batch_expire();
+}
+
+/**
+ * kernel_dplane_process_handle() - Sends the dataplane contexts to their
+ * appropriate handlers.
+ *
+ * @q:		Tail queue of contexts to batch
+ * Return:	Returns a status integer
+ */
+static int kernel_dplane_process_handle(struct dplane_ctx_q *q)
+{
+	struct zebra_dplane_ctx *ctx;
+	struct zebra_dplane_ctx *tmp_ctx;
+	int ret = 0;
+	for (ctx = TAILQ_FIRST(q); ctx != NULL; ctx = tmp_ctx) {
+		tmp_ctx = TAILQ_NEXT(ctx, zd_q_entries);
+
+		/* Dispatch to appropriate handlers */
+		switch (dplane_ctx_get_op(ctx)) {
+
+		case DPLANE_OP_ROUTE_INSTALL:
+		case DPLANE_OP_ROUTE_UPDATE:
+		case DPLANE_OP_ROUTE_DELETE:
+			ret = kernel_dplane_route_update_handle(ctx);
+			break;
+
+		case DPLANE_OP_LSP_INSTALL:
+		case DPLANE_OP_LSP_UPDATE:
+		case DPLANE_OP_LSP_DELETE:
+			ret = kernel_dplane_lsp_update_handle(ctx);
+			break;
+
+		case DPLANE_OP_NONE:
+			break;
+			// Do nothing, should have failed in the dispatch
+		}
+	}
+	return ret;
+}
+
+/**
+ * kernel_dplane_process() - Sends the dataplane contexts to the kernel without
+ * batching.
+ *
+ * @q:		Tail queue of contexts to batch
+ * Return:	Returns a status integer
+ */
+static int kernel_dplane_process(struct dplane_ctx_q *q)
+{
+	//TODO: Do this for bsd, and test on vm
+	return 1;
+}
+
+/*
+ * Kernel provider callback
+ */
+static int kernel_dplane_process_func(struct zebra_dplane_provider *prov)
+{
+	/* Queue of contexts to handle as batch in kernel */
+	struct dplane_ctx_q handle_q;
+	/* Return status */
+	int ret = 0;
+	/* How many are to be handled */
+	int count = 0;
+	/* Limit on number of contexts to process per cycle */
+	int limit;
+
+	TAILQ_INIT(&handle_q);
+	limit = dplane_provider_get_work_limit(prov);
+	/* Get a temporary list of ctx to handle */
+	count = dplane_provider_dequeue_in_list(prov, &handle_q);
+
+	if (IS_ZEBRA_DEBUG_DPLANE_DETAIL)
+		zlog_debug("dplane provider '%s': processing",
+			   dplane_provider_get_name(prov));
+
+#if defined(HAVE_NETLINK)
+	/* Check there is any ctx to handle first */
+	if (count > 0) {
+		ret = kernel_dplane_process_batch(&handle_q);
+	}
+
+	if (ret < 0) {
+		/* Something went wrong with batching */
+		zlog_err("Error sending batched contexts");
+		return ret;
+	}
+	ret = kernel_dplane_process_handle(&handle_q);
+
+	if (ret < 0) {
+		/* Something went wrong with batching */
+		zlog_err("Error handling batched contexts results");
+		/* Not returning here since the messages went through fine, but
+		 * we did not handle them correctly in frr, so we can still
+		 * possibly recover by requesting an update from the kernel?
+		 */
+	}
+#else
+	/* For non-linux/netlink kernels */
+	ret = kernel_dplane_process(&handle_q);
+
+#endif	/* HAVE_NETLINK */
+	dplane_provider_append_enqueue_out_ctx(prov, &handle_q, count);
 
 	/* Ensure that we'll run the work loop again if there's still
 	 * more work to do.
 	 */
-	if (counter >= limit) {
+	if (count >= limit) {
 		if (IS_ZEBRA_DEBUG_DPLANE_DETAIL)
 			zlog_debug("dplane provider '%s' reached max updates %d",
-				   dplane_provider_get_name(prov), counter);
+				   dplane_provider_get_name(prov), count);
 
 		atomic_fetch_add_explicit(&zdplane_info.dg_update_yields,
 					  1, memory_order_relaxed);
@@ -1737,7 +1900,7 @@ static int kernel_dplane_process_func(struct zebra_dplane_provider *prov)
 		dplane_provider_work_ready();
 	}
 
-	return 0;
+	return ret;
 }
 
 #if DPLANE_TEST_PROVIDER
