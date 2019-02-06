@@ -1232,7 +1232,7 @@ void zebra_rib_evaluate_rn_nexthops(struct route_node *rn, uint32_t seq)
 	struct rnh *rnh;
 
 	/*
-	 * We are storing the rnh's associated withb
+	 * We are storing the rnh's associated with
 	 * the tracked nexthop as a list of the rn's.
 	 * Unresolved rnh's are placed at the top
 	 * of the tree list.( 0.0.0.0/0 for v4 and 0::0/0 for v6 )
@@ -1241,13 +1241,6 @@ void zebra_rib_evaluate_rn_nexthops(struct route_node *rn, uint32_t seq)
 	 * would match a more specific route
 	 */
 	while (rn) {
-		if (IS_ZEBRA_DEBUG_NHT_DETAILED) {
-			char buf[PREFIX_STRLEN];
-
-			zlog_debug("%s: %s Being examined for Nexthop Tracking",
-				   __PRETTY_FUNCTION__,
-				   srcdest_rnode2str(rn, buf, sizeof(buf)));
-		}
 		if (!dest) {
 			rn = rn->parent;
 			if (rn)
@@ -1265,13 +1258,13 @@ void zebra_rib_evaluate_rn_nexthops(struct route_node *rn, uint32_t seq)
 				zebra_vrf_lookup_by_id(rnh->vrf_id);
 			struct prefix *p = &rnh->node->p;
 
-			if (IS_ZEBRA_DEBUG_NHT_DETAILED) {
+			if (IS_ZEBRA_DEBUG_NHT) {
 				char buf1[PREFIX_STRLEN];
 				char buf2[PREFIX_STRLEN];
 
 				zlog_debug("%u:%s has Nexthop(%s) depending on it, evaluating %u:%u",
 					   zvrf->vrf->vrf_id,
-					   srcdest_rnode2str(rn, buf1,
+					   prefix2str(&rn->p, buf1,
 						      sizeof(buf1)),
 					   prefix2str(p, buf2, sizeof(buf2)),
 					   seq, rnh->seqno);
@@ -1289,12 +1282,8 @@ void zebra_rib_evaluate_rn_nexthops(struct route_node *rn, uint32_t seq)
 			 * we were originally as such we know that
 			 * that sequence number is ok to respect.
 			 */
-			if (rnh->seqno == seq) {
-				if (IS_ZEBRA_DEBUG_NHT_DETAILED)
-					zlog_debug(
-						"\tNode processed and moved already");
+			if (rnh->seqno == seq)
 				continue;
-			}
 
 			rnh->seqno = seq;
 			zebra_evaluate_rnh(zvrf, family2afi(p->family), 0,
@@ -2158,7 +2147,6 @@ static void rib_process_result(struct zebra_dplane_ctx *ctx)
 	}
 
 	zebra_rib_evaluate_rn_nexthops(rn, seq);
-	zebra_rib_evaluate_mpls(rn);
 done:
 
 	if (rn)
@@ -2219,6 +2207,18 @@ static unsigned int process_subq(struct list *subq, uint8_t qindex)
  */
 static void do_nht_processing(void)
 {
+	struct zebra_vrf *zvrf;
+
+	/* Schedule LSPs for processing, if needed. */
+	zvrf = vrf_info_lookup(VRF_DEFAULT);
+	if (mpls_should_lsps_be_processed(zvrf)) {
+		if (IS_ZEBRA_DEBUG_MPLS)
+			zlog_debug(
+				"%u: Scheduling all LSPs upon RIB completion",
+				zvrf_id(zvrf));
+		zebra_mpls_lsp_schedule(zvrf);
+		mpls_unmark_lsps_for_processing(zvrf);
+	}
 }
 
 /* Dispatch the meta queue by picking, processing and unlocking the next RN from
