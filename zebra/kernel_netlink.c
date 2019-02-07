@@ -1238,6 +1238,8 @@ netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 	if (mnl_nlmsg_batch_reset(&nl_batch)) {
 		cached = 1;
 		// TODO: Re-run and force flush?
+		// Shouldn't need to do this since it will flush as soon
+		// as it is full
 	} else {
 		TAILQ_INIT(&batch_ctx.ctx_q);
 		cached = 0;

@@ -1635,12 +1635,9 @@ int dplane_provider_work_ready(void)
 static enum zebra_dplane_result
 kernel_dplane_lsp_update(struct zebra_dplane_ctx *ctx)
 {
-	enum zebra_dplane_result res;
 
 	/* Call into the synchronous kernel-facing code here */
-	res = kernel_lsp_update(ctx);
-
-	return res;
+	return kernel_lsp_update(ctx);
 }
 
 /**
@@ -1663,14 +1660,36 @@ kernel_dplane_lsp_update_handle(struct zebra_dplane_ctx *ctx)
 
 }
 
-/*
- * Handler for kernel pseudowire updates
+/**
+ * kernel_dplane_pw_update_handle() - Dispatch dataplane context pseudowire
+ * update to the kernel
+ * @ctx:	Pointer to dataplane context
+ * Return:	Status result set in the context
+ */
+static enum zebra_dplane_result
+kernel_dplane_pw_update_handle(struct zebra_dplane_ctx *ctx)
+{
+	enum zebra_dplane_result res;
+
+	res = dplane_ctx_get_status(ctx);
+
+	if (res != ZEBRA_DPLANE_REQUEST_SUCCESS)
+		atomic_fetch_add_explicit(
+			&zdplane_info.dg_pw_errors, 1,
+			memory_order_relaxed);
+
+	return res;
+}
+
+/**
+ * kernel_dplane_pw_update() - Dispatch dataplane context pseudowire update to
+ * the kernel
+ * @ctx:	Pointer to dataplane context
+ * Return:	Status result set in the context
  */
 static enum zebra_dplane_result
 kernel_dplane_pw_update(struct zebra_dplane_ctx *ctx)
 {
-	enum zebra_dplane_result res;
-
 	if (IS_ZEBRA_DEBUG_DPLANE_DETAIL)
 		zlog_debug("Dplane pw %s: op %s af %d loc: %u rem: %u",
 			   dplane_ctx_get_pw_ifname(ctx),
@@ -1679,14 +1698,7 @@ kernel_dplane_pw_update(struct zebra_dplane_ctx *ctx)
 			   dplane_ctx_get_pw_local_label(ctx),
 			   dplane_ctx_get_pw_remote_label(ctx));
 
-	res = kernel_pw_update(ctx);
-
-	if (res != ZEBRA_DPLANE_REQUEST_SUCCESS)
-		atomic_fetch_add_explicit(
-			&zdplane_info.dg_pw_errors, 1,
-			memory_order_relaxed);
-
-	return res;
+	return kernel_pw_update(ctx);
 }
 
 /**
@@ -1766,7 +1778,7 @@ static int kernel_dplane_process_batch(struct dplane_ctx_q *q)
 
 		case DPLANE_OP_PW_INSTALL:
 		case DPLANE_OP_PW_UNINSTALL:
-			res = kernel_dplane_pw_update(ctx);
+			kernel_dplane_pw_update(ctx);
 			break;
 
 		default:
@@ -1812,6 +1824,11 @@ static int kernel_dplane_process_handle(struct dplane_ctx_q *q)
 		case DPLANE_OP_LSP_UPDATE:
 		case DPLANE_OP_LSP_DELETE:
 			ret = kernel_dplane_lsp_update_handle(ctx);
+			break;
+
+		case DPLANE_OP_PW_INSTALL:
+		case DPLANE_OP_PW_UNINSTALL:
+			kernel_dplane_pw_update_handle(ctx);
 			break;
 
 		case DPLANE_OP_NONE:

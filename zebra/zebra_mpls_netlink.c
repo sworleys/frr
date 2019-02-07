@@ -66,7 +66,7 @@ enum zebra_dplane_result kernel_lsp_update(struct zebra_dplane_ctx *ctx)
  */
 enum zebra_dplane_result kernel_pw_update(struct zebra_dplane_ctx *ctx)
 {
-	return ZEBRA_DPLANE_REQUEST_SUCCESS;
+	return dplane_ctx_set_status(ctx, ZEBRA_DPLANE_REQUEST_SUCCESS);
 }
 
 int mpls_kernel_init(void)
