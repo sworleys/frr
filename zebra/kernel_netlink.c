@@ -809,7 +809,7 @@ enum zebra_dplane_result netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_
 		     h = NLMSG_NEXT(h, status)) {
 			/* Finish of reading. */
 			if (h->nlmsg_type == NLMSG_DONE)
-				break;
+				continue;
 
 			/* Error handling. */
 			if (h->nlmsg_type == NLMSG_ERROR) {
