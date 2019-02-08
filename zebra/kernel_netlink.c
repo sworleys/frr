@@ -373,7 +373,7 @@ static long netlink_read_file(char *buf, const char *fname)
 		fseek(f, 0, SEEK_END);
 		file_bytes = ftell(f);
 		rewind(f);
-		fread(buf, NL_RCV_PKT_BUF_SIZE, 1, f);
+		fread(buf, NL_PKT_RXBUF_SIZE, 1, f);
 		fclose(f);
 	}
 	return file_bytes;
