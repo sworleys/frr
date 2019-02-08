@@ -31,11 +31,7 @@
 #include "zebra/zebra_mpls.h"
 #include "zebra/zebra_dplane.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#define RSYSTEM_ROUTE(type)						\
+#define RSYSTEM_ROUTE(type)                                                    \
 	((type) == ZEBRA_ROUTE_KERNEL || (type) == ZEBRA_ROUTE_CONNECT)
 
 /*

@@ -1503,8 +1503,7 @@ static void rib_process_update_fib(struct zebra_vrf *zvrf,
 		 * interface up before IPv4 or IPv6 protocol is ready
 		 * to add routes.
 		 */
-		if (!CHECK_FLAG(new->status, ROUTE_ENTRY_INSTALLED) ||
-		    RIB_SYSTEM_ROUTE(new))
+		if (!CHECK_FLAG(new->status, ROUTE_ENTRY_INSTALLED))
 			rib_install_kernel(rn, new, NULL);
 	}
 
@@ -2065,8 +2064,22 @@ static void rib_process_result(struct zebra_dplane_ctx *ctx)
 			    (old_re && RIB_SYSTEM_ROUTE(old_re)))
 				zebra_rib_fixup_system(rn);
 
-			if (zvrf)
+			if (zvrf) {
 				zvrf->installs++;
+				/* Set flag for nexthop tracking processing */
+				zvrf->flags |= ZEBRA_VRF_RIB_SCHEDULED;
+			}
+
+			/*
+			 * System routes are weird in that they
+			 * allow multiple to be installed that match
+			 * to the same prefix, so after we get the
+			 * result we need to clean them up so that
+			 * we can actually use them.
+			 */
+			if ((re && RIB_SYSTEM_ROUTE(re)) ||
+			    (old_re && RIB_SYSTEM_ROUTE(old_re)))
+				zebra_rib_fixup_system(rn);
 
 			/* Redistribute */
 			/*
