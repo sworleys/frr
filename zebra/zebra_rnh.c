@@ -108,6 +108,16 @@ static void zebra_rnh_remove_from_routing_table(struct rnh *rnh)
 	if (!rn)
 		return;
 
+	if (IS_ZEBRA_DEBUG_NHT_DETAILED) {
+		char buf[PREFIX_STRLEN];
+		char buf1[PREFIX_STRLEN];
+
+		zlog_debug("%s: %u:%s removed from tracking on %s",
+			   __PRETTY_FUNCTION__, rnh->vrf_id,
+			   prefix2str(&rnh->node->p, buf, sizeof(buf)),
+			   srcdest_rnode2str(rn, buf1, sizeof(buf)));
+	}
+
 	dest = rib_dest_from_rnode(rn);
 	listnode_delete(dest->nht, rnh);
 	route_unlock_node(rn);
@@ -123,6 +133,16 @@ static void zebra_rnh_store_in_routing_table(struct rnh *rnh)
 	rn = route_node_match(table, &rnh->resolved_route);
 	if (!rn)
 		return;
+
+	if (IS_ZEBRA_DEBUG_NHT_DETAILED) {
+		char buf[PREFIX_STRLEN];
+		char buf1[PREFIX_STRLEN];
+
+		zlog_debug("%s: %u:%s added for tracking on %s",
+			   __PRETTY_FUNCTION__, rnh->vrf_id,
+			   prefix2str(&rnh->node->p, buf, sizeof(buf)),
+			   srcdest_rnode2str(rn, buf1, sizeof(buf)));
+	}
 
 	dest = rib_dest_from_rnode(rn);
 	listnode_add(dest->nht, rnh);

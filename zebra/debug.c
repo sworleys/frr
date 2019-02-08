@@ -502,7 +502,7 @@ static int config_write_debug(struct vty *vty)
 	}
 
 	if (IS_ZEBRA_DEBUG_NHT_DETAILED) {
-		vty_out(vty, "debug zebra nht detailed\n");
+		vty_out(vty, "debug zebra nht detailed");
 		write++;
 	} else if (IS_ZEBRA_DEBUG_NHT) {
 		vty_out(vty, "debug zebra nht\n");
