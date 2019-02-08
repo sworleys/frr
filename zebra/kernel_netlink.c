@@ -156,10 +156,9 @@ int netlink_talk_filter(struct nlmsghdr *h, ns_id_t ns_id, int startup)
 	return 0;
 }
 
-static int netlink_recvbuf(struct nlsock *nl)
+static int netlink_recvbuf(struct nlsock *nl, uint32_t newsize)
 {
 	uint32_t oldsize;
-	uint32_t newsize;
 	socklen_t newlen = sizeof(newsize);
 	socklen_t oldlen = sizeof(oldsize);
 	int ret;
@@ -799,8 +798,8 @@ enum zebra_dplane_result netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_
 #if defined(HANDLE_NETLINK_FUZZING)
 		if (!netlink_read) {
 			zlog_debug("Writing incoming netlink message");
-			//netlink_write_incoming(buf, status,
-			//		       netlink_file_counter++);
+			netlink_write_incoming(buf, status,
+					       netlink_file_counter++);
 		}
 #endif /* HANDLE_NETLINK_FUZZING */
 
@@ -1414,7 +1413,7 @@ void kernel_init(struct zebra_ns *zns)
 
 	/* Set receive buffer size if it's set from command line */
 	if (nl_rcvbufsize)
-		netlink_recvbuf(&zns->netlink);
+		netlink_recvbuf(&zns->netlink, nl_rcvbufsize);
 
 	netlink_install_filter(zns->netlink.sock,
 			       zns->netlink_cmd.snl.nl_pid,
