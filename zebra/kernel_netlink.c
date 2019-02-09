@@ -701,6 +701,39 @@ static void netlink_parse_extended_ack(struct nlmsghdr *h)
 	}
 }
 
+/**
+ * mark_ctx_errors() - Marks the status flag for all sequence numbers matching
+ * errors from the nlmsg sequence number
+ *
+ * @ctx_q:	The dataplane context tail queue
+ * @count:	The number of errors
+ * @ctx_errors:	Array with the sequence numbers that had an error
+ */
+static enum zebra_dplane_result mark_ctx_errors(struct dplane_ctx_q ctx_q, int count,
+			    uint32_t ctx_errors[])
+{
+
+	// TODO: Use seq here i think to mark failure on appropriate one
+	//ret = dplane_ctx_set_status(
+	//	&ctx, ZEBRA_DPLANE_REQUEST_FAILURE);
+	enum zebra_dplane_result ret = ZEBRA_DPLANE_REQUEST_SUCCESS;
+	struct zebra_dplane_ctx *ctx;
+	struct zebra_dplane_ctx *tmp_ctx;
+	for (int i = 0; i < count; i++) {
+		zlog_debug("recv_nlmsg_seq number: %d", ctx_errors[i]);
+		for (ctx = TAILQ_FIRST(&ctx_q); ctx != NULL; ctx = tmp_ctx) {
+			tmp_ctx = TAILQ_NEXT(ctx, zd_q_entries);
+			zlog_debug("ctx_seq number: %d", ctx->zd_seq);
+			if (ctx->zd_seq == ctx_errors[i]) {
+				ret = dplane_ctx_set_status(
+					ctx, ZEBRA_DPLANE_REQUEST_FAILURE);
+				break;
+			}
+		}
+	}
+	return ret;
+}
+
 /*
  * netlink_parse_info() - Receive message from netlink interface and pass those
  * information to the given function.
@@ -720,11 +753,15 @@ enum zebra_dplane_result netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_
 		       struct dplane_ctx_q ctx_q, int count, int startup)
 {
 	int status;
-	int ret = ZEBRA_DPLANE_REQUEST_SUCCESS;
 	int error;
 	int read_in = 0;
 
 	static uint8_t buf[NL_PKT_RXBUF_SIZE];
+	/* Array for keeping track of which sequences failed
+	 * Should never be bigger than the total possible ctx's queued
+	 */
+	uint32_t ctx_errors[DPLANE_DEFAULT_NEW_WORK] = {0};
+	int error_count = 0;
 
 	/* read until block */
 	while (true) {
@@ -737,7 +774,7 @@ enum zebra_dplane_result netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_
 		struct nlmsghdr *h;
 
 		if (count && read_in >= count) {
-			return ret;
+			break;
 		}
 
 #if defined(HANDLE_NETLINK_FUZZING)
@@ -914,8 +951,7 @@ enum zebra_dplane_result netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_
 						msg_type, err->msg.nlmsg_seq,
 						err->msg.nlmsg_pid);
 
-				//ret = dplane_ctx_set_status(
-				//	&ctx, ZEBRA_DPLANE_REQUEST_FAILURE);
+				ctx_errors[error_count++] = h->nlmsg_seq;
 				break;
 			}
 
@@ -962,8 +998,9 @@ enum zebra_dplane_result netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_
 			//	&ctx, ZEBRA_DPLANE_REQUEST_FAILURE);
 			break;
 		}
+
 	}
-	return ret;
+	return mark_ctx_errors(ctx_q, error_count, ctx_errors);
 }
 
 /**
@@ -1164,10 +1201,9 @@ netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 		batch_ctx.startup = startup;
 		batch_ctx_initialized = true;
 
-
 		if (n) {
 			nl = &(dp_info->nls);
-			n->nlmsg_seq = nl->seq;
+			n->nlmsg_seq = ctx->zd_seq;
 			n->nlmsg_pid = nl->snl.nl_pid;
 			n->nlmsg_seq = nl->seq;
 			n->nlmsg_pid = nl->snl.nl_pid;
@@ -1175,6 +1211,13 @@ netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 			       n->nlmsg_len);
 			dplane_ctx_enqueue_tail(&(batch_ctx.ctx_q), ctx);
 			cached++;
+
+			zlog_debug("send_nlmsg_seq number: %d", ctx->zd_seq);
+			struct zebra_dplane_ctx *tmp_ctx;
+			for (ctx = TAILQ_FIRST(&batch_ctx.ctx_q); ctx != NULL; ctx = tmp_ctx) {
+				tmp_ctx = TAILQ_NEXT(ctx, zd_q_entries);
+				zlog_debug("ctx_seq number: %d", ctx->zd_seq);
+			}
 
 			if (IS_ZEBRA_DEBUG_KERNEL) {
 				zlog_debug(

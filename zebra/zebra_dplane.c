@@ -43,11 +43,6 @@ DEFINE_MTYPE(ZEBRA, DP_PROV, "Zebra DPlane Provider")
 /* Enable test dataplane provider */
 /*#define DPLANE_TEST_PROVIDER 1 */
 
-/* Default value for max queued incoming updates */
-const uint32_t DPLANE_DEFAULT_MAX_QUEUED = 200;
-
-/* Default value for new work per cycle */
-const uint32_t DPLANE_DEFAULT_NEW_WORK = 100;
 
 /* Validation check macro for context blocks */
 /* #define DPLANE_DEBUG 1 */

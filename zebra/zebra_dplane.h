@@ -30,6 +30,12 @@
 #include "zebra/zserv.h"
 #include "zebra/zebra_mpls.h"
 
+/* Default value for max queued incoming updates */
+#define DPLANE_DEFAULT_MAX_QUEUED 200
+
+/* Default value for new work per cycle */
+#define DPLANE_DEFAULT_NEW_WORK 100
+
 /* Key netlink info from zebra ns */
 struct zebra_dplane_info {
 	ns_id_t ns_id;
