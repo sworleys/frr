@@ -185,6 +185,8 @@ extern void zebra_vxlan_flood_control(struct zserv *client,
 				      uint16_t length, struct zebra_vrf *zvrf);
 extern int zebra_vxlan_advertise_subnet(struct zserv *client, u_short length,
 					struct zebra_vrf *zvrf);
+extern int zebra_vxlan_advertise_svi_macip(struct zserv *client, u_short length,
+					   struct zebra_vrf *zvrf);
 extern int zebra_vxlan_advertise_gw_macip(struct zserv *client,
 					  u_short length,
 					  struct zebra_vrf *zvrf);

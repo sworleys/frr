@@ -2870,6 +2870,9 @@ static inline void zserv_handle_commands(struct zserv *client, uint16_t command,
 	case ZEBRA_FEC_UNREGISTER:
 		zserv_fec_unregister(client, length);
 		break;
+	case ZEBRA_ADVERTISE_SVI_MACIP:
+		zebra_vxlan_advertise_svi_macip(client, length, zvrf);
+		break;
 	case ZEBRA_ADVERTISE_DEFAULT_GW:
 		zebra_vxlan_advertise_gw_macip(client, length, zvrf);
 		break;
