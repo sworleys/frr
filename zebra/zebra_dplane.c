@@ -1786,7 +1786,6 @@ static int kernel_dplane_process_batch(struct dplane_ctx_q *q)
 			break;
 		}
 	}
-	zlog_debug("Looped %d times", count);
 	/* Flush the netlink batch */
 	return netlink_batch_expire();
 }

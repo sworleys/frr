@@ -720,11 +720,10 @@ static enum zebra_dplane_result mark_ctx_errors(struct dplane_ctx_q ctx_q, int c
 	struct zebra_dplane_ctx *ctx;
 	struct zebra_dplane_ctx *tmp_ctx;
 	for (int i = 0; i < count; i++) {
-		zlog_debug("recv_nlmsg_seq number: %d", ctx_errors[i]);
 		for (ctx = TAILQ_FIRST(&ctx_q); ctx != NULL; ctx = tmp_ctx) {
 			tmp_ctx = TAILQ_NEXT(ctx, zd_q_entries);
-			zlog_debug("ctx_seq number: %d", ctx->zd_seq);
 			if (ctx->zd_seq == ctx_errors[i]) {
+				zlog_debug("Error on context sequence: %d", ctx->zd_seq);
 				ret = dplane_ctx_set_status(
 					ctx, ZEBRA_DPLANE_REQUEST_FAILURE);
 				break;
@@ -852,6 +851,8 @@ enum zebra_dplane_result netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_
 			if (h->nlmsg_type == NLMSG_ERROR) {
 				struct nlmsgerr *err =
 					(struct nlmsgerr *)NLMSG_DATA(h);
+				/* header that caused the error */
+				struct nlmsghdr *err_h = &(err->msg);
 				int errnum = err->error;
 				int msg_type = err->msg.nlmsg_type;
 
@@ -860,9 +861,6 @@ enum zebra_dplane_result netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_
 					flog_err(EC_ZEBRA_NETLINK_LENGTH_ERROR,
 						 "%s error: message truncated",
 						 nl->name);
-					//ret = dplane_ctx_set_status(
-					//	&ctx,
-					//	ZEBRA_DPLANE_REQUEST_FAILURE);
 					break;
 				}
 
@@ -891,6 +889,7 @@ enum zebra_dplane_result netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_
 					}
 					continue;
 				}
+				
 
 				/* Deal with errors that occur because of races
 				 * in link handling */
@@ -911,9 +910,6 @@ enum zebra_dplane_result netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_
 							msg_type,
 							err->msg.nlmsg_seq,
 							err->msg.nlmsg_pid);
-					//ret = dplane_ctx_set_status(
-					//	&ctx,
-					//	ZEBRA_DPLANE_REQUEST_SUCCESS);
 					continue;
 				}
 
@@ -951,8 +947,8 @@ enum zebra_dplane_result netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_
 						msg_type, err->msg.nlmsg_seq,
 						err->msg.nlmsg_pid);
 
-				ctx_errors[error_count++] = h->nlmsg_seq;
-				break;
+				ctx_errors[error_count++] = err_h->nlmsg_seq;
+				continue;
 			}
 
 			/* OK we got netlink message. */
@@ -1205,19 +1201,10 @@ netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 			nl = &(dp_info->nls);
 			n->nlmsg_seq = ctx->zd_seq;
 			n->nlmsg_pid = nl->snl.nl_pid;
-			n->nlmsg_seq = nl->seq;
-			n->nlmsg_pid = nl->snl.nl_pid;
 			memcpy(mnl_nlmsg_batch_current(&nl_batch), n,
 			       n->nlmsg_len);
 			dplane_ctx_enqueue_tail(&(batch_ctx.ctx_q), ctx);
 			cached++;
-
-			zlog_debug("send_nlmsg_seq number: %d", ctx->zd_seq);
-			struct zebra_dplane_ctx *tmp_ctx;
-			for (ctx = TAILQ_FIRST(&batch_ctx.ctx_q); ctx != NULL; ctx = tmp_ctx) {
-				tmp_ctx = TAILQ_NEXT(ctx, zd_q_entries);
-				zlog_debug("ctx_seq number: %d", ctx->zd_seq);
-			}
 
 			if (IS_ZEBRA_DEBUG_KERNEL) {
 				zlog_debug(
