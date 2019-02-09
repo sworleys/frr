@@ -72,6 +72,9 @@ struct bgpevpn {
 	/* Flag to indicate if we are advertising subnet for this VNI */
 	u_int8_t advertise_subnet;
 
+	/* Flag to indicate if we are advertising the svi mac ip for this VNI*/
+	uint8_t advertise_svi_macip;
+
 	/* Id for deriving the RD automatically for this VNI */
 	u_int16_t rd_id;
 
@@ -138,6 +141,10 @@ struct bgp_evpn_info {
 	bool dad_freeze;
 	/* Recovery time */
 	uint32_t dad_freeze_time;
+
+	/* EVPN enable - advertise svi macip routes */
+	int advertise_svi_macip;
+
 };
 
 static inline int is_vrf_rd_configured(struct bgp *bgp_vrf)

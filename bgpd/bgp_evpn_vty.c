@@ -462,6 +462,8 @@ static void display_vni(struct vty *vty, struct bgpevpn *vpn, json_object *json)
 			inet_ntoa(vpn->originator_ip));
 		vty_out(vty, "  Advertise-gw-macip : %s\n",
 			vpn->advertise_gw_macip ? "Yes" : "No");
+		vty_out(vty, "  Advertise-svi-macip : %s\n",
+			vpn->advertise_svi_macip ? "Yes" : "No");
 	}
 
 	if (!json)
@@ -2427,6 +2429,33 @@ static void evpn_show_all_vnis(struct vty *vty, struct bgp *bgp,
 }
 
 /*
+ * evpn - enable advertisement of svi MAC-IP
+ */
+static void evpn_set_advertise_svi_macip(struct bgp *bgp, struct bgpevpn *vpn,
+					 uint32_t set)
+{
+	if (!vpn) {
+		if (set && bgp->evpn_info->advertise_svi_macip)
+			return;
+		else if (!set && !bgp->evpn_info->advertise_svi_macip)
+			return;
+
+		bgp->evpn_info->advertise_svi_macip = set;
+		bgp_zebra_advertise_svi_macip(bgp,
+					bgp->evpn_info->advertise_svi_macip, 0);
+	} else {
+		if (set && vpn->advertise_svi_macip)
+			return;
+		else if (!set && !vpn->advertise_svi_macip)
+			return;
+
+		vpn->advertise_svi_macip = set;
+		bgp_zebra_advertise_svi_macip(bgp, vpn->advertise_svi_macip,
+					      vpn->vni);
+	}
+}
+
+/*
  * evpn - enable advertisement of default g/w
  */
 static void evpn_set_advertise_default_gw(struct bgp *bgp, struct bgpevpn *vpn)
@@ -2589,6 +2618,9 @@ static void write_vni_config(struct vty *vty, struct bgpevpn *vpn)
 
 		if (vpn->advertise_gw_macip)
 			vty_out(vty, "   advertise-default-gw\n");
+
+		if (vpn->advertise_svi_macip)
+			vty_out(vty, "   advertise-svi-ip\n");
 
 		if (vpn->advertise_subnet)
 			vty_out(vty, "   advertise-subnet\n");
@@ -2917,6 +2949,54 @@ DEFPY (no_dup_addr_detection,
 	return CMD_SUCCESS;
 }
 
+DEFPY(bgp_evpn_advertise_svi_ip,
+      bgp_evpn_advertise_svi_ip_cmd,
+      "[no$no] advertise-svi-ip",
+      NO_STR
+      "Advertise svi mac-ip routes in EVPN\n")
+{
+	struct bgp *bgp = VTY_GET_CONTEXT(bgp);
+
+	if (!bgp)
+		return CMD_WARNING;
+
+	if (bgp->vrf_id != VRF_DEFAULT) {
+		vty_out(vty,
+			"This command is only supported under Default VRF\n");
+		return CMD_WARNING;
+	}
+
+	if (no)
+		evpn_set_advertise_svi_macip(bgp, NULL, 0);
+	else
+		evpn_set_advertise_svi_macip(bgp, NULL, 1);
+
+	return CMD_SUCCESS;
+}
+
+DEFPY(bgp_evpn_advertise_svi_ip_vni,
+      bgp_evpn_advertise_svi_ip_vni_cmd,
+      "[no$no] advertise-svi-ip",
+      NO_STR
+      "Advertise svi mac-ip routes in EVPN for a VNI\n")
+{
+	struct bgp *bgp = VTY_GET_CONTEXT(bgp);
+	VTY_DECLVAR_CONTEXT_SUB(bgpevpn, vpn);
+
+	if (!bgp)
+		return CMD_WARNING;
+
+	if (!vpn)
+		return CMD_WARNING;
+
+	if (no)
+		evpn_set_advertise_svi_macip(bgp, vpn, 0);
+	else
+		evpn_set_advertise_svi_macip(bgp, vpn, 1);
+
+	return CMD_SUCCESS;
+}
+
 DEFUN_HIDDEN (bgp_evpn_advertise_vni_subnet,
 	      bgp_evpn_advertise_vni_subnet_cmd,
 	      "advertise-subnet",
@@ -3181,6 +3261,9 @@ DEFUN(show_bgp_l2vpn_evpn_vni,
 		} else {
 			vty_out(vty, "Advertise Gateway Macip: %s\n",
 				bgp_def->advertise_gw_macip ? "Enabled"
+							: "Disabled");
+			vty_out(vty, "Advertise SVI Macip: %s\n",
+				bgp_def->evpn_info->advertise_svi_macip ? "Enabled"
 							: "Disabled");
 			vty_out(vty, "Advertise All VNI flag: %s\n",
 				is_evpn_enabled() ? "Enabled" : "Disabled");
@@ -4672,6 +4755,9 @@ void bgp_config_write_evpn_info(struct vty *vty, struct bgp *bgp, afi_t afi,
 	if (bgp->advertise_gw_macip)
 		vty_out(vty, "  advertise-default-gw\n");
 
+	if (bgp->evpn_info->advertise_svi_macip)
+		vty_out(vty, "  advertise-svi-ip\n");
+
 	if (!bgp->evpn_info->dup_addr_detect)
 		vty_out(vty, "  no dup-addr-detection\n");
 
@@ -4782,6 +4868,7 @@ void bgp_ethernetvpn_init(void)
 	install_element(BGP_EVPN_NODE, &no_bgp_evpn_advertise_all_vni_cmd);
 	install_element(BGP_EVPN_NODE, &bgp_evpn_advertise_default_gw_cmd);
 	install_element(BGP_EVPN_NODE, &no_bgp_evpn_advertise_default_gw_cmd);
+	install_element(BGP_EVPN_NODE, &bgp_evpn_advertise_svi_ip_cmd);
 	install_element(BGP_EVPN_NODE, &bgp_evpn_advertise_type5_cmd);
 	install_element(BGP_EVPN_NODE, &no_bgp_evpn_advertise_type5_cmd);
 	install_element(BGP_EVPN_NODE, &bgp_evpn_default_originate_cmd);
@@ -4833,6 +4920,7 @@ void bgp_ethernetvpn_init(void)
 	install_element(BGP_NODE, &no_bgp_evpn_vrf_rd_without_val_cmd);
 	install_element(BGP_EVPN_NODE, &bgp_evpn_vrf_rt_cmd);
 	install_element(BGP_EVPN_NODE, &no_bgp_evpn_vrf_rt_cmd);
+	install_element(BGP_EVPN_VNI_NODE, &bgp_evpn_advertise_svi_ip_vni_cmd);
 	install_element(BGP_EVPN_VNI_NODE,
 			&bgp_evpn_advertise_default_gw_vni_cmd);
 	install_element(BGP_EVPN_VNI_NODE,
