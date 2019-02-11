@@ -1885,7 +1885,6 @@ static int kernel_dplane_process_func(struct zebra_dplane_provider *prov)
 	if (ret < 0) {
 		/* Something went wrong with batching */
 		zlog_err("Error sending batched contexts");
-		return ret;
 	}
 	ret = kernel_dplane_process_handle(&handle_q);
 
