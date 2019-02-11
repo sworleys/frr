@@ -1752,9 +1752,9 @@ static int kernel_dplane_process_batch(struct dplane_ctx_q *q)
 {
 	struct zebra_dplane_ctx *ctx;
 	struct zebra_dplane_ctx *tmp_ctx;
-	int count = 0;
+	int ret = 0;
+
 	for (ctx = TAILQ_FIRST(q); ctx != NULL; ctx = tmp_ctx) {
-		count++;
 		tmp_ctx = TAILQ_NEXT(ctx, zd_q_entries);
 
 		switch (dplane_ctx_get_op(ctx)) {
@@ -1786,8 +1786,13 @@ static int kernel_dplane_process_batch(struct dplane_ctx_q *q)
 			break;
 		}
 	}
-	/* Flush the netlink batch */
-	return netlink_batch_expire();
+	ret = netlink_batch_expire();
+
+	if (ret == ZEBRA_DPLANE_REQUEST_SUCCESS) {
+		return 0;
+	} else {
+		return -1;
+	}
 }
 
 /**
@@ -1801,7 +1806,7 @@ static int kernel_dplane_process_handle(struct dplane_ctx_q *q)
 {
 	struct zebra_dplane_ctx *ctx;
 	struct zebra_dplane_ctx *tmp_ctx;
-	int ret = 0;
+
 	for (ctx = TAILQ_FIRST(q); ctx != NULL; ctx = tmp_ctx) {
 		tmp_ctx = TAILQ_NEXT(ctx, zd_q_entries);
 
@@ -1811,13 +1816,13 @@ static int kernel_dplane_process_handle(struct dplane_ctx_q *q)
 		case DPLANE_OP_ROUTE_INSTALL:
 		case DPLANE_OP_ROUTE_UPDATE:
 		case DPLANE_OP_ROUTE_DELETE:
-			ret = kernel_dplane_route_update_handle(ctx);
+			kernel_dplane_route_update_handle(ctx);
 			break;
 
 		case DPLANE_OP_LSP_INSTALL:
 		case DPLANE_OP_LSP_UPDATE:
 		case DPLANE_OP_LSP_DELETE:
-			ret = kernel_dplane_lsp_update_handle(ctx);
+			kernel_dplane_lsp_update_handle(ctx);
 			break;
 
 		case DPLANE_OP_PW_INSTALL:
@@ -1830,7 +1835,7 @@ static int kernel_dplane_process_handle(struct dplane_ctx_q *q)
 			// Do nothing, should have failed in the dispatch
 		}
 	}
-	return ret;
+	return 0;
 }
 
 /**
@@ -1865,15 +1870,17 @@ static int kernel_dplane_process_func(struct zebra_dplane_provider *prov)
 	/* Get a temporary list of ctx to handle */
 	count = dplane_provider_dequeue_in_list(prov, &handle_q);
 
+	/* Check there is any ctx to handle first */
+	if (count == 0) {
+		return ret;
+	}
+
 	if (IS_ZEBRA_DEBUG_DPLANE_DETAIL)
 		zlog_debug("dplane provider '%s': processing",
 			   dplane_provider_get_name(prov));
 
 #if defined(HAVE_NETLINK)
-	/* Check there is any ctx to handle first */
-	if (count > 0) {
-		ret = kernel_dplane_process_batch(&handle_q);
-	}
+	ret = kernel_dplane_process_batch(&handle_q);
 
 	if (ret < 0) {
 		/* Something went wrong with batching */

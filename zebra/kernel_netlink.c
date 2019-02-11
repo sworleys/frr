@@ -709,21 +709,20 @@ static void netlink_parse_extended_ack(struct nlmsghdr *h)
  * @count:	The number of errors
  * @ctx_errors:	Array with the sequence numbers that had an error
  */
-static enum zebra_dplane_result mark_ctx_errors(struct dplane_ctx_q ctx_q, int count,
-			    uint32_t ctx_errors[])
+static enum zebra_dplane_result
+mark_ctx_errors(struct dplane_ctx_q ctx_q, int count, uint32_t ctx_errors[])
 {
 
-	// TODO: Use seq here i think to mark failure on appropriate one
-	//ret = dplane_ctx_set_status(
-	//	&ctx, ZEBRA_DPLANE_REQUEST_FAILURE);
 	enum zebra_dplane_result ret = ZEBRA_DPLANE_REQUEST_SUCCESS;
 	struct zebra_dplane_ctx *ctx;
 	struct zebra_dplane_ctx *tmp_ctx;
+
 	for (int i = 0; i < count; i++) {
 		for (ctx = TAILQ_FIRST(&ctx_q); ctx != NULL; ctx = tmp_ctx) {
 			tmp_ctx = TAILQ_NEXT(ctx, zd_q_entries);
 			if (ctx->zd_seq == ctx_errors[i]) {
-				zlog_debug("Error on context sequence: %d", ctx->zd_seq);
+				zlog_debug("Error on context sequence: %d",
+					   ctx->zd_seq);
 				ret = dplane_ctx_set_status(
 					ctx, ZEBRA_DPLANE_REQUEST_FAILURE);
 				break;
@@ -746,10 +745,10 @@ static enum zebra_dplane_result mark_ctx_errors(struct dplane_ctx_q ctx_q, int c
  *           the filter.
  * Return:	Context result status; returns fail if even just one fails
  */
-enum zebra_dplane_result netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
-		       const struct nlsock *nl,
-		       const struct zebra_dplane_info *zns,
-		       struct dplane_ctx_q ctx_q, int count, int startup)
+enum zebra_dplane_result
+netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
+		   const struct nlsock *nl, const struct zebra_dplane_info *zns,
+		   struct dplane_ctx_q ctx_q, int count, int startup)
 {
 	int status;
 	int error;
