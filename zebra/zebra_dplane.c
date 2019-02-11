@@ -1886,21 +1886,14 @@ static int kernel_dplane_process_func(struct zebra_dplane_provider *prov)
 		/* Something went wrong with batching */
 		zlog_err("Error sending batched contexts");
 	}
-	ret = kernel_dplane_process_handle(&handle_q);
-
-	if (ret < 0) {
-		/* Something went wrong with batching */
-		zlog_err("Error handling batched contexts results");
-		/* Not returning here since the messages went through fine, but
-		 * we did not handle them correctly in frr, so we can still
-		 * possibly recover by requesting an update from the kernel?
-		 */
-	}
 #else
-	/* For non-linux/netlink kernels */
+	/* For non-linux/non-netlink kernels */
 	ret = kernel_dplane_process(&handle_q);
 
 #endif	/* HAVE_NETLINK */
+
+	kernel_dplane_process_handle(&handle_q);
+
 	dplane_provider_append_enqueue_out_ctx(prov, &handle_q, count);
 
 	/* Ensure that we'll run the work loop again if there's still
