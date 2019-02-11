@@ -335,7 +335,8 @@ enum zebra_dplane_result kernel_route_update(struct zebra_dplane_ctx *ctx)
 			zlog_err("Invalid routing socket update op %s (%u)",
 				 dplane_op2str(dplane_ctx_get_op(ctx)),
 				 dplane_ctx_get_op(ctx));
-			res = ZEBRA_DPLANE_REQUEST_FAILURE;
+			res = dplane_ctx_set_status(
+				ctx, ZEBRA_DPLANE_REQUEST_FAILURE);
 		}
 	} /* Elevated privs */
 

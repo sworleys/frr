@@ -1742,6 +1742,51 @@ kernel_dplane_route_update_handle(struct zebra_dplane_ctx *ctx)
 }
 
 /**
+ * kernel_dplane_process_handle() - Sends the dataplane contexts to their
+ * appropriate handlers.
+ *
+ * @q:		Tail queue of contexts to batch
+ * Return:	Returns a status integer
+ */
+static int kernel_dplane_process_handle(struct dplane_ctx_q *q)
+{
+	struct zebra_dplane_ctx *ctx;
+	struct zebra_dplane_ctx *tmp_ctx;
+
+	for (ctx = TAILQ_FIRST(q); ctx != NULL; ctx = tmp_ctx) {
+		tmp_ctx = TAILQ_NEXT(ctx, zd_q_entries);
+
+		/* Dispatch to appropriate handlers */
+		switch (dplane_ctx_get_op(ctx)) {
+
+		case DPLANE_OP_ROUTE_INSTALL:
+		case DPLANE_OP_ROUTE_UPDATE:
+		case DPLANE_OP_ROUTE_DELETE:
+			kernel_dplane_route_update_handle(ctx);
+			break;
+
+		case DPLANE_OP_LSP_INSTALL:
+		case DPLANE_OP_LSP_UPDATE:
+		case DPLANE_OP_LSP_DELETE:
+			kernel_dplane_lsp_update_handle(ctx);
+			break;
+
+		case DPLANE_OP_PW_INSTALL:
+		case DPLANE_OP_PW_UNINSTALL:
+			kernel_dplane_pw_update_handle(ctx);
+			break;
+
+		case DPLANE_OP_NONE:
+			break;
+			// Do nothing, should have failed in the dispatch
+		}
+	}
+	return 0;
+}
+
+#if defined(HAVE_NETLINK)
+
+/**
  * kernel_dplane_process_batch() - Sends the dataplane contexts to the kernel
  * via batched netlink messages.
  *
@@ -1795,48 +1840,7 @@ static int kernel_dplane_process_batch(struct dplane_ctx_q *q)
 	}
 }
 
-/**
- * kernel_dplane_process_handle() - Sends the dataplane contexts to their
- * appropriate handlers.
- *
- * @q:		Tail queue of contexts to batch
- * Return:	Returns a status integer
- */
-static int kernel_dplane_process_handle(struct dplane_ctx_q *q)
-{
-	struct zebra_dplane_ctx *ctx;
-	struct zebra_dplane_ctx *tmp_ctx;
-
-	for (ctx = TAILQ_FIRST(q); ctx != NULL; ctx = tmp_ctx) {
-		tmp_ctx = TAILQ_NEXT(ctx, zd_q_entries);
-
-		/* Dispatch to appropriate handlers */
-		switch (dplane_ctx_get_op(ctx)) {
-
-		case DPLANE_OP_ROUTE_INSTALL:
-		case DPLANE_OP_ROUTE_UPDATE:
-		case DPLANE_OP_ROUTE_DELETE:
-			kernel_dplane_route_update_handle(ctx);
-			break;
-
-		case DPLANE_OP_LSP_INSTALL:
-		case DPLANE_OP_LSP_UPDATE:
-		case DPLANE_OP_LSP_DELETE:
-			kernel_dplane_lsp_update_handle(ctx);
-			break;
-
-		case DPLANE_OP_PW_INSTALL:
-		case DPLANE_OP_PW_UNINSTALL:
-			kernel_dplane_pw_update_handle(ctx);
-			break;
-
-		case DPLANE_OP_NONE:
-			break;
-			// Do nothing, should have failed in the dispatch
-		}
-	}
-	return 0;
-}
+#else
 
 /**
  * kernel_dplane_process() - Sends the dataplane contexts to the kernel without
@@ -1847,9 +1851,49 @@ static int kernel_dplane_process_handle(struct dplane_ctx_q *q)
  */
 static int kernel_dplane_process(struct dplane_ctx_q *q)
 {
-	//TODO: Do this for bsd, and test on vm
-	return 1;
+	enum zebra_dplane_result res;
+	struct zebra_dplane_ctx *ctx;
+	struct zebra_dplane_ctx *tmp_ctx;
+
+	for (ctx = TAILQ_FIRST(q); ctx != NULL; ctx = tmp_ctx) {
+		tmp_ctx = TAILQ_NEXT(ctx, zd_q_entries);
+
+		switch (dplane_ctx_get_op(ctx)) {
+
+		case DPLANE_OP_ROUTE_INSTALL:
+		case DPLANE_OP_ROUTE_UPDATE:
+		case DPLANE_OP_ROUTE_DELETE:
+			res = kernel_dplane_route_update(ctx);
+			break;
+
+		case DPLANE_OP_LSP_INSTALL:
+		case DPLANE_OP_LSP_UPDATE:
+		case DPLANE_OP_LSP_DELETE:
+			res = kernel_dplane_lsp_update(ctx);
+			break;
+
+		case DPLANE_OP_PW_INSTALL:
+		case DPLANE_OP_PW_UNINSTALL:
+			res = kernel_dplane_pw_update(ctx);
+			break;
+
+		default:
+			atomic_fetch_add_explicit(
+				&zdplane_info.dg_other_errors, 1,
+				memory_order_relaxed);
+
+			dplane_ctx_set_status(ctx,
+					      ZEBRA_DPLANE_REQUEST_FAILURE);
+			break;
+		}
+
+		dplane_ctx_set_status(ctx, res);
+	}
+	return 0;
+
 }
+
+#endif	/* HAVE_NETLINK */
 
 /*
  * Kernel provider callback

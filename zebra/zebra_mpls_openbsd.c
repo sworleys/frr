@@ -310,8 +310,11 @@ enum zebra_dplane_result kernel_lsp_update(struct zebra_dplane_ctx *ctx)
 
 	ret = kernel_lsp_cmd(ctx);
 
-	return (ret == 0 ?
-		ZEBRA_DPLANE_REQUEST_SUCCESS : ZEBRA_DPLANE_REQUEST_FAILURE);
+	if (ret == 0) {
+		return dplane_ctx_set_status(ctx, ZEBRA_DPLANE_REQUEST_SUCCES); 
+	} else {
+		return dplane_ctx_set_status(ctx, ZEBRA_DPLANE_REQUEST_FAILURE); 
+	}
 }
 
 static enum zebra_dplane_result kmpw_install(struct zebra_dplane_ctx *ctx)
@@ -417,7 +420,7 @@ enum zebra_dplane_result kernel_pw_update(struct zebra_dplane_ctx *ctx)
 		break;
 	};
 
-	return result;
+	return dplane_ctx_set_status(ctx, result);
 }
 
 #define MAX_RTSOCK_BUF	128 * 1024
