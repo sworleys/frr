@@ -1752,7 +1752,7 @@ static int kernel_dplane_process_batch(struct dplane_ctx_q *q)
 {
 	struct zebra_dplane_ctx *ctx;
 	struct zebra_dplane_ctx *tmp_ctx;
-	int ret = 0;
+	enum zebra_dplane_result res;
 
 	for (ctx = TAILQ_FIRST(q); ctx != NULL; ctx = tmp_ctx) {
 		tmp_ctx = TAILQ_NEXT(ctx, zd_q_entries);
@@ -1786,9 +1786,9 @@ static int kernel_dplane_process_batch(struct dplane_ctx_q *q)
 			break;
 		}
 	}
-	ret = netlink_batch_expire();
+	res = netlink_batch_expire();
 
-	if (ret == ZEBRA_DPLANE_REQUEST_SUCCESS) {
+	if (res == ZEBRA_DPLANE_REQUEST_SUCCESS) {
 		return 0;
 	} else {
 		return -1;
