@@ -192,7 +192,7 @@ int zebra_check_addr(const struct prefix *p)
 /* Add nexthop to the end of a rib node's nexthop list */
 void route_entry_nexthop_add(struct route_entry *re, struct nexthop *nexthop)
 {
-	nexthop_group_add_sorted(&re->ng, nexthop);
+	nexthop_group_add_sorted(re->ng, nexthop);
 	re->nexthop_num++;
 }
 
@@ -202,8 +202,8 @@ void route_entry_nexthop_add(struct route_entry *re, struct nexthop *nexthop)
  */
 void route_entry_copy_nexthops(struct route_entry *re, struct nexthop *nh)
 {
-	assert(!re->ng.nexthop);
-	copy_nexthops(&re->ng.nexthop, nh, NULL);
+	assert(!re->ng->nexthop);
+	copy_nexthops(&re->ng->nexthop, nh, NULL);
 	for (struct nexthop *nexthop = nh; nexthop; nexthop = nexthop->next)
 		re->nexthop_num++;
 }
@@ -216,7 +216,7 @@ void route_entry_nexthop_delete(struct route_entry *re, struct nexthop *nexthop)
 	if (nexthop->prev)
 		nexthop->prev->next = nexthop->next;
 	else
-		re->ng.nexthop = nexthop->next;
+		re->ng->nexthop = nexthop->next;
 	re->nexthop_num--;
 }
 
@@ -501,7 +501,7 @@ int zebra_rib_labeled_unicast(struct route_entry *re)
 	if (re->type != ZEBRA_ROUTE_BGP)
 		return 0;
 
-	for (ALL_NEXTHOPS(re->ng, nexthop))
+	for (ALL_NEXTHOPS_PTR(re->ng, nexthop))
 		if (!nexthop->nh_label || !nexthop->nh_label->num_labels)
 			return 0;
 
@@ -525,15 +525,15 @@ void rib_install_kernel(struct route_node *rn, struct route_entry *re,
 	srcdest_rnode_prefixes(rn, &p, &src_p);
 
 	if (info->safi != SAFI_UNICAST) {
-		for (ALL_NEXTHOPS(re->ng, nexthop))
+		for (ALL_NEXTHOPS_PTR(re->ng, nexthop))
 			SET_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB);
 		return;
 	} else {
 		struct nexthop *prev;
 
-		for (ALL_NEXTHOPS(re->ng, nexthop)) {
+		for (ALL_NEXTHOPS_PTR(re->ng, nexthop)) {
 			UNSET_FLAG (nexthop->flags, NEXTHOP_FLAG_DUPLICATE);
-			for (ALL_NEXTHOPS(re->ng, prev)) {
+			for (ALL_NEXTHOPS_PTR(re->ng, prev)) {
 				if (prev == nexthop)
 					break;
 				if (nexthop_same_firsthop(nexthop, prev)) {
@@ -582,7 +582,7 @@ void rib_install_kernel(struct route_node *rn, struct route_entry *re,
 
 			if (!RIB_SYSTEM_ROUTE(old)) {
 				/* Clear old route's FIB flags */
-				for (ALL_NEXTHOPS(old->ng, nexthop)) {
+				for (ALL_NEXTHOPS_PTR(old->ng, nexthop)) {
 					UNSET_FLAG(nexthop->flags,
 						   NEXTHOP_FLAG_FIB);
 				}
@@ -620,7 +620,7 @@ void rib_uninstall_kernel(struct route_node *rn, struct route_entry *re)
 
 	if (info->safi != SAFI_UNICAST) {
 		UNSET_FLAG(re->status, ROUTE_ENTRY_INSTALLED);
-		for (ALL_NEXTHOPS(re->ng, nexthop))
+		for (ALL_NEXTHOPS_PTR(re->ng, nexthop))
 			UNSET_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB);
 		return;
 	}
@@ -680,7 +680,7 @@ static void rib_uninstall(struct route_node *rn, struct route_entry *re)
 			re->fib_ng.nexthop = NULL;
 		}
 
-		for (ALL_NEXTHOPS(re->ng, nexthop))
+		for (ALL_NEXTHOPS_PTR(re->ng, nexthop))
 			UNSET_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB);
 	}
 
@@ -856,7 +856,7 @@ static void rib_process_add_fib(struct zebra_vrf *zvrf, struct route_node *rn,
 
 	/* Update real nexthop. This may actually determine if nexthop is active
 	 * or not. */
-	if (!nexthop_group_active_nexthop_num(&new->ng)) {
+	if (!nexthop_group_active_nexthop_num(new->ng)) {
 		UNSET_FLAG(new->status, ROUTE_ENTRY_CHANGED);
 		return;
 	}
@@ -925,7 +925,7 @@ static void rib_process_update_fib(struct zebra_vrf *zvrf,
 
 		/* Update the nexthop; we could determine here that nexthop is
 		 * inactive. */
-		if (nexthop_group_active_nexthop_num(&new->ng))
+		if (nexthop_group_active_nexthop_num(new->ng))
 			nh_active = 1;
 
 		/* If nexthop is active, install the selected route, if
@@ -1043,13 +1043,13 @@ static struct route_entry *rib_choose_best(struct route_entry *current,
 		/* both are connected.  are either loop or vrf? */
 		struct nexthop *nexthop = NULL;
 
-		for (ALL_NEXTHOPS(alternate->ng, nexthop)) {
+		for (ALL_NEXTHOPS_PTR(alternate->ng, nexthop)) {
 			if (if_is_loopback_or_vrf(if_lookup_by_index(
 				    nexthop->ifindex, alternate->vrf_id)))
 				return alternate;
 		}
 
-		for (ALL_NEXTHOPS(current->ng, nexthop)) {
+		for (ALL_NEXTHOPS_PTR(current->ng, nexthop)) {
 			if (if_is_loopback_or_vrf(if_lookup_by_index(
 				    nexthop->ifindex, current->vrf_id)))
 				return current;
@@ -1364,7 +1364,7 @@ static void zebra_rib_fixup_system(struct route_node *rn)
 
 		SET_FLAG(re->status, ROUTE_ENTRY_INSTALLED);
 
-		for (ALL_NEXTHOPS(re->ng, nhop)) {
+		for (ALL_NEXTHOPS_PTR(re->ng, nhop)) {
 			if (CHECK_FLAG(nhop->flags, NEXTHOP_FLAG_RECURSIVE))
 				continue;
 
@@ -1516,7 +1516,7 @@ static bool rib_update_re_from_ctx(struct route_entry *re,
 	 * that is actually installed.
 	 */
 	matched = true;
-	for (ALL_NEXTHOPS(re->ng, nexthop)) {
+	for (ALL_NEXTHOPS_PTR(re->ng, nexthop)) {
 
 		if (CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_RECURSIVE))
 			continue;
@@ -2400,7 +2400,8 @@ void rib_unlink(struct route_node *rn, struct route_entry *re)
 	info = srcdest_rnode_table_info(rn);
 	zebra_nhg_release(info->afi, re);
 
-	nexthops_free(re->ng.nexthop);
+	nexthops_free(re->ng->nexthop);
+	nexthop_group_delete(&re->ng);
 	nexthops_free(re->fib_ng.nexthop);
 
 	XFREE(MTYPE_RE, re);
@@ -2466,7 +2467,7 @@ void _route_entry_dump(const char *func, union prefixconstptr pp,
 	zlog_debug("%s: nexthop_num == %u, nexthop_active_num == %u", straddr,
 		   re->nexthop_num, re->nexthop_active_num);
 
-	for (ALL_NEXTHOPS(re->ng, nexthop)) {
+	for (ALL_NEXTHOPS_PTR(re->ng, nexthop)) {
 		struct interface *ifp;
 		struct vrf *vrf = vrf_lookup_by_id(nexthop->vrf_id);
 
@@ -2630,6 +2631,8 @@ int rib_add_multipath(afi_t afi, safi_t safi, struct prefix *p,
 	/* Lookup table.  */
 	table = zebra_vrf_table_with_table_id(afi, safi, re->vrf_id, re->table);
 	if (!table) {
+		nexthops_free(re->ng->nexthop);
+		nexthop_group_delete(&re->ng);
 		XFREE(MTYPE_RE, re);
 		return 0;
 	}
@@ -2639,7 +2642,7 @@ int rib_add_multipath(afi_t afi, safi_t safi, struct prefix *p,
 	if (src_p)
 		apply_mask_ipv6(src_p);
 
-	zebra_nhg_find(afi, &re->ng, re);
+	zebra_nhg_find(afi, re->ng, re);
 	/* Set default distance by route type. */
 	if (re->distance == 0)
 		re->distance = route_distance(re->type);
@@ -2772,7 +2775,7 @@ void rib_delete(afi_t afi, safi_t safi, vrf_id_t vrf_id, int type,
 
 		if (re->type == ZEBRA_ROUTE_KERNEL && re->metric != metric)
 			continue;
-		if (re->type == ZEBRA_ROUTE_CONNECT && (rtnh = re->ng.nexthop)
+		if (re->type == ZEBRA_ROUTE_CONNECT && (rtnh = re->ng->nexthop)
 		    && rtnh->type == NEXTHOP_TYPE_IFINDEX && nh) {
 			if (rtnh->ifindex != nh->ifindex)
 				continue;
@@ -2785,7 +2788,7 @@ void rib_delete(afi_t afi, safi_t safi, vrf_id_t vrf_id, int type,
 				same = re;
 				break;
 			}
-			for (ALL_NEXTHOPS(re->ng, rtnh))
+			for (ALL_NEXTHOPS_PTR(re->ng, rtnh))
 				/*
 				 * No guarantee all kernel send nh with labels
 				 * on delete.
@@ -2826,7 +2829,7 @@ void rib_delete(afi_t afi, safi_t safi, vrf_id_t vrf_id, int type,
 			if (allow_delete) {
 				UNSET_FLAG(fib->status, ROUTE_ENTRY_INSTALLED);
 				/* Unset flags. */
-				for (rtnh = fib->ng.nexthop; rtnh;
+				for (rtnh = fib->ng->nexthop; rtnh;
 				     rtnh = rtnh->next)
 					UNSET_FLAG(rtnh->flags,
 						   NEXTHOP_FLAG_FIB);
@@ -2882,7 +2885,7 @@ void rib_delete(afi_t afi, safi_t safi, vrf_id_t vrf_id, int type,
 		if (CHECK_FLAG(flags, ZEBRA_FLAG_EVPN_ROUTE)) {
 			struct nexthop *tmp_nh;
 
-			for (ALL_NEXTHOPS(re->ng, tmp_nh)) {
+			for (ALL_NEXTHOPS_PTR(re->ng, tmp_nh)) {
 				struct ipaddr vtep_ip;
 
 				memset(&vtep_ip, 0, sizeof(struct ipaddr));
@@ -2936,6 +2939,7 @@ int rib_add(afi_t afi, safi_t safi, vrf_id_t vrf_id, int type,
 	re->nexthop_num = 0;
 	re->uptime = monotime(NULL);
 	re->tag = tag;
+	re->ng = nexthop_group_new();
 
 	/* Add nexthop. */
 	nexthop = nexthop_new();
@@ -2991,7 +2995,7 @@ void rib_update_table(struct route_table *table, rib_update_event_t event)
 					continue;
 				}
 
-				for (nh = re->ng.nexthop; nh; nh = nh->next)
+				for (nh = re->ng->nexthop; nh; nh = nh->next)
 					if (!(nh->type == NEXTHOP_TYPE_IPV4
 					      || nh->type == NEXTHOP_TYPE_IPV6))
 						break;
@@ -3099,7 +3103,7 @@ void rib_sweep_table(struct route_table *table)
 			 * this decision needs to be revisited
 			 */
 			SET_FLAG(re->status, ROUTE_ENTRY_INSTALLED);
-			for (ALL_NEXTHOPS(re->ng, nexthop))
+			for (ALL_NEXTHOPS_PTR(re->ng, nexthop))
 				SET_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB);
 
 			rib_uninstall_kernel(rn, re);
