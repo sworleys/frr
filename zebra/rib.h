@@ -88,7 +88,7 @@ struct route_entry {
 	struct re_list_item next;
 
 	/* Nexthop structure */
-	struct nexthop_group ng;
+	struct nexthop_group *ng;
 
 	/* Tag */
 	route_tag_t tag;
