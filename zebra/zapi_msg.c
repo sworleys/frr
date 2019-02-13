@@ -563,7 +563,7 @@ int zsend_redistribute_route(int cmd, struct zserv *client,
 		SET_FLAG(api.message, ZAPI_MESSAGE_NEXTHOP);
 		api.nexthop_num = re->nexthop_active_num;
 	}
-	for (nexthop = re->ng.nexthop; nexthop; nexthop = nexthop->next) {
+	for (nexthop = re->ng->nexthop; nexthop; nexthop = nexthop->next) {
 		if (!CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_ACTIVE))
 			continue;
 
@@ -664,7 +664,8 @@ static int zsend_ipv4_nexthop_lookup_mrib(struct zserv *client,
 		 * nexthop we are looking up. Therefore, we will just iterate
 		 * over the top chain of nexthops.
 		 */
-		for (nexthop = re->ng.nexthop; nexthop; nexthop = nexthop->next)
+		for (nexthop = re->ng->nexthop; nexthop;
+		     nexthop = nexthop->next)
 			if (CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_ACTIVE))
 				num += zserv_encode_nexthop(s, nexthop);
 
@@ -1424,6 +1425,8 @@ static void zread_route_add(ZAPI_HANDLER_ARGS)
 	re->flags = api.flags;
 	re->uptime = monotime(NULL);
 	re->vrf_id = vrf_id;
+	re->ng = nexthop_group_new();
+
 	if (api.tableid && vrf_id == VRF_DEFAULT)
 		re->table = api.tableid;
 	else
@@ -1435,6 +1438,8 @@ static void zread_route_add(ZAPI_HANDLER_ARGS)
 			  "%s: received a route without nexthops for prefix %pFX from client %s",
 			  __func__, &api.prefix,
 			  zebra_route_string(client->proto));
+
+		nexthop_group_delete(&re->ng);
 		XFREE(MTYPE_RE, re);
 		return;
 	}
@@ -1533,7 +1538,8 @@ static void zread_route_add(ZAPI_HANDLER_ARGS)
 				EC_ZEBRA_NEXTHOP_CREATION_FAILED,
 				"%s: Nexthops Specified: %d but we failed to properly create one",
 				__PRETTY_FUNCTION__, api.nexthop_num);
-			nexthops_free(re->ng.nexthop);
+			nexthops_free(re->ng->nexthop);
+			nexthop_group_delete(&re->ng);
 			XFREE(MTYPE_RE, re);
 			return;
 		}
@@ -1575,7 +1581,8 @@ static void zread_route_add(ZAPI_HANDLER_ARGS)
 		flog_warn(EC_ZEBRA_RX_SRCDEST_WRONG_AFI,
 			  "%s: Received SRC Prefix but afi is not v6",
 			  __PRETTY_FUNCTION__);
-		nexthops_free(re->ng.nexthop);
+		nexthops_free(re->ng->nexthop);
+		nexthop_group_delete(&re->ng);
 		XFREE(MTYPE_RE, re);
 		return;
 	}

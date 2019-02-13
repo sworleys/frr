@@ -88,7 +88,7 @@ struct route_entry {
 	struct re_list_item next;
 
 	/* Nexthop structure (from RIB) */
-	struct nexthop_group ng;
+	struct nexthop_group *ng;
 
 	/* Nexthop group from FIB (optional) */
 	struct nexthop_group fib_ng;
@@ -524,7 +524,7 @@ static inline struct nexthop_group *rib_active_nhg(struct route_entry *re)
 	if (re->fib_ng.nexthop)
 		return &(re->fib_ng);
 	else
-		return &(re->ng);
+		return re->ng;
 }
 
 extern void zebra_vty_init(void);
