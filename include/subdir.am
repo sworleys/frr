@@ -7,6 +7,7 @@ noinst_HEADERS += \
 	include/linux/neighbour.h \
 	include/linux/netlink.h \
 	include/linux/rtnetlink.h \
+	include/linux/nexthop.h\
 	include/linux/socket.h \
 	include/linux/net_namespace.h \
 	include/linux/fib_rules.h \

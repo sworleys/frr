@@ -27,10 +27,12 @@
 #include "zebra/rt.h"
 #include "zebra/zebra_pbr.h"
 #include "zebra/rt_netlink.h"
+#include "zebra/nh_netlink.h"
 #include "zebra/rule_netlink.h"
 
 void route_read(struct zebra_ns *zns)
 {
+	netlink_nexthop_read(zns);
 	netlink_route_read(zns);
 }
 
