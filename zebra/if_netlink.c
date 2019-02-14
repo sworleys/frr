@@ -67,6 +67,7 @@
 #include "zebra/kernel_netlink.h"
 #include "zebra/if_netlink.h"
 #include "zebra/zebra_errors.h"
+#include "zebra/zebra_vxlan.h"
 
 extern struct zebra_privs_t zserv_privs;
 
@@ -1058,7 +1059,7 @@ int netlink_link_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	zebra_slave_iftype_t zif_slave_type = ZEBRA_IF_SLAVE_NONE;
 	ifindex_t bridge_ifindex = IFINDEX_INTERNAL;
 	ifindex_t link_ifindex = IFINDEX_INTERNAL;
-
+	uint8_t old_hw_addr[INTERFACE_HWADDR_MAX];
 
 	zns = zebra_ns_lookup(ns_id);
 	ifi = NLMSG_DATA(h);
@@ -1231,6 +1232,8 @@ int netlink_link_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 			was_bridge_slave = IS_ZEBRA_IF_BRIDGE_SLAVE(ifp);
 			zebra_if_set_ziftype(ifp, zif_type, zif_slave_type);
 
+			memcpy(old_hw_addr, ifp->hw_addr, INTERFACE_HWADDR_MAX);
+
 			netlink_interface_update_hw_addr(tb, ifp);
 
 			if (if_is_no_ptm_operative(ifp)) {
@@ -1249,6 +1252,21 @@ int netlink_link_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 							"Intf %s(%u) PTM up, notifying clients",
 							name, ifp->ifindex);
 					zebra_interface_up_update(ifp);
+
+					/* Update EVPN VNI when SVI MAC change
+					 */
+					if (IS_ZEBRA_IF_VLAN(ifp) &&
+					    memcmp(old_hw_addr, ifp->hw_addr,
+						   INTERFACE_HWADDR_MAX)) {
+						struct interface *link_if;
+
+						link_if =
+						if_lookup_by_index_per_ns(
+						zebra_ns_lookup(NS_DEFAULT),
+								link_ifindex);
+						zebra_vxlan_svi_up(ifp,
+								link_if);
+					}
 				}
 			} else {
 				ifp->flags = ifi->ifi_flags & 0x0000fffff;
