@@ -59,9 +59,6 @@ struct route_entry {
 	/* Type fo this route. */
 	int type;
 
-	/* Source protocol instance */
-	unsigned short instance;
-
 	/* VRF identifier. */
 	vrf_id_t vrf_id;
 
@@ -74,9 +71,6 @@ struct route_entry {
 	/* MTU */
 	uint32_t mtu;
 	uint32_t nexthop_mtu;
-
-	/* Distance. */
-	uint8_t distance;
 
 	/* Flags of this route.
 	 * This flag's definition is in lib/zebra.h ZEBRA_FLAG_* and is exposed
@@ -102,6 +96,12 @@ struct route_entry {
 
 	/* Sequence value incremented for each dataplane operation */
 	uint32_t dplane_sequence;
+
+	/* Source protocol instance */
+	unsigned short instance;
+
+	/* Distance. */
+	uint8_t distance;
 };
 
 #define RIB_SYSTEM_ROUTE(R)                                                    \
