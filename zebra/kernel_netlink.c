@@ -315,8 +315,6 @@ bool netlink_read;
  */
 void netlink_read_init(const char *fname)
 {
-	/* Just fake the context */
-	struct dplane_ctx_q ctx_q;
 	struct zebra_dplane_info dp_info;
 
 	snprintf(netlink_fuzz_file, MAXPATHLEN, "%s", fname);
@@ -327,7 +325,7 @@ void netlink_read_init(const char *fname)
 	zebra_dplane_info_from_zns(&dp_info, zns, false);
 
 	netlink_parse_info(netlink_information_fetch, &zns->netlink, &dp_info,
-			   ctx_q, 1, 0);
+			   NULL, 1, 0);
 }
 
 /**
@@ -387,15 +385,13 @@ static long netlink_read_file(char *buf, const char *fname)
 static int kernel_read(struct thread *thread)
 {
 	struct zebra_ns *zns = (struct zebra_ns *)THREAD_ARG(thread);
-	/* Just fake the context */
-	struct dplane_ctx_q ctx_q;
 	struct zebra_dplane_info dp_info;
 
 	/* Capture key info from ns struct */
 	zebra_dplane_info_from_zns(&dp_info, zns, false);
 
 	netlink_parse_info(netlink_information_fetch, &zns->netlink, &dp_info,
-			   ctx_q, 5, 0);
+			   NULL, 5, 0);
 	zns->t_netlink = NULL;
 	thread_add_read(zrouter.master, kernel_read, zns, zns->netlink.sock,
 			&zns->t_netlink);
@@ -710,7 +706,7 @@ static void netlink_parse_extended_ack(struct nlmsghdr *h)
  * @ctx_errors:	Array with the sequence numbers that had an error
  */
 static enum zebra_dplane_result
-mark_ctx_errors(struct dplane_ctx_q ctx_q, int count, uint32_t ctx_errors[])
+mark_ctx_errors(struct dplane_ctx_q *ctx_q, int count, uint32_t ctx_errors[])
 {
 
 	enum zebra_dplane_result ret = ZEBRA_DPLANE_REQUEST_SUCCESS;
@@ -718,7 +714,7 @@ mark_ctx_errors(struct dplane_ctx_q ctx_q, int count, uint32_t ctx_errors[])
 	struct zebra_dplane_ctx *tmp_ctx;
 
 	for (int i = 0; i < count; i++) {
-		for (ctx = TAILQ_FIRST(&ctx_q); ctx != NULL; ctx = tmp_ctx) {
+		for (ctx = TAILQ_FIRST(ctx_q); ctx != NULL; ctx = tmp_ctx) {
 			tmp_ctx = TAILQ_NEXT(ctx, zd_q_entries);
 			if (ctx->zd_seq == ctx_errors[i]) {
 				zlog_debug("Error on context sequence: %d",
@@ -748,7 +744,7 @@ mark_ctx_errors(struct dplane_ctx_q ctx_q, int count, uint32_t ctx_errors[])
 enum zebra_dplane_result
 netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 		   const struct nlsock *nl, const struct zebra_dplane_info *zns,
-		   struct dplane_ctx_q ctx_q, int count, int startup)
+		   struct dplane_ctx_q *ctx_q, int count, int startup)
 {
 	int status;
 	int error;
@@ -794,8 +790,11 @@ netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 				/* We ignore ACKS back via sock options so it
 				 * makes sense we would get nothing here
 				 */
-				dplane_ctx_set_status_all(
-					&ctx_q, ZEBRA_DPLANE_REQUEST_SUCCESS);
+				if (ctx_q) {
+					dplane_ctx_set_status_all(
+						ctx_q,
+						ZEBRA_DPLANE_REQUEST_SUCCESS);
+				}
 				break;
 			}
 			flog_err(EC_ZEBRA_RECVMSG_OVERRUN,
@@ -812,16 +811,22 @@ netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 
 		if (status == 0) {
 			flog_err_sys(EC_LIB_SOCKET, "%s EOF", nl->name);
-			return dplane_ctx_set_status_all(&ctx_q,
-						  ZEBRA_DPLANE_REQUEST_FAILURE);
+			if (ctx_q) {
+				dplane_ctx_set_status_all(
+					ctx_q, ZEBRA_DPLANE_REQUEST_FAILURE);
+			}
+			return ZEBRA_DPLANE_REQUEST_FAILURE;
 		}
 
 		if (msg.msg_namelen != sizeof snl) {
 			flog_err(EC_ZEBRA_NETLINK_LENGTH_ERROR,
 				 "%s sender address length error: length %d",
 				 nl->name, msg.msg_namelen);
-			return dplane_ctx_set_status_all(&ctx_q,
-						  ZEBRA_DPLANE_REQUEST_FAILURE);
+			if (ctx_q) {
+				dplane_ctx_set_status_all(
+					ctx_q, ZEBRA_DPLANE_REQUEST_FAILURE);
+			}
+			return ZEBRA_DPLANE_REQUEST_FAILURE;
 		}
 
 		if (IS_ZEBRA_DEBUG_KERNEL_MSGDUMP_RECV) {
@@ -995,7 +1000,13 @@ netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 		}
 
 	}
-	return mark_ctx_errors(ctx_q, error_count, ctx_errors);
+
+	/* Startup request case */
+	if (!ctx_q && count) {
+		return ZEBRA_DPLANE_REQUEST_FAILURE;
+	} else {
+		return mark_ctx_errors(ctx_q, error_count, ctx_errors);
+	}
 }
 
 /**
@@ -1258,8 +1269,8 @@ netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 		zlog_debug("wrote [%d] messages (%u bytes) to netlink", cached,
 			   status);
 		ret = netlink_parse_info(filter, &(batch_ctx.dp_info->nls),
-					 batch_ctx.dp_info, batch_ctx.ctx_q, 0,
-					 batch_ctx.startup);
+					 batch_ctx.dp_info, &(batch_ctx.ctx_q),
+					 0, batch_ctx.startup);
 	}
 
 	/* flush cache */
