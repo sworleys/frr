@@ -281,6 +281,25 @@ DEFPY(vrrp_preempt,
 	return CMD_SUCCESS;
 }
 
+DEFPY(vrrp_accept,
+      vrrp_accept_cmd,
+      "[no] vrrp (1-255)$vrid accept",
+      NO_STR
+      VRRP_STR
+      VRRP_VRID_STR
+      "Preempt mode\n")
+{
+	VTY_DECLVAR_CONTEXT(interface, ifp);
+
+	struct vrrp_vrouter *vr;
+
+	VROUTER_GET_VTY(vty, ifp, vrid, vr);
+
+	vrrp_set_accept_mode(vr, !no);
+
+	return CMD_SUCCESS;
+}
+
 DEFPY(vrrp_autoconfigure,
       vrrp_autoconfigure_cmd,
       "[no] vrrp autoconfigure [version (2-3)]",
@@ -576,4 +595,5 @@ void vrrp_vty_init(void)
 	install_element(INTERFACE_NODE, &vrrp_ip_cmd);
 	install_element(INTERFACE_NODE, &vrrp_ip6_cmd);
 	install_element(INTERFACE_NODE, &vrrp_preempt_cmd);
+	install_element(INTERFACE_NODE, &vrrp_accept_cmd);
 }

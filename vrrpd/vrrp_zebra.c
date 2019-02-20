@@ -232,6 +232,35 @@ int vrrp_zclient_send_interface_protodown(struct interface *ifp, bool down)
 						down);
 }
 
+void vrrp_zclient_blackhole_vips(struct vrrp_router *r, bool add)
+{
+	struct zapi_route api = {};
+	struct prefix p = {};
+	int cmd;
+	int fam;
+	struct listnode *ln;
+	struct ipaddr *ip;
+
+	for (ALL_LIST_ELEMENTS_RO(r->addrs, ln, ip)) {
+		fam = ip->ipa_type == IPADDR_V4 ? AF_INET : AF_INET6;
+
+		p.family = fam;
+		p.prefixlen = (fam == AF_INET) ? IPV4_MAX_PREFIXLEN
+					       : IPV6_MAX_PREFIXLEN;
+		memcpy(&p.u, &ip->ip, IPADDRSZ(ip));
+
+		api.vrf_id = VRF_DEFAULT;
+		api.type = ZEBRA_ROUTE_VRRP;
+		api.safi = SAFI_UNICAST;
+		api.prefix = p;
+		zapi_route_set_blackhole(&api, BLACKHOLE_NULL);
+		SET_FLAG(api.flags, ZEBRA_FLAG_FIB_OVERRIDE);
+
+		cmd = add ? ZEBRA_ROUTE_ADD : ZEBRA_ROUTE_DELETE;
+		zclient_route_send(cmd, zclient, &api);
+	}
+}
+
 void vrrp_zebra_init(void)
 {
 	/* Socket for receiving updates from Zebra daemon */

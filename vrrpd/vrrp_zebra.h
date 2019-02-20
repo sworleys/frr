@@ -28,5 +28,6 @@ extern void vrrp_zebra_init(void);
 extern void vrrp_zebra_radv_set(struct vrrp_router *r, bool enable);
 extern int vrrp_zclient_send_interface_protodown(struct interface *ifp,
 						 bool down);
+extern void vrrp_zclient_blackhole_vips(struct vrrp_router *r, bool add);
 
 #endif /* __VRRP_ZEBRA_H__ */

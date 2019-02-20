@@ -301,6 +301,31 @@ void vrrp_set_advertisement_interval(struct vrrp_vrouter *vr,
 	vrrp_recalculate_timers(vr->v6);
 }
 
+void vrrp_set_accept_mode(struct vrrp_vrouter *vr, bool accept_mode)
+{
+	if (vr->accept_mode == accept_mode)
+		return;
+
+	if (vr->v4->fsm.state == VRRP_STATE_MASTER && vr->v4->priority != 255) {
+		DEBUGD(&vrrp_dbg_proto,
+		       VRRP_LOGPFX VRRP_LOGPFX_VRID
+		       "Accept_Mode changed to %s; %sblackholing all IPv4 VIPs",
+		       vr->vrid, accept_mode ? "on" : "off",
+		       accept_mode ? "un" : "");
+		vrrp_zclient_blackhole_vips(vr->v4, !accept_mode);
+	}
+	if (vr->v6->fsm.state == VRRP_STATE_MASTER && vr->v6->priority != 255) {
+		DEBUGD(&vrrp_dbg_proto,
+		       VRRP_LOGPFX VRRP_LOGPFX_VRID
+		       "Accept_Mode changed to %s; %sblackholing all IPv6 VIPs",
+		       vr->vrid, accept_mode ? "on" : "off",
+		       accept_mode ? "un" : "");
+		vrrp_zclient_blackhole_vips(vr->v6, !accept_mode);
+	}
+
+	vr->accept_mode = accept_mode;
+}
+
 static bool vrrp_has_ip(struct vrrp_vrouter *vr, struct ipaddr *ip)
 {
 	struct vrrp_router *r = ip->ipa_type == IPADDR_V4 ? vr->v4 : vr->v6;
@@ -1204,6 +1229,16 @@ static void vrrp_change_state_master(struct vrrp_router *r)
 		vrrp_zebra_radv_set(r, true);
 
 	vrrp_zclient_send_interface_protodown(r->mvl_ifp, false);
+
+	if (r->priority != 255 && !r->vr->accept_mode) {
+		DEBUGD(&vrrp_dbg_proto,
+		       VRRP_LOGPFX VRRP_LOGPFX_VRID
+		       "We are not the address owner and Accept_Mode is off; blackholing all VIPs",
+		       r->vr->vrid);
+		vrrp_zclient_blackhole_vips(r, true);
+	} else {
+		vrrp_zclient_blackhole_vips(r, false);
+	}
 }
 
 /*
@@ -2020,8 +2055,8 @@ int vrrp_config_write_interface(struct vty *vty)
 		if (!vr->preempt_mode && ++writes)
 			vty_out(vty, " no vrrp %" PRIu8 " preempt\n", vr->vrid);
 
-		if (vr->accept_mode && ++writes)
-			vty_out(vty, " vrrp %" PRIu8 " accept\n", vr->vrid);
+		if (!vr->accept_mode && ++writes)
+			vty_out(vty, " no vrrp %" PRIu8 " accept\n", vr->vrid);
 
 		if (vr->advertisement_interval != VRRP_DEFAULT_ADVINT
 		    && ++writes)

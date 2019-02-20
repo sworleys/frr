@@ -274,6 +274,21 @@ void vrrp_set_advertisement_interval(struct vrrp_vrouter *vr,
 				     uint16_t advertisement_interval);
 
 /*
+ * Set Accept_Mode on this Virtual Router.
+ *
+ * If the corresponding VRRP routers are non-owner Masters and accept mode is
+ * off, black hole routes for all VIPs will be installed into Zebra with a FIB
+ * override.
+ *
+ * vr
+ *    Virtual Router to set Accept_Mode on
+ *
+ * accept_mode
+ *    Whether to turn on Accept_Mode or not
+ */
+void vrrp_set_accept_mode(struct vrrp_vrouter *vr, bool accept_mode);
+
+/*
  * Add an IPvX address to a VRRP Virtual Router.
  *
  * r
