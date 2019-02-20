@@ -106,7 +106,7 @@ char *ecom_mac2str(char *ecom_mac)
 }
 
 /* Fetch router-mac from extended community */
-void bgp_attr_rmac(struct attr *attr,
+bool bgp_attr_rmac(struct attr *attr,
 		   struct ethaddr *rmac)
 {
 	int i = 0;
@@ -114,7 +114,7 @@ void bgp_attr_rmac(struct attr *attr,
 
 	ecom = attr->ecommunity;
 	if (!ecom || !ecom->size)
-		return;
+		return false;
 
 	/* If there is a router mac extended community, set RMAC in attr */
 	for (i = 0; i < ecom->size; i++) {
@@ -131,7 +131,9 @@ void bgp_attr_rmac(struct attr *attr,
 			continue;
 
 		memcpy(rmac, pnt, ETH_ALEN);
+		return true;
 	}
+	return false;
 }
 
 /*
