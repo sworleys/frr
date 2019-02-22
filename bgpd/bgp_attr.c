@@ -53,7 +53,6 @@
 #endif
 #include "bgp_encap_types.h"
 #include "bgp_evpn.h"
-#include "bgp_mac.h"
 
 /* Attribute strings for logging. */
 static const struct message attr_str[] = {
@@ -1918,18 +1917,7 @@ bgp_attr_ext_communities(struct bgp_attr_parser_args *args)
 	bgp_attr_evpn_na_flag(attr, &attr->router_flag);
 
 	/* Extract the Rmac, if any */
-	if (bgp_attr_rmac(attr, &attr->rmac)) {
-		if (bgp_mac_exist(&attr->rmac)) {
-			if (bgp_debug_update(peer, NULL, NULL, 1)) {
-				char buf1[ETHER_ADDR_STRLEN];
-
-				zlog_debug("%s: router mac %s already exist, rejecting the update",
-					   __func__, prefix_mac2str(&attr->rmac,
-							buf1, sizeof(buf1)));
-			}
-			return BGP_ATTR_PARSE_WITHDRAW;
-		}
-	}
+	bgp_attr_rmac(attr, &attr->rmac);
 
 	return BGP_ATTR_PARSE_PROCEED;
 }
