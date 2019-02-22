@@ -59,7 +59,6 @@ ZEBRA_ROUTE_BGP,        bgp,       bgpd,   'B', 1, 1, 1,     "BGP"
 ZEBRA_ROUTE_PIM,	pim,	   pimd,   'P', 0, 0, 0,     "PIM"
 ZEBRA_ROUTE_EIGRP,      eigrp,     eigrpd, 'E', 1, 0, 1,     "EIGRP"
 ZEBRA_ROUTE_NHRP,       nhrp,      nhrpd,  'N', 1, 1, 1,     "NHRP"
-ZEBRA_ROUTE_VRRP,       vrrp,      vrrpd,  'V', 1, 1, 0,     "VRRP"
 # HSLS and OLSR both are AFI independent (so: 1, 1), however
 # we want to disable for them for general Quagga distribution.
 # This at least makes it trivial for users of these protocols
@@ -108,4 +107,3 @@ ZEBRA_ROUTE_VNC_DIRECT,    "VNC direct (not via zebra) routes"
 ZEBRA_ROUTE_BABEL,  "Babel routing protocol (Babel)"
 ZEBRA_ROUTE_SHARP, "Super Happy Advanced Routing Protocol (sharpd)"
 ZEBRA_ROUTE_PBR, "Policy Based Routing (PBR)"
-ZEBRA_ROUTE_VRRP,   "Virtual Router Redundancy Protocol"

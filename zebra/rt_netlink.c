@@ -99,8 +99,7 @@ static inline int is_selfroute(int proto)
 	    || (proto == RTPROT_ISIS) || (proto == RTPROT_RIPNG)
 	    || (proto == RTPROT_NHRP) || (proto == RTPROT_EIGRP)
 	    || (proto == RTPROT_LDP) || (proto == RTPROT_BABEL)
-	    || (proto == RTPROT_RIP) || (proto == RTPROT_SHARP)
-	    || (proto == RTPROT_VRRP)) {
+	    || (proto == RTPROT_RIP) || (proto == RTPROT_SHARP)) {
 		return 1;
 	}
 
@@ -143,9 +142,6 @@ static inline int zebra2proto(int proto)
 		break;
 	case ZEBRA_ROUTE_SHARP:
 		proto = RTPROT_SHARP;
-		break;
-	case ZEBRA_ROUTE_VRRP:
-		proto = RTPROT_VRRP;
 		break;
 	default:
 		/*
