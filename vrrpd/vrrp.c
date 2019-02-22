@@ -628,6 +628,8 @@ static void vrrp_send_advertisement(struct vrrp_router *r)
 		zlog_warn(VRRP_LOGPFX VRRP_LOGPFX_VRID
 			  "Failed to send VRRP Advertisement: %s",
 			  r->vr->vrid, safe_strerror(errno));
+	} else {
+		++r->stats.adver_tx_cnt;
 	}
 }
 
@@ -713,6 +715,8 @@ static int vrrp_recv_advertisement(struct vrrp_router *r, struct ipaddr *src,
 		       " addresses, but this VRRP instance has %u",
 		       r->vr->vrid, family2str(r->family), pkt->hdr.naddr,
 		       r->addrs->count);
+
+	++r->stats.adver_rx_cnt;
 
 	int addrcmp;
 
@@ -1306,6 +1310,8 @@ static void vrrp_change_state(struct vrrp_router *r, int to)
 	zlog_info(VRRP_LOGPFX VRRP_LOGPFX_VRID "%s -> %s", r->vr->vrid,
 		  vrrp_state_names[r->fsm.state], vrrp_state_names[to]);
 	r->fsm.state = to;
+
+	++r->stats.trans_cnt;
 }
 
 /*
