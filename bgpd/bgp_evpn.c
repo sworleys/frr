@@ -3145,7 +3145,7 @@ static int process_type3_route(struct peer *peer, afi_t afi, safi_t safi,
  */
 static int process_type5_route(struct peer *peer, afi_t afi, safi_t safi,
 			       struct attr *attr, u_char *pfx, int psize,
-			       u_int32_t addpath_id, int withdraw)
+			       u_int32_t addpath_id)
 {
 	struct prefix_rd prd;
 	struct prefix_evpn p;
@@ -3230,7 +3230,7 @@ static int process_type5_route(struct peer *peer, afi_t afi, safi_t safi,
 	 */
 
 	/* Process the route. */
-	if (!withdraw)
+	if (attr)
 		ret = bgp_update(peer, (struct prefix *)&p, addpath_id, attr,
 				 afi, safi, ZEBRA_ROUTE_BGP, BGP_ROUTE_NORMAL,
 				 &prd, &label, 1, 0, &evpn);
@@ -4004,8 +4004,9 @@ int bgp_nlri_parse_evpn(struct peer *peer, struct attr *attr,
 			break;
 
 		case BGP_EVPN_IP_PREFIX_ROUTE:
-			if (process_type5_route(peer, afi, safi, attr, pnt,
-						psize, addpath_id, withdraw)) {
+			if (process_type5_route(peer, afi, safi,
+						withdraw ? NULL : attr, pnt,
+						psize, addpath_id)) {
 				flog_err(
 					BGP_ERR_PKT_PROCESS,
 					"%u:%s - Error in processing EVPN type-5 NLRI size %d",
