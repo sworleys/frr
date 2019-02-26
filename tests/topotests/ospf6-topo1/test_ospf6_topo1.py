@@ -261,7 +261,7 @@ def test_ospfv3_routingTable():
     print("\n\n** Verifying OSPFv3 Routing Table")
     print("******************************************\n")
     failures = 0
-    for i in range(1, 5):
+    for i in reversed(range(1, 5)):
         refTableFile = '%s/r%s/show_ipv6_route.ref' % (thisDir, i)
         if os.path.isfile(refTableFile):
             # Read expected result from file

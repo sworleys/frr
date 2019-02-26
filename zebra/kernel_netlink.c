@@ -1017,7 +1017,7 @@ netlink_parse_info(int (*filter)(struct nlmsghdr *, ns_id_t, int),
 enum zebra_dplane_result netlink_batch_expire()
 {
 	zlog_debug("%s popped\n", __func__);
-	return netlink_talk_info(netlink_talk_filter, NULL, NULL, NULL, 0);
+	return netlink_talk_info(netlink_talk_filter, NULL, NULL, NULL, -1);
 }
 
 /* Netlink batching code from libmnl */
@@ -1139,7 +1139,7 @@ static void *mnl_nlmsg_batch_current(struct mnl_nlmsg_batch *b)
  * @nlmsghdr:	The data to send to the kernel
  * @dp_info:	The dataplane and netlink socket information
  * @ctx:	The dataplane ctx
- * @startup:	Are we reading in under startup conditions
+ * @startup:	Are we reading in under startup conditions/set to -1 if flushing
  * Return:      Status Result of the last context batch (Should be none until
  * flushed)
  *
@@ -1202,6 +1202,7 @@ netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 		&& batch_ctx.startup == startup
 		&& batch_ctx.dp_info->nls.sock == dp_info->nls.sock)) {
 
+update_ctx:
 		batch_ctx.filter = filter;
 		batch_ctx.dp_info = dp_info;
 		batch_ctx.startup = startup;
@@ -1247,10 +1248,12 @@ netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 
 	snl.nl_family = AF_NETLINK;
 
-	/* Send message to netlink interface. */
-	frr_elevate_privs(&zserv_privs) {
-		status = sendmsg(batch_ctx.dp_info->nls.sock, &msg, 0);
-		save_errno = errno;
+	if (iov.iov_len > 0) {
+		/* Send message to netlink interface. */
+		frr_elevate_privs(&zserv_privs) {
+			status = sendmsg(batch_ctx.dp_info->nls.sock, &msg, 0);
+			save_errno = errno;
+		}
 	}
 
 	if (IS_ZEBRA_DEBUG_KERNEL_MSGDUMP_SEND) {
@@ -1268,20 +1271,24 @@ netlink_talk_info(int (*filter)(struct nlmsghdr *, ns_id_t, int startup),
 		// TODO: Fix the loggers?
 		zlog_debug("wrote [%d] messages (%u bytes) to netlink", cached,
 			   status);
-		ret = netlink_parse_info(filter, &(batch_ctx.dp_info->nls),
+		if (status) {
+			ret = netlink_parse_info(batch_ctx.filter, &(batch_ctx.dp_info->nls),
 					 batch_ctx.dp_info, &(batch_ctx.ctx_q),
 					 0, batch_ctx.startup);
+		}
 	}
 
 	/* flush cache */
 	if (mnl_nlmsg_batch_reset(&nl_batch)) {
 		cached = 1;
-		// TODO: Re-run and force flush?
-		// Shouldn't need to do this since it will flush as soon
-		// as it is full
 	} else {
 		TAILQ_INIT(&batch_ctx.ctx_q);
 		cached = 0;
+		if (startup != -1) {
+			/* If this wasn't a flush, then it was a context
+			 * change and we need the new data */
+			goto update_ctx;
+		}
 		batch_ctx_initialized = false;
 	}
 
