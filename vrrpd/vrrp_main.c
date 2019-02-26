@@ -57,7 +57,7 @@ struct zebra_privs_t vrrp_privs = {
 	.cap_num_p = array_size(_caps_p),
 	.cap_num_i = 0};
 
-struct option longopts[] = { { 0 } };
+struct option longopts[] = {{0}};
 
 /* Master of threads. */
 struct thread_master *master;
@@ -105,10 +105,8 @@ struct quagga_signal_t vrrp_signals[] = {
 
 FRR_DAEMON_INFO(vrrpd, VRRP, .vty_port = VRRP_VTY_PORT,
 		.proghelp = "Virtual Router Redundancy Protocol",
-		.signals = vrrp_signals,
-		.n_signals = array_size(vrrp_signals),
-		.privs = &vrrp_privs,
-)
+		.signals = vrrp_signals, .n_signals = array_size(vrrp_signals),
+		.privs = &vrrp_privs, )
 
 int main(int argc, char **argv, char **envp)
 {
