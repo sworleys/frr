@@ -2275,10 +2275,18 @@ static void bgp_process_main_one(struct bgp *bgp, struct bgp_node *rn,
 				if (new_select->type == ZEBRA_ROUTE_BGP
 				    && (new_select->sub_type == BGP_ROUTE_NORMAL
 					|| new_select->sub_type
-						   == BGP_ROUTE_IMPORTED))
+						   == BGP_ROUTE_IMPORTED)) {
+					/* For EVPN-based routes, need to del
+					 * followed by add, to clear entries
+					 * related to neighbor and RMAC.
+					 */
+					if (is_route_parent_evpn(old_select))
+						bgp_zebra_withdraw(p,
+							old_select, bgp, safi);
 
 					bgp_zebra_announce(rn, p, old_select,
 							   bgp, afi, safi);
+				}
 			}
 		}
 		UNSET_FLAG(old_select->flags, BGP_INFO_MULTIPATH_CHG);
@@ -2366,9 +2374,9 @@ static void bgp_process_main_one(struct bgp *bgp, struct bgp_node *rn,
 			|| new_select->sub_type == BGP_ROUTE_AGGREGATE
 			|| new_select->sub_type == BGP_ROUTE_IMPORTED)) {
 
-			/* if this is an evpn imported type-5 prefix,
-			 * we need to withdraw the route first to clear
-			 * the nh neigh and the RMAC entry.
+			/* For EVPN-based routes, need to del
+			 * followed by add, to clear entries
+			 * related to neighbor and RMAC.
 			 */
 			if (old_select &&
 			    is_route_parent_evpn(old_select))
