@@ -1655,7 +1655,10 @@ static int vrrp_autoconfig_if_add(struct interface *ifp)
 
 	if (!vr) {
 		vr = vrrp_autoconfig_autocreate(ifp);
-		created = true;
+		if (vr) {
+			created = true;
+			vrrp_zclient_send_interface_protodown(ifp, false);
+		}
 	}
 
 	if (!vr)
