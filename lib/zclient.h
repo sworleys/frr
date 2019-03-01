@@ -63,10 +63,6 @@ typedef enum {
 	ZEBRA_ROUTE_ADD,
 	ZEBRA_ROUTE_DELETE,
 	ZEBRA_ROUTE_NOTIFY_OWNER,
-	ZEBRA_IPV4_ROUTE_ADD,
-	ZEBRA_IPV4_ROUTE_DELETE,
-	ZEBRA_IPV6_ROUTE_ADD,
-	ZEBRA_IPV6_ROUTE_DELETE,
 	ZEBRA_REDISTRIBUTE_ADD,
 	ZEBRA_REDISTRIBUTE_DELETE,
 	ZEBRA_REDISTRIBUTE_DEFAULT_ADD,
@@ -84,7 +80,6 @@ typedef enum {
 	ZEBRA_IMPORT_ROUTE_REGISTER,
 	ZEBRA_IMPORT_ROUTE_UNREGISTER,
 	ZEBRA_IMPORT_CHECK_UPDATE,
-	ZEBRA_IPV4_ROUTE_IPV6_NEXTHOP_ADD,
 	ZEBRA_BFD_DEST_REGISTER,
 	ZEBRA_BFD_DEST_DEREGISTER,
 	ZEBRA_BFD_DEST_UPDATE,
@@ -311,37 +306,6 @@ struct zapi_route {
 	struct ethaddr rmac;
 };
 
-/* Zebra IPv4 route message API. */
-struct zapi_ipv4 {
-	u_char type;
-	u_short instance;
-
-	u_int32_t flags;
-
-	u_char message;
-
-	safi_t safi;
-
-	u_char nexthop_num;
-	struct in_addr **nexthop;
-
-	u_char ifindex_num;
-	ifindex_t *ifindex;
-
-	u_char label_num;
-	unsigned int *label;
-
-	u_char distance;
-
-	u_int32_t metric;
-
-	route_tag_t tag;
-
-	u_int32_t mtu;
-
-	vrf_id_t vrf_id;
-};
-
 struct zapi_pw {
 	char ifname[IF_NAMESIZE];
 	ifindex_t ifindex;
@@ -387,20 +351,10 @@ struct zclient_options {
 	bool receive_notify;
 };
 
-/* Prototypes of zebra client service functions. */
-extern struct zclient *zclient_new(struct thread_master *);
-
-#if CONFDATE > 20181101
-CPP_NOTICE("zclient_new_notify can take over or zclient_new now");
-#endif
-
 extern struct zclient_options zclient_options_default;
 
 extern struct zclient *zclient_new_notify(struct thread_master *m,
 					  struct zclient_options *opt);
-
-#define zclient_new(A) zclient_new_notify((A), &zclient_options_default); \
-	CPP_WARN("Please transition to using zclient_new_notify");
 
 extern void zclient_init(struct zclient *, int, u_short, struct zebra_privs_t *privs);
 extern int zclient_start(struct zclient *);
@@ -479,13 +433,6 @@ extern struct interface *zebra_interface_vrf_update_read(struct stream *s,
 extern void zebra_interface_if_set_value(struct stream *, struct interface *);
 extern void zebra_router_id_update_read(struct stream *s, struct prefix *rid);
 
-#if CONFDATE > 20180823
-CPP_NOTICE("zapi_ipv4_route, zapi_ipv6_route, zapi_ipv4_route_ipv6_nexthop as well as the zapi_ipv4 and zapi_ipv6 data structures should be removed now");
-#endif
-
-extern int zapi_ipv4_route(u_char, struct zclient *, struct prefix_ipv4 *,
-			   struct zapi_ipv4 *) __attribute__((deprecated));
-
 extern struct interface *zebra_interface_link_params_read(struct stream *);
 extern size_t zebra_interface_link_params_write(struct stream *,
 						struct interface *);
@@ -501,45 +448,6 @@ extern void zebra_read_pw_status_update(int command, struct zclient *zclient,
 					zebra_size_t length, vrf_id_t vrf_id,
 					struct zapi_pw_status *pw);
 
-/* IPv6 prefix add and delete function prototype. */
-
-struct zapi_ipv6 {
-	u_char type;
-	u_short instance;
-
-	u_int32_t flags;
-
-	u_char message;
-
-	safi_t safi;
-
-	u_char nexthop_num;
-	struct in6_addr **nexthop;
-
-	u_char ifindex_num;
-	ifindex_t *ifindex;
-
-	u_char label_num;
-	unsigned int *label;
-
-	u_char distance;
-
-	u_int32_t metric;
-
-	route_tag_t tag;
-
-	u_int32_t mtu;
-
-	vrf_id_t vrf_id;
-};
-
-extern int zapi_ipv6_route(u_char cmd, struct zclient *zclient,
-			   struct prefix_ipv6 *p, struct prefix_ipv6 *src_p,
-			   struct zapi_ipv6 *api) __attribute__((deprecated));
-extern int zapi_ipv4_route_ipv6_nexthop(u_char, struct zclient *,
-					struct prefix_ipv4 *,
-					struct zapi_ipv6 *)
-	__attribute__((deprecated));
 extern int zclient_route_send(u_char, struct zclient *, struct zapi_route *);
 extern int zclient_send_rnh(struct zclient *zclient, int command,
 			    struct prefix *p, bool exact_match,
