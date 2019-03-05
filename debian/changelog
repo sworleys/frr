@@ -1,8 +1,32 @@
 frr (4.0+cl3u10) RELEASED; urgency=medium
 
-  * Fixes: Lots of stuff
+  * New Enabled: VRRP
+  * New Enabled: "show interface brief" command
+  * Fixes: CM-23017 vtysh: only show error codes once
+  * Fixes: CM-23649 zebra: fix dup addr detect remote macip add case
+  * Fixes: CM-23586 bgpd: Fix EVPN advertise route-map application
+  * Fixes: CM-19560 bgpd: improve peer-group remote-as definitions
+  * Fixes: CM-22380 ospfd: ospfd core if hello packet exceeds link mtu
+  * Fixes: CM-21218 bgpd: fix valgrind flagged errors
+  * Fixes: CM-18989 ospfd: address CVE-2017-3224
+  * Fixes: CM-22864 zebra: probe local inactive neigh
+  * Fixes: CM-19951 zebra, bgpd: Exchange L3 interface for VRF's VNI
+  * Fixes: CM-23050 bgpd: Leak EVPN-installed routes
+  * Fixes: CM-23063 bgpd: No nexthop tracking for EVPN-imported leak
+  * Fixes: CM-23051 bgpd: Allow EVPN-sourced routes to be leaked back
+  * Fixes: CM-23790 bgpd: fll the pmsi_tnl_type into the type-3 PMSI
+  * Fixes: CM-23782 lib: advertise svi ip as macip opcode
+  * Fixes: CM-23850 zebra: advertise evpn route upon l3vni svi mac chg
+  * Fixes: CM-23776 bgpd: vrl source-vrf route map filter
+  * Fixes: CM-23674 bgpd: reject bgp update to overwrite self mac
+  * Fixes: CM-23892 bgpd: Fix route change handling for EVPN-based routes
+  * Fixes: CM-24003 bgpd: fix evpn type-5 implicit withdraw processing
+  * Fixes: CM-23985 tools: keep exit-vrf to change context correctly between vrfs
+  * Fixes: CM-23986 tools: fix blackhole static changes in frr-reload.py
+  * Fixes: CM-24022 bgpd: prevent type-5 route creation if the bgp_vrf->l3vni is 0
+  * Fixes: CM-23902 bgpd: resolve more neighbor peer-group issues
 
- -- dev-support <dev-support@cumulusnetworks.com>  Thu, 25 Jul 2018 18:10:00 -0400
+ -- dev-support <dev-support@cumulusnetworks.com>  Tue, 5 Mar 2019 13:14:50 -0400
 
 frr (4.0+cl3u9) RELEASED; urgency=medium
 
