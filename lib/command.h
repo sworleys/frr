@@ -144,6 +144,7 @@ enum node_type {
 	BGP_EVPN_VNI_NODE,       /* BGP EVPN VNI */
 	RPKI_NODE,     /* RPKI node for configuration of RPKI cache server
 			  connections.*/
+	VRRP_NODE,		 /* VRRP node */
 	NODE_TYPE_MAX, /* maximum */
 };
 

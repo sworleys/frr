@@ -31,6 +31,7 @@
 %{!?with_oldvpn:        %global  with_oldvpn        1 }
 %{!?with_rpki:          %global  with_rpki          0 }
 %{!?with_pbrd:          %global  with_pbrd          1 }
+%{!?with_vrrpd:         %global  with_vrrpd         1 }
 
 # path defines
 %define     _sysconfdir   /etc/frr
@@ -80,7 +81,7 @@
 
 # misc internal defines
 
-%define     daemon_list zebra ripd ospfd bgpd isisd ripngd ospf6d pbrd
+%define     daemon_list zebra ripd ospfd bgpd isisd ripngd ospf6d pbrd vrrpd
 
 %if %{with_ldpd}
 %define     daemon_ldpd ldpd
@@ -118,13 +119,19 @@
 %define		daemon_babeld	""
 %endif
 
+%if %{with_vrrpd}
+%define		daemon_vrrpd vrrpd
+%else
+%define		daemon_vrrpd ""
+%endif
+
 %if %{with_watchfrr}
 %define     daemon_watchfrr watchfrr
 %else
 %define     daemon_watchfrr ""
 %endif
 
-%define     all_daemons %{daemon_list} %{daemon_ldpd} %{daemon_pimd} %{daemon_nhrpd} %{daemon_eigrpd} %{daemon_babeld} %{daemon_watchfrr} %{daemon_pbrd}
+%define     all_daemons %{daemon_list} %{daemon_ldpd} %{daemon_pimd} %{daemon_nhrpd} %{daemon_eigrpd} %{daemon_babeld} %{daemon_watchfrr} %{daemon_pbrd} %{daemon_vrrpd}
 
 # allow build dir to be kept
 %{!?keep_build:         %global  keep_build         0 }
@@ -280,6 +287,11 @@ developing OSPF-API and frr applications.
 	--enable-babeld \
 %else
 	--disable-babeld \
+%endif
+%if %{with_vrrpd}
+	--enable-vrrpd \
+%else
+	--disable-vrrpd \
 %endif
 %if %{with_pam}
     --with-libpam \
@@ -440,6 +452,9 @@ zebra_spec_add_service ldpd     2612/tcp "LDPd vty"
 %if %{with_eigrpd}
 zebra_spec_add_service eigrpd   2613/tcp "EIGRPd vty"
 %endif
+%if %{with_vrrpd}
+zebra_spec_add_service vrrpd    2617/tcp "VRRPd vty"
+%endif
 
 %if "%{initsystem}" == "systemd"
 for daemon in %all_daemons ; do
@@ -570,6 +585,9 @@ rm -rf %{buildroot}
 %endif
 %if %{with_pbrd}
     %{_sbindir}/pbrd
+%endif
+%if %{with_vrrpd}
+    %{_sbindir}/vrrpd
 %endif
 %{_sbindir}/isisd
 %if %{with_ldpd}

@@ -88,6 +88,8 @@ func_frr()
     exec_cmd $jexec pbr.intf vtysh -c "show pbr interface"
     exec_cmd $jexec pbr.nhop.group vtysh -c "show pbr nexthop-groups"
 
+    exec_cmd vrrp.summary vtysh -c "show vrrp"
+
     [ $SUP_SECURE -eq 0 ] && {
         [ $SUP_VERBOSE -eq 1 ] &&
             date +"%F_%T.%N: ${FUNCNAME[0]}: copy.vtysh.history files to archive" 1>&2

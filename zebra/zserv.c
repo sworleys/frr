@@ -157,6 +157,7 @@ int zebra_server_send_message(struct zserv *client)
 static void zserv_encode_interface(struct stream *s, struct interface *ifp)
 {
 	/* Interface information. */
+	struct zebra_if *zif = ifp->info;
 	stream_put(s, ifp->name, INTERFACE_NAMSIZ);
 	stream_putl(s, ifp->ifindex);
 	stream_putc(s, ifp->status);
@@ -168,6 +169,7 @@ static void zserv_encode_interface(struct stream *s, struct interface *ifp)
 	stream_putl(s, ifp->mtu);
 	stream_putl(s, ifp->mtu6);
 	stream_putl(s, ifp->bandwidth);
+	stream_putl(s, zif->link_ifindex);
 	stream_putl(s, ifp->ll_type);
 	stream_putl(s, ifp->hw_addr_len);
 	if (ifp->hw_addr_len)
@@ -1136,6 +1138,32 @@ int zsend_pw_update(struct zserv *client, struct zebra_pw *pw)
 	return zebra_server_send_message(client);
 }
 
+/*
+ * Handle message requesting interface be set up or down.
+ */
+static int zread_interface_set_protodown(struct zserv *client, u_short length,
+					 struct zebra_vrf *zvrf)
+{
+	ifindex_t ifindex;
+	struct interface *ifp;
+	char down;
+
+	struct stream *s = client->ibuf;
+
+	STREAM_GETL(s, ifindex);
+	STREAM_GETC(s, down);
+
+	/* set ifdown */
+	ifp = if_lookup_by_index_per_ns(zebra_ns_lookup(NS_DEFAULT), ifindex);
+	zlog_info("Setting interface %s (%u): protodown %s", ifp->name, ifindex,
+		  down ? "on" : "off");
+
+	zebra_if_set_protodown(ifp, down);
+
+stream_failure:
+	return 0;
+}
+
 /* Register zebra server interface information.  Send current all
    interface and address information. */
 static int zread_interface_add(struct zserv *client, u_short length,
@@ -1259,14 +1287,7 @@ static int zread_route_add(struct zserv *client, u_short length,
 			case NEXTHOP_TYPE_IPV4_IFINDEX:
 
 				memset(&vtep_ip, 0, sizeof(struct ipaddr));
-				if (CHECK_FLAG(api.flags,
-					       ZEBRA_FLAG_EVPN_ROUTE)) {
-					ifindex =
-						get_l3vni_svi_ifindex(vrf_id);
-				} else {
-					ifindex = api_nh->ifindex;
-				}
-
+				ifindex = api_nh->ifindex;
 				if (IS_ZEBRA_DEBUG_RECV) {
 					char nhbuf[INET6_ADDRSTRLEN] = {0};
 					inet_ntop(AF_INET, &api_nh->gate.ipv4,
@@ -1280,20 +1301,19 @@ static int zread_route_add(struct zserv *client, u_short length,
 					re, &api_nh->gate.ipv4, NULL, ifindex,
 					api_nh->vrf_id);
 
-				/* if this an EVPN route entry,
-				 * program the nh as neigh
+				/* Special handling for IPv4 routes sourced
+				 * from EVPN - the nexthop and associated MAC
+				 * need to be installed.
 				 */
 				if (CHECK_FLAG(api.flags,
 					       ZEBRA_FLAG_EVPN_ROUTE)) {
-					SET_FLAG(nexthop->flags,
-						 NEXTHOP_FLAG_EVPN_RVTEP);
 					vtep_ip.ipa_type = IPADDR_V4;
 					memcpy(&(vtep_ip.ipaddr_v4),
 					       &(api_nh->gate.ipv4),
 					       sizeof(struct in_addr));
 					zebra_vxlan_evpn_vrf_route_add(
-						vrf_id, &api_nh->rmac, &vtep_ip,
-						&api.prefix);
+						api_nh->vrf_id, &api_nh->rmac,
+						&vtep_ip, &api.prefix);
 				}
 				break;
 			case NEXTHOP_TYPE_IPV6:
@@ -1302,32 +1322,24 @@ static int zread_route_add(struct zserv *client, u_short length,
 				break;
 			case NEXTHOP_TYPE_IPV6_IFINDEX:
 				memset(&vtep_ip, 0, sizeof(struct ipaddr));
-				if (CHECK_FLAG(api.flags,
-					       ZEBRA_FLAG_EVPN_ROUTE)) {
-					ifindex =
-						get_l3vni_svi_ifindex(vrf_id);
-				} else {
-					ifindex = api_nh->ifindex;
-				}
-
+				ifindex = api_nh->ifindex;
 				nexthop = route_entry_nexthop_ipv6_ifindex_add(
 					re, &api_nh->gate.ipv6, ifindex,
 					api_nh->vrf_id);
 
-				/* if this an EVPN route entry,
-				 * program the nh as neigh
+				/* Special handling for IPv6 routes sourced
+				 * from EVPN - the nexthop and associated MAC
+				 * need to be installed.
 				 */
 				if (CHECK_FLAG(api.flags,
 					       ZEBRA_FLAG_EVPN_ROUTE)) {
-					SET_FLAG(nexthop->flags,
-						 NEXTHOP_FLAG_EVPN_RVTEP);
 					vtep_ip.ipa_type = IPADDR_V6;
 					memcpy(&vtep_ip.ipaddr_v6,
 					       &(api_nh->gate.ipv6),
 					       sizeof(struct in6_addr));
 					zebra_vxlan_evpn_vrf_route_add(
-						vrf_id, &api_nh->rmac, &vtep_ip,
-						&api.prefix);
+						api_nh->vrf_id, &api_nh->rmac,
+						&vtep_ip, &api.prefix);
 				}
 				break;
 			case NEXTHOP_TYPE_BLACKHOLE:
@@ -1452,203 +1464,6 @@ static int zread_route_del(struct zserv *client, u_short length,
 	return 0;
 }
 
-/* This function support multiple nexthop. */
-/*
- * Parse the ZEBRA_IPV4_ROUTE_ADD sent from client. Update re and
- * add kernel route.
- */
-static int zread_ipv4_add(struct zserv *client, u_short length,
-			  struct zebra_vrf *zvrf)
-{
-	int i;
-	struct route_entry *re;
-	struct prefix p;
-	u_char message;
-	struct in_addr nhop_addr;
-	u_char nexthop_num;
-	u_char nexthop_type;
-	struct stream *s;
-	ifindex_t ifindex;
-	safi_t safi;
-	int ret;
-	enum lsp_types_t label_type = ZEBRA_LSP_NONE;
-	mpls_label_t label;
-	struct nexthop *nexthop;
-	enum blackhole_type bh_type = BLACKHOLE_NULL;
-
-	/* Get input stream.  */
-	s = client->ibuf;
-
-	/* Allocate new re. */
-	re = XCALLOC(MTYPE_RE, sizeof(struct route_entry));
-
-	/* Type, flags, message. */
-	STREAM_GETC(s, re->type);
-	if (re->type > ZEBRA_ROUTE_MAX) {
-		zlog_warn("%s: Specified route type %d is not a legal value\n",
-			  __PRETTY_FUNCTION__, re->type);
-		XFREE(MTYPE_RE, re);
-		return -1;
-	}
-	STREAM_GETW(s, re->instance);
-	STREAM_GETL(s, re->flags);
-	STREAM_GETC(s, message);
-	STREAM_GETW(s, safi);
-	re->uptime = time(NULL);
-
-	/* IPv4 prefix. */
-	memset(&p, 0, sizeof(struct prefix_ipv4));
-	p.family = AF_INET;
-	STREAM_GETC(s, p.prefixlen);
-	if (p.prefixlen > IPV4_MAX_BITLEN) {
-		zlog_warn("%s: Specified prefix length %d is greater than what v4 can be",
-			  __PRETTY_FUNCTION__, p.prefixlen);
-		XFREE(MTYPE_RE, re);
-		return -1;
-	}
-	STREAM_GET(&p.u.prefix4, s, PSIZE(p.prefixlen));
-
-	/* VRF ID */
-	re->vrf_id = zvrf_id(zvrf);
-
-	/* Nexthop parse. */
-	if (CHECK_FLAG(message, ZAPI_MESSAGE_NEXTHOP)) {
-		STREAM_GETC(s, nexthop_num);
-		zserv_nexthop_num_warn(__func__, (const struct prefix *)&p,
-				       nexthop_num);
-
-		if (CHECK_FLAG(message, ZAPI_MESSAGE_LABEL))
-			label_type = lsp_type_from_re_type(client->proto);
-
-		for (i = 0; i < nexthop_num; i++) {
-			STREAM_GETC(s, nexthop_type);
-
-			switch (nexthop_type) {
-			case NEXTHOP_TYPE_IFINDEX:
-				STREAM_GETL(s, ifindex);
-				route_entry_nexthop_ifindex_add(re, ifindex,
-								re->vrf_id);
-				break;
-			case NEXTHOP_TYPE_IPV4:
-				STREAM_GET(&nhop_addr.s_addr, s,
-					   IPV4_MAX_BYTELEN);
-				nexthop = route_entry_nexthop_ipv4_add(
-					re, &nhop_addr, NULL, re->vrf_id);
-				/* For labeled-unicast, each nexthop is followed
-				 * by label. */
-				if (CHECK_FLAG(message, ZAPI_MESSAGE_LABEL)) {
-					STREAM_GETL(s, label);
-					nexthop_add_labels(nexthop, label_type,
-							   1, &label);
-				}
-				break;
-			case NEXTHOP_TYPE_IPV4_IFINDEX:
-				STREAM_GET(&nhop_addr.s_addr, s,
-					   IPV4_MAX_BYTELEN);
-				STREAM_GETL(s, ifindex);
-				route_entry_nexthop_ipv4_ifindex_add(
-					re, &nhop_addr, NULL, ifindex,
-					re->vrf_id);
-				break;
-			case NEXTHOP_TYPE_IPV6:
-				zlog_warn(
-					"%s: Please use ZEBRA_ROUTE_ADD if you want to pass v6 nexthops",
-					__PRETTY_FUNCTION__);
-				nexthops_free(re->ng.nexthop);
-				XFREE(MTYPE_RE, re);
-				return -1;
-				break;
-			case NEXTHOP_TYPE_BLACKHOLE:
-				route_entry_nexthop_blackhole_add(re, bh_type);
-				break;
-			default:
-				zlog_warn(
-					"%s: Specified nexthop type: %d does not exist",
-					__PRETTY_FUNCTION__, nexthop_type);
-				nexthops_free(re->ng.nexthop);
-				XFREE(MTYPE_RE, re);
-				return -1;
-			}
-		}
-	}
-
-	/* Distance. */
-	if (CHECK_FLAG(message, ZAPI_MESSAGE_DISTANCE))
-		STREAM_GETC(s, re->distance);
-
-	/* Metric. */
-	if (CHECK_FLAG(message, ZAPI_MESSAGE_METRIC))
-		STREAM_GETL(s, re->metric);
-
-	/* Tag */
-	if (CHECK_FLAG(message, ZAPI_MESSAGE_TAG))
-		STREAM_GETL(s, re->tag);
-	else
-		re->tag = 0;
-
-	if (CHECK_FLAG(message, ZAPI_MESSAGE_MTU))
-		STREAM_GETL(s, re->mtu);
-	else
-		re->mtu = 0;
-
-	/* Table */
-	re->table = zvrf->table_id;
-
-	ret = rib_add_multipath(AFI_IP, safi, &p, NULL, re);
-
-	/* Stats */
-	if (ret > 0)
-		client->v4_route_add_cnt++;
-	else if (ret < 0)
-		client->v4_route_upd8_cnt++;
-
-	return 0;
-
-stream_failure:
-	nexthops_free(re->ng.nexthop);
-	XFREE(MTYPE_RE, re);
-	return -1;
-}
-
-/* Zebra server IPv4 prefix delete function. */
-static int zread_ipv4_delete(struct zserv *client, u_short length,
-			     struct zebra_vrf *zvrf)
-{
-	struct stream *s;
-	struct zapi_ipv4 api;
-	struct prefix p;
-	u_int32_t table_id;
-
-	s = client->ibuf;
-
-	/* Type, flags, message. */
-	STREAM_GETC(s, api.type);
-	STREAM_GETW(s, api.instance);
-	STREAM_GETL(s, api.flags);
-	STREAM_GETC(s, api.message);
-	STREAM_GETW(s, api.safi);
-
-	/* IPv4 prefix. */
-	memset(&p, 0, sizeof(struct prefix));
-	p.family = AF_INET;
-	STREAM_GETC(s, p.prefixlen);
-	if (p.prefixlen > IPV4_MAX_BITLEN) {
-		zlog_warn("%s: Passed in prefixlen %d is impossible",
-			  __PRETTY_FUNCTION__, p.prefixlen);
-		return -1;
-	}
-	STREAM_GET(&p.u.prefix4, s, PSIZE(p.prefixlen));
-
-	table_id = zvrf->table_id;
-
-	rib_delete(AFI_IP, api.safi, zvrf_id(zvrf), api.type, api.instance,
-		   api.flags, &p, NULL, NULL, table_id, 0, false, NULL);
-	client->v4_route_del_cnt++;
-
-stream_failure:
-	return 0;
-}
-
 /* MRIB Nexthop lookup for IPv4. */
 static int zread_ipv4_nexthop_lookup_mrib(struct zserv *client, u_short length,
 					  struct zebra_vrf *zvrf)
@@ -1662,416 +1477,6 @@ static int zread_ipv4_nexthop_lookup_mrib(struct zserv *client, u_short length,
 
 stream_failure:
 	return -1;
-}
-
-/* Zebra server IPv6 prefix add function. */
-static int zread_ipv4_route_ipv6_nexthop_add(struct zserv *client,
-					     u_short length,
-					     struct zebra_vrf *zvrf)
-{
-	unsigned int i;
-	struct stream *s;
-	struct in6_addr nhop_addr;
-	struct route_entry *re;
-	u_char message;
-	u_char nexthop_num;
-	u_char nexthop_type;
-	struct prefix p;
-	safi_t safi;
-	static struct in6_addr nexthops[MULTIPATH_NUM];
-	static unsigned int ifindices[MULTIPATH_NUM];
-	int ret;
-	static mpls_label_t labels[MULTIPATH_NUM];
-	enum lsp_types_t label_type = ZEBRA_LSP_NONE;
-	mpls_label_t label;
-	struct nexthop *nexthop;
-	enum blackhole_type bh_type = BLACKHOLE_NULL;
-
-	/* Get input stream.  */
-	s = client->ibuf;
-
-	memset(&nhop_addr, 0, sizeof(struct in6_addr));
-
-	/* Allocate new re. */
-	re = XCALLOC(MTYPE_RE, sizeof(struct route_entry));
-
-	/* Type, flags, message. */
-	STREAM_GETC(s, re->type);
-	if (re->type > ZEBRA_ROUTE_MAX) {
-		zlog_warn("%s: Specified route type: %d is not a legal value\n",
-			  __PRETTY_FUNCTION__, re->type);
-		XFREE(MTYPE_RE, re);
-		return -1;
-	}
-	STREAM_GETW(s, re->instance);
-	STREAM_GETL(s, re->flags);
-	STREAM_GETC(s, message);
-	STREAM_GETW(s, safi);
-	re->uptime = time(NULL);
-
-	/* IPv4 prefix. */
-	memset(&p, 0, sizeof(struct prefix_ipv4));
-	p.family = AF_INET;
-	STREAM_GETC(s, p.prefixlen);
-	if (p.prefixlen > IPV4_MAX_BITLEN) {
-		zlog_warn("%s: Prefix Length %d is greater than what a v4 address can use",
-			  __PRETTY_FUNCTION__, p.prefixlen);
-		XFREE(MTYPE_RE, re);
-		return -1;
-	}
-	STREAM_GET(&p.u.prefix4, s, PSIZE(p.prefixlen));
-
-	/* VRF ID */
-	re->vrf_id = zvrf_id(zvrf);
-
-	/* We need to give nh-addr, nh-ifindex with the same next-hop object
-	 * to the re to ensure that IPv6 multipathing works; need to coalesce
-	 * these. Clients should send the same number of paired set of
-	 * next-hop-addr/next-hop-ifindices. */
-	if (CHECK_FLAG(message, ZAPI_MESSAGE_NEXTHOP)) {
-		unsigned int nh_count = 0;
-		unsigned int if_count = 0;
-		unsigned int max_nh_if = 0;
-
-		STREAM_GETC(s, nexthop_num);
-		zserv_nexthop_num_warn(__func__, (const struct prefix *)&p,
-				       nexthop_num);
-
-		if (CHECK_FLAG(message, ZAPI_MESSAGE_LABEL))
-			label_type = lsp_type_from_re_type(client->proto);
-
-		for (i = 0; i < nexthop_num; i++) {
-			STREAM_GETC(s, nexthop_type);
-
-			switch (nexthop_type) {
-			case NEXTHOP_TYPE_IPV6:
-				STREAM_GET(&nhop_addr, s, 16);
-				if (nh_count < MULTIPATH_NUM) {
-					/* For labeled-unicast, each nexthop is
-					 * followed by label. */
-					if (CHECK_FLAG(message,
-						       ZAPI_MESSAGE_LABEL)) {
-						STREAM_GETL(s, label);
-						labels[nh_count] = label;
-					}
-					nexthops[nh_count] = nhop_addr;
-					nh_count++;
-				}
-				break;
-			case NEXTHOP_TYPE_IFINDEX:
-				if (if_count < multipath_num) {
-					STREAM_GETL(s, ifindices[if_count++]);
-				}
-				break;
-			case NEXTHOP_TYPE_BLACKHOLE:
-				route_entry_nexthop_blackhole_add(re, bh_type);
-				break;
-			default:
-				zlog_warn(
-					"%s: Please use ZEBRA_ROUTE_ADD if you want to pass non v6 nexthops",
-					__PRETTY_FUNCTION__);
-				nexthops_free(re->ng.nexthop);
-				XFREE(MTYPE_RE, re);
-				return -1;
-			}
-		}
-
-		max_nh_if = (nh_count > if_count) ? nh_count : if_count;
-		for (i = 0; i < max_nh_if; i++) {
-			if ((i < nh_count)
-			    && !IN6_IS_ADDR_UNSPECIFIED(&nexthops[i])) {
-				if ((i < if_count) && ifindices[i])
-					nexthop =
-						route_entry_nexthop_ipv6_ifindex_add(
-							re, &nexthops[i],
-							ifindices[i],
-							re->vrf_id);
-				else
-					nexthop = route_entry_nexthop_ipv6_add(
-						re, &nexthops[i], re->vrf_id);
-
-				if (CHECK_FLAG(message, ZAPI_MESSAGE_LABEL))
-					nexthop_add_labels(nexthop, label_type,
-							   1, &labels[i]);
-			} else {
-				if ((i < if_count) && ifindices[i])
-					route_entry_nexthop_ifindex_add(
-						re, ifindices[i], re->vrf_id);
-			}
-		}
-	}
-
-	/* Distance. */
-	if (CHECK_FLAG(message, ZAPI_MESSAGE_DISTANCE))
-		STREAM_GETC(s, re->distance);
-
-	/* Metric. */
-	if (CHECK_FLAG(message, ZAPI_MESSAGE_METRIC))
-		STREAM_GETL(s, re->metric);
-
-	/* Tag */
-	if (CHECK_FLAG(message, ZAPI_MESSAGE_TAG))
-		STREAM_GETL(s, re->tag);
-	else
-		re->tag = 0;
-
-	if (CHECK_FLAG(message, ZAPI_MESSAGE_MTU))
-		STREAM_GETL(s, re->mtu);
-	else
-		re->mtu = 0;
-
-	/* Table */
-	re->table = zvrf->table_id;
-
-	ret = rib_add_multipath(AFI_IP6, safi, &p, NULL, re);
-	/* Stats */
-	if (ret > 0)
-		client->v4_route_add_cnt++;
-	else if (ret < 0)
-		client->v4_route_upd8_cnt++;
-
-	return 0;
-
-stream_failure:
-	nexthops_free(re->ng.nexthop);
-	XFREE(MTYPE_RE, re);
-	return -1;
-}
-
-static int zread_ipv6_add(struct zserv *client, u_short length,
-			  struct zebra_vrf *zvrf)
-{
-	unsigned int i;
-	struct stream *s;
-	struct in6_addr nhop_addr;
-	ifindex_t ifindex;
-	struct route_entry *re;
-	u_char message;
-	u_char nexthop_num;
-	u_char nexthop_type;
-	struct prefix p;
-	struct prefix_ipv6 src_p, *src_pp;
-	safi_t safi;
-	static struct in6_addr nexthops[MULTIPATH_NUM];
-	static unsigned int ifindices[MULTIPATH_NUM];
-	int ret;
-	static mpls_label_t labels[MULTIPATH_NUM];
-	enum lsp_types_t label_type = ZEBRA_LSP_NONE;
-	mpls_label_t label;
-	struct nexthop *nexthop;
-	enum blackhole_type bh_type = BLACKHOLE_NULL;
-
-	/* Get input stream.  */
-	s = client->ibuf;
-
-	memset(&nhop_addr, 0, sizeof(struct in6_addr));
-
-	/* Allocate new re. */
-	re = XCALLOC(MTYPE_RE, sizeof(struct route_entry));
-
-	/* Type, flags, message. */
-	STREAM_GETC(s, re->type);
-	if (re->type > ZEBRA_ROUTE_MAX) {
-		zlog_warn("%s: Specified route type: %d is not a legal value\n",
-			  __PRETTY_FUNCTION__, re->type);
-		XFREE(MTYPE_RE, re);
-		return -1;
-	}
-	STREAM_GETW(s, re->instance);
-	STREAM_GETL(s, re->flags);
-	STREAM_GETC(s, message);
-	STREAM_GETW(s, safi);
-	re->uptime = time(NULL);
-
-	/* IPv6 prefix. */
-	memset(&p, 0, sizeof(p));
-	p.family = AF_INET6;
-	STREAM_GETC(s, p.prefixlen);
-	if (p.prefixlen > IPV6_MAX_BITLEN) {
-		zlog_warn("%s: Specified prefix length %d is to large for v6 prefix",
-			  __PRETTY_FUNCTION__, p.prefixlen);
-		XFREE(MTYPE_RE, re);
-		return -1;
-	}
-	STREAM_GET(&p.u.prefix6, s, PSIZE(p.prefixlen));
-
-	if (CHECK_FLAG(message, ZAPI_MESSAGE_SRCPFX)) {
-		memset(&src_p, 0, sizeof(src_p));
-		src_p.family = AF_INET6;
-		STREAM_GETC(s, src_p.prefixlen);
-		if (src_p.prefixlen > IPV6_MAX_BITLEN) {
-			zlog_warn("%s: Specified src prefix length %d is to large for v6 prefix",
-				  __PRETTY_FUNCTION__, src_p.prefixlen);
-			XFREE(MTYPE_RE, re);
-			return -1;
-		}
-		STREAM_GET(&src_p.prefix, s, PSIZE(src_p.prefixlen));
-		src_pp = &src_p;
-	} else
-		src_pp = NULL;
-
-	/* VRF ID */
-	re->vrf_id = zvrf_id(zvrf);
-
-	/* We need to give nh-addr, nh-ifindex with the same next-hop object
-	 * to the re to ensure that IPv6 multipathing works; need to coalesce
-	 * these. Clients should send the same number of paired set of
-	 * next-hop-addr/next-hop-ifindices. */
-	if (CHECK_FLAG(message, ZAPI_MESSAGE_NEXTHOP)) {
-		unsigned int nh_count = 0;
-		unsigned int if_count = 0;
-		unsigned int max_nh_if = 0;
-
-		STREAM_GETC(s, nexthop_num);
-		zserv_nexthop_num_warn(__func__, (const struct prefix *)&p,
-				       nexthop_num);
-
-		if (CHECK_FLAG(message, ZAPI_MESSAGE_LABEL))
-			label_type = lsp_type_from_re_type(client->proto);
-
-		for (i = 0; i < nexthop_num; i++) {
-			STREAM_GETC(s, nexthop_type);
-
-			switch (nexthop_type) {
-			case NEXTHOP_TYPE_IPV6:
-				STREAM_GET(&nhop_addr, s, 16);
-				if (nh_count < MULTIPATH_NUM) {
-					/* For labeled-unicast, each nexthop is
-					 * followed by label. */
-					if (CHECK_FLAG(message,
-						       ZAPI_MESSAGE_LABEL)) {
-						STREAM_GETL(s, label);
-						labels[nh_count] = label;
-					}
-					nexthops[nh_count++] = nhop_addr;
-				}
-				break;
-			case NEXTHOP_TYPE_IPV6_IFINDEX:
-				STREAM_GET(&nhop_addr, s, 16);
-				STREAM_GETL(s, ifindex);
-				route_entry_nexthop_ipv6_ifindex_add(
-					re, &nhop_addr, ifindex, re->vrf_id);
-				break;
-			case NEXTHOP_TYPE_IFINDEX:
-				if (if_count < multipath_num) {
-					STREAM_GETL(s, ifindices[if_count++]);
-				}
-				break;
-			case NEXTHOP_TYPE_BLACKHOLE:
-				route_entry_nexthop_blackhole_add(re, bh_type);
-				break;
-			default:
-				zlog_warn(
-					"%s: Please use ZEBRA_ROUTE_ADD if you want to pass non v6 nexthops",
-					__PRETTY_FUNCTION__);
-				nexthops_free(re->ng.nexthop);
-				XFREE(MTYPE_RE, re);
-				return -1;
-			}
-		}
-
-		max_nh_if = (nh_count > if_count) ? nh_count : if_count;
-		for (i = 0; i < max_nh_if; i++) {
-			if ((i < nh_count)
-			    && !IN6_IS_ADDR_UNSPECIFIED(&nexthops[i])) {
-				if ((i < if_count) && ifindices[i])
-					nexthop =
-						route_entry_nexthop_ipv6_ifindex_add(
-							re, &nexthops[i],
-							ifindices[i],
-							re->vrf_id);
-				else
-					nexthop = route_entry_nexthop_ipv6_add(
-						re, &nexthops[i], re->vrf_id);
-				if (CHECK_FLAG(message, ZAPI_MESSAGE_LABEL))
-					nexthop_add_labels(nexthop, label_type,
-							   1, &labels[i]);
-			} else {
-				if ((i < if_count) && ifindices[i])
-					route_entry_nexthop_ifindex_add(
-						re, ifindices[i], re->vrf_id);
-			}
-		}
-	}
-
-	/* Distance. */
-	if (CHECK_FLAG(message, ZAPI_MESSAGE_DISTANCE))
-		STREAM_GETC(s, re->distance);
-
-	/* Metric. */
-	if (CHECK_FLAG(message, ZAPI_MESSAGE_METRIC))
-		STREAM_GETL(s, re->metric);
-
-	/* Tag */
-	if (CHECK_FLAG(message, ZAPI_MESSAGE_TAG))
-		STREAM_GETL(s, re->tag);
-	else
-		re->tag = 0;
-
-	if (CHECK_FLAG(message, ZAPI_MESSAGE_MTU))
-		STREAM_GETL(s, re->mtu);
-	else
-		re->mtu = 0;
-
-	re->table = zvrf->table_id;
-
-	ret = rib_add_multipath(AFI_IP6, safi, &p, src_pp, re);
-	/* Stats */
-	if (ret > 0)
-		client->v6_route_add_cnt++;
-	else if (ret < 0)
-		client->v6_route_upd8_cnt++;
-
-	return 0;
-
-stream_failure:
-	nexthops_free(re->ng.nexthop);
-	XFREE(MTYPE_RE, re);
-
-	return -1;
-}
-
-/* Zebra server IPv6 prefix delete function. */
-static int zread_ipv6_delete(struct zserv *client, u_short length,
-			     struct zebra_vrf *zvrf)
-{
-	struct stream *s;
-	struct zapi_ipv6 api;
-	struct prefix p;
-	struct prefix_ipv6 src_p, *src_pp;
-
-	s = client->ibuf;
-
-	/* Type, flags, message. */
-	STREAM_GETC(s, api.type);
-	STREAM_GETW(s, api.instance);
-	STREAM_GETL(s, api.flags);
-	STREAM_GETC(s, api.message);
-	STREAM_GETW(s, api.safi);
-
-	/* IPv4 prefix. */
-	memset(&p, 0, sizeof(struct prefix));
-	p.family = AF_INET6;
-	STREAM_GETC(s, p.prefixlen);
-	STREAM_GET(&p.u.prefix6, s, PSIZE(p.prefixlen));
-
-	if (CHECK_FLAG(api.message, ZAPI_MESSAGE_SRCPFX)) {
-		memset(&src_p, 0, sizeof(struct prefix_ipv6));
-		src_p.family = AF_INET6;
-		STREAM_GETC(s, src_p.prefixlen);
-		STREAM_GET(&src_p.prefix, s, PSIZE(src_p.prefixlen));
-		src_pp = &src_p;
-	} else
-		src_pp = NULL;
-
-	rib_delete(AFI_IP6, api.safi, zvrf_id(zvrf), api.type, api.instance,
-		   api.flags, &p, src_pp, NULL, client->rtm_table, 0, false,
-		   NULL);
-
-	client->v6_route_del_cnt++;
-
-stream_failure:
-	return 0;
 }
 
 /* Register zebra server router-id information.  Send current router-id */
@@ -2786,26 +2191,14 @@ static inline void zserv_handle_commands(struct zserv *client, uint16_t command,
 	case ZEBRA_INTERFACE_DELETE:
 		zread_interface_delete(client, length, zvrf);
 		break;
+	case ZEBRA_INTERFACE_SET_PROTODOWN:
+		zread_interface_set_protodown(client, length, zvrf);
+		break;
 	case ZEBRA_ROUTE_ADD:
 		zread_route_add(client, length, zvrf);
 		break;
 	case ZEBRA_ROUTE_DELETE:
 		zread_route_del(client, length, zvrf);
-		break;
-	case ZEBRA_IPV4_ROUTE_ADD:
-		zread_ipv4_add(client, length, zvrf);
-		break;
-	case ZEBRA_IPV4_ROUTE_DELETE:
-		zread_ipv4_delete(client, length, zvrf);
-		break;
-	case ZEBRA_IPV4_ROUTE_IPV6_NEXTHOP_ADD:
-		zread_ipv4_route_ipv6_nexthop_add(client, length, zvrf);
-		break;
-	case ZEBRA_IPV6_ROUTE_ADD:
-		zread_ipv6_add(client, length, zvrf);
-		break;
-	case ZEBRA_IPV6_ROUTE_DELETE:
-		zread_ipv6_delete(client, length, zvrf);
 		break;
 	case ZEBRA_REDISTRIBUTE_ADD:
 		zebra_redistribute_add(command, client, length, zvrf);
@@ -2885,6 +2278,9 @@ static inline void zserv_handle_commands(struct zserv *client, uint16_t command,
 		break;
 	case ZEBRA_FEC_UNREGISTER:
 		zserv_fec_unregister(client, length);
+		break;
+	case ZEBRA_ADVERTISE_SVI_MACIP:
+		zebra_vxlan_advertise_svi_macip(client, length, zvrf);
 		break;
 	case ZEBRA_ADVERTISE_DEFAULT_GW:
 		zebra_vxlan_advertise_gw_macip(client, length, zvrf);

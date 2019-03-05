@@ -2275,10 +2275,18 @@ static void bgp_process_main_one(struct bgp *bgp, struct bgp_node *rn,
 				if (new_select->type == ZEBRA_ROUTE_BGP
 				    && (new_select->sub_type == BGP_ROUTE_NORMAL
 					|| new_select->sub_type
-						   == BGP_ROUTE_IMPORTED))
+						   == BGP_ROUTE_IMPORTED)) {
+					/* For EVPN-based routes, need to del
+					 * followed by add, to clear entries
+					 * related to neighbor and RMAC.
+					 */
+					if (is_route_parent_evpn(old_select))
+						bgp_zebra_withdraw(p,
+							old_select, bgp, safi);
 
 					bgp_zebra_announce(rn, p, old_select,
 							   bgp, afi, safi);
+				}
 			}
 		}
 		UNSET_FLAG(old_select->flags, BGP_INFO_MULTIPATH_CHG);
@@ -2366,9 +2374,9 @@ static void bgp_process_main_one(struct bgp *bgp, struct bgp_node *rn,
 			|| new_select->sub_type == BGP_ROUTE_AGGREGATE
 			|| new_select->sub_type == BGP_ROUTE_IMPORTED)) {
 
-			/* if this is an evpn imported type-5 prefix,
-			 * we need to withdraw the route first to clear
-			 * the nh neigh and the RMAC entry.
+			/* For EVPN-based routes, need to del
+			 * followed by add, to clear entries
+			 * related to neighbor and RMAC.
 			 */
 			if (old_select &&
 			    is_route_parent_evpn(old_select))
@@ -2387,8 +2395,9 @@ static void bgp_process_main_one(struct bgp *bgp, struct bgp_node *rn,
 
 	/* advertise/withdraw type-5 routes */
 	if ((afi == AFI_IP || afi == AFI_IP6) && (safi == SAFI_UNICAST)) {
-		if (advertise_type5_routes(bgp, afi) && new_select &&
-		    (!new_select->extra || !new_select->extra->parent)) {
+		if (advertise_type5_routes(bgp, afi) &&
+		    new_select &&
+		    is_route_injectable_into_evpn(new_select)) {
 
 			/* apply the route-map */
 			if (bgp->adv_cmd_rmap[afi][safi].map) {
@@ -2403,6 +2412,10 @@ static void bgp_process_main_one(struct bgp *bgp, struct bgp_node *rn,
 								       &rn->p,
 								       new_select->attr,
 								       afi, safi);
+				else
+					bgp_evpn_withdraw_type5_route(bgp,
+								      &rn->p,
+								      afi, safi);
 			} else {
 				bgp_evpn_advertise_type5_route(bgp,
 							       &rn->p,
@@ -2410,8 +2423,9 @@ static void bgp_process_main_one(struct bgp *bgp, struct bgp_node *rn,
 							       afi, safi);
 
 			}
-		} else if (advertise_type5_routes(bgp, afi) && old_select &&
-			 (!old_select->extra || !old_select->extra->parent))
+		} else if (advertise_type5_routes(bgp, afi) &&
+			   old_select &&
+			   is_route_injectable_into_evpn(old_select))
 			bgp_evpn_withdraw_type5_route(bgp, &rn->p, afi, safi);
 	}
 
@@ -2995,7 +3009,7 @@ int bgp_update(struct peer *peer, struct prefix *p, u_int32_t addpath_id,
 		goto filtered;
 	}
 
-	if (bgp_mac_entry_exists(p)) {
+	if (bgp_mac_entry_exists(p) || attr->rmac_exist) {
 		reason = "self mac;";
 		goto filtered;
 	}
@@ -3181,9 +3195,11 @@ int bgp_update(struct peer *peer, struct prefix *p, u_int32_t addpath_id,
 		/* Update MPLS label */
 		if (has_valid_label) {
 			extra = bgp_info_extra_get(ri);
-			memcpy(&extra->label, label,
-			       num_labels * sizeof(mpls_label_t));
-			extra->num_labels = num_labels;
+			if (extra->label != label) {
+				memcpy(&extra->label, label,
+				       num_labels * sizeof(mpls_label_t));
+				extra->num_labels = num_labels;
+			}
 			if (!(afi == AFI_L2VPN && safi == SAFI_EVPN))
 				bgp_set_valid_label(&extra->label[0]);
 		}
@@ -3351,8 +3367,11 @@ int bgp_update(struct peer *peer, struct prefix *p, u_int32_t addpath_id,
 	/* Update MPLS label */
 	if (has_valid_label) {
 		extra = bgp_info_extra_get(new);
-		memcpy(&extra->label, label, num_labels * sizeof(mpls_label_t));
-		extra->num_labels = num_labels;
+		if (extra->label != label) {
+			memcpy(&extra->label, label,
+			       num_labels * sizeof(mpls_label_t));
+			extra->num_labels = num_labels;
+		}
 		if (!(afi == AFI_L2VPN && safi == SAFI_EVPN))
 			bgp_set_valid_label(&extra->label[0]);
 	}
@@ -8016,11 +8035,15 @@ void route_vty_out_detail(struct vty *vty, struct bgp *bgp, struct prefix *p,
 				json_pmsi = json_object_new_object();
 				json_object_string_add(json_pmsi,
 						       "tunnelType", str);
+				json_object_int_add(json_pmsi,
+						"label",
+						label2vni(&attr->label));
 				json_object_object_add(json_path, "pmsi",
 						       json_pmsi);
 			} else
-				vty_out(vty, "      PMSI Tunnel Type: %s\n",
-					str);
+				vty_out(vty,
+					"      PMSI Tunnel Type: %s, label: %d\n",
+					str, label2vni(&attr->label));
 		}
 
 	}

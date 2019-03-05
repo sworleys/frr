@@ -46,6 +46,7 @@
 #include "bgpd/bgp_zebra.h"
 #include "bgpd/bgp_nexthop.h"
 #include "bgpd/bgp_nht.h"
+#include "bgpd/bgp_evpn.h"
 
 #if ENABLE_BGP_VNC
 #include "bgpd/rfapi/rfapi_backend.h"
@@ -432,10 +433,14 @@ leak_update(
 		if (bi->extra && bi->extra->bgp_orig)
 			bgp_nexthop = bi->extra->bgp_orig;
 
-		/* No nexthop tracking for redistributed routes */
-		if (bi_ultimate->sub_type == BGP_ROUTE_REDISTRIBUTE)
+		/*
+		 * No nexthop tracking for redistributed routes or for
+		 * EVPN-imported routes that get leaked.
+		 */
+		if (bi_ultimate->sub_type == BGP_ROUTE_REDISTRIBUTE ||
+		    is_ri_family_evpn(bi_ultimate)) {
 			nh_valid = 1;
-		else {
+		} else {
 			struct bgp_info *bi_to_send = bi;
 
 			if (bi->extra && bi->extra->parent)
@@ -512,10 +517,13 @@ leak_update(
 	 * No nexthop tracking for redistributed routes because
 	 * their originating protocols will do the tracking and
 	 * withdraw those routes if the nexthops become unreachable
+	 * This also holds good for EVPN-imported routes that get
+	 * leaked.
 	 */
-	if (bi_ultimate->sub_type == BGP_ROUTE_REDISTRIBUTE)
+	if (bi_ultimate->sub_type == BGP_ROUTE_REDISTRIBUTE ||
+	    is_ri_family_evpn(bi_ultimate)) {
 		nh_valid = 1;
-	else
+	} else
 		/*
 		 * TBD do we need to do anything about the
 		 * 'connected' parameter?
@@ -581,8 +589,8 @@ void vpn_leak_from_vrf_update(struct bgp *bgp_vpn,       /* to */
 		return;
 	}
 
-	/* loop check - should not be an imported route. */
-	if (info_vrf->extra && info_vrf->extra->bgp_orig)
+	/* Is this route exportable into the VPN table? */
+	if (!is_route_injectable_into_vpn(info_vrf))
 		return;
 
 
@@ -795,15 +803,6 @@ void vpn_leak_from_vrf_withdraw(struct bgp *bgp_vpn,       /* to */
 			info_vrf->type, info_vrf->sub_type);
 	}
 
-	if (info_vrf->sub_type != BGP_ROUTE_NORMAL
-	    && info_vrf->sub_type != BGP_ROUTE_STATIC
-	    && info_vrf->sub_type != BGP_ROUTE_REDISTRIBUTE) {
-
-		if (debug)
-			zlog_debug("%s: wrong sub_type %d", __func__,
-				   info_vrf->sub_type);
-		return;
-	}
 	if (!bgp_vpn)
 		return;
 
@@ -812,6 +811,10 @@ void vpn_leak_from_vrf_withdraw(struct bgp *bgp_vpn,       /* to */
 			zlog_debug("%s: can't get afi of prefix", __func__);
 		return;
 	}
+
+	/* Is this route exportable into the VPN table? */
+	if (!is_route_injectable_into_vpn(info_vrf))
+		return;
 
 	if (!vpn_leak_to_vpn_active(bgp_vrf, afi, &debugmsg)) {
 		if (debug)
@@ -967,9 +970,13 @@ static void vpn_leak_to_vrf_update_onevrf(struct bgp *bgp_vrf,       /* to */
 		return;
 	}
 
-	if (debug)
-		zlog_debug("%s: updating to vrf %s", __func__,
-				bgp_vrf->name_pretty);
+	if (debug) {
+		char buf_prefix[PREFIX_STRLEN];
+
+		prefix2str(p, buf_prefix, sizeof(buf_prefix));
+		zlog_debug("%s: updating %s to vrf %s", __func__,
+				buf_prefix, bgp_vrf->name_pretty);
+	}
 
 	bgp_attr_dup(&static_attr, info_vpn->attr); /* shallow copy */
 
@@ -1024,6 +1031,7 @@ static void vpn_leak_to_vrf_update_onevrf(struct bgp *bgp_vrf,       /* to */
 		memset(&info, 0, sizeof(info));
 		info.peer = bgp_vrf->peer_self;
 		info.attr = &static_attr;
+		info.extra = info_vpn->extra; /* Used for source-vrf filter */
 		ret = route_map_apply(bgp_vrf->vpn_policy[afi]
 					      .rmap[BGP_VPN_POLICY_DIR_FROMVPN],
 				      p, RMAP_BGP, &info);
@@ -1206,8 +1214,10 @@ void vpn_leak_to_vrf_withdraw_all(struct bgp *bgp_vrf, /* to */
 	     bn = bgp_route_next(bn)) {
 
 		for (bi = bn->info; bi; bi = bi->next) {
-			if (bi->extra && bi->extra->bgp_orig != bgp_vrf) {
-
+			if (bi->extra &&
+			    bi->extra->bgp_orig != bgp_vrf &&
+			    bi->extra->parent &&
+			    is_ri_family_vpn(bi->extra->parent)) {
 				/* delete route */
 				bgp_aggregate_decrement(bgp_vrf, &bn->p, bi,
 							afi, safi);

@@ -87,8 +87,13 @@ static inline int is_route_parent_evpn(struct bgp_info *ri)
 	    !ri->extra->parent)
 		return 0;
 
-	/* See if the parent is of family L2VPN/EVPN */
-	parent_ri = (struct bgp_info *)ri->extra->parent;
+	/* Determine parent recursively */
+	for (parent_ri = ri->extra->parent;
+	     parent_ri->extra && parent_ri->extra->parent;
+	     parent_ri = parent_ri->extra->parent)
+		;
+
+	/* See if of family L2VPN/EVPN */
 	rn = parent_ri->net;
 	if (!rn)
 		return 0;
@@ -98,6 +103,38 @@ static inline int is_route_parent_evpn(struct bgp_info *ri)
 	    table->safi == SAFI_EVPN)
 		return 1;
 	return 0;
+}
+
+/* Flag if the route's family is EVPN. */
+static inline bool is_ri_family_evpn(struct bgp_info *ri)
+{
+	return is_ri_family_matching(ri, AFI_L2VPN, SAFI_EVPN);
+}
+
+/* Flag if the route is injectable into EVPN. This would be either a
+ * non-imported route or a non-EVPN imported route.
+ */
+static inline bool is_route_injectable_into_evpn(struct bgp_info *ri)
+{
+	struct bgp_info *parent_ri;
+	struct bgp_table *table;
+	struct bgp_node *rn;
+
+	if (ri->sub_type != BGP_ROUTE_IMPORTED ||
+	    !ri->extra ||
+	    !ri->extra->parent)
+		return true;
+
+	parent_ri = (struct bgp_info *)ri->extra->parent;
+	rn = parent_ri->net;
+	if (!rn)
+		return true;
+	table = bgp_node_table(rn);
+	if (table &&
+	    table->afi == AFI_L2VPN &&
+	    table->safi == SAFI_EVPN)
+		return false;
+	return true;
 }
 
 extern void bgp_evpn_advertise_type5_route(struct bgp *bgp_vrf,
@@ -138,7 +175,7 @@ extern int bgp_evpn_local_macip_add(struct bgp *bgp, vni_t vni,
 extern int bgp_evpn_local_l3vni_add(vni_t vni, vrf_id_t vrf_id,
 				    struct ethaddr *rmac,
 				    struct in_addr originator_ip,
-				    int filter);
+				    int filter, ifindex_t svi_ifindex);
 extern int bgp_evpn_local_l3vni_del(vni_t vni, vrf_id_t vrf_id);
 extern int bgp_evpn_local_vni_del(struct bgp *bgp, vni_t vni);
 extern int bgp_evpn_local_vni_add(struct bgp *bgp, vni_t vni,

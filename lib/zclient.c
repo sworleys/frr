@@ -540,6 +540,25 @@ void zclient_send_interface_radv_req(struct zclient *zclient, vrf_id_t vrf_id,
 	zclient_send_message(zclient);
 }
 
+int zclient_send_interface_protodown(struct zclient *zclient, vrf_id_t vrf_id,
+				     struct interface *ifp, bool down)
+{
+	struct stream *s;
+
+	if (zclient->sock < 0)
+		return -1;
+
+	s = zclient->obuf;
+	stream_reset(s);
+	zclient_create_header(s, ZEBRA_INTERFACE_SET_PROTODOWN, vrf_id);
+	stream_putl(s, ifp->ifindex);
+	stream_putc(s, !!down);
+	stream_putw_at(s, 0, stream_get_endp(s));
+	zclient_send_message(zclient);
+
+	return 0;
+}
+
 /* Make connection to zebra daemon. */
 int zclient_start(struct zclient *zclient)
 {
@@ -723,226 +742,6 @@ int zclient_send_rnh(struct zclient *zclient, int command, struct prefix *p,
  *
  * XXX: No attention paid to alignment.
  */
-int zapi_ipv4_route(u_char cmd, struct zclient *zclient, struct prefix_ipv4 *p,
-		    struct zapi_ipv4 *api)
-{
-	int i;
-	int psize;
-	struct stream *s;
-
-	/* Reset stream. */
-	s = zclient->obuf;
-	stream_reset(s);
-
-	/* Some checks for labeled-unicast. The current expectation is that each
-	 * nexthop is accompanied by a label in the case of labeled-unicast.
-	 */
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_LABEL)
-	    && CHECK_FLAG(api->message, ZAPI_MESSAGE_NEXTHOP)) {
-		/* We expect prefixes installed with labels and the number to
-		 * match
-		 * the number of nexthops.
-		 */
-		assert(api->label_num == api->nexthop_num);
-	}
-
-	zclient_create_header(s, cmd, api->vrf_id);
-
-	/* Put type and nexthop. */
-	stream_putc(s, api->type);
-	stream_putw(s, api->instance);
-	stream_putl(s, api->flags);
-	stream_putc(s, api->message);
-	stream_putw(s, api->safi);
-
-	/* Put prefix information. */
-	psize = PSIZE(p->prefixlen);
-	stream_putc(s, p->prefixlen);
-	stream_write(s, (u_char *)&p->prefix, psize);
-
-	/* Nexthop, ifindex, distance and metric information. */
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_NEXTHOP)) {
-		stream_putc(s, api->nexthop_num + api->ifindex_num);
-
-		for (i = 0; i < api->nexthop_num; i++) {
-			stream_putc(s, NEXTHOP_TYPE_IPV4);
-			stream_put_in_addr(s, api->nexthop[i]);
-			/* For labeled-unicast, each nexthop is followed by
-			 * label. */
-			if (CHECK_FLAG(api->message, ZAPI_MESSAGE_LABEL))
-				stream_putl(s, api->label[i]);
-		}
-		for (i = 0; i < api->ifindex_num; i++) {
-			stream_putc(s, NEXTHOP_TYPE_IFINDEX);
-			stream_putl(s, api->ifindex[i]);
-		}
-	}
-
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_DISTANCE))
-		stream_putc(s, api->distance);
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_METRIC))
-		stream_putl(s, api->metric);
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_TAG))
-		stream_putl(s, api->tag);
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_MTU))
-		stream_putl(s, api->mtu);
-
-	/* Put length at the first point of the stream. */
-	stream_putw_at(s, 0, stream_get_endp(s));
-
-	return zclient_send_message(zclient);
-}
-
-int zapi_ipv4_route_ipv6_nexthop(u_char cmd, struct zclient *zclient,
-				 struct prefix_ipv4 *p, struct zapi_ipv6 *api)
-{
-	int i;
-	int psize;
-	struct stream *s;
-
-	/* Reset stream. */
-	s = zclient->obuf;
-	stream_reset(s);
-
-	/* Some checks for labeled-unicast. The current expectation is that each
-	 * nexthop is accompanied by a label in the case of labeled-unicast.
-	 */
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_LABEL)
-	    && CHECK_FLAG(api->message, ZAPI_MESSAGE_NEXTHOP)) {
-		/* We expect prefixes installed with labels and the number to
-		 * match
-		 * the number of nexthops.
-		 */
-		assert(api->label_num == api->nexthop_num);
-	}
-
-	zclient_create_header(s, cmd, api->vrf_id);
-
-	/* Put type and nexthop. */
-	stream_putc(s, api->type);
-	stream_putw(s, api->instance);
-	stream_putl(s, api->flags);
-	stream_putc(s, api->message);
-	stream_putw(s, api->safi);
-
-	/* Put prefix information. */
-	psize = PSIZE(p->prefixlen);
-	stream_putc(s, p->prefixlen);
-	stream_write(s, (u_char *)&p->prefix, psize);
-
-	/* Nexthop, ifindex, distance and metric information. */
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_NEXTHOP)) {
-		stream_putc(s, api->nexthop_num + api->ifindex_num);
-
-		for (i = 0; i < api->nexthop_num; i++) {
-			stream_putc(s, NEXTHOP_TYPE_IPV6);
-			stream_write(s, (u_char *)api->nexthop[i], 16);
-			/* For labeled-unicast, each nexthop is followed by
-			 * label. */
-			if (CHECK_FLAG(api->message, ZAPI_MESSAGE_LABEL))
-				stream_putl(s, api->label[i]);
-		}
-		for (i = 0; i < api->ifindex_num; i++) {
-			stream_putc(s, NEXTHOP_TYPE_IFINDEX);
-			stream_putl(s, api->ifindex[i]);
-		}
-	}
-
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_DISTANCE))
-		stream_putc(s, api->distance);
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_METRIC))
-		stream_putl(s, api->metric);
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_TAG))
-		stream_putl(s, api->tag);
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_MTU))
-		stream_putl(s, api->mtu);
-
-	/* Put length at the first point of the stream. */
-	stream_putw_at(s, 0, stream_get_endp(s));
-
-	return zclient_send_message(zclient);
-}
-
-int zapi_ipv6_route(u_char cmd, struct zclient *zclient, struct prefix_ipv6 *p,
-		    struct prefix_ipv6 *src_p, struct zapi_ipv6 *api)
-{
-	int i;
-	int psize;
-	struct stream *s;
-
-	/* either we have !SRCPFX && src_p == NULL, or SRCPFX && src_p != NULL
-	 */
-	assert(!(api->message & ZAPI_MESSAGE_SRCPFX) == !src_p);
-
-	/* Reset stream. */
-	s = zclient->obuf;
-	stream_reset(s);
-
-	/* Some checks for labeled-unicast. The current expectation is that each
-	 * nexthop is accompanied by a label in the case of labeled-unicast.
-	 */
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_LABEL)
-	    && CHECK_FLAG(api->message, ZAPI_MESSAGE_NEXTHOP)) {
-		/* We expect prefixes installed with labels and the number to
-		 * match
-		 * the number of nexthops.
-		 */
-		assert(api->label_num == api->nexthop_num);
-	}
-
-	zclient_create_header(s, cmd, api->vrf_id);
-
-	/* Put type and nexthop. */
-	stream_putc(s, api->type);
-	stream_putw(s, api->instance);
-	stream_putl(s, api->flags);
-	stream_putc(s, api->message);
-	stream_putw(s, api->safi);
-
-	/* Put prefix information. */
-	psize = PSIZE(p->prefixlen);
-	stream_putc(s, p->prefixlen);
-	stream_write(s, (u_char *)&p->prefix, psize);
-
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_SRCPFX)) {
-		psize = PSIZE(src_p->prefixlen);
-		stream_putc(s, src_p->prefixlen);
-		stream_write(s, (u_char *)&src_p->prefix, psize);
-	}
-
-	/* Nexthop, ifindex, distance and metric information. */
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_NEXTHOP)) {
-		stream_putc(s, api->nexthop_num + api->ifindex_num);
-
-		for (i = 0; i < api->nexthop_num; i++) {
-			stream_putc(s, NEXTHOP_TYPE_IPV6);
-			stream_write(s, (u_char *)api->nexthop[i], 16);
-			/* For labeled-unicast, each nexthop is followed by
-			 * label. */
-			if (CHECK_FLAG(api->message, ZAPI_MESSAGE_LABEL))
-				stream_putl(s, api->label[i]);
-		}
-		for (i = 0; i < api->ifindex_num; i++) {
-			stream_putc(s, NEXTHOP_TYPE_IFINDEX);
-			stream_putl(s, api->ifindex[i]);
-		}
-	}
-
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_DISTANCE))
-		stream_putc(s, api->distance);
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_METRIC))
-		stream_putl(s, api->metric);
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_TAG))
-		stream_putl(s, api->tag);
-	if (CHECK_FLAG(api->message, ZAPI_MESSAGE_MTU))
-		stream_putl(s, api->mtu);
-
-	/* Put length at the first point of the stream. */
-	stream_putw_at(s, 0, stream_get_endp(s));
-
-	return zclient_send_message(zclient);
-}
-
 int zclient_route_send(u_char cmd, struct zclient *zclient,
 		       struct zapi_route *api)
 {
@@ -1449,6 +1248,8 @@ stream_failure:
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  * |  bandwidth                                                    |
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * |  parent ifindex                                               |
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  * |  Link Layer Type                                              |
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  * |  Harware Address Length                                       |
@@ -1624,6 +1425,7 @@ void zebra_interface_if_set_value(struct stream *s, struct interface *ifp)
 	ifp->mtu = stream_getl(s);
 	ifp->mtu6 = stream_getl(s);
 	ifp->bandwidth = stream_getl(s);
+	ifp->link_ifindex = stream_getl(s);
 	ifp->ll_type = stream_getl(s);
 	ifp->hw_addr_len = stream_getl(s);
 	if (ifp->hw_addr_len)

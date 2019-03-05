@@ -67,6 +67,7 @@
 #include "zebra/kernel_netlink.h"
 #include "zebra/if_netlink.h"
 #include "zebra/zebra_errors.h"
+#include "zebra/zebra_vxlan.h"
 
 extern struct zebra_privs_t zserv_privs;
 
@@ -1000,6 +1001,9 @@ int netlink_interface_addr(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	if (tb[IFA_LABEL])
 		label = (char *)RTA_DATA(tb[IFA_LABEL]);
 
+#ifndef IFA_RT_PRIORITY
+#define IFA_RT_PRIORITY 9
+#endif
 	if (tb[IFA_RT_PRIORITY])
 		metric = *(uint32_t *)RTA_DATA(tb[IFA_RT_PRIORITY]);
 
@@ -1058,7 +1062,7 @@ int netlink_link_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	zebra_slave_iftype_t zif_slave_type = ZEBRA_IF_SLAVE_NONE;
 	ifindex_t bridge_ifindex = IFINDEX_INTERNAL;
 	ifindex_t link_ifindex = IFINDEX_INTERNAL;
-
+	uint8_t old_hw_addr[INTERFACE_HWADDR_MAX];
 
 	zns = zebra_ns_lookup(ns_id);
 	ifi = NLMSG_DATA(h);
@@ -1231,6 +1235,8 @@ int netlink_link_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 			was_bridge_slave = IS_ZEBRA_IF_BRIDGE_SLAVE(ifp);
 			zebra_if_set_ziftype(ifp, zif_type, zif_slave_type);
 
+			memcpy(old_hw_addr, ifp->hw_addr, INTERFACE_HWADDR_MAX);
+
 			netlink_interface_update_hw_addr(tb, ifp);
 
 			if (if_is_no_ptm_operative(ifp)) {
@@ -1249,6 +1255,21 @@ int netlink_link_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 							"Intf %s(%u) PTM up, notifying clients",
 							name, ifp->ifindex);
 					zebra_interface_up_update(ifp);
+
+					/* Update EVPN VNI when SVI MAC change
+					 */
+					if (IS_ZEBRA_IF_VLAN(ifp) &&
+					    memcmp(old_hw_addr, ifp->hw_addr,
+						   INTERFACE_HWADDR_MAX)) {
+						struct interface *link_if;
+
+						link_if =
+						if_lookup_by_index_per_ns(
+						zebra_ns_lookup(NS_DEFAULT),
+								link_ifindex);
+						zebra_vxlan_svi_up(ifp,
+								link_if);
+					}
 				}
 			} else {
 				ifp->flags = ifi->ifi_flags & 0x0000fffff;
@@ -1296,6 +1317,32 @@ int netlink_link_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
 	}
 
 	return 0;
+}
+
+int netlink_protodown(struct interface *ifp, bool down)
+{
+	struct zebra_ns *zns = zebra_ns_lookup(NS_DEFAULT);
+
+	struct {
+		struct nlmsghdr n;
+		struct ifinfomsg ifa;
+		char buf[NL_PKT_BUF_SIZE];
+	} req;
+
+	memset(&req, 0, sizeof req);
+
+	req.n.nlmsg_len = NLMSG_LENGTH(sizeof(struct ifinfomsg));
+	req.n.nlmsg_flags = NLM_F_REQUEST;
+	req.n.nlmsg_type = RTM_SETLINK;
+	req.n.nlmsg_pid = zns->netlink_cmd.snl.nl_pid;
+
+	req.ifa.ifi_index = ifp->ifindex;
+
+	addattr_l(&req.n, sizeof req, IFLA_PROTO_DOWN, &down, 4);
+	addattr_l(&req.n, sizeof req, IFLA_LINK, &ifp->ifindex, 4);
+
+	return netlink_talk(netlink_talk_filter, &req.n, &zns->netlink_cmd, zns,
+			    0);
 }
 
 /* Interface information read by netlink. */

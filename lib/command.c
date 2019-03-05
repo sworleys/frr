@@ -120,6 +120,7 @@ const char *node_names[] = {
 	"link-params",		    // LINK_PARAMS_NODE,
 	"bgp evpn vni",		    // BGP_EVPN_VNI_NODE,
 	"rpki",			    // RPKI_NODE
+	"vrrp",			    // VRRP_NODE
 };
 
 /* Command vector which includes some level of command lists. Normally
@@ -1468,6 +1469,7 @@ DEFUN (config_end,
 	case KEYCHAIN_KEY_NODE:
 	case MASC_NODE:
 	case VTY_NODE:
+	case VRRP_NODE:
 	case LINK_PARAMS_NODE:
 		vty_config_unlock(vty);
 		vty->node = ENABLE_NODE;

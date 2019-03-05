@@ -221,18 +221,24 @@ extern void list_sort(struct list *list,
 		      int (*cmp)(const void **, const void **));
 
 /*
- * The usage of list_delete is being transitioned to pass in
- * the double pointer to remove use after free's.
- * list_free usage is deprecated, it leads to memory leaks
- * of the linklist nodes.  Please use list_delete_and_null
+ * Convert a list to an array of void pointers.
  *
- * In Oct of 2018, rename list_delete_and_null to list_delete
- * and remove list_delete_original and the list_delete #define
- * Additionally remove list_free entirely
+ * Starts from the list head and ends either on the last node of the list or
+ * when the provided array cannot store any more elements.
+ *
+ * list
+ *    list to convert
+ *
+ * arr
+ *    Pre-allocated array of void *
+ *
+ * arrlen
+ *    Number of elements in arr
+ *
+ * Returns:
+ *    arr
  */
-#if CONFDATE > 20181001
-CPP_NOTICE("list_delete without double pointer is deprecated, please fixup")
-#endif
+void **list_to_array(struct list *list, void **arr, size_t arrlen);
 
 /*
  * Delete a list and NULL its pointer.

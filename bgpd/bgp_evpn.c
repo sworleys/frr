@@ -1349,8 +1349,10 @@ static int update_evpn_route(struct bgp *bgp, struct bgpevpn *vpn,
 				      ZEBRA_MACIP_TYPE_ROUTER_FLAG) ? 1 : 0;
 
 	/* PMSI is only needed for type-3 routes */
-	if (p->prefix.route_type == BGP_EVPN_IMET_ROUTE)
+	if (p->prefix.route_type == BGP_EVPN_IMET_ROUTE) {
 		attr.flag |= ATTR_FLAG_BIT(BGP_ATTR_PMSI_TUNNEL);
+		attr.pmsi_tnl_type = PMSI_TNLTYPE_INGR_REPL;
+	}
 
 	/* router mac is only needed for type-2 routes here. */
 	if (p->prefix.route_type == BGP_EVPN_MAC_IP_ROUTE)
@@ -1952,6 +1954,9 @@ static int install_evpn_route_entry_in_vrf(struct bgp *bgp_vrf,
 	/* Perform route selection and update zebra, if required. */
 	bgp_process(bgp_vrf, rn, afi, safi);
 
+	/* Process for route leaking. */
+	vpn_leak_from_vrf_update(bgp_get_default(), bgp_vrf, ri);
+
 	return ret;
 }
 
@@ -2078,6 +2083,9 @@ static int uninstall_evpn_route_entry_in_vrf(struct bgp *bgp_vrf,
 
 	if (!ri)
 		return 0;
+
+	/* Process for route leaking. */
+	vpn_leak_from_vrf_withdraw(bgp_get_default(), bgp_vrf, ri);
 
 	bgp_aggregate_decrement(bgp_vrf, &rn->p, ri, afi, safi);
 
@@ -3139,7 +3147,7 @@ static int process_type3_route(struct peer *peer, afi_t afi, safi_t safi,
  */
 static int process_type5_route(struct peer *peer, afi_t afi, safi_t safi,
 			       struct attr *attr, u_char *pfx, int psize,
-			       u_int32_t addpath_id, int withdraw)
+			       u_int32_t addpath_id)
 {
 	struct prefix_rd prd;
 	struct prefix_evpn p;
@@ -3224,7 +3232,7 @@ static int process_type5_route(struct peer *peer, afi_t afi, safi_t safi,
 	 */
 
 	/* Process the route. */
-	if (!withdraw)
+	if (attr)
 		ret = bgp_update(peer, (struct prefix *)&p, addpath_id, attr,
 				 afi, safi, ZEBRA_ROUTE_BGP, BGP_ROUTE_NORMAL,
 				 &prd, &label, 1, 0, &evpn);
@@ -3410,11 +3418,13 @@ void bgp_evpn_withdraw_type5_routes(struct bgp *bgp_vrf,
 
 	table = bgp_vrf->rib[afi][safi];
 	for (rn = bgp_table_top(table); rn; rn = bgp_route_next(rn)) {
-		/* Only care about "selected" routes - non-imported. */
+		/* Only care about "selected" routes. Also perform a loop
+		 * check to ensure that only the right routes go into EVPN.
+		 */
 		/* TODO: Support for AddPath for EVPN. */
 		for (ri = rn->info; ri; ri = ri->next) {
 			if (CHECK_FLAG(ri->flags, BGP_INFO_SELECTED) &&
-			    (!ri->extra || !ri->extra->parent)) {
+			    is_route_injectable_into_evpn(ri)) {
 				bgp_evpn_withdraw_type5_route(bgp_vrf, &rn->p,
 							      afi, safi);
 				break;
@@ -3480,13 +3490,13 @@ void bgp_evpn_advertise_type5_routes(struct bgp *bgp_vrf,
 
 	table = bgp_vrf->rib[afi][safi];
 	for (rn = bgp_table_top(table); rn; rn = bgp_route_next(rn)) {
-		/* Need to identify the "selected" route entry to use its
-		 * attribute. Also, we only consider "non-imported" routes.
-		 * TODO: Support for AddPath for EVPN.
+		/* Only care about "selected" routes. Also perform a loop
+		 * check to ensure that only the right routes go into EVPN.
 		 */
+		/* TODO: Support for AddPath for EVPN. */
 		for (ri = rn->info; ri; ri = ri->next) {
 			if (CHECK_FLAG(ri->flags, BGP_INFO_SELECTED) &&
-			    (!ri->extra || !ri->extra->parent)) {
+			    is_route_injectable_into_evpn(ri)) {
 
 				/* apply the route-map */
 				if (bgp_vrf->adv_cmd_rmap[afi][safi].map) {
@@ -3996,8 +4006,9 @@ int bgp_nlri_parse_evpn(struct peer *peer, struct attr *attr,
 			break;
 
 		case BGP_EVPN_IP_PREFIX_ROUTE:
-			if (process_type5_route(peer, afi, safi, attr, pnt,
-						psize, addpath_id, withdraw)) {
+			if (process_type5_route(peer, afi, safi,
+						withdraw ? NULL : attr, pnt,
+						psize, addpath_id)) {
 				flog_err(
 					BGP_ERR_PKT_PROCESS,
 					"%u:%s - Error in processing EVPN type-5 NLRI size %d",
@@ -4328,7 +4339,7 @@ int bgp_filter_evpn_routes_upon_martian_nh_change(struct bgp *bgp)
 
 				if (bgp_nexthop_self(bgp, ri->attr->nexthop)) {
 
-					char attr_str[BUFSIZ];
+					char attr_str[BUFSIZ] = {0};
 					char pbuf[PREFIX_STRLEN];
 
 					bgp_dump_attr(ri->attr, attr_str,
@@ -4447,7 +4458,7 @@ int bgp_evpn_local_l3vni_add(vni_t l3vni,
 			     vrf_id_t vrf_id,
 			     struct ethaddr *rmac,
 			     struct in_addr originator_ip,
-			     int filter)
+			     int filter, ifindex_t svi_ifindex)
 {
 	struct bgp *bgp_vrf = NULL; /* bgp VRF instance */
 	struct bgp *bgp_def = NULL; /* default bgp instance */
@@ -4495,14 +4506,11 @@ int bgp_evpn_local_l3vni_add(vni_t l3vni,
 		SET_FLAG(bgp_vrf->vrf_flags, BGP_VRF_AUTO);
 	}
 
-	/* associate with l3vni */
+	/* associate the vrf with l3vni and related parameters */
 	bgp_vrf->l3vni = l3vni;
-
-	/* set the router mac - to be used in mac-ip routes for this vrf */
 	memcpy(&bgp_vrf->rmac, rmac, sizeof(struct ethaddr));
-
-	/* set the originator ip */
 	bgp_vrf->originator_ip = originator_ip;
+	bgp_vrf->l3vni_svi_ifindex = svi_ifindex;
 
 	/* set the right filter - are we using l3vni only for prefix routes? */
 	if (filter)
