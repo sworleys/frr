@@ -1571,12 +1571,6 @@ static int vrrp_shutdown(struct vrrp_router *r)
 	THREAD_OFF(r->t_read);
 	THREAD_OFF(r->t_write);
 
-	/* Protodown macvlan */
-	vrrp_zclient_send_interface_protodown(r->mvl_ifp, true);
-
-	/* Throw away our source address */
-	memset(&r->src, 0x00, sizeof(r->src));
-
 	if (r->sock_rx > 0) {
 		close(r->sock_rx);
 		r->sock_rx = -1;
