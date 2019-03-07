@@ -784,7 +784,7 @@ static int vrrp_recv_advertisement(struct vrrp_router *r, struct ipaddr *src,
 			DEBUGD(&vrrp_dbg_proto,
 			       VRRP_LOGPFX VRRP_LOGPFX_VRID
 			       "Discarding advertisement from %s (%" PRIu8
-			       " = %" PRIu8 " & %s <= %s)",
+			       " <= %" PRIu8 " & %s <= %s)",
 			       r->vr->vrid, sipstr, pkt->hdr.priority,
 			       r->priority, sipstr, dipstr);
 		}
@@ -917,7 +917,11 @@ static int vrrp_bind_to_primary_connected(struct vrrp_router *r)
 	char ipstr[INET6_ADDRSTRLEN];
 	struct interface *ifp;
 
-	ifp = r->vr->ifp;
+	/*
+	 * A slight quirk: the RFC specifies that advertisements under IPv6 must
+	 * be transmitted using the link local address of the source interface
+	 */
+	ifp = r->family == AF_INET ? r->vr->ifp : r->mvl_ifp;
 
 	struct listnode *ln;
 	struct connected *c = NULL;
@@ -1535,6 +1539,8 @@ static int vrrp_shutdown(struct vrrp_router *r)
 	/* Cancel all timers */
 	THREAD_OFF(r->t_adver_timer);
 	THREAD_OFF(r->t_master_down_timer);
+	THREAD_OFF(r->t_read);
+	THREAD_OFF(r->t_write);
 
 	if (r->sock_rx > 0) {
 		close(r->sock_rx);
