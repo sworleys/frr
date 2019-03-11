@@ -30,6 +30,7 @@ frr (4.0+cl3u10) RELEASED; urgency=medium
   * Fixes: CM-23986 tools: fix blackhole static changes in frr-reload.py
   * Fixes: CM-24022 bgpd: prevent type-5 route creation if the bgp_vrf->l3vni is 0
   * Fixes: CM-23902 bgpd: resolve more neighbor peer-group issues
+  * Fixes: CM-24203 zebra: properly select system routes sometimes
 
  -- dev-support <dev-support@cumulusnetworks.com>  Tue, 5 Mar 2019 13:14:50 -0400
 
