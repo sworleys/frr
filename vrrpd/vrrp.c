@@ -97,8 +97,6 @@ static void vrrp_mac_set(struct ethaddr *mac, bool v6, uint8_t vrid)
  */
 static void vrrp_recalculate_timers(struct vrrp_router *r)
 {
-	uint16_t mdiadv = r->vr->version == 3 ? r->master_adver_interval
-					      : r->vr->advertisement_interval;
 	uint16_t skm = (r->vr->version == 3) ? r->master_adver_interval : 100;
 	r->skew_time = ((256 - r->vr->priority) * skm) / 256;
 	r->master_down_interval = 3 * mdiadv;
