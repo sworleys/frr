@@ -1,21 +1,12 @@
-frr (4.0+cl3u12) RELEASED; urgency=medium
-
-  * Fixes: CM-24269 vrrpd: late bind to Tx address
-
- -- dev-support <dev-support@cumulusnetworks.com>  Thu, 14 Mar 2019 17:00:00 -0400
-
-frr (4.0+cl3u11) RELEASED; urgency=medium
-
-  * Fixes: CM-24230 vrrpd: allow centisecond precision for vrrpv2
-  * Fixes: CM-24253 vrrpd: include auth fields in v2 packet
-  * Fixes: CM-24061 vrrpd: allow OS to choose VRRP IPv6 src address
-
- -- dev-support <dev-support@cumulusnetworks.com>  Wed, 13 Mar 2019 17:00:00 -0400
-
 frr (4.0+cl3u10) RELEASED; urgency=medium
 
   * New Enabled: VRRP
   * New Enabled: "show interface brief" command
+  * Fixes: CM-24277 zebra: don't protodown a NULL interface
+  * Fixes: CM-24230 vrrpd: allow centisecond precision for vrrpv2
+  * Fixes: CM-24253 vrrpd: include auth fields in v2 packet
+  * Fixes: CM-24061 vrrpd: allow OS to choose VRRP IPv6 src address
+  * Fixes: CM-24269 vrrpd: late bind to Tx address
   * Fixes: CM-23017 vtysh: only show error codes once
   * Fixes: CM-23649 zebra: fix dup addr detect remote macip add case
   * Fixes: CM-23586 bgpd: Fix EVPN advertise route-map application
