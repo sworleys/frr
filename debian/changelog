@@ -1,17 +1,3 @@
-frr (4.0+cl3u12) RELEASED; urgency=medium
-
-  * Fixes: CM-24269 vrrpd: late bind to Tx address
-
- -- dev-support <dev-support@cumulusnetworks.com>  Thu, 14 Mar 2019 17:00:00 -0400
-
-frr (4.0+cl3u11) RELEASED; urgency=medium
-
-  * Fixes: CM-24230 vrrpd: allow centisecond precision for vrrpv2
-  * Fixes: CM-24253 vrrpd: include auth fields in v2 packet
-  * Fixes: CM-24061 vrrpd: allow OS to choose VRRP IPv6 src address
-
- -- dev-support <dev-support@cumulusnetworks.com>  Wed, 13 Mar 2019 17:00:00 -0400
-
 frr (4.0+cl3u10) RELEASED; urgency=medium
 
   * New Enabled: VRRP
@@ -46,6 +32,7 @@ frr (4.0+cl3u10) RELEASED; urgency=medium
   * Fixes: CM-22864 zebra: Revert probe local inactive neigh
   * Fixes: CM-24177 bgpd: Allow collection of data for EVPN Route Leaking
   * Fixes: CM-24231 bgpd: Fix redistribution into vrf when networking is restarted
+  * Fixes: CM-24281 zebra: Avoid crash during svi shutdown
 
  -- dev-support <dev-support@cumulusnetworks.com>  Tue, 5 Mar 2019 13:14:50 -0400
 
