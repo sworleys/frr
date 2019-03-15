@@ -323,7 +323,6 @@ void vrrp_check_start(struct vrrp_vrouter *vr)
 	/* Macvlan interface must have a link local */
 	start = start && connected_get_linklocal(r->mvl_ifp);
 	whynot = (!start && !whynot) ? "No link local address configured" : NULL;
-#endif
 	/* Macvlan interface must have a v6 IP besides the link local */
 	start = start && (r->mvl_ifp->connected->count >= 2);
 	whynot = (!start && !whynot) ? "No Virtual IP configured on macvlan device" : NULL;
