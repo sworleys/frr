@@ -2,6 +2,7 @@ frr (4.0+cl3u10) RELEASED; urgency=medium
 
   * New Enabled: VRRP
   * New Enabled: "show interface brief" command
+  * Fixes: CM-24224 bgpd: router mac same as self skip route install
   * Fixes: CM-24277 zebra: don't protodown a NULL interface
   * Fixes: CM-24230 vrrpd: allow centisecond precision for vrrpv2
   * Fixes: CM-24253 vrrpd: include auth fields in v2 packet
