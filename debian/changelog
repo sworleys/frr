@@ -41,7 +41,7 @@ frr (4.0+cl3u10) RELEASED; urgency=medium
   * Fixes: CM-24231 bgpd: Fix redistribution into vrf when networking is restarted
   * Fixes: CM-24281 zebra: Avoid crash during svi shutdown
 
- -- dev-support <dev-support@cumulusnetworks.com>  Tue, 5 Mar 2019 13:14:50 -0400
+ -- dev-support <dev-support@cumulusnetworks.com>  Wed, 20 Mar 2019 13:14:50 -0400
 
 frr (4.0+cl3u9) RELEASED; urgency=medium
 
