@@ -59,7 +59,7 @@ nexthop_group_cmd_compare(const struct nexthop_group_cmd *nhgc1,
 	return strcmp(nhgc1->name, nhgc2->name);
 }
 
-uint8_t nexthop_group_nexthop_num(struct nexthop_group *nhg)
+uint8_t nexthop_group_nexthop_num(const struct nexthop_group *nhg)
 {
 	struct nexthop *nhop;
 	uint8_t num = 0;
@@ -83,7 +83,8 @@ uint8_t nexthop_group_active_nexthop_num(struct nexthop_group *nhg)
 	return num;
 }
 
-struct nexthop *nexthop_exists(struct nexthop_group *nhg, struct nexthop *nh)
+struct nexthop *nexthop_exists(const struct nexthop_group *nhg,
+			       const struct nexthop *nh)
 {
 	struct nexthop *nexthop;
 
@@ -93,6 +94,28 @@ struct nexthop *nexthop_exists(struct nexthop_group *nhg, struct nexthop *nh)
 	}
 
 	return NULL;
+}
+
+bool nexthop_group_equal(const struct nexthop_group *nhg1,
+			 const struct nexthop_group *nhg2)
+{
+	struct nexthop *nh = NULL;
+
+	if (nhg1 && !nhg2)
+		return false;
+
+	if (!nhg1 && !nhg2)
+		return false;
+
+	if (nexthop_group_nexthop_num(nhg1) != nexthop_group_nexthop_num(nhg2))
+		return false;
+
+	for (ALL_NEXTHOPS_PTR(nhg1, nh)) {
+		if (!nexthop_exists(nhg2, nh))
+			return false;
+	}
+
+	return true;
 }
 
 struct nexthop_group *nexthop_group_new(void)

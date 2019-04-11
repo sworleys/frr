@@ -115,15 +115,17 @@ void nexthop_group_disable_vrf(struct vrf *vrf);
 void nexthop_group_interface_state_change(struct interface *ifp,
 					  ifindex_t oldifindex);
 
-extern struct nexthop *nexthop_exists(struct nexthop_group *nhg,
-				      struct nexthop *nh);
+extern struct nexthop *nexthop_exists(const struct nexthop_group *nhg,
+				      const struct nexthop *nh);
+extern bool nexthop_group_equal(const struct nexthop_group *nhg1,
+				const struct nexthop_group *nhg2);
 
 extern struct nexthop_group_cmd *nhgc_find(const char *name);
 
 extern void nexthop_group_write_nexthop(struct vty *vty, struct nexthop *nh);
 
 /* Return the number of nexthops in this nhg */
-extern uint8_t nexthop_group_nexthop_num(struct nexthop_group *nhg);
+extern uint8_t nexthop_group_nexthop_num(const struct nexthop_group *nhg);
 extern uint8_t nexthop_group_active_nexthop_num(struct nexthop_group *nhg);
 
 #ifdef __cplusplus
