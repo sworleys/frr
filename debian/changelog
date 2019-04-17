@@ -1,3 +1,12 @@
+frr (4.0+cl3u11) RELEASED; urgency=medium
+
+  * New Enabled: bgpd: add support for MD5 auth on listen ranges
+  * Fixes: CM-24375 tools: fix vrrp autoconfigure reload
+  * Fixes: CM-24339 zebra: evpn dup detect handle ip state change
+  * Fixes: CM-24248 lib, bgpd: Do not register nexthop 0.0.0.0 to nht
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Tue, 16 Apr 2019 18:29:14 -0400
+
 frr (4.0+cl3u10) RELEASED; urgency=medium
 
   * New Enabled: VRRP
@@ -41,10 +50,8 @@ frr (4.0+cl3u10) RELEASED; urgency=medium
   * Fixes: CM-24231 bgpd: Fix redistribution into vrf when networking is restarted
   * Fixes: CM-24281 zebra: Avoid crash during svi shutdown
   * Fixes: CM-24320 bgpd: l3vni add-del handle non-default rd
-  * Fixes: CM-6366 bgpd: add support for MD5 auth on listen ranges
-  * Fixes: CM-24375 tools: fix vrrp autoconfigure reload
 
- -- dev-support <dev-support@cumulusnetworks.com>  Tue, 16 Apr 2019 18:29:14 +0000
+ -- dev-support <dev-support@cumulusnetworks.com>  Wed, 20 Mar 2019 13:14:50 -0400
 
 frr (4.0+cl3u9) RELEASED; urgency=medium
 
