@@ -74,7 +74,7 @@ static int pim_msdp_sa_adv_timer_cb(struct thread *t)
 	struct pim_instance *pim = THREAD_ARG(t);
 
 	if (PIM_DEBUG_MSDP_EVENTS) {
-		zlog_debug("MSDP SA advertisment timer expired");
+		zlog_debug("MSDP SA advertisement timer expired");
 	}
 
 	pim_msdp_sa_adv_timer_setup(pim, true /* start */);
@@ -519,7 +519,7 @@ static void pim_msdp_sa_local_del_on_up_del(struct pim_instance *pim,
 			 * changes; perhaps
 			 * address this in the next release? - XXX  */
 			flog_err(
-				  LIB_ERR_DEVELOPMENT,
+				EC_LIB_DEVELOPMENT,
 				"MSDP sa %s SPT teardown is causing the local entry to be removed",
 				sa->sg_str);
 			return;
@@ -687,7 +687,7 @@ static unsigned int pim_msdp_sa_hash_key_make(void *p)
 	return (jhash_2words(sa->sg.src.s_addr, sa->sg.grp.s_addr, 0));
 }
 
-static int pim_msdp_sa_hash_eq(const void *p1, const void *p2)
+static bool pim_msdp_sa_hash_eq(const void *p1, const void *p2)
 {
 	const struct pim_msdp_sa *sa1 = p1;
 	const struct pim_msdp_sa *sa2 = p2;
@@ -1221,7 +1221,7 @@ static unsigned int pim_msdp_peer_hash_key_make(void *p)
 	return (jhash_1word(mp->peer.s_addr, 0));
 }
 
-static int pim_msdp_peer_hash_eq(const void *p1, const void *p2)
+static bool pim_msdp_peer_hash_eq(const void *p1, const void *p2)
 {
 	const struct pim_msdp_peer *mp1 = p1;
 	const struct pim_msdp_peer *mp2 = p2;
@@ -1256,11 +1256,10 @@ static void pim_msdp_mg_free(struct pim_instance *pim)
 	if (PIM_DEBUG_MSDP_EVENTS) {
 		zlog_debug("MSDP mesh-group %s deleted", mg->mesh_group_name);
 	}
-	if (mg->mesh_group_name)
-		XFREE(MTYPE_PIM_MSDP_MG_NAME, mg->mesh_group_name);
+	XFREE(MTYPE_PIM_MSDP_MG_NAME, mg->mesh_group_name);
 
 	if (mg->mbr_list)
-		list_delete_and_null(&mg->mbr_list);
+		list_delete(&mg->mbr_list);
 
 	XFREE(MTYPE_PIM_MSDP_MG, pim->msdp.mg);
 }
@@ -1383,7 +1382,6 @@ enum pim_msdp_err pim_msdp_mg_mbr_add(struct pim_instance *pim,
 	}
 
 	mbr = XCALLOC(MTYPE_PIM_MSDP_MG_MBR, sizeof(*mbr));
-
 	mbr->mbr_ip = mbr_ip;
 	listnode_add_sort(mg->mbr_list, mbr);
 
@@ -1524,8 +1522,8 @@ enum pim_msdp_err pim_msdp_mg_src_add(struct pim_instance *pim,
 }
 
 /*********************** MSDP feature APIs *********************************/
-int pim_msdp_config_write_helper(struct pim_instance *pim, struct vty *vty,
-				 const char *spaces)
+int pim_msdp_config_write(struct pim_instance *pim, struct vty *vty,
+			  const char *spaces)
 {
 	struct listnode *mbrnode;
 	struct pim_msdp_mg_mbr *mbr;
@@ -1552,11 +1550,6 @@ int pim_msdp_config_write_helper(struct pim_instance *pim, struct vty *vty,
 		++count;
 	}
 	return count;
-}
-
-int pim_msdp_config_write(struct vty *vty)
-{
-	return pim_msdp_config_write_helper(pimg, vty, "");
 }
 
 /* Enable feature including active/periodic timers etc. on the first peer
@@ -1611,7 +1604,7 @@ void pim_msdp_exit(struct pim_instance *pim)
 	}
 
 	if (pim->msdp.peer_list) {
-		list_delete_and_null(&pim->msdp.peer_list);
+		list_delete(&pim->msdp.peer_list);
 	}
 
 	if (pim->msdp.sa_hash) {
@@ -1621,7 +1614,7 @@ void pim_msdp_exit(struct pim_instance *pim)
 	}
 
 	if (pim->msdp.sa_list) {
-		list_delete_and_null(&pim->msdp.sa_list);
+		list_delete(&pim->msdp.sa_list);
 	}
 
 	if (pim->msdp.work_obuf)

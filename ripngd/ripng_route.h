@@ -30,23 +30,23 @@ struct ripng_aggregate {
 	unsigned int suppress;
 
 	/* Metric of this route.  */
-	u_char metric;
+	uint8_t metric;
 
 	/* Tag field of RIPng packet.*/
-	u_int16_t tag;
+	uint16_t tag;
 
 	/* Route-map futures - this variables can be changed. */
 	struct in6_addr nexthop_out;
-	u_char metric_set;
-	u_char metric_out;
-	u_int16_t tag_out;
+	uint8_t metric_set;
+	uint8_t metric_out;
+	uint16_t tag_out;
 };
 
-extern void ripng_aggregate_increment(struct route_node *rp,
+extern void ripng_aggregate_increment(struct agg_node *rp,
 				      struct ripng_info *rinfo);
-extern void ripng_aggregate_decrement(struct route_node *rp,
+extern void ripng_aggregate_decrement(struct agg_node *rp,
 				      struct ripng_info *rinfo);
-extern void ripng_aggregate_decrement_list(struct route_node *rp,
+extern void ripng_aggregate_decrement_list(struct agg_node *rp,
 					   struct list *list);
 extern int ripng_aggregate_add(struct prefix *p);
 extern int ripng_aggregate_delete(struct prefix *p);

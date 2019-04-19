@@ -38,7 +38,7 @@
 
 
 /* master signals descriptor struct */
-struct quagga_sigevent_master_t {
+static struct quagga_sigevent_master_t {
 	struct thread *t;
 
 	struct quagga_signal_t *signals;
@@ -84,8 +84,8 @@ int quagga_sigevent_process(void)
 	sigdelset(&newmask, SIGKILL);
 
 	if ((sigprocmask(SIG_BLOCK, &newmask, &oldmask)) < 0) {
-		flog_err(LIB_ERR_SYSTEM_CALL,
-			  "quagga_signal_timer: couldnt block signals!");
+		flog_err_sys(EC_LIB_SYSTEM_CALL,
+			     "quagga_signal_timer: couldnt block signals!");
 		return -1;
 	}
 #endif /* SIGEVENT_BLOCK_SIGNALS */
@@ -121,8 +121,6 @@ int quagga_sigevent_process(void)
 int quagga_signal_timer(struct thread *t)
 {
 	struct quagga_sigevent_master_t *sigm;
-	struct quagga_signal_t *sig;
-	int i;
 
 	sigm = THREAD_ARG(t);
 	sigm->t = NULL;
@@ -286,7 +284,7 @@ static void trap_default_signals(void)
 	};
 	static const struct {
 		const int *sigs;
-		u_int nsigs;
+		unsigned int nsigs;
 		void (*handler)(int signo
 #ifdef SA_SIGINFO
 				,
@@ -298,10 +296,10 @@ static void trap_default_signals(void)
 		{exit_signals, array_size(exit_signals), exit_handler},
 		{ignore_signals, array_size(ignore_signals), NULL},
 	};
-	u_int i;
+	unsigned int i;
 
 	for (i = 0; i < array_size(sigmap); i++) {
-		u_int j;
+		unsigned int j;
 
 		for (j = 0; j < sigmap[i].nsigs; j++) {
 			struct sigaction oact;
@@ -332,7 +330,7 @@ static void trap_default_signals(void)
 				if (sigaction(sigmap[i].sigs[j], &act, NULL)
 				    < 0)
 					flog_err(
-						LIB_ERR_SYSTEM_CALL,
+						EC_LIB_SYSTEM_CALL,
 						"Unable to set signal handler for signal %d: %s",
 						sigmap[i].sigs[j],
 						safe_strerror(errno));

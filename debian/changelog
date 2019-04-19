@@ -1,121 +1,22 @@
-frr (4.0+cl3u7) RELEASED; urgency=medium
+frr (7.0+cl4u1) UNRELEASED; urgency=medium
 
-  * Fixes: CM-20585 bgpd: enable aggregation in EVPN
-  * Fixes: CM-22509 bgpd: Solve issue entering aggregate twice
-  * Fixes: CM-19714 bgpd: Martian Nexthops not being updated appropriately
-  * Fixes: CM-22630 ospf6d: Fix crash in lsa processing
+  * backport to debian10 systems
 
- -- dev-support <dev-support@cumulusnetworks.com>  Thu, 04 Oct 2018 09:35:45 -0400
+ --  <clbuilder@adoyle_debian-buildenv_1547846431>  Sat, 19 Jan 2019 00:09:55 +0000
 
-frr (4.0+cl3u6) RELEASED; urgency=medium
+frr (6.1+cl4u1) RELEASED; urgency=medium
 
-  * New Enabled: Warning Messaging
-  * New Enabled: EVPN extended Mobility support
-  * Fixes: CM-22229 bgpd: Fix host support of v6 RMAC
-  * Fixes: CM-22130 zebra: Uninstall RMAC's from kernel appropriately
-  * Fixes: CM-21718 zebra: Check router_flag change for neigh update
-  * Fixes: CM-21566 bgpd: unregister VNI learning on default instance delete
-  * Fixes: CM-22170 ospfd: interface speed change during int add
-  * Fixes: CM-21598 pimd: Modify order of command output
-  * Fixes: CM-20259 bgpd: Add json output to route-leak show command
-  * Fixes: CM-21684 bgpd: issues with vrf imports with restart
-  * Fixes: CM-21996 tools: correct frr-reload.py handling of bgp vni/exit-vni
-  * Fixes: CM-21875 bgpd: cleanup evpn prefix debugging commands
-  * Fixes: CM-12769 bgpd: route detail output local pref display
-  * Fixes: CM-21895 bgpd: Intentionally stop some timers on instance removal
-  * Fixes: CM-20456 zebra: Display consistent mac count
-  * Fixes: CM-21644 pimd: RPT prunes do not need to be figured for a *,G prune
-  * Fixes: CM-14476 bgpd: Add evpn prefix to debug bgp updates
-  * Fixes: CM-21722 zebra: remove default vrf output for kernel vrf ipv6 blackhole
-  * Fixes: CM-21048 tools: handle exit-vrf as end of context block
-  * Fixes: CM-21712 bgpd: Support evpn nd ext community
-  * Fixes: CM-21791 bgpd: make name of default vrf/bgp instance consistent
-  * Fixes: CM-21040 bgpd/ospfd: Make json a bit more consistent
-  * Fixes: CM-22288 zebra: Fix neighbor update to bgp
-  * Fixes: CM-22388 zebra: Resolve link dependencies post nldump
-  * Fixes: CM-22092 bgpd: Fix missing afi/safi configuration
+  * New Enabled: PIM draft Unnumbered
 
- -- dev-support <dev-support@cumulusnetworks.com>  Tue, 03 Sep 2018 15:14:40 -0400
-
-frr (4.0+cl3u5) RELEASED; urgency=medium
-
-  * New Enabled: Evpn code fix
-
- -- dev-support <dev-support@cumulusnetworks.com>  Thu, 25 Jul 2018 15:13:67 -0400
-
-frr (4.0+cl3u4) RELEASED; urgency=medium
-
-  * Fixes: CM-21895 bgpd: Intentionally stop timers on delete
-
- -- dev-support <dev-support@cumulusnetworks.com>  Wed, 1 Aug 2018 20:38:01 -0400
-
-frr (4.0+cl3u3) RELEASED; urgency=medium
-
-  * New Enabled: Error Messaging
-  * Fixes: CM-21319 debian: Rewrite frr.conf to support vrf static routes
-  * Fixes: CM-20204 bgpd: Accept vni rd_rt command for default vrf
-  * Fixes: CM-20206 bgpd: Fix default RD value in running-cfg
-  * Fixes: CM-20572 zebra: Hide default vrf instance of l3vni cmd
-  * Fixes: CM-21335 bgpd: Fix bgp crash in evpn vni route-map
-  * Fixes: CM-20043 bgpd: aggregate summarization duplicates updates
-  * Fixes: CM-16139 ospf6d: Fix ECMP for asbr external routes
-  * Fixes: CM-20849 lib: Reorder evpn prefix for ipv6
-  * Fixes: CM-20952 lib: Reorder evpn prefix for ipv6
-  * Fixes: CM-21014 bgpd: Check for L3VNI before sending RMAC/L3 RT's
-  * Fixes: CM-21443 bgpd: l3vni del to free ip prefix routes from vrf
-  * Fixes: CM-21429 zebra: duplicate nexthops for cross-vrf static routes
-  * Fixes: CM-21599 pimd: ECMP not recovering after neighbor drops
-  * Fixes: CM-21508 zebra: install EVPN gateway MAC as static/sticky
-
- -- dev-support <dev-support@cumulusnetworks.com>  Mon, 25 Jun 2018 18:10:00 -0400
-
-frr (4.0+cl3u2) RELEASED; urgency=medium
-
-  * Fixes: CM-20471 bgpd: Update parent's refcount for imported routes
-  * Fixes: CM-20776 bgpd: Set NEXT_HOP attribute for EVPN imported routes
-  * Fixes: CM-20664 Increase timeout for restart failure conditions
-  * Fixes: CM-20807 ospf6d: Fix area border router duplicate
-  * Fixes: CM-20841 Put back lost backwards compatibility guard in packaging
-  * Fixes: CM-20744 ospfd: Always create the fifo for the interface
-  * Fixes: CM-20086 lib: allow hostname to begin with a letter or number
-  * Fixes: CM-21019 bgpd: Fix crash on shutdown
-  * Fixes: CM-21013 watchfrr: Accept deprecated options
-  * Fixes: CM-20871 zebra: link/unlink l2vni with l3vni when svi state change
-  * Fixes: CM-20732 bgpd: Fix a typo in output cmd
-  * Fixes: CM-21068 bgpd: Fix crash on shutdown
-  * Fixes: CM-21114 vtysh: Fix bad path to conf file in -q mode
-
- -- dev-support <dev-support@cumulusnetworks.com>  Wed, 19 May 2018 12:30:41 -0400
-
-frr (4.0+cl3u1) RELEASED; urgency=medium
-
-  * New Enabled: PBR Policy Based Routing
-  * New Enabled: BGP VRF - VRF Route Leaking
-
- -- dev-support <dev-support@cumulusnetworks.com>  Mon, 9 Apr 2018 18:10:00 -0400
+ -- FRRouting-Dev <dev@lists.frrouting.org>  Wed, 18 Oct 2017 17:01:42 -0700
 
 frr (3.0-1) RELEASED; urgency=medium
 
-  * Fixes: CM-17497 bgpd: Fixes too many open FD's
-  * Fixes: CM-17923 FRR: Add better cl-support for large routing tables
-  * Fixes: CM-18221 ospfd: Some lsa maxage issues
-  * Fixes: CM-18220 ospfd: Failed redistribution in some rare cases
+  * Added Debian 9 Backport
+ 
+ -- FRRouting-Dev <dev@lists.frrouting.org>  Mon, 16 Oct 2017 03:28:00 -0700
 
- -- dev-support <dev-support@cumulusnetworks.com>  Thu, 5 Oct 2017 13:21:59 -0400
-
-frr (3.1+cl3u2) RELEASED; urgency=medium
-
-  * Fixes: CM-17867 Stale routes left behind when FRR stopped
-
- -- dev-support <dev-support@cumulusnetworks.com>  Wed, 27 Sep 2017 09:43:19 -0400
-
-frr (3.1+cl3u1) RELEASED; urgency=medium
-
-  * New Enabled: FRR Uplift
-
- -- dev-support <dev-support@cumulusnetworks.com>  Fri, 12 May 2017 08:37:53 -0400
-
-frr (3.0) Released; urgency=medium
+frr (3.0-0) RELEASED; urgency=medium
 
   * New Enabled: BGP Shutdown Message
   * New Enabled: BGP Large Community
@@ -133,7 +34,7 @@ frr (3.0) Released; urgency=medium
   * New Enabled: PIM Sparse Mode
   * New Enabled: NHRP RFC 2332
   * New Enabled: Label Manager
-  * Switched from hardening-wrapper to dpkg-buildflags.
+  * Switched from hardening-wrapper to dpkg-buildflags. 
 
  -- FRRouting-Dev <dev@lists.frrouting.org>  Fri, 13 Oct 2017 16:17:26 -0700
 

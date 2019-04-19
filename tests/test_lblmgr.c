@@ -21,6 +21,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #include "lib/stream.h"
 #include "lib/zclient.h"
 
@@ -29,7 +33,7 @@
 #define CHUNK_SIZE 32
 
 struct zclient *zclient;
-u_short instance = 1;
+unsigned short instance = 1;
 
 const char *sequence = "GGRGGGRRG";
 
@@ -55,7 +59,7 @@ static int zebra_send_label_manager_connect()
 
 	printf("Connect to Label Manager\n");
 
-	ret = lm_label_manager_connect(zclient);
+	ret = lm_label_manager_connect(zclient, 0);
 	printf("Label Manager connection result: %u \n", ret);
 	if (ret != 0) {
 		fprintf(stderr, "Error %d connecting to Label Manager %s\n",
@@ -115,7 +119,7 @@ void init_zclient(struct thread_master *master, char *lm_zserv_path)
 {
 	frr_zclient_addr(&zclient_addr, &zclient_addr_len, lm_zserv_path);
 
-	zclient = zclient_new_notify(master, &zclient_options_default);
+	zclient = zclient_new(master, &zclient_options_default);
 	/* zclient_init(zclient, ZEBRA_LABEL_MANAGER, 0); */
 	zclient->sock = -1;
 	zclient->redist_default = ZEBRA_ROUTE_LDP;

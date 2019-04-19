@@ -17,6 +17,11 @@
  * with this program; see the file COPYING; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
  */
+
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -563,6 +568,8 @@ void csv_decode(csv_t *csv, char *inbuf)
 	csv_record_t *rec;
 
 	buf = (inbuf) ? inbuf : csv->buf;
+	assert(buf);
+
 	pos = strpbrk(buf, "\n");
 	while (pos != NULL) {
 		rec = calloc(1, sizeof(csv_record_t));
@@ -663,8 +670,8 @@ int main()
 
 	log_verbose("Mem: %d\n", get_memory_usage(getpid()));
 	csv_init(&csv, buf, 256);
-	sprintf(hdr1, "%4u", 0);
-	sprintf(hdr2, "%4u", 1);
+	sprintf(hdr1, "%4d", 0);
+	sprintf(hdr2, "%4d", 1);
 	log_verbose("(%zu/%zu/%d/%d)\n", strlen(hdr1), strlen(hdr2), atoi(hdr1),
 		    atoi(hdr2));
 	rec = csv_encode(&csv, 2, hdr1, hdr2);
@@ -676,8 +683,8 @@ int main()
 	}
 	csv_encode(&csv, 2, "pdfadfadfadsadsaddfdfdsfdsd", "35444554545454545");
 	log_verbose("%s\n", buf);
-	sprintf(hdr1, "%4u", csv.csv_len);
-	sprintf(hdr2, "%4u", 1);
+	sprintf(hdr1, "%4d", csv.csv_len);
+	sprintf(hdr2, "%4d", 1);
 	log_verbose("(%zu/%zu/%d/%d)\n", strlen(hdr1), strlen(hdr2), atoi(hdr1),
 		    atoi(hdr2));
 	rec = csv_encode_record(&csv, rec, 2, hdr1, hdr2);

@@ -23,7 +23,17 @@
 #define __VXLAN_H__
 
 /* VxLAN Network Identifier - 24-bit (RFC 7348) */
-typedef u_int32_t vni_t;
+typedef uint32_t vni_t;
 #define VNI_MAX 16777215 /* (2^24 - 1) */
 
+/* Flooding mechanisms for BUM packets. */
+/* Currently supported mechanisms are head-end (ingress) replication
+ * (which is the default) and no flooding. Future options could be
+ * using PIM-SM, PIM-Bidir etc.
+ */
+enum vxlan_flood_control {
+	VXLAN_FLOOD_HEAD_END_REPL = 0,
+	VXLAN_FLOOD_DISABLED,
+	VXLAN_FLOOD_PIM_SM,
+};
 #endif /* __VXLAN_H__ */

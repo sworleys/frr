@@ -17,11 +17,16 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #ifdef __linux__
 
 #include "pim_igmp_mtrace.h"
 
 #include "checksum.h"
+#include "prefix.h"
 #include "mtracebis_routeget.h"
 
 #include <sys/select.h>
@@ -37,6 +42,7 @@
 #include <net/if.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <netdb.h>
 
 #define MTRACEBIS_VERSION "0.1"
 #define MTRACE_TIMEOUT (5)
@@ -49,11 +55,178 @@
 static const char *progname;
 static void usage(void)
 {
-	fprintf(stderr, "Usage : %s <multicast source>\n", progname);
+	fprintf(stderr, "Usage : %s <multicast source> [<multicast group>]\n",
+		progname);
 }
 static void version(void)
 {
 	fprintf(stderr, "%s %s\n", progname, MTRACEBIS_VERSION);
+}
+
+static void print_host(struct in_addr addr)
+{
+	struct hostent *h;
+
+	h = gethostbyaddr(&addr, sizeof(addr), AF_INET);
+	if (h == NULL)
+		printf("?");
+	else
+		printf("%s", h->h_name);
+	printf(" (%s) ", inet_ntoa(addr));
+}
+
+static void print_line_no(int i)
+{
+	printf("%3d  ", -i);
+}
+
+static const char *rtg_proto_str(enum mtrace_rtg_proto proto)
+{
+	static char buf[80];
+
+	buf[0] = '\0';
+
+	switch (proto) {
+	case MTRACE_RTG_PROTO_DVMRP:
+		return "DVMRP";
+	case MTRACE_RTG_PROTO_MOSPF:
+		return "MOSPF";
+	case MTRACE_RTG_PROTO_PIM:
+		return "PIM";
+	case MTRACE_RTG_PROTO_CBT:
+		return "CBT";
+	case MTRACE_RTG_PROTO_PIM_SPECIAL:
+		return "PIM special";
+	case MTRACE_RTG_PROTO_PIM_STATIC:
+		return "PIM static";
+	case MTRACE_RTG_PROTO_DVMRP_STATIC:
+		return "DVMRP static";
+	case MTRACE_RTG_PROTO_PIM_MBGP:
+		return "PIM MBGP";
+	case MTRACE_RTG_PROTO_CBT_SPECIAL:
+		return "CBT special";
+	case MTRACE_RTG_PROTO_CBT_STATIC:
+		return "CBT static";
+	case MTRACE_RTG_PROTO_PIM_ASSERT:
+		return "PIM assert";
+	default:
+		sprintf(buf, "unknown protocol (%d)", proto);
+		return buf;
+	}
+}
+
+static void print_rtg_proto(uint32_t rtg_proto)
+{
+	printf("%s", rtg_proto_str(rtg_proto));
+}
+
+static void print_fwd_ttl(uint32_t fwd_ttl)
+{
+	printf("thresh^ %d", fwd_ttl);
+}
+
+static const char *fwd_code_str(enum mtrace_fwd_code code)
+{
+	static char buf[80];
+
+	buf[0] = '\0';
+
+	switch (code) {
+	case MTRACE_FWD_CODE_NO_ERROR:
+		return "no error";
+	case MTRACE_FWD_CODE_WRONG_IF:
+		return "wrong interface";
+	case MTRACE_FWD_CODE_PRUNE_SENT:
+		return "prune sent";
+	case MTRACE_FWD_CODE_PRUNE_RCVD:
+		return "prune received";
+	case MTRACE_FWD_CODE_SCOPED:
+		return "scoped";
+	case MTRACE_FWD_CODE_NO_ROUTE:
+		return "no route";
+	case MTRACE_FWD_CODE_WRONG_LAST_HOP:
+		return "wrong last hop";
+	case MTRACE_FWD_CODE_NOT_FORWARDING:
+		return "not forwarding";
+	case MTRACE_FWD_CODE_REACHED_RP:
+		return "reached RP";
+	case MTRACE_FWD_CODE_RPF_IF:
+		return "RPF interface";
+	case MTRACE_FWD_CODE_NO_MULTICAST:
+		return "no multicast";
+	case MTRACE_FWD_CODE_INFO_HIDDEN:
+		return "info hidden";
+	case MTRACE_FWD_CODE_NO_SPACE:
+		return "no space";
+	case MTRACE_FWD_CODE_OLD_ROUTER:
+		return "old router";
+	case MTRACE_FWD_CODE_ADMIN_PROHIB:
+		return "admin. prohib.";
+	default:
+		sprintf(buf, "unknown fwd. code (%d)", code);
+		return buf;
+	}
+}
+
+static void print_fwd_code(uint32_t fwd_code)
+{
+	printf("%s", fwd_code_str(fwd_code));
+}
+
+static void print_rsp(struct igmp_mtrace_rsp *rsp)
+{
+	print_host(rsp->outgoing);
+	if (rsp->fwd_code == 0 || rsp->fwd_code == MTRACE_FWD_CODE_REACHED_RP) {
+		print_rtg_proto(rsp->rtg_proto);
+		printf(" ");
+		if (rsp->fwd_code == MTRACE_FWD_CODE_REACHED_RP)
+			printf("(RP) ");
+		if (rsp->rtg_proto == MTRACE_RTG_PROTO_PIM) {
+			switch (rsp->src_mask) {
+			case MTRACE_SRC_MASK_GROUP:
+				printf("(*,G) ");
+				break;
+			case MTRACE_SRC_MASK_SOURCE:
+				printf("(S,G) ");
+				break;
+			}
+		}
+		print_fwd_ttl(rsp->fwd_ttl);
+	} else {
+		print_fwd_code(rsp->fwd_code);
+	}
+	printf("\n");
+}
+
+static void print_dest(struct igmp_mtrace *mtrace)
+{
+	print_line_no(0);
+	print_host(mtrace->dst_addr);
+	printf("\n");
+}
+
+static void print_summary(struct igmp_mtrace *mtrace, int hops, long msec)
+{
+	int i;
+	int t = 0;
+
+	for (i = 0; i < hops; i++)
+		t += mtrace->rsp[i].fwd_ttl;
+
+	printf("Round trip time %ld ms; total ttl of %d required.\n", msec, t);
+}
+
+static void print_responses(struct igmp_mtrace *mtrace, int hops, long msec)
+{
+	int i;
+
+	print_dest(mtrace);
+
+	for (i = 0; i < hops; i++) {
+		print_line_no(i + 1);
+		print_rsp(&mtrace->rsp[i]);
+	}
+	print_summary(mtrace, hops, msec);
 }
 
 static int send_query(int fd, struct in_addr to_addr,
@@ -88,7 +261,7 @@ static void print_query(struct igmp_mtrace *mtrace)
 	       inet_ntop(AF_INET, &mtrace->grp_addr, grp_str, sizeof(grp_str)));
 }
 
-static int recv_response(int fd, long msec, int *hops)
+static int recv_response(int fd, int *hops, struct igmp_mtrace *mtracer)
 {
 	int recvd;
 	char mtrace_buf[IP_AND_MTRACE_BUF_LEN];
@@ -96,8 +269,9 @@ static int recv_response(int fd, long msec, int *hops)
 	struct igmp_mtrace *mtrace;
 	int mtrace_len;
 	int responses;
-	int i;
-	u_short sum;
+	unsigned short sum;
+	size_t mtrace_off;
+	size_t ip_len;
 
 	recvd = recvfrom(fd, mtrace_buf, IP_AND_MTRACE_BUF_LEN, 0, NULL, 0);
 
@@ -124,12 +298,19 @@ static int recv_response(int fd, long msec, int *hops)
 	if (sum != in_cksum(ip, ip->ip_hl * 4))
 		return -1;
 
-	mtrace = (struct igmp_mtrace *)(mtrace_buf + (4 * ip->ip_hl));
-
-	mtrace_len = ntohs(ip->ip_len) - ip->ip_hl * 4;
-
-	if (mtrace_len < (int)MTRACE_HDR_SIZE)
+	/* Header overflow check */
+	mtrace_off = 4 * ip->ip_hl;
+	if (mtrace_off > MTRACE_BUF_LEN)
 		return -1;
+
+	/* Underflow/overflow check */
+	ip_len = ntohs(ip->ip_len);
+	if (ip_len < mtrace_off || ip_len < MTRACE_HDR_SIZE
+	    || ip_len > MTRACE_BUF_LEN)
+		return -1;
+
+	mtrace_len = ip_len - mtrace_off;
+	mtrace = (struct igmp_mtrace *)(mtrace_buf + mtrace_off);
 
 	sum = mtrace->checksum;
 	mtrace->checksum = 0;
@@ -145,26 +326,26 @@ static int recv_response(int fd, long msec, int *hops)
 	responses = mtrace_len - sizeof(struct igmp_mtrace);
 	responses /= sizeof(struct igmp_mtrace_rsp);
 
-	printf("%ld ms received responses from %d hops.\n", msec, responses);
+	if (responses > MTRACE_MAX_HOPS) {
+		fprintf(stderr, "mtrace too large\n");
+		return -1;
+	}
 
 	if (hops)
 		*hops = responses;
 
-	for (i = 0; i < responses; i++) {
-		struct igmp_mtrace_rsp *rsp = &mtrace->rsp[i];
-
-		if (rsp->fwd_code != 0)
-			printf("-%d fwd. code 0x%2x.\n", i, rsp->fwd_code);
-	}
+	if (mtracer)
+		memcpy(mtracer, mtrace, mtrace_len);
 
 	return 0;
 }
 
-static int wait_for_response(int fd, int *hops)
+static int wait_for_response(int fd, int *hops, struct igmp_mtrace *mtrace,
+			     long *ret_msec)
 {
 	fd_set readfds;
 	struct timeval timeout;
-	int ret = -1;
+	int ret;
 	long msec, rmsec, tmsec;
 
 	FD_ZERO(&readfds);
@@ -181,18 +362,28 @@ static int wait_for_response(int fd, int *hops)
 			return ret;
 		rmsec = timeout.tv_sec * 1000 + timeout.tv_usec / 1000;
 		msec = tmsec - rmsec;
-	} while (recv_response(fd, msec, hops) != 0);
+	} while (recv_response(fd, hops, mtrace) != 0);
+
+	if (ret_msec)
+		*ret_msec = msec;
 
 	return ret;
+}
+
+static bool check_end(struct igmp_mtrace *mtrace, int hops)
+{
+	return mtrace->src_addr.s_addr == mtrace->rsp[hops - 1].prev_hop.s_addr;
 }
 
 int main(int argc, char *const argv[])
 {
 	struct in_addr mc_source;
+	struct in_addr mc_group;
 	struct in_addr iface_addr;
 	struct in_addr gw_addr;
 	struct in_addr mtrace_addr;
 	struct igmp_mtrace mtrace;
+	struct igmp_mtrace *mtracep;
 	int hops = 255;
 	int rhops;
 	int maxhops = 255;
@@ -203,9 +394,11 @@ int main(int argc, char *const argv[])
 	int fd = -1;
 	int ret = -1;
 	int c;
+	long msec;
 	int i, j;
 	char ifname[IF_NAMESIZE];
-	char ip_str[INET_ADDRSTRLEN];
+	char mbuf[MTRACE_BUF_LEN];
+	bool not_group;
 
 	mtrace_addr.s_addr = inet_addr("224.0.1.32");
 
@@ -221,7 +414,7 @@ int main(int argc, char *const argv[])
 	else
 		progname = argv[0];
 
-	if (argc != 2) {
+	if (argc != 2 && argc != 3) {
 		usage();
 		exit(EXIT_FAILURE);
 	}
@@ -230,7 +423,7 @@ int main(int argc, char *const argv[])
 		static struct option long_options[] = {
 			{"help", no_argument, 0, 'h'},
 			{"version", no_argument, 0, 'v'},
-			{0, 0, 0, 0} };
+			{0, 0, 0, 0}};
 		int option_index = 0;
 
 		c = getopt_long(argc, argv, "vh", long_options, &option_index);
@@ -252,8 +445,25 @@ int main(int argc, char *const argv[])
 	}
 	if (inet_pton(AF_INET, argv[1], &mc_source) != 1) {
 		usage();
-		fprintf(stderr, "%s: %s not a valid IPv4 address\n", argv[0],
+		fprintf(stderr, "%s: %s is not a valid IPv4 address\n", argv[0],
 			argv[1]);
+		exit(EXIT_FAILURE);
+	}
+
+	mc_group.s_addr = 0;
+	not_group = false;
+
+	if (argc == 3) {
+		if (inet_pton(AF_INET, argv[2], &mc_group) != 1)
+			not_group = true;
+		if (!not_group && !IPV4_CLASS_DE(ntohl(mc_group.s_addr)))
+			not_group = true;
+	}
+
+	if (not_group) {
+		usage();
+		fprintf(stderr, "%s: %s is not a valid IPv4 group address\n",
+			argv[0], argv[2]);
 		exit(EXIT_FAILURE);
 	}
 
@@ -277,7 +487,7 @@ int main(int argc, char *const argv[])
 	mtrace.type = PIM_IGMP_MTRACE_QUERY_REQUEST;
 	mtrace.hops = hops;
 	mtrace.checksum = 0;
-	mtrace.grp_addr.s_addr = 0;
+	mtrace.grp_addr = mc_group;
 	mtrace.src_addr = mc_source;
 	mtrace.dst_addr = iface_addr;
 	mtrace.rsp_addr = unicast ? iface_addr : mtrace_addr;
@@ -312,8 +522,10 @@ int main(int argc, char *const argv[])
 		goto close_fd;
 	}
 	printf("Querying full reverse path...\n");
-	ret = wait_for_response(fd, NULL);
+	mtracep = (struct igmp_mtrace *)mbuf;
+	ret = wait_for_response(fd, &rhops, mtracep, &msec);
 	if (ret > 0) {
+		print_responses(mtracep, rhops, msec);
 		ret = 0;
 		goto close_fd;
 	}
@@ -325,10 +537,9 @@ int main(int argc, char *const argv[])
 	}
 	printf(" * ");
 	printf("switching to hop-by-hop:\n");
-	printf("%3d  ? (%s)\n", 0,
-	       inet_ntop(AF_INET, &mtrace.dst_addr, ip_str, sizeof(ip_str)));
+	print_dest(&mtrace);
 	for (i = 1; i < maxhops; i++) {
-		printf("%3d ", -i);
+		print_line_no(i);
 		mtrace.hops = i;
 		for (j = 0; j < perhop; j++) {
 			mtrace.qry_id++;
@@ -340,12 +551,20 @@ int main(int argc, char *const argv[])
 				ret = EXIT_FAILURE;
 				goto close_fd;
 			}
-			ret = wait_for_response(fd, &rhops);
+			ret = wait_for_response(fd, &rhops, mtracep, &msec);
 			if (ret > 0) {
-				if (i > rhops) {
+				if (check_end(mtracep, rhops)) {
+					print_rsp(&mtracep->rsp[rhops - 1]);
+					print_summary(mtracep, rhops, msec);
 					ret = 0;
 					goto close_fd;
 				}
+				if (i > rhops) {
+					printf(" * ...giving up.\n");
+					ret = 0;
+					goto close_fd;
+				}
+				print_rsp(&mtracep->rsp[rhops - 1]);
 				break;
 			}
 			printf(" *");

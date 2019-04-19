@@ -23,9 +23,9 @@
 
 #include "lib/ferr.h"
 
-enum isis_ferr_refs {
-	ISIS_ERR_PACKET = ISIS_FERR_START,
-	ISIS_ERR_CONFIG,
+enum isis_log_refs {
+	EC_ISIS_PACKET = ISIS_FERR_START,
+	EC_ISIS_CONFIG,
 };
 
 extern void isis_error_init(void);

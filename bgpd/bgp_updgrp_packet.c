@@ -56,6 +56,7 @@
 #include "bgpd/bgp_nht.h"
 #include "bgpd/bgp_mplsvpn.h"
 #include "bgpd/bgp_label.h"
+#include "bgpd/bgp_addpath.h"
 
 /********************
  * PRIVATE FUNCTIONS
@@ -64,12 +65,11 @@
 /********************
  * PUBLIC FUNCTIONS
  ********************/
-struct bpacket *bpacket_alloc()
+struct bpacket *bpacket_alloc(void)
 {
 	struct bpacket *pkt;
 
-	pkt = (struct bpacket *)XCALLOC(MTYPE_BGP_PACKET,
-					sizeof(struct bpacket));
+	pkt = XCALLOC(MTYPE_BGP_PACKET, sizeof(struct bpacket));
 
 	return pkt;
 }
@@ -397,8 +397,8 @@ struct stream *bpacket_reformat_for_peer(struct bpacket *pkt,
 
 	vec = &pkt->arr.entries[BGP_ATTR_VEC_NH];
 	if (CHECK_FLAG(vec->flags, BPKT_ATTRVEC_FLAGS_UPDATED)) {
-		u_int8_t nhlen;
-		afi_t nhafi = AFI_MAX; /* NH AFI is based on nhlen! */
+		uint8_t nhlen;
+		afi_t nhafi;
 		int route_map_sets_nh;
 		nhlen = stream_getc_from(s, vec->offset);
 		if (peer_cap_enhe(peer, paf->afi, paf->safi))
@@ -427,9 +427,10 @@ struct stream *bpacket_reformat_for_peer(struct bpacket *pkt,
 				break;
 			default:
 				/* TODO: handle IPv6 nexthops */
-				flog_warn(BGP_WARN_INVALID_NEXTHOP_LENGTH,
-					  "%s: %s: invalid MP nexthop length (AFI IP): %u",
-					  __func__, peer->host, nhlen);
+				flog_warn(
+					EC_BGP_INVALID_NEXTHOP_LENGTH,
+					"%s: %s: invalid MP nexthop length (AFI IP): %u",
+					__func__, peer->host, nhlen);
 				stream_free(s);
 				return NULL;
 			}
@@ -532,9 +533,10 @@ struct stream *bpacket_reformat_for_peer(struct bpacket *pkt,
 				break;
 			default:
 				/* TODO: handle IPv4 nexthops */
-				flog_warn(BGP_WARN_INVALID_NEXTHOP_LENGTH,
-					  "%s: %s: invalid MP nexthop length (AFI IP6): %u",
-					  __func__, peer->host, nhlen);
+				flog_warn(
+					EC_BGP_INVALID_NEXTHOP_LENGTH,
+					"%s: %s: invalid MP nexthop length (AFI IP6): %u",
+					__func__, peer->host, nhlen);
 				stream_free(s);
 				return NULL;
 			}
@@ -685,7 +687,7 @@ struct bpacket *subgroup_update_packet(struct update_subgroup *subgrp)
 	struct bgp_adj_out *adj;
 	struct bgp_advertise *adv;
 	struct bgp_node *rn = NULL;
-	struct bgp_info *binfo = NULL;
+	struct bgp_path_info *path = NULL;
 	bgp_size_t total_attr_len = 0;
 	unsigned long attrlen_pos = 0;
 	size_t mpattrlen_pos = 0;
@@ -699,10 +701,10 @@ struct bpacket *subgroup_update_packet(struct update_subgroup *subgrp)
 	int num_pfx = 0;
 	int addpath_encode = 0;
 	int addpath_overhead = 0;
-	u_int32_t addpath_tx_id = 0;
+	uint32_t addpath_tx_id = 0;
 	struct prefix_rd *prd = NULL;
 	mpls_label_t label = MPLS_INVALID_LABEL, *label_pnt = NULL;
-	u_int32_t num_labels = 0;
+	uint32_t num_labels = 0;
 
 	if (!subgrp)
 		return NULL;
@@ -729,12 +731,13 @@ struct bpacket *subgroup_update_packet(struct update_subgroup *subgrp)
 		rn = adv->rn;
 		adj = adv->adj;
 		addpath_tx_id = adj->addpath_tx_id;
-		binfo = adv->binfo;
+		path = adv->pathi;
 
 		space_remaining = STREAM_CONCAT_REMAIN(s, snlri, STREAM_SIZE(s))
 				  - BGP_MAX_PACKET_SIZE_OVERFLOW;
-		space_needed = BGP_NLRI_LENGTH + addpath_overhead +
-			       bgp_packet_mpattr_prefix_size(afi, safi, &rn->p);
+		space_needed =
+			BGP_NLRI_LENGTH + addpath_overhead
+			+ bgp_packet_mpattr_prefix_size(afi, safi, &rn->p);
 
 		/* When remaining space can't include NLRI and it's length.  */
 		if (space_remaining < space_needed)
@@ -744,8 +747,8 @@ struct bpacket *subgroup_update_packet(struct update_subgroup *subgrp)
 		if (stream_empty(s)) {
 			struct peer *from = NULL;
 
-			if (binfo)
-				from = binfo->peer;
+			if (path)
+				from = path->peer;
 
 			/* 1: Write the BGP message header - 16 bytes marker, 2
 			 * bytes length,
@@ -778,16 +781,16 @@ struct bpacket *subgroup_update_packet(struct update_subgroup *subgrp)
 			space_remaining =
 				STREAM_CONCAT_REMAIN(s, snlri, STREAM_SIZE(s))
 				- BGP_MAX_PACKET_SIZE_OVERFLOW;
-			space_needed = BGP_NLRI_LENGTH + addpath_overhead +
-				bgp_packet_mpattr_prefix_size(afi, safi,
-							      &rn->p);
+			space_needed = BGP_NLRI_LENGTH + addpath_overhead
+				       + bgp_packet_mpattr_prefix_size(
+						 afi, safi, &rn->p);
 
 			/* If the attributes alone do not leave any room for
 			 * NLRI then
 			 * return */
 			if (space_remaining < space_needed) {
 				flog_err(
-					BGP_ERR_UPDGRP_ATTR_LEN,
+					EC_BGP_UPDGRP_ATTR_LEN,
 					"u%" PRIu64 ":s%" PRIu64
 					" attributes too long, cannot send UPDATE",
 					subgrp->update_group->id, subgrp->id);
@@ -818,13 +821,13 @@ struct bpacket *subgroup_update_packet(struct update_subgroup *subgrp)
 				prd = (struct prefix_rd *)&rn->prn->p;
 
 			if (safi == SAFI_LABELED_UNICAST) {
-				label = bgp_adv_label(rn, binfo, peer, afi,
+				label = bgp_adv_label(rn, path, peer, afi,
 						      safi);
 				label_pnt = &label;
 				num_labels = 1;
-			} else if (binfo && binfo->extra) {
-				label_pnt = &binfo->extra->label[0];
-				num_labels = binfo->extra->num_labels;
+			} else if (path && path->extra) {
+				label_pnt = &path->extra->label[0];
+				num_labels = path->extra->num_labels;
 			}
 
 			if (stream_empty(snlri))
@@ -937,7 +940,7 @@ struct bpacket *subgroup_withdraw_packet(struct update_subgroup *subgrp)
 	size_t mp_start = 0;
 	size_t attrlen_pos = 0;
 	size_t mplen_pos = 0;
-	u_char first_time = 1;
+	uint8_t first_time = 1;
 	afi_t afi;
 	safi_t safi;
 	int space_remaining = 0;
@@ -945,7 +948,7 @@ struct bpacket *subgroup_withdraw_packet(struct update_subgroup *subgrp)
 	int num_pfx = 0;
 	int addpath_encode = 0;
 	int addpath_overhead = 0;
-	u_int32_t addpath_tx_id = 0;
+	uint32_t addpath_tx_id = 0;
 	struct prefix_rd *prd = NULL;
 
 
@@ -1120,6 +1123,8 @@ void subgroup_default_update_packet(struct update_subgroup *subgrp,
 			snprintf(tx_id_buf, sizeof(tx_id_buf),
 				 " with addpath ID %u",
 				 BGP_ADDPATH_TX_ID_FOR_DEFAULT_ORIGINATE);
+		else
+			tx_id_buf[0] = '\0';
 
 		zlog_debug("u%" PRIu64 ":s%" PRIu64 " send UPDATE %s%s %s",
 			   (SUBGRP_UPDGRP(subgrp))->id, subgrp->id,

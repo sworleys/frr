@@ -37,19 +37,19 @@ typedef enum vnc_export_type {
 
 struct vnc_export_info {
 	struct vnc_export_info *next;
-	struct route_node *node;
+	struct agg_node *node;
 	struct peer *peer;
-	u_char type;
-	u_char subtype;
+	uint8_t type;
+	uint8_t subtype;
 	uint32_t lifetime;
 	struct thread *timer;
 };
 
-extern struct route_node *vnc_etn_get(struct bgp *bgp, vnc_export_type_t type,
-				      struct prefix *p);
+extern struct agg_node *vnc_etn_get(struct bgp *bgp, vnc_export_type_t type,
+				    struct prefix *p);
 
-extern struct route_node *
-vnc_etn_lookup(struct bgp *bgp, vnc_export_type_t type, struct prefix *p);
+extern struct agg_node *vnc_etn_lookup(struct bgp *bgp, vnc_export_type_t type,
+				       struct prefix *p);
 
 extern struct vnc_export_info *vnc_eti_get(struct bgp *bgp,
 					   vnc_export_type_t etype,

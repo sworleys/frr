@@ -6,15 +6,20 @@ if SHARPD
 noinst_LIBRARIES += sharpd/libsharp.a
 sbin_PROGRAMS += sharpd/sharpd
 dist_examples_DATA += sharpd/sharpd.conf.sample
+vtysh_scan += $(top_srcdir)/sharpd/sharp_vty.c
+man8 += $(MANBUILD)/sharpd.8
 endif
 
 sharpd_libsharp_a_SOURCES = \
+	sharpd/sharp_nht.c \
 	sharpd/sharp_zebra.c \
 	sharpd/sharp_vty.c \
 	# end
 
 noinst_HEADERS += \
+	sharpd/sharp_nht.h \
 	sharpd/sharp_vty.h \
+	sharpd/sharp_globals.h \
 	sharpd/sharp_zebra.h \
 	# end
 

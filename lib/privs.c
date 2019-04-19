@@ -290,7 +290,7 @@ zebra_privs_current_t zprivs_state_caps(void)
 				 zprivs_state.syscaps_p->caps[i], CAP_EFFECTIVE,
 				 &val)) {
 			flog_err(
-				LIB_ERR_SYSTEM_CALL,
+				EC_LIB_SYSTEM_CALL,
 				"zprivs_state_caps: could not cap_get_flag, %s",
 				safe_strerror(errno));
 			return ZPRIVS_UNKNOWN;
@@ -698,6 +698,58 @@ static int getgrouplist(const char *user, gid_t group, gid_t *groups,
 }
 #endif /* HAVE_GETGROUPLIST */
 
+struct zebra_privs_t *_zprivs_raise(struct zebra_privs_t *privs,
+				    const char *funcname)
+{
+	int save_errno = errno;
+
+	if (!privs)
+		return NULL;
+
+	/* If we're already elevated, just return */
+	pthread_mutex_lock(&(privs->mutex));
+	{
+		if (++(privs->refcount) == 1) {
+			errno = 0;
+			if (privs->change(ZPRIVS_RAISE)) {
+				zlog_err("%s: Failed to raise privileges (%s)",
+					 funcname, safe_strerror(errno));
+			}
+			errno = save_errno;
+			privs->raised_in_funcname = funcname;
+		}
+	}
+	pthread_mutex_unlock(&(privs->mutex));
+
+	return privs;
+}
+
+void _zprivs_lower(struct zebra_privs_t **privs)
+{
+	int save_errno = errno;
+
+	if (!*privs)
+		return;
+
+	/* Don't lower privs if there's another caller */
+	pthread_mutex_lock(&(*privs)->mutex);
+	{
+		if (--((*privs)->refcount) == 0) {
+			errno = 0;
+			if ((*privs)->change(ZPRIVS_LOWER)) {
+				zlog_err("%s: Failed to lower privileges (%s)",
+					 (*privs)->raised_in_funcname,
+					 safe_strerror(errno));
+			}
+			errno = save_errno;
+			(*privs)->raised_in_funcname = NULL;
+		}
+	}
+	pthread_mutex_unlock(&(*privs)->mutex);
+
+	*privs = NULL;
+}
+
 void zprivs_preinit(struct zebra_privs_t *zprivs)
 {
 	struct passwd *pwentry = NULL;
@@ -707,6 +759,9 @@ void zprivs_preinit(struct zebra_privs_t *zprivs)
 		fprintf(stderr, "zprivs_init: called with NULL arg!\n");
 		exit(1);
 	}
+
+	pthread_mutex_init(&(zprivs->mutex), NULL);
+	zprivs->refcount = 0;
 
 	if (zprivs->vty_group) {
 		/* in a "NULL" setup, this is allowed to fail too, but still
@@ -754,7 +809,7 @@ void zprivs_preinit(struct zebra_privs_t *zprivs)
 
 void zprivs_init(struct zebra_privs_t *zprivs)
 {
-	gid_t groups[NGROUPS_MAX];
+	gid_t groups[NGROUPS_MAX] = {};
 	int i, ngroups = 0;
 	int found = 0;
 
@@ -764,7 +819,7 @@ void zprivs_init(struct zebra_privs_t *zprivs)
 		return;
 
 	if (zprivs->user) {
-		ngroups = sizeof(groups);
+		ngroups = array_size(groups);
 		if (getgrouplist(zprivs->user, zprivs_state.zgid, groups,
 				 &ngroups)
 		    < 0) {
@@ -826,6 +881,19 @@ void zprivs_init(struct zebra_privs_t *zprivs)
 
 #ifdef HAVE_CAPABILITIES
 	zprivs_caps_init(zprivs);
+
+	/*
+	 * If we have initialized the system with no requested
+	 * capabilities, change will not have been set
+	 * to anything by zprivs_caps_init, As such
+	 * we should make sure that when we attempt
+	 * to raize privileges that we actually have
+	 * a do nothing function to call instead of a
+	 * crash :).
+	 */
+	if (!zprivs->change)
+		zprivs->change = zprivs_change_null;
+
 #else  /* !HAVE_CAPABILITIES */
 	/* we dont have caps. we'll need to maintain rid and saved uid
 	 * and change euid back to saved uid (who we presume has all neccessary

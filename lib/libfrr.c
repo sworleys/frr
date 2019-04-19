@@ -36,29 +36,33 @@
 #include "module.h"
 #include "network.h"
 #include "lib_errors.h"
+#include "db.h"
+#include "northbound_cli.h"
 
 DEFINE_HOOK(frr_late_init, (struct thread_master * tm), (tm))
 DEFINE_KOOH(frr_early_fini, (), ())
 DEFINE_KOOH(frr_fini, (), ())
 
-bool quagga_compat_mode = false;
-
-const char frr_sysconfdir[] = FRR_CONFDIR;
+const char frr_sysconfdir[] = SYSCONFDIR;
 const char frr_vtydir[] = DAEMON_VTY_DIR;
+#ifdef HAVE_SQLITE3
+const char frr_dbdir[] = DAEMON_DB_DIR;
+#endif
 const char frr_moduledir[] = MODULE_PATH;
-
-char compat_indicator[MAXPATHLEN];
 
 char frr_protoname[256] = "NONE";
 char frr_protonameinst[256] = "NONE";
 
-char config_default[256];
-char config_default_int[256];
+char config_default[512];
 char frr_zclientpath[256];
-static char pidfile_default[256];
+static char pidfile_default[512];
+#ifdef HAVE_SQLITE3
+static char dbfile_default[512];
+#endif
 static char vtypath_default[256];
 
-bool debug_memstats_at_exit = 0;
+bool debug_memstats_at_exit = false;
+static bool nodetach_term, nodetach_daemon;
 
 static char comb_optstr[256];
 static struct option comb_lo[64];
@@ -84,6 +88,10 @@ static void opt_extend(const struct optspec *os)
 
 #define OPTION_VTYSOCK   1000
 #define OPTION_MODULEDIR 1002
+#define OPTION_LOG       1003
+#define OPTION_LOGLEVEL  1004
+#define OPTION_TCLI      1005
+#define OPTION_DB_FILE   1006
 
 static const struct option lo_always[] = {
 	{"help", no_argument, NULL, 'h'},
@@ -92,6 +100,9 @@ static const struct option lo_always[] = {
 	{"module", no_argument, NULL, 'M'},
 	{"vty_socket", required_argument, NULL, OPTION_VTYSOCK},
 	{"moduledir", required_argument, NULL, OPTION_MODULEDIR},
+	{"log", required_argument, NULL, OPTION_LOG},
+	{"log-level", required_argument, NULL, OPTION_LOGLEVEL},
+	{"tcli", no_argument, NULL, OPTION_TCLI},
 	{NULL}};
 static const struct optspec os_always = {
 	"hvdM:",
@@ -100,13 +111,19 @@ static const struct optspec os_always = {
 	"  -d, --daemon       Runs in daemon mode\n"
 	"  -M, --module       Load specified module\n"
 	"      --vty_socket   Override vty socket path\n"
-	"      --moduledir    Override modules directory\n",
+	"      --moduledir    Override modules directory\n"
+	"      --log          Set Logging to stdout, syslog, or file:<name>\n"
+	"      --log-level    Set Logging Level to use, debug, info, warn, etc\n"
+	"      --tcli         Use transaction-based CLI\n",
 	lo_always};
 
 
 static const struct option lo_cfg_pid_dry[] = {
 	{"pid_file", required_argument, NULL, 'i'},
 	{"config_file", required_argument, NULL, 'f'},
+#ifdef HAVE_SQLITE3
+	{"db_file", required_argument, NULL, OPTION_DB_FILE},
+#endif
 	{"pathspace", required_argument, NULL, 'N'},
 	{"dryrun", no_argument, NULL, 'C'},
 	{"terminal", no_argument, NULL, 't'},
@@ -115,6 +132,9 @@ static const struct optspec os_cfg_pid_dry = {
 	"f:i:CtN:",
 	"  -f, --config_file  Set configuration file name\n"
 	"  -i, --pid_file     Set process identifier file name\n"
+#ifdef HAVE_SQLITE3
+	"      --db_file      Set database file name\n"
+#endif
 	"  -N, --pathspace    Insert prefix into config & socket paths\n"
 	"  -C, --dryrun       Check configuration for validity and exit\n"
 	"  -t, --terminal     Open terminal session on stdio\n"
@@ -148,11 +168,6 @@ static const struct optspec os_user = {"u:g:",
 				       "  -g, --group        Group to run as\n",
 				       lo_user};
 
-static const struct option lo_quagga[] = {{"quagga", no_argument, NULL, 'q'},
-					  {NULL}};
-static const struct optspec os_quagga = {
-	"q", "  -q, --quagga       Enable Quagga compatibility mode\n",
-	lo_quagga};
 
 bool frr_zclient_addr(struct sockaddr_storage *sa, socklen_t *sa_len,
 		      const char *path)
@@ -179,7 +194,7 @@ bool frr_zclient_addr(struct sockaddr_storage *sa, socklen_t *sa_len,
 			break;
 		case '6':
 			path++;
-			/* fallthrough */
+		/* fallthrough */
 		default:
 			af = AF_INET6;
 			break;
@@ -277,7 +292,6 @@ void frr_preinit(struct frr_daemon_info *daemon, int argc, char **argv)
 	umask(0027);
 
 	opt_extend(&os_always);
-	opt_extend(&os_quagga);
 	if (!(di->flags & FRR_NO_CFG_PID_DRY))
 		opt_extend(&os_cfg_pid_dry);
 	if (!(di->flags & FRR_NO_PRIVSEP))
@@ -286,24 +300,24 @@ void frr_preinit(struct frr_daemon_info *daemon, int argc, char **argv)
 		opt_extend(&os_zclient);
 	if (!(di->flags & FRR_NO_TCPVTY))
 		opt_extend(&os_vty);
+	if (di->flags & FRR_DETACH_LATER)
+		nodetach_daemon = true;
 
 	snprintf(config_default, sizeof(config_default), "%s/%s.conf",
 		 frr_sysconfdir, di->name);
-	snprintf(config_default_int, sizeof(config_default_int), "%s/%s",
-		 frr_sysconfdir, FRR_INTCONF);
-
 	snprintf(pidfile_default, sizeof(pidfile_default), "%s/%s.pid",
 		 frr_vtydir, di->name);
+#ifdef HAVE_SQLITE3
+	snprintf(dbfile_default, sizeof(dbfile_default), "%s/%s.db",
+		 frr_dbdir, di->name);
+#endif
 
 	strlcpy(frr_protoname, di->logname, sizeof(frr_protoname));
 	strlcpy(frr_protonameinst, di->logname, sizeof(frr_protonameinst));
 
-	snprintf(compat_indicator, sizeof(compat_indicator), "%s/.qcompat", frr_vtydir);
-
-	/* delete quagga compatibility mode indicator */
-	remove(compat_indicator);
-
 	strlcpy(frr_zclientpath, ZEBRA_SERV_PATH, sizeof(frr_zclientpath));
+
+	di->cli_mode = FRR_CLI_CLASSIC;
 }
 
 void frr_opt_add(const char *optstr, const struct option *longopts,
@@ -390,6 +404,13 @@ static int frr_opt(int opt)
 		}
 		di->pathspace = optarg;
 		break;
+#ifdef HAVE_SQLITE3
+	case OPTION_DB_FILE:
+		if (di->flags & FRR_NO_CFG_PID_DRY)
+			return 1;
+		di->db_file = optarg;
+		break;
+#endif
 	case 'C':
 		if (di->flags & FRR_NO_CFG_PID_DRY)
 			return 1;
@@ -454,6 +475,9 @@ static int frr_opt(int opt)
 		}
 		di->module_path = optarg;
 		break;
+	case OPTION_TCLI:
+		di->cli_mode = FRR_CLI_TRANSACTIONAL;
+		break;
 	case 'u':
 		if (di->flags & FRR_NO_PRIVSEP)
 			return 1;
@@ -464,13 +488,11 @@ static int frr_opt(int opt)
 			return 1;
 		di->privs->group = optarg;
 		break;
-	case 'q':
-		/* touch file indicating we're in quagga compat mode */
-		{}
-		int f = open(compat_indicator, O_RDONLY | O_CREAT,
-			     S_IRUSR | S_IWUSR);
-		close(f);
-		quagga_compat_mode = true;
+	case OPTION_LOG:
+		di->early_logging = optarg;
+		break;
+	case OPTION_LOGLEVEL:
+		di->early_loglevel = optarg;
 		break;
 	default:
 		return 1;
@@ -532,15 +554,15 @@ static void frr_mkdir(const char *path, bool strip)
 		if (errno == EEXIST)
 			return;
 
-		flog_err(LIB_ERR_SYSTEM_CALL, "failed to mkdir \"%s\": %s",
-			 path, strerror(errno));
+		flog_err(EC_LIB_SYSTEM_CALL, "failed to mkdir \"%s\": %s", path,
+			 strerror(errno));
 		return;
 	}
 
 	zprivs_get_ids(&ids);
 	if (chown(path, ids.uid_normal, ids.gid_normal))
-		flog_err(LIB_ERR_SYSTEM_CALL, "failed to chown \"%s\": %s",
-			 path, strerror(errno));
+		flog_err(EC_LIB_SYSTEM_CALL, "failed to chown \"%s\": %s", path,
+			 strerror(errno));
 }
 
 static struct thread_master *master;
@@ -561,27 +583,24 @@ struct thread_master *frr_init(void)
 		snprintf(p_instance, sizeof(p_instance), "-%d", di->instance);
 	}
 	if (di->pathspace)
-		snprintf(p_pathspace, sizeof(p_pathspace), "/%s",
+		snprintf(p_pathspace, sizeof(p_pathspace), "%s/",
 			 di->pathspace);
 
-	const char *confdir =
-		quagga_compat_mode ? QUAGGA_CONFDIR : frr_sysconfdir;
-
 	snprintf(config_default, sizeof(config_default), "%s%s%s%s.conf",
-		 confdir, p_pathspace, di->name, p_instance);
-	snprintf(config_default_int, sizeof(config_default_int), "%s%s/%s",
-		 confdir, p_pathspace,
-		 quagga_compat_mode ? QUAGGA_INTCONF : FRR_INTCONF);
-	snprintf(pidfile_default, sizeof(pidfile_default), "%s%s/%s%s.pid",
+		 frr_sysconfdir, p_pathspace, di->name, p_instance);
+	snprintf(pidfile_default, sizeof(pidfile_default), "%s/%s%s%s.pid",
 		 frr_vtydir, p_pathspace, di->name, p_instance);
+#ifdef HAVE_SQLITE3
+	snprintf(dbfile_default, sizeof(dbfile_default), "%s/%s%s%s.db",
+		 frr_dbdir, p_pathspace, di->name, p_instance);
+#endif
 
 	zprivs_preinit(di->privs);
 
 	openzlog(di->progname, di->logname, di->instance,
 		 LOG_CONS | LOG_NDELAY | LOG_PID, LOG_DAEMON);
-#if defined(HAVE_CUMULUS)
-	zlog_set_level(ZLOG_DEST_SYSLOG, zlog_default->default_lvl);
-#endif
+
+	command_setup_early_logging(di->early_logging, di->early_loglevel);
 
 	if (!frr_zclient_addr(&zclient_addr, &zclient_addr_len,
 			      frr_zclientpath)) {
@@ -616,17 +635,37 @@ struct thread_master *frr_init(void)
 	master = thread_master_create(NULL);
 	signal_init(master, di->n_signals, di->signals);
 
+#ifdef HAVE_SQLITE3
+	if (!di->db_file)
+		di->db_file = dbfile_default;
+	db_init(di->db_file);
+#endif
+
 	if (di->flags & FRR_LIMITED_CLI)
 		cmd_init(-1);
 	else
 		cmd_init(1);
+
 	vty_init(master);
 	memory_init();
 
-	ferr_ref_init();
+	log_ref_init();
 	lib_error_init();
 
+	yang_init();
+	nb_init(master, di->yang_modules, di->n_yang_modules);
+
 	return master;
+}
+
+const char *frr_get_progname(void)
+{
+	return di ? di->progname : NULL;
+}
+
+enum frr_cli_mode frr_get_cli_mode(void)
+{
+	return di ? di->cli_mode : FRR_CLI_CLASSIC;
 }
 
 static int rcvd_signal = 0;
@@ -668,7 +707,7 @@ static void frr_daemon_wait(int fd)
 
 		rcvd_signal = 0;
 
-#if   defined(HAVE_PPOLL)
+#if defined(HAVE_PPOLL)
 		ret = ppoll(pfd, 1, NULL, &prevsigs);
 #elif defined(HAVE_POLLTS)
 		ret = pollts(pfd, 1, NULL, &prevsigs);
@@ -760,15 +799,51 @@ static void frr_daemonize(void)
 	frr_daemon_wait(fds[0]);
 }
 
+/*
+ * Why is this a thread?
+ *
+ * The read in of config for integrated config happens *after*
+ * thread execution starts( because it is passed in via a vtysh -b -n )
+ * While if you are not using integrated config we want the ability
+ * to read the config in after thread execution starts, so that
+ * we can match this behavior.
+ */
+static int frr_config_read_in(struct thread *t)
+{
+	if (!vty_read_config(NULL, di->config_file, config_default) &&
+	    di->backup_config_file) {
+		char *orig = XSTRDUP(MTYPE_TMP, host_config_get());
+
+		zlog_info("Attempting to read backup config file: %s specified",
+			  di->backup_config_file);
+		vty_read_config(NULL, di->backup_config_file, config_default);
+
+		host_config_set(orig);
+		XFREE(MTYPE_TMP, orig);
+	}
+
+	/*
+	 * Update the shared candidate after reading the startup configuration.
+	 */
+	nb_config_replace(vty_shared_candidate_config, running_config, true);
+
+	return 0;
+}
+
 void frr_config_fork(void)
 {
 	hook_call(frr_late_init, master);
 
-	vty_read_config(di->config_file, config_default);
+	if (!(di->flags & FRR_NO_CFG_PID_DRY)) {
+		/* Don't start execution if we are in dry-run mode */
+		if (di->dryrun) {
+			frr_config_read_in(NULL);
+			exit(0);
+		}
 
-	/* Don't start execution if we are in dry-run mode */
-	if (di->dryrun)
-		exit(0);
+		thread_add_event(master, frr_config_read_in, NULL, 0,
+				 &di->read_in);
+	}
 
 	if (di->daemon_mode || di->terminal)
 		frr_daemonize();
@@ -778,7 +853,7 @@ void frr_config_fork(void)
 	pid_output(di->pid_file);
 }
 
-void frr_vty_serv(void)
+static void frr_vty_serv(void)
 {
 	/* allow explicit override of vty_path in the future
 	 * (not currently set anywhere) */
@@ -805,14 +880,22 @@ void frr_vty_serv(void)
 	vty_serv_sock(di->vty_addr, di->vty_port, di->vty_path);
 }
 
+static void frr_check_detach(void)
+{
+	if (nodetach_term || nodetach_daemon)
+		return;
+
+	if (daemon_ctl_sock != -1)
+		close(daemon_ctl_sock);
+	daemon_ctl_sock = -1;
+}
+
 static void frr_terminal_close(int isexit)
 {
 	int nullfd;
 
-	if (daemon_ctl_sock != -1) {
-		close(daemon_ctl_sock);
-		daemon_ctl_sock = -1;
-	}
+	nodetach_term = false;
+	frr_check_detach();
 
 	if (!di->daemon_mode || isexit) {
 		printf("\n%s exiting\n", di->name);
@@ -826,9 +909,9 @@ static void frr_terminal_close(int isexit)
 
 	nullfd = open("/dev/null", O_RDONLY | O_NOCTTY);
 	if (nullfd == -1) {
-		flog_err(LIB_ERR_SYSTEM_CALL,
-			  "%s: failed to open /dev/null: %s", __func__,
-			  safe_strerror(errno));
+		flog_err_sys(EC_LIB_SYSTEM_CALL,
+			     "%s: failed to open /dev/null: %s", __func__,
+			     safe_strerror(errno));
 	} else {
 		dup2(nullfd, 0);
 		dup2(nullfd, 1);
@@ -851,18 +934,20 @@ static int frr_daemon_ctl(struct thread *t)
 		return 0;
 
 	switch (buf[0]) {
-	case 'S':	/* SIGTSTP */
+	case 'S': /* SIGTSTP */
 		vty_stdio_suspend();
-		send(daemon_ctl_sock, "s", 1, 0);
+		if (send(daemon_ctl_sock, "s", 1, 0) < 0)
+			zlog_err("%s send(\"s\") error (SIGTSTP propagation)",
+				 (di && di->name ? di->name : ""));
 		break;
-	case 'R':	/* SIGTCNT [implicit] */
+	case 'R': /* SIGTCNT [implicit] */
 		vty_stdio_resume();
 		break;
-	case 'I':	/* SIGINT */
+	case 'I': /* SIGINT */
 		di->daemon_mode = false;
 		raise(SIGINT);
 		break;
-	case 'Q':	/* SIGQUIT */
+	case 'Q': /* SIGQUIT */
 		di->daemon_mode = true;
 		vty_stdio_close();
 		break;
@@ -872,6 +957,12 @@ out:
 	thread_add_read(master, frr_daemon_ctl, NULL, daemon_ctl_sock,
 			&daemon_ctl_thread);
 	return 0;
+}
+
+void frr_detach(void)
+{
+	nodetach_daemon = false;
+	frr_check_detach();
 }
 
 void frr_run(struct thread_master *master)
@@ -888,6 +979,8 @@ void frr_run(struct thread_master *master)
 		    instanceinfo, di->vty_port, di->startinfo);
 
 	if (di->terminal) {
+		nodetach_term = true;
+
 		vty_stdio(frr_terminal_close);
 		if (daemon_ctl_sock != -1) {
 			set_nonblocking(daemon_ctl_sock);
@@ -897,9 +990,9 @@ void frr_run(struct thread_master *master)
 	} else if (di->daemon_mode) {
 		int nullfd = open("/dev/null", O_RDONLY | O_NOCTTY);
 		if (nullfd == -1) {
-			flog_err(LIB_ERR_SYSTEM_CALL,
-				  "%s: failed to open /dev/null: %s", __func__,
-				  safe_strerror(errno));
+			flog_err_sys(EC_LIB_SYSTEM_CALL,
+				     "%s: failed to open /dev/null: %s",
+				     __func__, safe_strerror(errno));
 		} else {
 			dup2(nullfd, 0);
 			dup2(nullfd, 1);
@@ -907,9 +1000,7 @@ void frr_run(struct thread_master *master)
 			close(nullfd);
 		}
 
-		if (daemon_ctl_sock != -1)
-			close(daemon_ctl_sock);
-		daemon_ctl_sock = -1;
+		frr_check_detach();
 	}
 
 	/* end fixed stderr startup logging */
@@ -936,7 +1027,12 @@ void frr_fini(void)
 	/* memory_init -> nothing needed */
 	vty_terminate();
 	cmd_terminate();
-	ferr_ref_fini();
+	nb_terminate();
+	yang_terminate();
+#ifdef HAVE_SQLITE3
+	db_close();
+#endif
+	log_ref_fini();
 	zprivs_terminate(di->privs);
 	/* signal_init -> nothing needed */
 	thread_master_free(master);
@@ -956,10 +1052,8 @@ void frr_fini(void)
 	if (!have_leftovers)
 		return;
 
-	snprintf(filename, sizeof(filename),
-		 "/tmp/frr-memstats-%s-%llu-%llu",
-		 di->name,
-		 (unsigned long long)getpid(),
+	snprintf(filename, sizeof(filename), "/tmp/frr-memstats-%s-%llu-%llu",
+		 di->name, (unsigned long long)getpid(),
 		 (unsigned long long)time(NULL));
 
 	fp = fopen(filename, "w");
@@ -967,4 +1061,26 @@ void frr_fini(void)
 		log_memstats(fp, di->name);
 		fclose(fp);
 	}
+}
+
+#ifdef INTERP
+static const char interp[]
+	__attribute__((section(".interp"), used)) = INTERP;
+#endif
+/*
+ * executable entry point for libfrr.so
+ *
+ * note that libc initialization is skipped for this so the set of functions
+ * that can be called is rather limited
+ */
+extern void _libfrr_version(void)
+	__attribute__((visibility("hidden"), noreturn));
+void _libfrr_version(void)
+{
+	const char banner[] =
+		FRR_FULL_NAME " " FRR_VERSION ".\n"
+		FRR_COPYRIGHT GIT_INFO "\n"
+		"configured with:\n    " FRR_CONFIG_ARGS "\n";
+	write(1, banner, sizeof(banner) - 1);
+	_exit(0);
 }

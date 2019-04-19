@@ -36,6 +36,7 @@
 #include "filter.h"
 #include "ns.h"
 #include "lib_errors.h"
+#include "nexthop.h"
 
 #include "bgpd/bgpd.h"
 #include "bgpd/bgp_open.h"
@@ -44,6 +45,7 @@
 #include "bgpd/bgp_debug.h"
 #include "bgpd/bgp_errors.h"
 #include "bgpd/bgp_network.h"
+#include "bgpd/bgp_zebra.h"
 
 extern struct zebra_privs_t bgpd_privs;
 
@@ -55,14 +57,32 @@ struct bgp_listener {
 	union sockunion su;
 	struct thread *thread;
 	struct bgp *bgp;
+	char *name;
 };
+
+void bgp_dump_listener_info(struct vty *vty)
+{
+	struct listnode *node;
+	struct bgp_listener *listener;
+
+	vty_out(vty, "Name             fd Address\n");
+	vty_out(vty, "---------------------------\n");
+	for (ALL_LIST_ELEMENTS_RO(bm->listen_sockets, node, listener)) {
+		char buf[128];
+
+		vty_out(vty, "%-16s %d %s\n",
+			listener->name ? listener->name : VRF_DEFAULT_NAME,
+			listener->fd,
+			sockunion2str(&listener->su, buf, sizeof(buf)));
+	}
+}
 
 /*
  * Set MD5 key for the socket, for the given IPv4 peer address.
  * If the password is NULL or zero-length, the option will be disabled.
  */
 static int bgp_md5_set_socket(int socket, union sockunion *su,
-			      const char *password)
+			      uint16_t prefixlen, const char *password)
 {
 	int ret = -1;
 	int en = ENOSYS;
@@ -79,36 +99,50 @@ static int bgp_md5_set_socket(int socket, union sockunion *su,
 		su2.sin.sin_port = 0;
 	else
 		su2.sin6.sin6_port = 0;
-	ret = sockopt_tcp_signature(socket, &su2, password);
+
+	/* For addresses, use the non-extended signature functionality */
+	if ((su2.sa.sa_family == AF_INET && prefixlen == IPV4_MAX_PREFIXLEN)
+	    || (su2.sa.sa_family == AF_INET6
+		&& prefixlen == IPV6_MAX_PREFIXLEN))
+		ret = sockopt_tcp_signature(socket, &su2, password);
+	else
+		ret = sockopt_tcp_signature_ext(socket, &su2, prefixlen,
+						password);
 	en = errno;
 #endif /* HAVE_TCP_MD5SIG */
 
-	if (ret < 0)
-		flog_warn(BGP_WARN_NO_TCP_MD5,
-			  "can't set TCP_MD5SIG option on socket %d: %s",
-			  socket, safe_strerror(en));
+	if (ret < 0) {
+		char sabuf[SU_ADDRSTRLEN];
+		sockunion2str(su, sabuf, sizeof(sabuf));
+
+		switch (ret) {
+		case -2:
+			flog_warn(
+				EC_BGP_NO_TCP_MD5,
+				"Unable to set TCP MD5 option on socket for peer %s (sock=%d): This platform does not support MD5 auth for prefixes",
+				sabuf, socket);
+			break;
+		default:
+			flog_warn(
+				EC_BGP_NO_TCP_MD5,
+				"Unable to set TCP MD5 option on socket for peer %s (sock=%d): %s",
+				sabuf, socket, safe_strerror(en));
+		}
+	}
 
 	return ret;
 }
 
 /* Helper for bgp_connect */
 static int bgp_md5_set_connect(int socket, union sockunion *su,
-			       const char *password)
+			       uint16_t prefixlen, const char *password)
 {
 	int ret = -1;
 
 #if HAVE_DECL_TCP_MD5SIG
-	if (bgpd_privs.change(ZPRIVS_RAISE)) {
-		flog_err(LIB_ERR_PRIVILEGES, "%s: could not raise privs",
-			  __func__);
-		return ret;
+	frr_elevate_privs(&bgpd_privs) {
+		ret = bgp_md5_set_socket(socket, su, prefixlen, password);
 	}
-
-	ret = bgp_md5_set_socket(socket, su, password);
-
-	if (bgpd_privs.change(ZPRIVS_LOWER))
-		flog_err(LIB_ERR_PRIVILEGES, "%s: could not lower privs",
-			  __func__);
 #endif /* HAVE_TCP_MD5SIG */
 
 	return ret;
@@ -120,28 +154,55 @@ static int bgp_md5_set_password(struct peer *peer, const char *password)
 	int ret = 0;
 	struct bgp_listener *listener;
 
-	if (bgpd_privs.change(ZPRIVS_RAISE)) {
-		flog_err(LIB_ERR_PRIVILEGES, "%s: could not raise privs",
-			  __func__);
-		return -1;
+	/*
+	 * Set or unset the password on the listen socket(s). Outbound
+	 * connections are taken care of in bgp_connect() below.
+	 */
+	frr_elevate_privs(&bgpd_privs)
+	{
+		for (ALL_LIST_ELEMENTS_RO(bm->listen_sockets, node, listener))
+			if (listener->su.sa.sa_family
+			    == peer->su.sa.sa_family) {
+				uint16_t prefixlen =
+					peer->su.sa.sa_family == AF_INET
+						? IPV4_MAX_PREFIXLEN
+						: IPV6_MAX_PREFIXLEN;
+
+				ret = bgp_md5_set_socket(listener->fd,
+							 &peer->su, prefixlen,
+							 password);
+				break;
+			}
+	}
+	return ret;
+}
+
+int bgp_md5_set_prefix(struct prefix *p, const char *password)
+{
+	int ret = 0;
+	union sockunion su;
+	struct listnode *node;
+	struct bgp_listener *listener;
+
+	/* Set or unset the password on the listen socket(s). */
+	frr_elevate_privs(&bgpd_privs)
+	{
+		for (ALL_LIST_ELEMENTS_RO(bm->listen_sockets, node, listener))
+			if (listener->su.sa.sa_family == p->family) {
+				prefix2sockunion(p, &su);
+				ret = bgp_md5_set_socket(listener->fd, &su,
+							 p->prefixlen,
+							 password);
+				break;
+			}
 	}
 
-	/* Set or unset the password on the listen socket(s). Outbound
-	 * connections
-	 * are taken care of in bgp_connect() below.
-	 */
-	for (ALL_LIST_ELEMENTS_RO(bm->listen_sockets, node, listener))
-		if (listener->su.sa.sa_family == peer->su.sa.sa_family) {
-			ret = bgp_md5_set_socket(listener->fd, &peer->su,
-						 password);
-			break;
-		}
-
-	if (bgpd_privs.change(ZPRIVS_LOWER))
-		flog_err(LIB_ERR_PRIVILEGES, "%s: could not lower privs",
-			  __func__);
-
 	return ret;
+}
+
+int bgp_md5_unset_prefix(struct prefix *p)
+{
+	return bgp_md5_set_prefix(p, NULL);
 }
 
 int bgp_md5_set(struct peer *peer)
@@ -166,7 +227,7 @@ int bgp_set_socket_ttl(struct peer *peer, int bgp_sock)
 		ret = sockopt_ttl(peer->su.sa.sa_family, bgp_sock, peer->ttl);
 		if (ret) {
 			flog_err(
-				LIB_ERR_SOCKET,
+				EC_LIB_SOCKET,
 				"%s: Can't set TxTTL on peer (rtrid %s) socket, err = %d",
 				__func__,
 				inet_ntop(AF_INET, &peer->remote_id, buf,
@@ -182,7 +243,7 @@ int bgp_set_socket_ttl(struct peer *peer, int bgp_sock)
 		ret = sockopt_ttl(peer->su.sa.sa_family, bgp_sock, MAXTTL);
 		if (ret) {
 			flog_err(
-				LIB_ERR_SOCKET,
+				EC_LIB_SOCKET,
 				"%s: Can't set TxTTL on peer (rtrid %s) socket, err = %d",
 				__func__,
 				inet_ntop(AF_INET, &peer->remote_id, buf,
@@ -194,7 +255,7 @@ int bgp_set_socket_ttl(struct peer *peer, int bgp_sock)
 				     MAXTTL + 1 - peer->gtsm_hops);
 		if (ret) {
 			flog_err(
-				LIB_ERR_SOCKET,
+				EC_LIB_SOCKET,
 				"%s: Can't set MinTTL on peer (rtrid %s) socket, err = %d",
 				__func__,
 				inet_ntop(AF_INET, &peer->remote_id, buf,
@@ -239,10 +300,9 @@ static int bgp_get_instance_for_inc_conn(int sock, struct bgp **bgp_inst)
 	rc = getsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, name, &name_len);
 	if (rc != 0) {
 #if defined(HAVE_CUMULUS)
-		flog_err(
-			LIB_ERR_SOCKET,
-			"[Error] BGP SO_BINDTODEVICE get failed (%s), sock %d",
-			safe_strerror(errno), sock);
+		flog_err(EC_LIB_SOCKET,
+			 "[Error] BGP SO_BINDTODEVICE get failed (%s), sock %d",
+			 safe_strerror(errno), sock);
 		return -1;
 #endif
 	}
@@ -297,8 +357,8 @@ static int bgp_accept(struct thread *thread)
 	/* Register accept thread. */
 	accept_sock = THREAD_FD(thread);
 	if (accept_sock < 0) {
-		flog_err(LIB_ERR_SOCKET, "accept_sock is nevative value %d",
-			  accept_sock);
+		flog_err_sys(EC_LIB_SOCKET, "accept_sock is nevative value %d",
+			     accept_sock);
 		return -1;
 	}
 	listener->thread = NULL;
@@ -309,9 +369,9 @@ static int bgp_accept(struct thread *thread)
 	/* Accept client connection. */
 	bgp_sock = sockunion_accept(accept_sock, &su);
 	if (bgp_sock < 0) {
-		flog_err(LIB_ERR_SOCKET,
-			  "[Error] BGP socket accept failed (%s)",
-			  safe_strerror(errno));
+		flog_err_sys(EC_LIB_SOCKET,
+			     "[Error] BGP socket accept failed (%s)",
+			     safe_strerror(errno));
 		return -1;
 	}
 	set_nonblocking(bgp_sock);
@@ -422,7 +482,6 @@ static int bgp_accept(struct thread *thread)
 
 	peer = peer_create(&su, peer1->conf_if, peer1->bgp, peer1->local_as,
 			   peer1->as, peer1->as_type, 0, 0, NULL);
-	peer->su = su;
 	hash_release(peer->bgp->peerhash, peer);
 	hash_get(peer->bgp->peerhash, peer, hash_alloc_intern);
 
@@ -464,16 +523,17 @@ static char *bgp_get_bound_name(struct peer *peer)
 {
 	char *name = NULL;
 
-	if ((peer->bgp->vrf_id == VRF_DEFAULT) &&
-	    !peer->ifname && !peer->conf_if)
+	if (!peer)
+		return NULL;
+
+	if ((peer->bgp->vrf_id == VRF_DEFAULT) && !peer->ifname
+	    && !peer->conf_if)
 		return NULL;
 
 	if (peer->su.sa.sa_family != AF_INET
 	    && peer->su.sa.sa_family != AF_INET6)
 		return NULL; // unexpected
 
-	if (!peer)
-		return name;
 	/* For IPv6 peering, interface (unnumbered or link-local with interface)
 	 * takes precedence over VRF. For IPv4 peering, explicit interface or
 	 * VRF are the situations to bind.
@@ -559,13 +619,11 @@ int bgp_connect(struct peer *peer)
 		zlog_debug("Peer address not learnt: Returning from connect");
 		return 0;
 	}
-	if (bgpd_privs.change(ZPRIVS_RAISE))
-		flog_err(LIB_ERR_PRIVILEGES, "Can't raise privileges");
+	frr_elevate_privs(&bgpd_privs) {
 	/* Make socket for the peer. */
-	peer->fd = vrf_sockunion_socket(&peer->su, peer->bgp->vrf_id,
-					bgp_get_bound_name(peer));
-	if (bgpd_privs.change(ZPRIVS_LOWER))
-		flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		peer->fd = vrf_sockunion_socket(&peer->su, peer->bgp->vrf_id,
+						bgp_get_bound_name(peer));
+	}
 	if (peer->fd < 0)
 		return -1;
 
@@ -580,25 +638,29 @@ int bgp_connect(struct peer *peer)
 	sockopt_reuseaddr(peer->fd);
 	sockopt_reuseport(peer->fd);
 	if (sockopt_mark_default(peer->fd, DATAPLANE_MARK, &bgpd_privs) < 0)
-		flog_warn(BGP_WARN_NO_SOCKOPT_MARK,
+		flog_warn(EC_BGP_NO_SOCKOPT_MARK,
 			  "Unable to set mark on FD for peer %s, err=%s",
 			  peer->host, safe_strerror(errno));
 
 #ifdef IPTOS_PREC_INTERNETCONTROL
-	if (bgpd_privs.change(ZPRIVS_RAISE))
-		flog_err(LIB_ERR_PRIVILEGES, "%s: could not raise privs",
-			  __func__);
-	if (sockunion_family(&peer->su) == AF_INET)
-		setsockopt_ipv4_tos(peer->fd, IPTOS_PREC_INTERNETCONTROL);
-	else if (sockunion_family(&peer->su) == AF_INET6)
-		setsockopt_ipv6_tclass(peer->fd, IPTOS_PREC_INTERNETCONTROL);
-	if (bgpd_privs.change(ZPRIVS_LOWER))
-		flog_err(LIB_ERR_PRIVILEGES, "%s: could not lower privs",
-			  __func__);
+	frr_elevate_privs(&bgpd_privs) {
+		if (sockunion_family(&peer->su) == AF_INET)
+			setsockopt_ipv4_tos(peer->fd,
+					    IPTOS_PREC_INTERNETCONTROL);
+		else if (sockunion_family(&peer->su) == AF_INET6)
+			setsockopt_ipv6_tclass(peer->fd,
+					       IPTOS_PREC_INTERNETCONTROL);
+	}
 #endif
 
-	if (peer->password)
-		bgp_md5_set_connect(peer->fd, &peer->su, peer->password);
+	if (peer->password) {
+		uint16_t prefixlen = peer->su.sa.sa_family == AF_INET
+					     ? IPV4_MAX_PREFIXLEN
+					     : IPV6_MAX_PREFIXLEN;
+
+		bgp_md5_set_connect(peer->fd, &peer->su, prefixlen,
+				    peer->password);
+	}
 
 	/* Update source bind. */
 	if (bgp_update_source(peer) < 0) {
@@ -639,15 +701,12 @@ int bgp_getsockname(struct peer *peer)
 	if (!peer->su_remote)
 		return -1;
 
-	if (bgp_nexthop_set(peer->su_local, peer->su_remote, &peer->nexthop,
-			    peer)) {
-#if defined(HAVE_CUMULUS)
-		flog_err(
-			BGP_ERR_NH_UPD,
-			"%s: nexthop_set failed, resetting connection - intf %p",
-			peer->host, peer->nexthop.ifp);
+	if (!bgp_zebra_nexthop_set(peer->su_local, peer->su_remote,
+				   &peer->nexthop, peer)) {
+		flog_err(EC_BGP_NH_UPD,
+			 "%s: nexthop_set failed, resetting connection - intf %p",
+			 peer->host, peer->nexthop.ifp);
 		return -1;
-#endif
 	}
 	return 0;
 }
@@ -662,42 +721,39 @@ static int bgp_listener(int sock, struct sockaddr *sa, socklen_t salen,
 	sockopt_reuseaddr(sock);
 	sockopt_reuseport(sock);
 
-	if (bgpd_privs.change(ZPRIVS_RAISE))
-		flog_err(LIB_ERR_PRIVILEGES, "%s: could not raise privs",
-			  __func__);
+	frr_elevate_privs(&bgpd_privs) {
 
 #ifdef IPTOS_PREC_INTERNETCONTROL
-	if (sa->sa_family == AF_INET)
-		setsockopt_ipv4_tos(sock, IPTOS_PREC_INTERNETCONTROL);
-	else if (sa->sa_family == AF_INET6)
-		setsockopt_ipv6_tclass(sock, IPTOS_PREC_INTERNETCONTROL);
+		if (sa->sa_family == AF_INET)
+			setsockopt_ipv4_tos(sock, IPTOS_PREC_INTERNETCONTROL);
+		else if (sa->sa_family == AF_INET6)
+			setsockopt_ipv6_tclass(sock,
+					       IPTOS_PREC_INTERNETCONTROL);
 #endif
 
-	sockopt_v6only(sa->sa_family, sock);
+		sockopt_v6only(sa->sa_family, sock);
 
-	ret = bind(sock, sa, salen);
-	en = errno;
-	if (bgpd_privs.change(ZPRIVS_LOWER))
-		flog_err(LIB_ERR_PRIVILEGES, "%s: could not lower privs",
-			  __func__);
+		ret = bind(sock, sa, salen);
+		en = errno;
+	}
 
 	if (ret < 0) {
-		flog_err(LIB_ERR_SOCKET, "bind: %s", safe_strerror(en));
+		flog_err_sys(EC_LIB_SOCKET, "bind: %s", safe_strerror(en));
 		return ret;
 	}
 
 	ret = listen(sock, SOMAXCONN);
 	if (ret < 0) {
-		flog_err(LIB_ERR_SOCKET, "listen: %s", safe_strerror(errno));
+		flog_err_sys(EC_LIB_SOCKET, "listen: %s", safe_strerror(errno));
 		return ret;
 	}
 
 	listener = XCALLOC(MTYPE_BGP_LISTENER, sizeof(*listener));
 	listener->fd = sock;
+	listener->name = XSTRDUP(MTYPE_BGP_LISTENER, bgp->name);
 
 	/* this socket needs a change of ns. record bgp back pointer */
-	if (bgp->vrf_id != VRF_DEFAULT &&
-	    vrf_is_mapped_on_netns(bgp->vrf_id))
+	if (bgp->vrf_id != VRF_DEFAULT)
 		listener->bgp = bgp;
 
 	memcpy(&listener->su, sa, salen);
@@ -725,17 +781,20 @@ int bgp_socket(struct bgp *bgp, unsigned short port, const char *address)
 	snprintf(port_str, sizeof(port_str), "%d", port);
 	port_str[sizeof(port_str) - 1] = '\0';
 
-	if (bgpd_privs.change(ZPRIVS_RAISE))
-		flog_err(LIB_ERR_PRIVILEGES, "Can't raise privileges");
-	ret = vrf_getaddrinfo(address, port_str, &req,
-			      &ainfo_save, bgp->vrf_id);
-	if (bgpd_privs.change(ZPRIVS_LOWER))
-		flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+	frr_elevate_privs(&bgpd_privs) {
+		ret = vrf_getaddrinfo(address, port_str, &req, &ainfo_save,
+				      bgp->vrf_id);
+	}
 	if (ret != 0) {
-		flog_err(LIB_ERR_SOCKET, "getaddrinfo: %s", gai_strerror(ret));
+		flog_err_sys(EC_LIB_SOCKET, "getaddrinfo: %s",
+			     gai_strerror(ret));
 		return -1;
 	}
-
+	if (bgp_option_check(BGP_OPT_NO_ZEBRA) &&
+	    bgp->vrf_id != VRF_DEFAULT) {
+		freeaddrinfo(ainfo_save);
+		return -1;
+	}
 	count = 0;
 	for (ainfo = ainfo_save; ainfo; ainfo = ainfo->ai_next) {
 		int sock;
@@ -743,16 +802,17 @@ int bgp_socket(struct bgp *bgp, unsigned short port, const char *address)
 		if (ainfo->ai_family != AF_INET && ainfo->ai_family != AF_INET6)
 			continue;
 
-		if (bgpd_privs.change(ZPRIVS_RAISE))
-			flog_err(LIB_ERR_PRIVILEGES, "Can't raise privileges");
-		sock = vrf_socket(ainfo->ai_family, ainfo->ai_socktype,
-				  ainfo->ai_protocol, bgp->vrf_id,
-				  NULL);
-		if (bgpd_privs.change(ZPRIVS_LOWER))
-			flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+		frr_elevate_privs(&bgpd_privs) {
+			sock = vrf_socket(ainfo->ai_family,
+					  ainfo->ai_socktype,
+					  ainfo->ai_protocol, bgp->vrf_id,
+					  (bgp->inst_type
+					   == BGP_INSTANCE_TYPE_VRF
+					   ? bgp->name : NULL));
+		}
 		if (sock < 0) {
-			flog_err(LIB_ERR_SOCKET, "socket: %s",
-				  safe_strerror(errno));
+			flog_err_sys(EC_LIB_SOCKET, "socket: %s",
+				     safe_strerror(errno));
 			continue;
 		}
 
@@ -760,21 +820,21 @@ int bgp_socket(struct bgp *bgp, unsigned short port, const char *address)
 		 * ttl=255 */
 		sockopt_ttl(ainfo->ai_family, sock, MAXTTL);
 
-		ret = bgp_listener(sock, ainfo->ai_addr,
-				   ainfo->ai_addrlen, bgp);
+		ret = bgp_listener(sock, ainfo->ai_addr, ainfo->ai_addrlen,
+				   bgp);
 		if (ret == 0)
 			++count;
 		else
 			close(sock);
 	}
 	freeaddrinfo(ainfo_save);
-	if (count == 0) {
+	if (count == 0 && bgp->inst_type != BGP_INSTANCE_TYPE_VRF) {
 		flog_err(
-			LIB_ERR_SOCKET,
+			EC_LIB_SOCKET,
 			"%s: no usable addresses please check other programs usage of specified port %d",
 			__func__, port);
-		flog_err(LIB_ERR_SOCKET, "%s: Program cannot continue",
-			  __func__);
+		flog_err_sys(EC_LIB_SOCKET, "%s: Program cannot continue",
+			     __func__);
 		exit(-1);
 	}
 
@@ -800,6 +860,7 @@ void bgp_close_vrf_socket(struct bgp *bgp)
 			thread_cancel(listener->thread);
 			close(listener->fd);
 			listnode_delete(bm->listen_sockets, listener);
+			XFREE(MTYPE_BGP_LISTENER, listener->name);
 			XFREE(MTYPE_BGP_LISTENER, listener);
 		}
 	}
@@ -821,6 +882,7 @@ void bgp_close(void)
 		thread_cancel(listener->thread);
 		close(listener->fd);
 		listnode_delete(bm->listen_sockets, listener);
+		XFREE(MTYPE_BGP_LISTENER, listener->name);
 		XFREE(MTYPE_BGP_LISTENER, listener);
 	}
 }

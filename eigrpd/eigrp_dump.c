@@ -117,11 +117,11 @@ void eigrp_ip_header_dump(struct ip *iph)
 	zlog_debug("ip_hl %u", iph->ip_hl);
 	zlog_debug("ip_tos %u", iph->ip_tos);
 	zlog_debug("ip_len %u", iph->ip_len);
-	zlog_debug("ip_id %u", (u_int32_t)iph->ip_id);
-	zlog_debug("ip_off %u", (u_int32_t)iph->ip_off);
+	zlog_debug("ip_id %u", (uint32_t)iph->ip_id);
+	zlog_debug("ip_off %u", (uint32_t)iph->ip_off);
 	zlog_debug("ip_ttl %u", iph->ip_ttl);
 	zlog_debug("ip_p %u", iph->ip_p);
-	zlog_debug("ip_sum 0x%x", (u_int32_t)iph->ip_sum);
+	zlog_debug("ip_sum 0x%x", (uint32_t)iph->ip_sum);
 	zlog_debug("ip_src %s", inet_ntoa(iph->ip_src));
 	zlog_debug("ip_dst %s", inet_ntoa(iph->ip_dst));
 }
@@ -156,7 +156,7 @@ const char *eigrp_if_name_string(struct eigrp_interface *ei)
 const char *eigrp_topology_ip_string(struct eigrp_prefix_entry *tn)
 {
 	static char buf[EIGRP_IF_STRING_MAXLEN] = "";
-	u_int32_t ifaddr;
+	uint32_t ifaddr;
 
 	ifaddr = ntohl(tn->destination->u.prefix4.s_addr);
 	snprintf(buf, EIGRP_IF_STRING_MAXLEN, "%u.%u.%u.%u",
@@ -169,7 +169,7 @@ const char *eigrp_topology_ip_string(struct eigrp_prefix_entry *tn)
 const char *eigrp_if_ip_string(struct eigrp_interface *ei)
 {
 	static char buf[EIGRP_IF_STRING_MAXLEN] = "";
-	u_int32_t ifaddr;
+	uint32_t ifaddr;
 
 	if (!ei)
 		return "inactive";
@@ -185,7 +185,7 @@ const char *eigrp_if_ip_string(struct eigrp_interface *ei)
 const char *eigrp_neigh_ip_string(struct eigrp_neighbor *nbr)
 {
 	static char buf[EIGRP_IF_STRING_MAXLEN] = "";
-	u_int32_t ifaddr;
+	uint32_t ifaddr;
 
 	ifaddr = ntohl(nbr->src.s_addr);
 	snprintf(buf, EIGRP_IF_STRING_MAXLEN, "%u.%u.%u.%u",
@@ -216,8 +216,7 @@ void show_ip_eigrp_interface_sub(struct vty *vty, struct eigrp *eigrp,
 	vty_out(vty, "%u %c %-10u", 0, '/',
 		eigrp_neighbor_packet_queue_sum(ei));
 	vty_out(vty, "%-7u %-14u %-12u %-8u", 0, 0, 0, 0);
-	vty_out(vty, "%-8u %-8u \n", ei->params.v_hello,
-		ei->params.v_wait);
+	vty_out(vty, "%-8u %-8u \n", ei->params.v_hello, ei->params.v_wait);
 }
 
 void show_ip_eigrp_interface_detail(struct vty *vty, struct eigrp *eigrp,
@@ -229,7 +228,7 @@ void show_ip_eigrp_interface_detail(struct vty *vty, struct eigrp *eigrp,
 		"Un/reliable mcasts: ", 0, "/", 0, "Un/reliable ucasts: ", 0,
 		"/", 0);
 	vty_out(vty, "%-2s %s %d %s %d %s %d \n", "", "Mcast exceptions: ", 0,
-		"  CR packets: ", 0, "  ACKs supressed: ", 0);
+		"  CR packets: ", 0, "  ACKs suppressed: ", 0);
 	vty_out(vty, "%-2s %s %d %s %d \n", "", "Retransmissions sent: ", 0,
 		"Out-of-sequence rcvd: ", 0);
 	vty_out(vty, "%-2s %s %s %s \n", "", "Authentication mode is ", "not",
@@ -253,7 +252,8 @@ void show_ip_eigrp_neighbor_sub(struct vty *vty, struct eigrp_neighbor *nbr,
 	vty_out(vty, "%-3u %-17s %-21s", 0, eigrp_neigh_ip_string(nbr),
 		eigrp_if_name_string(nbr->ei));
 	if (nbr->t_holddown)
-		vty_out(vty, "%-7lu", thread_timer_remain_second(nbr->t_holddown));
+		vty_out(vty, "%-7lu",
+			thread_timer_remain_second(nbr->t_holddown));
 	else
 		vty_out(vty, "-      ");
 	vty_out(vty, "%-8u %-6u %-5u", 0, 0, EIGRP_PACKET_RETRANS_TIME);
@@ -276,11 +276,8 @@ void show_ip_eigrp_neighbor_sub(struct vty *vty, struct eigrp_neighbor *nbr,
  */
 void show_ip_eigrp_topology_header(struct vty *vty, struct eigrp *eigrp)
 {
-	struct in_addr router_id;
-	router_id.s_addr = eigrp->router_id;
-
 	vty_out(vty, "\nEIGRP Topology Table for AS(%d)/ID(%s)\n\n", eigrp->AS,
-		inet_ntoa(router_id));
+		inet_ntoa(eigrp->router_id));
 	vty_out(vty,
 		"Codes: P - Passive, A - Active, U - Update, Q - Query, "
 		"R - Reply\n       r - reply Status, s - sia Status\n\n");
@@ -295,17 +292,16 @@ void show_ip_eigrp_prefix_entry(struct vty *vty, struct eigrp_prefix_entry *tn)
 
 	vty_out(vty, "%s, ",
 		prefix2str(tn->destination, buffer, PREFIX_STRLEN));
-	vty_out(vty, "%u successors, ",
-		(successors) ? successors->count : 0);
+	vty_out(vty, "%u successors, ", (successors) ? successors->count : 0);
 	vty_out(vty, "FD is %u, serno: %" PRIu64 " \n", tn->fdistance,
 		tn->serno);
 
 	if (successors)
-		list_delete_and_null(&successors);
+		list_delete(&successors);
 }
 
 void show_ip_eigrp_nexthop_entry(struct vty *vty, struct eigrp *eigrp,
-				  struct eigrp_nexthop_entry *te, int *first)
+				 struct eigrp_nexthop_entry *te, int *first)
 {
 	if (te->reported_distance == EIGRP_MAX_METRIC)
 		return;
@@ -609,7 +605,7 @@ static struct cmd_node eigrp_debug_node = {
 };
 
 /* Initialize debug commands. */
-void eigrp_debug_init()
+void eigrp_debug_init(void)
 {
 	install_node(&eigrp_debug_node, config_write_debug);
 

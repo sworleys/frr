@@ -207,12 +207,12 @@ int holddown_timer_expired(struct thread *thread)
 	return 0;
 }
 
-u_char eigrp_nbr_state_get(struct eigrp_neighbor *nbr)
+uint8_t eigrp_nbr_state_get(struct eigrp_neighbor *nbr)
 {
 	return (nbr->state);
 }
 
-void eigrp_nbr_state_set(struct eigrp_neighbor *nbr, u_char state)
+void eigrp_nbr_state_set(struct eigrp_neighbor *nbr, uint8_t state)
 {
 	nbr->state = state;
 
@@ -303,7 +303,7 @@ int eigrp_nbr_count_get(void)
 	struct listnode *node, *node2, *nnode2;
 	struct eigrp_neighbor *nbr;
 	struct eigrp *eigrp = eigrp_lookup();
-	u_int32_t counter;
+	uint32_t counter;
 
 	if (eigrp == NULL) {
 		zlog_debug("EIGRP Routing Process not enabled");
@@ -336,8 +336,8 @@ int eigrp_nbr_count_get(void)
 void eigrp_nbr_hard_restart(struct eigrp_neighbor *nbr, struct vty *vty)
 {
 	if (nbr == NULL) {
-		flog_err(EIGRP_ERR_CONFIG,
-			  "Nbr Hard restart: Neighbor not specified.");
+		flog_err(EC_EIGRP_CONFIG,
+			 "Nbr Hard restart: Neighbor not specified.");
 		return;
 	}
 
@@ -360,7 +360,8 @@ void eigrp_nbr_hard_restart(struct eigrp_neighbor *nbr, struct vty *vty)
 	eigrp_nbr_delete(nbr);
 }
 
-int eigrp_nbr_split_horizon_check(struct eigrp_nexthop_entry *ne, struct eigrp_interface *ei)
+int eigrp_nbr_split_horizon_check(struct eigrp_nexthop_entry *ne,
+				  struct eigrp_interface *ei)
 {
 	if (ne->distance == EIGRP_MAX_METRIC)
 		return 0;

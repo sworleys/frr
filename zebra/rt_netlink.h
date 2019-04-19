@@ -24,6 +24,7 @@
 #ifdef HAVE_NETLINK
 
 #include "zebra/zebra_mpls.h"
+#include "zebra/zebra_dplane.h"
 
 #define NL_DEFAULT_ROUTE_METRIC 20
 
@@ -52,17 +53,19 @@
 #define RTPROT_EIGRP       192
 #define RTPROT_LDP         193
 #define RTPROT_SHARP       194
+#define RTPROT_PBR         195
+#define RTPROT_ZSTATIC     196
+#define RTPROT_OPENFABRIC  197
 
 void rt_netlink_init(void);
 
-extern int netlink_mpls_multipath(int cmd, zebra_lsp_t *lsp);
+/* MPLS label forwarding table change, using dataplane context information. */
+extern int netlink_mpls_multipath(int cmd, struct zebra_dplane_ctx *ctx);
 
-extern int netlink_route_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
-				ns_id_t ns_id, int startup);
+extern int netlink_route_change(struct nlmsghdr *h, ns_id_t ns_id, int startup);
 extern int netlink_route_read(struct zebra_ns *zns);
 
-extern int netlink_neigh_change(struct sockaddr_nl *snl, struct nlmsghdr *h,
-				ns_id_t ns_id);
+extern int netlink_neigh_change(struct nlmsghdr *h, ns_id_t ns_id);
 extern int netlink_macfdb_read(struct zebra_ns *zns);
 extern int netlink_macfdb_read_for_bridge(struct zebra_ns *zns,
 					  struct interface *ifp,
@@ -70,6 +73,11 @@ extern int netlink_macfdb_read_for_bridge(struct zebra_ns *zns,
 extern int netlink_neigh_read(struct zebra_ns *zns);
 extern int netlink_neigh_read_for_vlan(struct zebra_ns *zns,
 				       struct interface *vlan_if);
+extern int netlink_macfdb_read_specific_mac(struct zebra_ns *zns,
+					    struct interface *br_if,
+					    struct ethaddr *mac, uint16_t vid);
+extern int netlink_neigh_read_specific_ip(struct ipaddr *ip,
+					  struct interface *vlan_if);
 
 #endif /* HAVE_NETLINK */
 

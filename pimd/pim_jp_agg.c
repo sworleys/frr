@@ -32,7 +32,7 @@
 
 void pim_jp_agg_group_list_free(struct pim_jp_agg_group *jag)
 {
-	list_delete_and_null(&jag->sources);
+	list_delete(&jag->sources);
 
 	XFREE(MTYPE_PIM_JP_AGG_GROUP, jag);
 }
@@ -108,7 +108,7 @@ void pim_jp_agg_clear_group(struct list *group)
 			js->up = NULL;
 			XFREE(MTYPE_PIM_JP_AGG_SOURCE, js);
 		}
-		list_delete_and_null(&jag->sources);
+		list_delete(&jag->sources);
 		listnode_delete(group, jag);
 		XFREE(MTYPE_PIM_JP_AGG_GROUP, jag);
 	}
@@ -168,7 +168,7 @@ void pim_jp_agg_remove_group(struct list *group, struct pim_upstream *up)
 	}
 
 	if (jag->sources->count == 0) {
-		list_delete_and_null(&jag->sources);
+		list_delete(&jag->sources);
 		listnode_delete(group, jag);
 		XFREE(MTYPE_PIM_JP_AGG_GROUP, jag);
 	}
@@ -213,8 +213,18 @@ void pim_jp_agg_upstream_verification(struct pim_upstream *up, bool ignore)
 {
 #ifdef PIM_JP_AGG_DEBUG
 	struct interface *ifp;
-	struct pim_interface *pim_ifp = up->rpf.source_nexthop.interface->info;
-	struct pim_instance *pim = pim_ifp->pim;
+	struct pim_interface *pim_ifp;
+	struct pim_instance *pim;
+
+	if (!up->rpf.source_nexthop.interface) {
+		if (PIM_DEBUG_TRACE)
+			zlog_debug("%s: up %s RPF is not present",
+				__PRETTY_FUNCTION__, up->sg_str);
+		return;
+	}
+
+	pim_ifp = up->rpf.source_nexthop.interface->info;
+	pim = pim_ifp->pim;
 
 	FOR_ALL_INTERFACES (pim->vrf, ifp) {
 		pim_ifp = ifp->info;
@@ -329,7 +339,6 @@ void pim_jp_agg_single_upstream_send(struct pim_rpf *rpf,
 
 	if (first) {
 		groups = list_new();
-
 		jag.sources = list_new();
 
 		listnode_add(groups, &jag);

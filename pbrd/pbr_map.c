@@ -3,8 +3,6 @@
  * Copyright (C) 2018 Cumulus Networks, Inc.
  *               Donald Sharp
  *
- * This file is part of FRR.
- *
  * FRR is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
  * Free Software Foundation; either version 2, or (at your option) any
@@ -73,8 +71,7 @@ static int pbr_map_sequence_compare(const struct pbr_map_sequence *pbrms1,
 
 static void pbr_map_sequence_delete(struct pbr_map_sequence *pbrms)
 {
-	if (pbrms->internal_nhg_name)
-		XFREE(MTYPE_TMP, pbrms->internal_nhg_name);
+	XFREE(MTYPE_TMP, pbrms->internal_nhg_name);
 
 	XFREE(MTYPE_PBR_MAP_SEQNO, pbrms);
 }
@@ -123,6 +120,17 @@ void pbr_map_reason_string(unsigned int reason, char *buf, int size)
 	}
 }
 
+void pbr_map_final_interface_deletion(struct pbr_map *pbrm,
+				      struct pbr_map_interface *pmi)
+{
+	if (pmi->delete == true) {
+		listnode_delete(pbrm->incoming, pmi);
+		pmi->pbrm = NULL;
+
+		bf_release_index(pbrm->ifi_bitfield, pmi->install_bit);
+		XFREE(MTYPE_PBR_MAP_INTERFACE, pmi);
+	}
+}
 
 void pbr_map_interface_delete(struct pbr_map *pbrm, struct interface *ifp_del)
 {
@@ -275,7 +283,7 @@ struct pbr_map_sequence *pbrms_get(const char *name, uint32_t seqno)
 	pbrm = pbrm_find(name);
 	if (!pbrm) {
 		pbrm = XCALLOC(MTYPE_PBR_MAP, sizeof(*pbrm));
-		strcpy(pbrm->name, name);
+		snprintf(pbrm->name, sizeof(pbrm->name), "%s", name);
 
 		pbrm->seqnumbers = list_new();
 		pbrm->seqnumbers->cmp =
@@ -384,7 +392,7 @@ static bool pbr_map_check_valid_internal(struct pbr_map *pbrm)
  * valid config or not.  If so note that it is and return
  * that we are valid.
  */
-extern bool pbr_map_check_valid(const char *name)
+bool pbr_map_check_valid(const char *name)
 {
 	struct pbr_map *pbrm;
 
@@ -400,7 +408,7 @@ extern bool pbr_map_check_valid(const char *name)
 	return pbrm->valid;
 }
 
-extern void pbr_map_schedule_policy_from_nhg(const char *nh_group)
+void pbr_map_schedule_policy_from_nhg(const char *nh_group)
 {
 	struct pbr_map_sequence *pbrms;
 	struct pbr_map *pbrm;
@@ -411,7 +419,8 @@ extern void pbr_map_schedule_policy_from_nhg(const char *nh_group)
 		       pbrm->name);
 		for (ALL_LIST_ELEMENTS_RO(pbrm->seqnumbers, node, pbrms)) {
 			DEBUGD(&pbr_dbg_map, "\tNH Grp name: %s",
-			       pbrms->nhgrp_name ? pbrms->nhgrp_name : "NULL");
+			       pbrms->nhgrp_name ?
+			       pbrms->nhgrp_name : pbrms->internal_nhg_name);
 
 			if (pbrms->nhgrp_name
 			    && (strcmp(nh_group, pbrms->nhgrp_name) == 0)) {
@@ -431,7 +440,7 @@ extern void pbr_map_schedule_policy_from_nhg(const char *nh_group)
 	}
 }
 
-extern void pbr_map_policy_install(const char *name)
+void pbr_map_policy_install(const char *name)
 {
 	struct pbr_map_sequence *pbrms;
 	struct pbr_map *pbrm;
@@ -467,11 +476,7 @@ void pbr_map_policy_delete(struct pbr_map *pbrm, struct pbr_map_interface *pmi)
 	for (ALL_LIST_ELEMENTS_RO(pbrm->seqnumbers, node, pbrms))
 		pbr_send_pbr_map(pbrms, pmi, false);
 
-	listnode_delete(pbrm->incoming, pmi);
-	pmi->pbrm = NULL;
-
-	bf_release_index(pbrm->ifi_bitfield, pmi->install_bit);
-	XFREE(MTYPE_PBR_MAP_INTERFACE, pmi);
+	pmi->delete = true;
 }
 
 /*
@@ -480,7 +485,7 @@ void pbr_map_policy_delete(struct pbr_map *pbrm, struct pbr_map_interface *pmi)
  * valid for usage.  If we are valid then schedule the installation/deletion
  * of the pbr-policy.
  */
-extern void pbr_map_check_nh_group_change(const char *nh_group)
+void pbr_map_check_nh_group_change(const char *nh_group)
 {
 	struct pbr_map_sequence *pbrms;
 	struct pbr_map *pbrm;
@@ -528,20 +533,10 @@ void pbr_map_check(struct pbr_map_sequence *pbrms)
 	DEBUGD(&pbr_dbg_map, "%s: for %s(%u)", __PRETTY_FUNCTION__,
 	       pbrm->name, pbrms->seqno);
 	if (pbr_map_check_valid(pbrm->name))
-		DEBUGD(&pbr_dbg_map, "We are totally valid %s\n",
+		DEBUGD(&pbr_dbg_map, "We are totally valid %s",
 		       pbrm->name);
 
-	DEBUGD(&pbr_dbg_map, "%s: Installing %s(%u) reason: %" PRIu64,
-	       __PRETTY_FUNCTION__, pbrm->name, pbrms->seqno, pbrms->reason);
-
 	if (pbrms->reason == PBR_MAP_VALID_SEQUENCE_NUMBER) {
-		if (pbrms->installed) {
-			install = false;
-			for (ALL_LIST_ELEMENTS_RO(pbrm->incoming, inode, pmi)) {
-				pbr_send_pbr_map(pbrms, pmi, install);
-			}
-			install = true;
-		}
 		install = true;
 		DEBUGD(&pbr_dbg_map, "%s: Installing %s(%u) reason: %" PRIu64,
 		       __PRETTY_FUNCTION__, pbrm->name, pbrms->seqno,
@@ -575,7 +570,7 @@ void pbr_map_install(struct pbr_map *pbrm)
 			pbr_send_pbr_map(pbrms, pmi, true);
 }
 
-extern void pbr_map_init(void)
+void pbr_map_init(void)
 {
 	RB_INIT(pbr_map_entry_head, &pbr_maps);
 

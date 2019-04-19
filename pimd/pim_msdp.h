@@ -119,12 +119,8 @@ struct pim_msdp_peer {
 /* protocol timers */
 #define PIM_MSDP_PEER_HOLD_TIME 75
 	struct thread *hold_timer; // 5.4
-				   /* $FRR indent$ */
-/* clang-format off */
 #define PIM_MSDP_PEER_KA_TIME 60
 	struct thread *ka_timer; // 5.5
-				 /* $FRR indent$ */
-				 /* clang-format off */
 #define PIM_MSDP_PEER_CONNECT_RETRY_TIME 30
 	struct thread *cr_timer; // 5.6
 
@@ -139,8 +135,6 @@ struct pim_msdp_peer {
 	uint32_t conn_attempts;
 	uint32_t est_flaps;
 	uint32_t sa_cnt; /* number of SAs attributed to this peer */
-			 /* $FRR indent$ */
-			 /* clang-format off */
 #define PIM_MSDP_PEER_LAST_RESET_STR 20
 	char last_reset[PIM_MSDP_PEER_LAST_RESET_STR];
 
@@ -238,9 +232,8 @@ void pim_msdp_peer_reset_tcp_conn(struct pim_msdp_peer *mp, const char *rc_str);
 int pim_msdp_write(struct thread *thread);
 char *pim_msdp_peer_key_dump(struct pim_msdp_peer *mp, char *buf, int buf_size,
 			     bool long_format);
-int pim_msdp_config_write(struct vty *vty);
-int pim_msdp_config_write_helper(struct pim_instance *pim, struct vty *vty,
-				 const char *spaces);
+int pim_msdp_config_write(struct pim_instance *pim, struct vty *vty,
+			  const char *spaces);
 void pim_msdp_peer_pkt_txed(struct pim_msdp_peer *mp);
 void pim_msdp_sa_ref(struct pim_instance *pim, struct pim_msdp_peer *mp,
 		     struct prefix_sg *sg, struct in_addr rp);

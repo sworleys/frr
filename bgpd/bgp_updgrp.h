@@ -64,8 +64,7 @@
 	 | PEER_FLAG_REMOVE_PRIVATE_AS_ALL                                     \
 	 | PEER_FLAG_REMOVE_PRIVATE_AS_REPLACE                                 \
 	 | PEER_FLAG_REMOVE_PRIVATE_AS_ALL_REPLACE                             \
-	 | PEER_FLAG_ADDPATH_TX_ALL_PATHS                                      \
-	 | PEER_FLAG_ADDPATH_TX_BESTPATH_PER_AS | PEER_FLAG_AS_OVERRIDE)
+	 | PEER_FLAG_AS_OVERRIDE)
 
 #define PEER_UPDGRP_CAP_FLAGS (PEER_CAP_AS4_RCV)
 
@@ -77,7 +76,7 @@
 typedef enum { BGP_ATTR_VEC_NH = 0, BGP_ATTR_VEC_MAX } bpacket_attr_vec_type;
 
 typedef struct {
-	u_int32_t flags;
+	uint32_t flags;
 	unsigned long offset;
 } bpacket_attr_vec;
 
@@ -139,19 +138,19 @@ struct update_group {
 	uint64_t id;
 	time_t uptime;
 
-	u_int32_t join_events;
-	u_int32_t prune_events;
-	u_int32_t merge_events;
-	u_int32_t updgrp_switch_events;
-	u_int32_t peer_refreshes_combined;
-	u_int32_t adj_count;
-	u_int32_t split_events;
-	u_int32_t merge_checks_triggered;
+	uint32_t join_events;
+	uint32_t prune_events;
+	uint32_t merge_events;
+	uint32_t updgrp_switch_events;
+	uint32_t peer_refreshes_combined;
+	uint32_t adj_count;
+	uint32_t split_events;
+	uint32_t merge_checks_triggered;
 
-	u_int32_t subgrps_created;
-	u_int32_t subgrps_deleted;
+	uint32_t subgrps_created;
+	uint32_t subgrps_deleted;
 
-	u_int32_t num_dbg_en_peers;
+	uint32_t num_dbg_en_peers;
 };
 
 /*
@@ -214,7 +213,7 @@ struct update_subgroup {
 	struct hash *hash;
 
 	struct thread *t_coalesce;
-	u_int32_t v_coalesce;
+	uint32_t v_coalesce;
 
 	struct thread *t_merge_check;
 
@@ -236,25 +235,25 @@ struct update_subgroup {
 		uint64_t subgroup_id;
 	} split_from;
 
-	u_int32_t join_events;
-	u_int32_t prune_events;
+	uint32_t join_events;
+	uint32_t prune_events;
 
 	/*
 	 * This is bumped up when another subgroup merges into this one.
 	 */
-	u_int32_t merge_events;
-	u_int32_t updgrp_switch_events;
-	u_int32_t peer_refreshes_combined;
-	u_int32_t adj_count;
-	u_int32_t split_events;
-	u_int32_t merge_checks_triggered;
+	uint32_t merge_events;
+	uint32_t updgrp_switch_events;
+	uint32_t peer_refreshes_combined;
+	uint32_t adj_count;
+	uint32_t split_events;
+	uint32_t merge_checks_triggered;
 
 	uint64_t id;
 
-	u_int16_t sflags;
+	uint16_t sflags;
 
 	/* Subgroup flags, see below  */
-	u_int16_t flags;
+	uint16_t flags;
 };
 
 /*
@@ -287,14 +286,13 @@ struct update_subgroup {
  */
 #define SUBGRP_DECR_STAT(subgrp, stat) SUBGRP_INCR_STAT_BY(subgrp, stat, -1)
 
-
 typedef int (*updgrp_walkcb)(struct update_group *updgrp, void *ctx);
 
 /* really a private structure */
 struct updwalk_context {
 	struct vty *vty;
 	struct bgp_node *rn;
-	struct bgp_info *ri;
+	struct bgp_path_info *pi;
 	uint64_t updgrp_id;
 	uint64_t subgrp_id;
 	bgp_policy_type_e policy_type;
@@ -303,7 +301,7 @@ struct updwalk_context {
 	int policy_route_update;
 	updgrp_walkcb cb;
 	void *context;
-	u_int8_t flags;
+	uint8_t flags;
 
 #define UPDWALK_FLAGS_ADVQUEUE   (1 << 0)
 #define UPDWALK_FLAGS_ADVERTISED (1 << 1)
@@ -341,23 +339,23 @@ struct updwalk_context {
  * Walk all subgroups in an update group.
  */
 #define UPDGRP_FOREACH_SUBGRP(updgrp, subgrp)                                  \
-	LIST_FOREACH(subgrp, &((updgrp)->subgrps), updgrp_train)
+	LIST_FOREACH (subgrp, &((updgrp)->subgrps), updgrp_train)
 
 #define UPDGRP_FOREACH_SUBGRP_SAFE(updgrp, subgrp, tmp_subgrp)                 \
-	LIST_FOREACH_SAFE(subgrp, &((updgrp)->subgrps), updgrp_train,          \
-			  tmp_subgrp)
+	LIST_FOREACH_SAFE (subgrp, &((updgrp)->subgrps), updgrp_train,         \
+			   tmp_subgrp)
 
 #define SUBGRP_FOREACH_PEER(subgrp, paf)                                       \
-	LIST_FOREACH(paf, &(subgrp->peers), subgrp_train)
+	LIST_FOREACH (paf, &(subgrp->peers), subgrp_train)
 
 #define SUBGRP_FOREACH_PEER_SAFE(subgrp, paf, temp_paf)                        \
-	LIST_FOREACH_SAFE(paf, &(subgrp->peers), subgrp_train, temp_paf)
+	LIST_FOREACH_SAFE (paf, &(subgrp->peers), subgrp_train, temp_paf)
 
 #define SUBGRP_FOREACH_ADJ(subgrp, adj)                                        \
-	TAILQ_FOREACH(adj, &(subgrp->adjq), subgrp_adj_train)
+	TAILQ_FOREACH (adj, &(subgrp->adjq), subgrp_adj_train)
 
 #define SUBGRP_FOREACH_ADJ_SAFE(subgrp, adj, adj_temp)                         \
-	TAILQ_FOREACH_SAFE(adj, &(subgrp->adjq), subgrp_adj_train, adj_temp)
+	TAILQ_FOREACH_SAFE (adj, &(subgrp->adjq), subgrp_adj_train, adj_temp)
 
 /* Prototypes.  */
 /* bgp_updgrp.c */
@@ -443,23 +441,24 @@ extern void subgroup_announce_all(struct update_subgroup *subgrp);
 extern void subgroup_default_originate(struct update_subgroup *subgrp,
 				       int withdraw);
 extern void group_announce_route(struct bgp *bgp, afi_t afi, safi_t safi,
-				 struct bgp_node *rn, struct bgp_info *ri);
+				 struct bgp_node *rn, struct bgp_path_info *pi);
 extern void subgroup_clear_table(struct update_subgroup *subgrp);
 extern void update_group_announce(struct bgp *bgp);
 extern void update_group_announce_rrclients(struct bgp *bgp);
 extern void peer_af_announce_route(struct peer_af *paf, int combine);
 extern struct bgp_adj_out *bgp_adj_out_alloc(struct update_subgroup *subgrp,
 					     struct bgp_node *rn,
-					     u_int32_t addpath_tx_id);
+					     uint32_t addpath_tx_id);
 extern void bgp_adj_out_remove_subgroup(struct bgp_node *rn,
 					struct bgp_adj_out *adj,
 					struct update_subgroup *subgrp);
 extern void bgp_adj_out_set_subgroup(struct bgp_node *rn,
 				     struct update_subgroup *subgrp,
-				     struct attr *attr, struct bgp_info *binfo);
+				     struct attr *attr,
+				     struct bgp_path_info *path);
 extern void bgp_adj_out_unset_subgroup(struct bgp_node *rn,
 				       struct update_subgroup *subgrp,
-				       char withdraw, u_int32_t addpath_tx_id);
+				       char withdraw, uint32_t addpath_tx_id);
 void subgroup_announce_table(struct update_subgroup *subgrp,
 			     struct bgp_table *table);
 extern void subgroup_trigger_write(struct update_subgroup *subgrp);
@@ -469,8 +468,6 @@ extern int update_group_clear_update_dbg(struct update_group *updgrp,
 
 extern void update_bgp_group_free(struct bgp *bgp);
 extern int bgp_addpath_encode_tx(struct peer *peer, afi_t afi, safi_t safi);
-extern int bgp_addpath_tx_path(struct peer *peer, afi_t afi, safi_t safi,
-			       struct bgp_info *ri);
 
 /*
  * Inline functions

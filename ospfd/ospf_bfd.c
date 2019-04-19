@@ -201,9 +201,8 @@ static int ospf_bfd_interface_dest_update(int command, struct zclient *zclient,
 	struct interface *ifp;
 	struct ospf_interface *oi;
 	struct ospf_if_params *params;
-	struct ospf_neighbor *nbr = NULL;
+	struct ospf_neighbor *nbr;
 	struct route_node *node;
-	struct route_node *n_node;
 	struct prefix p;
 	int status;
 	int old_status;
@@ -230,28 +229,7 @@ static int ospf_bfd_interface_dest_update(int command, struct zclient *zclient,
 		if ((oi = node->info) == NULL)
 			continue;
 
-		/* walk the neighbor list for point-to-point network */
-		if (oi->type == OSPF_IFTYPE_POINTOPOINT) {
-			for (n_node = route_top(oi->nbrs); n_node;
-				n_node = route_next(n_node)) {
-				nbr = n_node->info;
-				if (nbr) {
-					/* skip myself */
-					if (nbr == oi->nbr_self) {
-						nbr = NULL;
-						continue;
-					}
-
-					/* Found the matching neighbor */
-					if (nbr->src.s_addr ==
-						p.u.prefix4.s_addr)
-						break;
-				}
-			}
-		} else {
-			nbr = ospf_nbr_lookup_by_addr(oi->nbrs, &p.u.prefix4);
-		}
-
+		nbr = ospf_nbr_lookup_by_addr(oi->nbrs, &p.u.prefix4);
 		if (!nbr || !nbr->bfd_info)
 			continue;
 
@@ -312,17 +290,21 @@ void ospf_bfd_info_nbr_create(struct ospf_interface *oi,
 void ospf_bfd_write_config(struct vty *vty, struct ospf_if_params *params)
 
 {
+#if HAVE_BFDD == 0
 	struct bfd_info *bfd_info;
+#endif /* ! HAVE_BFDD */
 
 	if (!params->bfd_info)
 		return;
 
+#if HAVE_BFDD == 0
 	bfd_info = (struct bfd_info *)params->bfd_info;
 
 	if (CHECK_FLAG(bfd_info->flags, BFD_FLAG_PARAM_CFG))
 		vty_out(vty, " ip ospf bfd %d %d %d\n", bfd_info->detect_mult,
 			bfd_info->required_min_rx, bfd_info->desired_min_tx);
 	else
+#endif /* ! HAVE_BFDD */
 		vty_out(vty, " ip ospf bfd\n");
 }
 
@@ -358,8 +340,8 @@ void ospf_bfd_interface_show(struct vty *vty, struct interface *ifp,
  * ospf_bfd_if_param_set - Set the configured BFD paramter values for
  *                         interface.
  */
-static void ospf_bfd_if_param_set(struct interface *ifp, u_int32_t min_rx,
-				  u_int32_t min_tx, u_int8_t detect_mult,
+static void ospf_bfd_if_param_set(struct interface *ifp, uint32_t min_rx,
+				  uint32_t min_tx, uint8_t detect_mult,
 				  int defaults)
 {
 	struct ospf_if_params *params;
@@ -395,7 +377,12 @@ DEFUN (ip_ospf_bfd,
 	return CMD_SUCCESS;
 }
 
-DEFUN (ip_ospf_bfd_param,
+#if HAVE_BFDD > 0
+DEFUN_HIDDEN(
+#else
+DEFUN(
+#endif /* HAVE_BFDD */
+       ip_ospf_bfd_param,
        ip_ospf_bfd_param_cmd,
        "ip ospf bfd (2-255) (50-60000) (50-60000)",
        "IP Information\n"
@@ -409,9 +396,9 @@ DEFUN (ip_ospf_bfd_param,
 	int idx_number = 3;
 	int idx_number_2 = 4;
 	int idx_number_3 = 5;
-	u_int32_t rx_val;
-	u_int32_t tx_val;
-	u_int8_t dm_val;
+	uint32_t rx_val;
+	uint32_t tx_val;
+	uint8_t dm_val;
 	int ret;
 
 	assert(ifp);
@@ -429,14 +416,21 @@ DEFUN (ip_ospf_bfd_param,
 
 DEFUN (no_ip_ospf_bfd,
        no_ip_ospf_bfd_cmd,
+#if HAVE_BFDD > 0
+       "no ip ospf bfd",
+#else
        "no ip ospf bfd [(2-255) (50-60000) (50-60000)]",
+#endif /* HAVE_BFDD */
        NO_STR
        "IP Information\n"
        "OSPF interface commands\n"
        "Disables BFD support\n"
+#if HAVE_BFDD == 0
        "Detect Multiplier\n"
        "Required min receive interval\n"
-       "Desired min transmit interval\n")
+       "Desired min transmit interval\n"
+#endif /* !HAVE_BFDD */
+)
 {
 	VTY_DECLVAR_CONTEXT(interface, ifp);
 	struct ospf_if_params *params;

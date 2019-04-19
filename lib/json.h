@@ -23,6 +23,20 @@
 
 #if defined(HAVE_JSON_C_JSON_H)
 #include <json-c/json.h>
+
+/*
+ * FRR style JSON iteration.
+ * Usage: JSON_FOREACH(...) { ... }
+ */
+#define JSON_FOREACH(jo, joi, join)                                            \
+	/* struct json_object *jo; */                                          \
+	/* struct json_object_iterator joi; */                                 \
+	/* struct json_object_iterator join; */                                \
+	for ((joi) = json_object_iter_begin((jo)),                             \
+	    (join) = json_object_iter_end((jo));                               \
+	     json_object_iter_equal(&(joi), &(join)) == 0;                     \
+	     json_object_iter_next(&(joi)))
+
 #else
 #include <json/json.h>
 
@@ -43,6 +57,7 @@ extern void json_object_string_add(struct json_object *obj, const char *key,
 				   const char *s);
 extern void json_object_int_add(struct json_object *obj, const char *key,
 				int64_t i);
+void json_object_boolean_add(struct json_object *obj, const char *key, bool val);
 extern void json_object_boolean_false_add(struct json_object *obj,
 					  const char *key);
 extern void json_object_boolean_true_add(struct json_object *obj,

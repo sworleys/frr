@@ -32,17 +32,16 @@
 #include "zebra/rt.h"
 #include "zebra/debug.h"
 
-int zebra_ipmr_route_stats(struct zserv *client, u_short length,
-			   struct zebra_vrf *zvrf)
+void zebra_ipmr_route_stats(ZAPI_HANDLER_ARGS)
 {
 	struct mcast_route_data mroute;
 	struct stream *s;
 	int suc = -1;
 
 	memset(&mroute, 0, sizeof(mroute));
-	STREAM_GET(&mroute.sg.src, client->ibuf, 4);
-	STREAM_GET(&mroute.sg.grp, client->ibuf, 4);
-	STREAM_GETL(client->ibuf, mroute.ifindex);
+	STREAM_GET(&mroute.sg.src, msg, 4);
+	STREAM_GET(&mroute.sg.grp, msg, 4);
+	STREAM_GETL(msg, mroute.ifindex);
 
 	if (IS_ZEBRA_DEBUG_KERNEL) {
 		char sbuf[40];
@@ -51,13 +50,14 @@ int zebra_ipmr_route_stats(struct zserv *client, u_short length,
 		strlcpy(sbuf, inet_ntoa(mroute.sg.src), sizeof(sbuf));
 		strlcpy(gbuf, inet_ntoa(mroute.sg.grp), sizeof(gbuf));
 
-		zlog_debug("Asking for (%s,%s) mroute information", sbuf, gbuf);
+		zlog_debug("Asking for (%s,%s)[%s(%u)] mroute information",
+			   sbuf, gbuf, zvrf->vrf->name, zvrf->vrf->vrf_id);
 	}
 
 	suc = kernel_get_ipmr_sg_stats(zvrf, &mroute);
 
 stream_failure:
-	s = client->obuf;
+	s = stream_new(ZEBRA_MAX_PACKET_SIZ);
 
 	stream_reset(s);
 
@@ -68,6 +68,5 @@ stream_failure:
 	stream_putl(s, suc);
 
 	stream_putw_at(s, 0, stream_get_endp(s));
-	zebra_server_send_message(client);
-	return 0;
+	zserv_send_message(client, s);
 }

@@ -6,14 +6,14 @@ import sys, re, subprocess, os
 
 # find all DEFUNs
 defun_re = re.compile(
-        r'^((DEF(UN(_NOSH|_HIDDEN)?|PY)|ALIAS)\s*\(.*?)^(?=\s*\{)',
+        r'^((DEF(UN(|_ATTR|_CMD_(ELEMENT|FUNC_(DECL|TEXT))|_DEPRECATED|_NOSH|_HIDDEN|SH(|_ATTR|_DEPRECATED|_HIDDEN))?|PY|PY_ATTR|PY_HIDDEN)|ALIAS)\s*\(.*?)^(?=\s*\{)',
         re.M | re.S)
 define_re = re.compile(
         r'((^#\s*define[^\n]+[^\\]\n)+)',
         re.M | re.S)
 # find clang-format control that we just inserted
 clean_re = re.compile(
-        r'^/\* \$FRR indent\$ \*/\s*\n\s*/\* clang-format (on|off) \*/\s*\n',
+        r'^.*/\* \$FRR indent\$ \*/\s*\n\s*/\* clang-format (on|off) \*/\s*\n',
         re.M)
 
 def wrap_file(fn):

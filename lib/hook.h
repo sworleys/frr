@@ -1,23 +1,17 @@
 /*
  * Copyright (c) 2016  David Lamparter, for NetDEF, Inc.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #ifndef _FRR_HOOK_H
@@ -150,8 +144,8 @@ extern void _hook_register(struct hook *hook, void *funcptr, void *arg,
 		       NULL, false, THIS_MODULE, #func, prio)
 #define hook_register_arg_prio(hookname, prio, func, arg)                      \
 	_hook_register(&_hook_##hookname,                                      \
-		       _hook_typecheck_arg_##hookname(func),                   \
-		       arg, true, THIS_MODULE, #func, prio)
+		       _hook_typecheck_arg_##hookname(func), arg, true,        \
+		       THIS_MODULE, #func, prio)
 
 extern void _hook_unregister(struct hook *hook, void *funcptr, void *arg,
 			     bool has_arg);
@@ -190,7 +184,7 @@ extern void _hook_unregister(struct hook *hook, void *funcptr, void *arg,
 	{                                                                      \
 		return (void *)funcptr;                                        \
 	}
-#define DECLARE_KOOH(hookname, arglist, passlist) \
+#define DECLARE_KOOH(hookname, arglist, passlist)                              \
 	DECLARE_HOOK(hookname, arglist, passlist)
 
 /* use in source file - contains hook-related definitions.
@@ -220,9 +214,9 @@ extern void _hook_unregister(struct hook *hook, void *funcptr, void *arg,
 		return hooksum;                                                \
 	}
 
-#define DEFINE_HOOK(hookname, arglist, passlist) \
+#define DEFINE_HOOK(hookname, arglist, passlist)                               \
 	DEFINE_HOOK_INT(hookname, arglist, passlist, false)
-#define DEFINE_KOOH(hookname, arglist, passlist) \
+#define DEFINE_KOOH(hookname, arglist, passlist)                               \
 	DEFINE_HOOK_INT(hookname, arglist, passlist, true)
 
 #endif /* _FRR_HOOK_H */

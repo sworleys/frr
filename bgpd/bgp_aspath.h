@@ -51,8 +51,8 @@
 struct assegment {
 	struct assegment *next;
 	as_t *as;
-	u_short length;
-	u_char type;
+	unsigned short length;
+	uint8_t type;
 };
 
 /* AS path may be include some AsSegments.  */
@@ -85,9 +85,10 @@ extern struct aspath *aspath_filter_exclude(struct aspath *, struct aspath *);
 extern struct aspath *aspath_add_seq_n(struct aspath *, as_t, unsigned);
 extern struct aspath *aspath_add_seq(struct aspath *, as_t);
 extern struct aspath *aspath_add_confed_seq(struct aspath *, as_t);
-extern int aspath_cmp(const void *, const void *);
+extern bool aspath_cmp(const void *as1, const void *as2);
 extern int aspath_cmp_left(const struct aspath *, const struct aspath *);
-extern int aspath_cmp_left_confed(const struct aspath *, const struct aspath *);
+extern bool aspath_cmp_left_confed(const struct aspath *as1,
+				   const struct aspath *as2xs);
 extern struct aspath *aspath_delete_confed_seq(struct aspath *);
 extern struct aspath *aspath_empty(void);
 extern struct aspath *aspath_empty_get(void);
@@ -127,6 +128,6 @@ extern struct aspath *aspath_reconcile_as4(struct aspath *, struct aspath *);
 extern unsigned int aspath_has_as4(struct aspath *);
 
 /* For SNMP BGP4PATHATTRASPATHSEGMENT, might be useful for debug */
-extern u_char *aspath_snmp_pathseg(struct aspath *, size_t *);
+extern uint8_t *aspath_snmp_pathseg(struct aspath *, size_t *);
 
 #endif /* _QUAGGA_BGP_ASPATH_H */

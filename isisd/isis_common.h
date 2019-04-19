@@ -28,25 +28,21 @@
  * Area Address
  */
 struct area_addr {
-	u_char addr_len;
-	u_char area_addr[20];
+	uint8_t addr_len;
+	uint8_t area_addr[20];
 };
 
-/* Key used to obfuscate passwords in config files */
-#define ISIS_PASSWD_OBFUSCATION_KEY "8098f63eb10810955117d86072df905a"
-
 struct isis_passwd {
-	u_char len;
+	uint8_t len;
 #define ISIS_PASSWD_TYPE_UNUSED   0
 #define ISIS_PASSWD_TYPE_CLEARTXT 1
 #define ISIS_PASSWD_TYPE_HMAC_MD5 54
 #define ISIS_PASSWD_TYPE_PRIVATE  255
-	u_char type;
+	uint8_t type;
 /* Authenticate SNPs? */
 #define SNP_AUTH_SEND   0x01
 #define SNP_AUTH_RECV   0x02
 	uint8_t snp_auth;
-
 	uint8_t passwd[255];
 };
 
@@ -54,8 +50,8 @@ struct isis_passwd {
  * Supported Protocol IDs
  */
 struct nlpids {
-	u_char count;
-	u_char nlpids[4]; /* FIXME: enough ? */
+	uint8_t count;
+	uint8_t nlpids[4]; /* FIXME: enough ? */
 };
 
 #endif

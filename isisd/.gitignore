@@ -1,15 +1,6 @@
-!Makefile
-Makefile.in
-*.o
 isisd
-.deps
+<<<<<<< HEAD
+=======
+fabricd
+>>>>>>> upstream/dev/7.0
 isisd.conf
-.nfs*
-*.lo
-*.la
-*.libs
-.arch-inventory
-.arch-ids
-*~
-*.loT
-*.a

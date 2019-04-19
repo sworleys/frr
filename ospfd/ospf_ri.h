@@ -78,7 +78,7 @@
 
 struct ri_tlv_router_cap {
 	struct tlv_header header; /* Value length is 4 bytes. */
-	u_int32_t value;
+	uint32_t value;
 };
 
 /* Capabilities bits are left align */
@@ -108,10 +108,10 @@ struct ri_pce_subtlv_address {
 #define	PCE_ADDRESS_LENGTH_IPV4		8
 #define	PCE_ADDRESS_LENGTH_IPV6		20
 	struct {
-		u_int16_t type; /* Address type: 1 = IPv4, 2 = IPv6 */
+		uint16_t type; /* Address type: 1 = IPv4, 2 = IPv6 */
 #define	PCE_ADDRESS_TYPE_IPV4		1
 #define	PCE_ADDRESS_TYPE_IPV6		2
-		u_int16_t reserved;
+		uint16_t reserved;
 		struct in_addr value; /* PCE address */
 	} address;
 };
@@ -124,7 +124,7 @@ struct ri_pce_subtlv_path_scope {
 	 * L, R, Rd, S, Sd, Y, PrefL, PrefR, PrefS and PrefY bits:
 	 * see RFC5088 page 9
 	 */
-	u_int32_t value;
+	uint32_t value;
 };
 
 /* PCE Domain Sub-TLV */ /* Optional */
@@ -135,18 +135,18 @@ struct ri_pce_subtlv_path_scope {
 
 struct ri_pce_subtlv_domain {
 	struct tlv_header header; /* Type = 3; Length = 8 bytes. */
-	u_int16_t type; /* Domain type: 1 = OSPF Area ID, 2 = AS Number */
-	u_int16_t reserved;
-	u_int32_t value;
+	uint16_t type; /* Domain type: 1 = OSPF Area ID, 2 = AS Number */
+	uint16_t reserved;
+	uint32_t value;
 };
 
 /* PCE Neighbor Sub-TLV */ /* Mandatory if R or S bit is set */
 #define RI_PCE_SUBTLV_NEIGHBOR		4
 struct ri_pce_subtlv_neighbor {
 	struct tlv_header header; /* Type = 4; Length = 8 bytes. */
-	u_int16_t type; /* Domain type: 1 = OSPF Area ID, 2 = AS Number */
-	u_int16_t reserved;
-	u_int32_t value;
+	uint16_t type; /* Domain type: 1 = OSPF Area ID, 2 = AS Number */
+	uint16_t reserved;
+	uint32_t value;
 };
 
 /* PCE Capabilities Flags Sub-TLV */ /* Optional */
@@ -164,13 +164,77 @@ struct ri_pce_subtlv_neighbor {
 
 struct ri_pce_subtlv_cap_flag {
 	struct tlv_header header; /* Type = 5; Length = n x 4 bytes. */
-	u_int32_t value;
+	uint32_t value;
 };
 
 /* Structure to share flooding scope info for Segment Routing */
 struct scope_info {
 	uint8_t scope;
-	struct in_addr area_id;
+	struct list *areas;
+};
+
+/* Flags to manage the Router Information LSA. */
+#define RIFLG_LSA_INACTIVE		0x0
+#define RIFLG_LSA_ENGAGED		0x1
+#define RIFLG_LSA_FORCED_REFRESH	0x2
+
+/* Store Router Information PCE TLV and SubTLV in network byte order. */
+struct ospf_pce_info {
+	bool enabled;
+	struct ri_tlv_pce pce_header;
+	struct ri_pce_subtlv_address pce_address;
+	struct ri_pce_subtlv_path_scope pce_scope;
+	struct list *pce_domain;
+	struct list *pce_neighbor;
+	struct ri_pce_subtlv_cap_flag pce_cap_flag;
+};
+
+/*
+ * Store Router Information Segment Routing TLV and SubTLV
+ * in network byte order
+ */
+struct ospf_ri_sr_info {
+	bool enabled;
+	/* Algorithms supported by the node */
+	struct ri_sr_tlv_sr_algorithm algo;
+	/*
+	 * Segment Routing Global Block i.e. label range
+	 * Only one range supported in this code
+	 */
+	struct ri_sr_tlv_sid_label_range range;
+	/* Maximum SID Depth supported by the node */
+	struct ri_sr_tlv_node_msd msd;
+};
+
+/* Store area information to flood LSA per area */
+struct ospf_ri_area_info {
+
+	uint32_t flags;
+
+	/* area pointer if flooding is Type 10 Null if flooding is AS scope */
+	struct ospf_area *area;
+};
+
+/* Following structure are internal use only. */
+struct ospf_router_info {
+	bool enabled;
+
+	uint8_t registered;
+	uint8_t scope;
+	/* LSA flags are only used when scope is AS flooding */
+	uint32_t as_flags;
+
+	/* List of area info to flood RI LSA */
+	struct list *area_info;
+
+	/* Store Router Information Capabilities LSA */
+	struct ri_tlv_router_cap router_cap;
+
+	/* Store PCE capability LSA */
+	struct ospf_pce_info pce_info;
+
+	/* Store SR capability LSA */
+	struct ospf_ri_sr_info sr_info;
 };
 
 /* Prototypes. */

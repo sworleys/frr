@@ -23,9 +23,9 @@
 
 #include "lib/ferr.h"
 
-enum nhrp_ferr_refs {
-	NHRP_ERR_SWAN = NHRP_FERR_START,
-	NHRP_ERR_RESOLVER,
+enum nhrp_log_refs {
+	EC_NHRP_SWAN = NHRP_FERR_START,
+	EC_NHRP_RESOLVER,
 };
 
 extern void nhrp_error_init(void);

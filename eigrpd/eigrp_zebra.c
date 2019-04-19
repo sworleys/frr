@@ -114,9 +114,9 @@ static void eigrp_zebra_connected(struct zclient *zclient)
 
 void eigrp_zebra_init(void)
 {
-	struct zclient_options opt = { .receive_notify = false };
+	struct zclient_options opt = {.receive_notify = false};
 
-	zclient = zclient_new_notify(master, &opt);
+	zclient = zclient_new(master, &opt);
 
 	zclient_init(zclient, ZEBRA_ROUTE_EIGRP, 0, &eigrpd_privs);
 	zclient->zebra_connected = eigrp_zebra_connected;
@@ -205,8 +205,7 @@ static int eigrp_interface_delete(int command, struct zclient *zclient,
 			ifp->metric, ifp->mtu);
 
 	if (ifp->info)
-		eigrp_if_free(ifp->info,
-			      INTERFACE_DOWN_BY_ZEBRA);
+		eigrp_if_free(ifp->info, INTERFACE_DOWN_BY_ZEBRA);
 
 	if_set_index(ifp, IFINDEX_INTERNAL);
 	return 0;
@@ -426,7 +425,7 @@ void eigrp_zebra_route_delete(struct prefix *p)
 int eigrp_is_type_redistributed(int type)
 {
 	return ((DEFAULT_ROUTE_TYPE(type))
-			? vrf_bitmap_check(zclient->default_information,
+			? vrf_bitmap_check(zclient->default_information[AFI_IP],
 					   VRF_DEFAULT)
 			: vrf_bitmap_check(zclient->redist[AFI_IP][type],
 					   VRF_DEFAULT));

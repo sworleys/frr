@@ -359,6 +359,7 @@ our $InitAttribute = qr{$InitAttributeData|$InitAttributeConst|$InitAttributeIni
 # We need \b after 'init' otherwise 'initconst' will cause a false positive in a check
 our $Attribute	= qr{
 			const|
+			_Atomic|
 			__percpu|
 			__nocast|
 			__safe|
@@ -1247,11 +1248,6 @@ sub sanitise_line {
 	} elsif ($res =~ /^.\s*\#\s*(?:error|warning)\s+(.*)\b/) {
 		my $clean = 'X' x length($1);
 		$res =~ s@(\#\s*(?:error|warning)\s+).*@$1$clean@;
-	}
-
-	if ($allow_c99_comments && $res =~ m@(//.*$)@) {
-		my $match = $1;
-		$res =~ s/\Q$match\E/"$;" x length($match)/e;
 	}
 
 	return $res;
@@ -3612,14 +3608,19 @@ sub process {
 
 # no C99 // comments
 		if ($line =~ m{//}) {
-			if (ERROR("C99_COMMENTS",
-				  "do not use C99 // comments\n" . $herecurr) &&
-			    $fix) {
-				my $line = $fixed[$fixlinenr];
-				if ($line =~ /\/\/(.*)$/) {
-					my $comment = trim($1);
-					$fixed[$fixlinenr] =~ s@\/\/(.*)$@/\* $comment \*/@;
+			if (!$allow_c99_comments) {
+				if(ERROR("C99_COMMENTS",
+					 "do not use C99 // comments\n" . $herecurr) &&
+				   $fix) {
+					my $line = $fixed[$fixlinenr];
+					if ($line =~ /\/\/(.*)$/) {
+						my $comment = trim($1);
+						$fixed[$fixlinenr] =~ s@\/\/(.*)$@/\* $comment \*/@;
+					}
 				}
+			} else {
+				WARN("C99_COMMENTS",
+				     "C99 // comments do not match recommendation\n" . $herecurr);
 			}
 		}
 		# Remove C99 comments.
@@ -4181,7 +4182,9 @@ sub process {
 				} elsif ($op eq ',') {
 					my $rtrim_before = 0;
 					my $space_after = 0;
-					if ($ctx =~ /Wx./) {
+					if ($line=~/\#\s*define/) {
+						# ignore , spacing in macros
+					} elsif ($ctx =~ /Wx./) {
 						if (ERROR("SPACING",
 							  "space prohibited before that '$op' $at\n" . $hereptr)) {
 							$line_fixed = 1;
@@ -4516,17 +4519,6 @@ sub process {
 			}
 		}
 
-#goto labels aren't indented, allow a single space however
-		if ($line=~/^.\s+[A-Za-z\d_]+:(?![0-9]+)/ and
-		   !($line=~/^. [A-Za-z\d_]+:/) and !($line=~/^.\s+default:/)) {
-			if (WARN("INDENTED_LABEL",
-				 "labels should not be indented\n" . $herecurr) &&
-			    $fix) {
-				$fixed[$fixlinenr] =~
-				    s/^(.)\s+/$1/;
-			}
-		}
-
 # return is not a function
 		if (defined($stat) && $stat =~ /^.\s*return(\s*)\(/s) {
 			my $spacing = $1;
@@ -4847,6 +4839,7 @@ sub process {
 			my $ctx = '';
 			my $has_flow_statement = 0;
 			my $has_arg_concat = 0;
+			my $complex = 0;
 			($dstat, $dcond, $ln, $cnt, $off) =
 				ctx_statement_block($linenr, $realcnt, 0);
 			$ctx = $dstat;
@@ -4865,6 +4858,7 @@ sub process {
 				$define_args = substr($define_args, 1, length($define_args) - 2);
 				$define_args =~ s/\s*//g;
 				@def_args = split(",", $define_args);
+				$complex = 1;
 			}
 
 			$dstat =~ s/$;//g;
@@ -4932,7 +4926,7 @@ sub process {
 				} elsif ($dstat =~ /;/) {
 					ERROR("MULTISTATEMENT_MACRO_USE_DO_WHILE",
 					      "Macros with multiple statements should be enclosed in a do - while loop\n" . "$herectx");
-				} else {
+				} elsif ($complex) {
 					ERROR("COMPLEX_MACRO",
 					      "Macros with complex values should be enclosed in parentheses\n" . "$herectx");
 				}
@@ -5629,49 +5623,52 @@ sub process {
 			}
 		}
 
+#
+# Kernel macros unnused for FRR
+#
 # Check for __attribute__ packed, prefer __packed
-		if ($realfile !~ m@\binclude/uapi/@ &&
-		    $line =~ /\b__attribute__\s*\(\s*\(.*\bpacked\b/) {
-			WARN("PREFER_PACKED",
-			     "__packed is preferred over __attribute__((packed))\n" . $herecurr);
-		}
+#		if ($realfile !~ m@\binclude/uapi/@ &&
+#		    $line =~ /\b__attribute__\s*\(\s*\(.*\bpacked\b/) {
+#			WARN("PREFER_PACKED",
+#			     "__packed is preferred over __attribute__((packed))\n" . $herecurr);
+#		}
 
 # Check for __attribute__ aligned, prefer __aligned
-		if ($realfile !~ m@\binclude/uapi/@ &&
-		    $line =~ /\b__attribute__\s*\(\s*\(.*aligned/) {
-			WARN("PREFER_ALIGNED",
-			     "__aligned(size) is preferred over __attribute__((aligned(size)))\n" . $herecurr);
-		}
+#		if ($realfile !~ m@\binclude/uapi/@ &&
+#		    $line =~ /\b__attribute__\s*\(\s*\(.*aligned/) {
+#			WARN("PREFER_ALIGNED",
+#			     "__aligned(size) is preferred over __attribute__((aligned(size)))\n" . $herecurr);
+#		}
 
 # Check for __attribute__ format(printf, prefer __printf
-		if ($realfile !~ m@\binclude/uapi/@ &&
-		    $line =~ /\b__attribute__\s*\(\s*\(\s*format\s*\(\s*printf/) {
-			if (WARN("PREFER_PRINTF",
-				 "__printf(string-index, first-to-check) is preferred over __attribute__((format(printf, string-index, first-to-check)))\n" . $herecurr) &&
-			    $fix) {
-				$fixed[$fixlinenr] =~ s/\b__attribute__\s*\(\s*\(\s*format\s*\(\s*printf\s*,\s*(.*)\)\s*\)\s*\)/"__printf(" . trim($1) . ")"/ex;
+#		if ($realfile !~ m@\binclude/uapi/@ &&
+#		    $line =~ /\b__attribute__\s*\(\s*\(\s*format\s*\(\s*printf/) {
+#			if (WARN("PREFER_PRINTF",
+#				 "__printf(string-index, first-to-check) is preferred over __attribute__((format(printf, string-index, first-to-check)))\n" . $herecurr) &&
+#			    $fix) {
+#				$fixed[$fixlinenr] =~ s/\b__attribute__\s*\(\s*\(\s*format\s*\(\s*printf\s*,\s*(.*)\)\s*\)\s*\)/"__printf(" . trim($1) . ")"/ex;
 
-			}
-		}
+#			}
+#		}
 
 # Check for __attribute__ format(scanf, prefer __scanf
-		if ($realfile !~ m@\binclude/uapi/@ &&
-		    $line =~ /\b__attribute__\s*\(\s*\(\s*format\s*\(\s*scanf\b/) {
-			if (WARN("PREFER_SCANF",
-				 "__scanf(string-index, first-to-check) is preferred over __attribute__((format(scanf, string-index, first-to-check)))\n" . $herecurr) &&
-			    $fix) {
-				$fixed[$fixlinenr] =~ s/\b__attribute__\s*\(\s*\(\s*format\s*\(\s*scanf\s*,\s*(.*)\)\s*\)\s*\)/"__scanf(" . trim($1) . ")"/ex;
-			}
-		}
+#		if ($realfile !~ m@\binclude/uapi/@ &&
+#		    $line =~ /\b__attribute__\s*\(\s*\(\s*format\s*\(\s*scanf\b/) {
+#			if (WARN("PREFER_SCANF",
+#				 "__scanf(string-index, first-to-check) is preferred over __attribute__((format(scanf, string-index, first-to-check)))\n" . $herecurr) &&
+#			    $fix) {
+#				$fixed[$fixlinenr] =~ s/\b__attribute__\s*\(\s*\(\s*format\s*\(\s*scanf\s*,\s*(.*)\)\s*\)\s*\)/"__scanf(" . trim($1) . ")"/ex;
+#			}
+#		}
 
 # Check for __attribute__ weak, or __weak declarations (may have link issues)
-		if ($^V && $^V ge 5.10.0 &&
-		    $line =~ /(?:$Declare|$DeclareMisordered)\s*$Ident\s*$balanced_parens\s*(?:$Attribute)?\s*;/ &&
-		    ($line =~ /\b__attribute__\s*\(\s*\(.*\bweak\b/ ||
-		     $line =~ /\b__weak\b/)) {
-			ERROR("WEAK_DECLARATION",
-			      "Using weak declarations can have unintended link defects\n" . $herecurr);
-		}
+#		if ($^V && $^V ge 5.10.0 &&
+#		    $line =~ /(?:$Declare|$DeclareMisordered)\s*$Ident\s*$balanced_parens\s*(?:$Attribute)?\s*;/ &&
+#		    ($line =~ /\b__attribute__\s*\(\s*\(.*\bweak\b/ ||
+#		     $line =~ /\b__weak\b/)) {
+#			ERROR("WEAK_DECLARATION",
+#			      "Using weak declarations can have unintended link defects\n" . $herecurr);
+#		}
 
 # check for c99 types like uint8_t used outside of uapi/ and tools/
 		if ($realfile !~ m@\binclude/uapi/@ &&
@@ -5887,27 +5884,6 @@ sub process {
 			}
 			WARN("NAKED_SSCANF",
 			     "unchecked sscanf return value\n" . "$here\n$stat_real\n");
-		}
-
-# check for simple sscanf that should be kstrto<foo>
-		if ($^V && $^V ge 5.10.0 &&
-		    defined $stat &&
-		    $line =~ /\bsscanf\b/) {
-			my $lc = $stat =~ tr@\n@@;
-			$lc = $lc + $linenr;
-			my $stat_real = raw_line($linenr, 0);
-		        for (my $count = $linenr + 1; $count <= $lc; $count++) {
-				$stat_real = $stat_real . "\n" . raw_line($count, 0);
-			}
-			if ($stat_real =~ /\bsscanf\b\s*\(\s*$FuncArg\s*,\s*("[^"]+")/) {
-				my $format = $6;
-				my $count = $format =~ tr@%@%@;
-				if ($count == 1 &&
-				    $format =~ /^"\%(?i:ll[udxi]|[udxi]ll|ll|[hl]h?[udxi]|[udxi][hl]h?|[hl]h?|[udxi])"$/) {
-					WARN("SSCANF_TO_KSTRTO",
-					     "Prefer kstrto<type> to single variable sscanf\n" . "$here\n$stat_real\n");
-				}
-			}
 		}
 
 # check for new externs in .h files.
@@ -6180,12 +6156,6 @@ sub process {
 			     "consider using a completion\n" . $herecurr);
 		}
 
-# recommend kstrto* over simple_strto* and strict_strto*
-		if ($line =~ /\b((simple|strict)_(strto(l|ll|ul|ull)))\s*\(/) {
-			WARN("CONSIDER_KSTRTO",
-			     "$1 is obsolete, use k$3 instead\n" . $herecurr);
-		}
-
 # check for __initcall(), use device_initcall() explicitly or more appropriate function please
 		if ($line =~ /^.\s*__initcall\s*\(/) {
 			WARN("USE_DEVICE_INITCALL",
@@ -6357,6 +6327,26 @@ sub process {
 				     "unknown module license " . $extracted_string . "\n" . $herecurr);
 			}
 		}
+
+# check for usage of nonstandard fixed-width integral types
+		if ($line =~ /u_int8_t/ ||
+		    $line =~ /u_int32_t/ ||
+		    $line =~ /u_int16_t/ ||
+		    $line =~ /u_int64_t/ ||
+		    $line =~ /[^a-z_]u_char[^a-z_]/ ||
+		    $line =~ /[^a-z_]u_short[^a-z_]/ ||
+		    $line =~ /[^a-z_]u_int[^a-z_]/ ||
+		    $line =~ /[^a-z_]u_long[^a-z_]/) {
+			ERROR("NONSTANDARD_INTEGRAL_TYPES",
+			      "Please, no nonstandard integer types in new code.\n" . $herecurr)
+		}
+
+# check for usage of non-32 bit atomics
+		if ($line =~ /_Atomic [u]?int(?!32)[0-9]+_t/) {
+			WARN("NON_32BIT_ATOMIC",
+			     "Please, only use 32 bit atomics.\n" . $herecurr);
+		}
+
 	}
 
 	# If we have no input at all, then there is nothing to report on

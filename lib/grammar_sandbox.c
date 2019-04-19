@@ -23,6 +23,10 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #include "command.h"
 #include "memory_vty.h"
 #include "graph.h"
@@ -37,13 +41,10 @@ DEFINE_MTYPE_STATIC(LIB, CMD_TOKENS, "Command desc")
 void grammar_sandbox_init(void);
 void pretty_print_graph(struct vty *vty, struct graph_node *, int, int,
 			struct graph_node **, size_t);
-static void pretty_print_dot(FILE *ofd, unsigned opts, struct graph_node *start,
-			     struct graph_node **stack, size_t stackpos,
-			     struct graph_node **visited, size_t *visitpos);
 void init_cmdgraph(struct vty *, struct graph **);
 
 /** shim interface commands **/
-struct graph *nodegraph = NULL, *nodegraph_free = NULL;
+static struct graph *nodegraph = NULL, *nodegraph_free = NULL;
 
 #define check_nodegraph()                                                      \
 	do {                                                                   \
@@ -139,7 +140,7 @@ DEFUN (grammar_test_complete,
 		vty_out(vty, "%% No match\n");
 
 	// free resources
-	list_delete_and_null(&completions);
+	list_delete(&completions);
 	cmd_free_strvec(command);
 	XFREE(MTYPE_TMP, cmdstr);
 
@@ -183,7 +184,7 @@ DEFUN (grammar_test_match,
 
 		vty_out(vty, "func: %p\n", element->func);
 
-		list_delete_and_null(&argvv);
+		list_delete(&argvv);
 	} else {
 		assert(MATCHER_ERROR(result));
 		switch (result) {
@@ -274,23 +275,19 @@ DEFUN (grammar_test_dot,
        ".dot filename\n")
 {
 	check_nodegraph();
-
-	struct graph_node *stack[CMD_ARGC_MAX];
-	struct graph_node *visited[CMD_ARGC_MAX * CMD_ARGC_MAX];
-	size_t vpos = 0;
-
 	FILE *ofd = fopen(argv[2]->arg, "w");
+
 	if (!ofd) {
 		vty_out(vty, "%s: %s\r\n", argv[2]->arg, strerror(errno));
 		return CMD_SUCCESS;
 	}
 
-	fprintf(ofd,
-		"digraph {\n  graph [ rankdir = LR ];\n  node [ fontname = \"Fira Mono\", fontsize = 9 ];\n\n");
-	pretty_print_dot(ofd, 0, vector_slot(nodegraph->nodes, 0), stack, 0,
-			 visited, &vpos);
-	fprintf(ofd, "}\n");
+	char *dot = cmd_graph_dump_dot(nodegraph);
+
+	fprintf(ofd, "%s", dot);
 	fclose(ofd);
+	XFREE(MTYPE_TMP, dot);
+
 	return CMD_SUCCESS;
 }
 
@@ -318,7 +315,7 @@ static void cmd_graph_permute(struct list *out, struct graph_node **stack,
 	struct graph_node *gn = stack[stackpos];
 	struct cmd_token *tok = gn->data;
 	char *appendp = cmd + strlen(cmd);
-	size_t i, j;
+	size_t j;
 
 	if (tok->type < SPECIAL_TKN) {
 		sprintf(appendp, "%s ", tok->text);
@@ -335,7 +332,7 @@ static void cmd_graph_permute(struct list *out, struct graph_node **stack,
 	if (++stackpos == CMD_ARGC_MAX)
 		return;
 
-	for (i = 0; i < vector_active(gn->to); i++) {
+	for (size_t i = 0; i < vector_active(gn->to); i++) {
 		struct graph_node *gnext = vector_slot(gn->to, i);
 		for (j = 0; j < stackpos; j++)
 			if (stack[j] == gnext)
@@ -402,8 +399,8 @@ DEFUN (grammar_findambig,
 			nodegraph = cnode->cmdgraph;
 			if (!nodegraph)
 				continue;
-			vty_out(vty, "scanning node %d (%s)\n",
-				scannode - 1, node_names[scannode - 1]);
+			vty_out(vty, "scanning node %d (%s)\n", scannode - 1,
+				node_names[scannode - 1]);
 		}
 
 		commands = cmd_graph_permutations(nodegraph);
@@ -424,7 +421,7 @@ DEFUN (grammar_findambig,
 			}
 			prev = cur;
 		}
-		list_delete_and_null(&commands);
+		list_delete(&commands);
 
 		vty_out(vty, "\n");
 	} while (scan && scannode < LINK_PARAMS_NODE);
@@ -489,24 +486,6 @@ void grammar_sandbox_init(void)
 	install_element(ENABLE_NODE, &grammar_access_cmd);
 }
 
-#define item(x) { x, #x }
-struct message tokennames[] = {item(WORD_TKN),	// words
-			       item(VARIABLE_TKN),    // almost anything
-			       item(RANGE_TKN),       // integer range
-			       item(IPV4_TKN),	// IPV4 addresses
-			       item(IPV4_PREFIX_TKN), // IPV4 network prefixes
-			       item(IPV6_TKN),	// IPV6 prefixes
-			       item(IPV6_PREFIX_TKN), // IPV6 network prefixes
-			       item(MAC_TKN),	 // MAC address
-			       item(MAC_PREFIX_TKN),  // MAC address w/ mask
-
-			       /* plumbing types */
-			       item(FORK_TKN),
-			       item(JOIN_TKN),
-			       item(START_TKN), // first token in line
-			       item(END_TKN),   // last token in line
-			       {0}};
-
 /**
  * Pretty-prints a graph, assuming it is a tree.
  *
@@ -570,89 +549,6 @@ void pretty_print_graph(struct vty *vty, struct graph_node *start, int level,
 	} else
 		vty_out(vty, "\n");
 }
-
-static void pretty_print_dot(FILE *ofd, unsigned opts, struct graph_node *start,
-			     struct graph_node **stack, size_t stackpos,
-			     struct graph_node **visited, size_t *visitpos)
-{
-	// print this node
-	char tokennum[32];
-	struct cmd_token *tok = start->data;
-	const char *color;
-
-	for (size_t i = 0; i < (*visitpos); i++)
-		if (visited[i] == start)
-			return;
-	visited[(*visitpos)++] = start;
-	if ((*visitpos) == CMD_ARGC_MAX * CMD_ARGC_MAX)
-		return;
-
-	snprintf(tokennum, sizeof(tokennum), "%d?", tok->type);
-	fprintf(ofd, "  n%p [ shape=box, label=<", start);
-
-	fprintf(ofd, "<b>%s</b>", lookup_msg(tokennames, tok->type, NULL));
-	if (tok->attr == CMD_ATTR_DEPRECATED)
-		fprintf(ofd, " (d)");
-	else if (tok->attr == CMD_ATTR_HIDDEN)
-		fprintf(ofd, " (h)");
-	if (tok->text) {
-		if (tok->type == WORD_TKN)
-			fprintf(ofd,
-				"<br/>\"<font color=\"#0055ff\" point-size=\"11\"><b>%s</b></font>\"",
-				tok->text);
-		else
-			fprintf(ofd, "<br/>%s", tok->text);
-	}
-	/*  if (desc)
-	    fprintf(ofd, " ?'%s'", tok->desc); */
-	switch (tok->type) {
-	case START_TKN:
-		color = "#ccffcc";
-		break;
-	case FORK_TKN:
-		color = "#aaddff";
-		break;
-	case JOIN_TKN:
-		color = "#ddaaff";
-		break;
-	case WORD_TKN:
-		color = "#ffffff";
-		break;
-	default:
-		color = "#ffffff";
-		break;
-	}
-	fprintf(ofd, ">, style = filled, fillcolor = \"%s\" ];\n", color);
-
-	if (stackpos == CMD_ARGC_MAX)
-		return;
-	stack[stackpos++] = start;
-
-	for (unsigned int i = 0; i < vector_active(start->to); i++) {
-		struct graph_node *adj = vector_slot(start->to, i);
-		// if this node is a vararg, just print *
-		if (adj == start) {
-			fprintf(ofd, "  n%p -> n%p;\n", start, start);
-		} else if (((struct cmd_token *)adj->data)->type == END_TKN) {
-			// struct cmd_token *et = adj->data;
-			fprintf(ofd, "  n%p -> end%p;\n", start, adj);
-			fprintf(ofd,
-				"  end%p [ shape=box, label=<end>, style = filled, fillcolor = \"#ffddaa\" ];\n",
-				adj);
-		} else {
-			fprintf(ofd, "  n%p -> n%p;\n", start, adj);
-			size_t k;
-			for (k = 0; k < stackpos; k++)
-				if (stack[k] == adj)
-					break;
-			if (k == stackpos) {
-				pretty_print_dot(ofd, opts, adj, stack,
-						 stackpos, visited, visitpos);
-			}
-		}
-	}
-}
-
 
 /** stuff that should go in command.c + command.h */
 void init_cmdgraph(struct vty *vty, struct graph **graph)

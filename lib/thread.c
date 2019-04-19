@@ -32,10 +32,12 @@
 #include "sigevent.h"
 #include "network.h"
 #include "jhash.h"
+#include "frratomic.h"
 #include "lib_errors.h"
 
 DEFINE_MTYPE_STATIC(LIB, THREAD, "Thread")
 DEFINE_MTYPE_STATIC(LIB, THREAD_MASTER, "Thread master")
+DEFINE_MTYPE_STATIC(LIB, THREAD_POLL, "Thread Poll Info")
 DEFINE_MTYPE_STATIC(LIB, THREAD_STATS, "Thread stats")
 
 #if defined(__APPLE__)
@@ -50,22 +52,23 @@ DEFINE_MTYPE_STATIC(LIB, THREAD_STATS, "Thread stats")
 	} while (0);
 
 /* control variable for initializer */
-pthread_once_t init_once = PTHREAD_ONCE_INIT;
+static pthread_once_t init_once = PTHREAD_ONCE_INIT;
 pthread_key_t thread_current;
 
-pthread_mutex_t masters_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t masters_mtx = PTHREAD_MUTEX_INITIALIZER;
 static struct list *masters;
 
+static void thread_free(struct thread_master *master, struct thread *thread);
 
 /* CLI start ---------------------------------------------------------------- */
 static unsigned int cpu_record_hash_key(struct cpu_thread_history *a)
 {
-	int size = sizeof (&a->func);
+	int size = sizeof(a->func);
 
 	return jhash(&a->func, size, 0);
 }
 
-static int cpu_record_hash_cmp(const struct cpu_thread_history *a,
+static bool cpu_record_hash_cmp(const struct cpu_thread_history *a,
 			       const struct cpu_thread_history *b)
 {
 	return a->func == b->func;
@@ -102,28 +105,44 @@ static void vty_out_cpu_thread_history(struct vty *vty,
 		a->types & (1 << THREAD_EXECUTE) ? 'X' : ' ', a->funcname);
 }
 
-static void cpu_record_hash_print(struct hash_backet *bucket, void *args[])
+static void cpu_record_hash_print(struct hash_bucket *bucket, void *args[])
 {
 	struct cpu_thread_history *totals = args[0];
+	struct cpu_thread_history copy;
 	struct vty *vty = args[1];
-	thread_type *filter = args[2];
+	uint8_t *filter = args[2];
 
 	struct cpu_thread_history *a = bucket->data;
 
-	if (!(a->types & *filter))
+	copy.total_active =
+		atomic_load_explicit(&a->total_active, memory_order_seq_cst);
+	copy.total_calls =
+		atomic_load_explicit(&a->total_calls, memory_order_seq_cst);
+	copy.cpu.total =
+		atomic_load_explicit(&a->cpu.total, memory_order_seq_cst);
+	copy.cpu.max = atomic_load_explicit(&a->cpu.max, memory_order_seq_cst);
+	copy.real.total =
+		atomic_load_explicit(&a->real.total, memory_order_seq_cst);
+	copy.real.max =
+		atomic_load_explicit(&a->real.max, memory_order_seq_cst);
+	copy.types = atomic_load_explicit(&a->types, memory_order_seq_cst);
+	copy.funcname = a->funcname;
+
+	if (!(copy.types & *filter))
 		return;
-	vty_out_cpu_thread_history(vty, a);
-	totals->total_active += a->total_active;
-	totals->total_calls += a->total_calls;
-	totals->real.total += a->real.total;
-	if (totals->real.max < a->real.max)
-		totals->real.max = a->real.max;
-	totals->cpu.total += a->cpu.total;
-	if (totals->cpu.max < a->cpu.max)
-		totals->cpu.max = a->cpu.max;
+
+	vty_out_cpu_thread_history(vty, &copy);
+	totals->total_active += copy.total_active;
+	totals->total_calls += copy.total_calls;
+	totals->real.total += copy.real.total;
+	if (totals->real.max < copy.real.max)
+		totals->real.max = copy.real.max;
+	totals->cpu.total += copy.cpu.total;
+	if (totals->cpu.max < copy.cpu.max)
+		totals->cpu.max = copy.cpu.max;
 }
 
-static void cpu_record_print(struct vty *vty, thread_type filter)
+static void cpu_record_print(struct vty *vty, uint8_t filter)
 {
 	struct cpu_thread_history tmp;
 	void *args[3] = {&tmp, vty, &filter};
@@ -141,7 +160,7 @@ static void cpu_record_print(struct vty *vty, thread_type filter)
 
 			char underline[strlen(name) + 1];
 			memset(underline, '-', sizeof(underline));
-			underline[sizeof(underline)] = '\0';
+			underline[sizeof(underline) - 1] = '\0';
 
 			vty_out(vty, "\n");
 			vty_out(vty, "Showing statistics for pthread %s\n",
@@ -158,7 +177,7 @@ static void cpu_record_print(struct vty *vty, thread_type filter)
 			if (m->cpu_record->count)
 				hash_iterate(
 					m->cpu_record,
-					(void (*)(struct hash_backet *,
+					(void (*)(struct hash_bucket *,
 						  void *))cpu_record_hash_print,
 					args);
 			else
@@ -182,9 +201,9 @@ static void cpu_record_print(struct vty *vty, thread_type filter)
 		vty_out_cpu_thread_history(vty, &tmp);
 }
 
-static void cpu_record_hash_clear(struct hash_backet *bucket, void *args[])
+static void cpu_record_hash_clear(struct hash_bucket *bucket, void *args[])
 {
-	thread_type *filter = args[0];
+	uint8_t *filter = args[0];
 	struct hash *cpu_record = args[1];
 
 	struct cpu_thread_history *a = bucket->data;
@@ -195,9 +214,9 @@ static void cpu_record_hash_clear(struct hash_backet *bucket, void *args[])
 	hash_release(cpu_record, bucket->data);
 }
 
-static void cpu_record_clear(thread_type filter)
+static void cpu_record_clear(uint8_t filter)
 {
-	thread_type *tmp = &filter;
+	uint8_t *tmp = &filter;
 	struct thread_master *m;
 	struct listnode *ln;
 
@@ -209,7 +228,7 @@ static void cpu_record_clear(thread_type filter)
 				void *args[2] = {tmp, m->cpu_record};
 				hash_iterate(
 					m->cpu_record,
-					(void (*)(struct hash_backet *,
+					(void (*)(struct hash_bucket *,
 						  void *))cpu_record_hash_clear,
 					args);
 			}
@@ -219,7 +238,7 @@ static void cpu_record_clear(thread_type filter)
 	pthread_mutex_unlock(&masters_mtx);
 }
 
-static thread_type parse_filter(const char *filterstr)
+static uint8_t parse_filter(const char *filterstr)
 {
 	int i = 0;
 	int filter = 0;
@@ -262,7 +281,7 @@ DEFUN (show_thread_cpu,
        "Thread CPU usage\n"
        "Display filter (rwtexb)\n")
 {
-	thread_type filter = (thread_type)-1U;
+	uint8_t filter = (uint8_t)-1U;
 	int idx = 0;
 
 	if (argv_find(argv, argc, "FILTER", &idx)) {
@@ -329,7 +348,7 @@ DEFUN (clear_thread_cpu,
        "Thread CPU usage\n"
        "Display filter (rwtexb)\n")
 {
-	thread_type filter = (thread_type)-1U;
+	uint8_t filter = (uint8_t)-1U;
 	int idx = 0;
 
 	if (argv_find(argv, argc, "FILTER", &idx)) {
@@ -381,7 +400,7 @@ static void cancelreq_del(void *cr)
 }
 
 /* initializer, only ever called once */
-static void initializer()
+static void initializer(void)
 {
 	pthread_key_create(&thread_current, NULL);
 }
@@ -394,8 +413,6 @@ struct thread_master *thread_master_create(const char *name)
 	pthread_once(&init_once, &initializer);
 
 	rv = XCALLOC(MTYPE_THREAD_MASTER, sizeof(struct thread_master));
-	if (rv == NULL)
-		return NULL;
 
 	/* Initialize master mutex */
 	pthread_mutex_init(&rv->mtx, NULL);
@@ -407,24 +424,15 @@ struct thread_master *thread_master_create(const char *name)
 	/* Initialize I/O task data structures */
 	getrlimit(RLIMIT_NOFILE, &limit);
 	rv->fd_limit = (int)limit.rlim_cur;
-	rv->read =
-		XCALLOC(MTYPE_THREAD, sizeof(struct thread *) * rv->fd_limit);
-	if (rv->read == NULL) {
-		XFREE(MTYPE_THREAD_MASTER, rv);
-		return NULL;
-	}
-	rv->write =
-		XCALLOC(MTYPE_THREAD, sizeof(struct thread *) * rv->fd_limit);
-	if (rv->write == NULL) {
-		XFREE(MTYPE_THREAD, rv->read);
-		XFREE(MTYPE_THREAD_MASTER, rv);
-		return NULL;
-	}
+	rv->read = XCALLOC(MTYPE_THREAD_POLL,
+			   sizeof(struct thread *) * rv->fd_limit);
+
+	rv->write = XCALLOC(MTYPE_THREAD_POLL,
+			    sizeof(struct thread *) * rv->fd_limit);
 
 	rv->cpu_record = hash_create_size(
-		8,
-		(unsigned int (*)(void *))cpu_record_hash_key,
-		(int (*)(const void *, const void *))cpu_record_hash_cmp,
+		8, (unsigned int (*)(void *))cpu_record_hash_key,
+		(bool (*)(const void *, const void *))cpu_record_hash_cmp,
 		"Thread Hash");
 
 
@@ -473,8 +481,7 @@ void thread_master_set_name(struct thread_master *master, const char *name)
 {
 	pthread_mutex_lock(&master->mtx);
 	{
-		if (master->name)
-			XFREE(MTYPE_THREAD_MASTER, master->name);
+		XFREE(MTYPE_THREAD_MASTER, master->name);
 		master->name = XSTRDUP(MTYPE_THREAD_MASTER, name);
 	}
 	pthread_mutex_unlock(&master->mtx);
@@ -524,17 +531,30 @@ static struct thread *thread_trim_head(struct thread_list *list)
 	return NULL;
 }
 
+#define THREAD_UNUSED_DEPTH 10
+
 /* Move thread to unuse list. */
 static void thread_add_unuse(struct thread_master *m, struct thread *thread)
 {
+	pthread_mutex_t mtxc = thread->mtx;
+
 	assert(m != NULL && thread != NULL);
 	assert(thread->next == NULL);
 	assert(thread->prev == NULL);
-	thread->ref = NULL;
 
-	thread->type = THREAD_UNUSED;
 	thread->hist->total_active--;
-	thread_list_add(&m->unuse, thread);
+	memset(thread, 0, sizeof(struct thread));
+	thread->type = THREAD_UNUSED;
+
+	/* Restore the thread mutex context. */
+	thread->mtx = mtxc;
+
+	if (m->unuse.count < THREAD_UNUSED_DEPTH) {
+		thread_list_add(&m->unuse, thread);
+		return;
+	}
+
+	thread_free(m, thread);
 }
 
 /* Free all unused thread. */
@@ -545,9 +565,8 @@ static void thread_list_free(struct thread_master *m, struct thread_list *list)
 
 	for (t = list->head; t; t = next) {
 		next = t->next;
-		XFREE(MTYPE_THREAD, t);
+		thread_free(m, t);
 		list->count--;
-		m->alloc--;
 	}
 }
 
@@ -561,11 +580,10 @@ static void thread_array_free(struct thread_master *m,
 		t = thread_array[index];
 		if (t) {
 			thread_array[index] = NULL;
-			XFREE(MTYPE_THREAD, t);
-			m->alloc--;
+			thread_free(m, t);
 		}
 	}
-	XFREE(MTYPE_THREAD, thread_array);
+	XFREE(MTYPE_THREAD_POLL, thread_array);
 }
 
 static void thread_queue_free(struct thread_master *m, struct pqueue *queue)
@@ -573,9 +591,8 @@ static void thread_queue_free(struct thread_master *m, struct pqueue *queue)
 	int i;
 
 	for (i = 0; i < queue->size; i++)
-		XFREE(MTYPE_THREAD, queue->array[i]);
+		thread_free(m, queue->array[i]);
 
-	m->alloc -= queue->size;
 	pqueue_delete(queue);
 }
 
@@ -593,8 +610,7 @@ void thread_master_free_unused(struct thread_master *m)
 	{
 		struct thread *t;
 		while ((t = thread_trim_head(&m->unuse)) != NULL) {
-			pthread_mutex_destroy(&t->mtx);
-			XFREE(MTYPE_THREAD, t);
+			thread_free(m, t);
 		}
 	}
 	pthread_mutex_unlock(&m->mtx);
@@ -607,7 +623,7 @@ void thread_master_free(struct thread_master *m)
 	{
 		listnode_delete(masters, m);
 		if (masters->count == 0) {
-			list_delete_and_null(&masters);
+			list_delete(&masters);
 		}
 	}
 	pthread_mutex_unlock(&masters_mtx);
@@ -622,32 +638,37 @@ void thread_master_free(struct thread_master *m)
 	pthread_cond_destroy(&m->cancel_cond);
 	close(m->io_pipe[0]);
 	close(m->io_pipe[1]);
-	list_delete_and_null(&m->cancel_req);
+	list_delete(&m->cancel_req);
 	m->cancel_req = NULL;
 
 	hash_clean(m->cpu_record, cpu_record_hash_free);
 	hash_free(m->cpu_record);
 	m->cpu_record = NULL;
 
-	if (m->name)
-		XFREE(MTYPE_THREAD_MASTER, m->name);
+	XFREE(MTYPE_THREAD_MASTER, m->name);
 	XFREE(MTYPE_THREAD_MASTER, m->handler.pfds);
 	XFREE(MTYPE_THREAD_MASTER, m->handler.copy);
 	XFREE(MTYPE_THREAD_MASTER, m);
 }
 
-/* Return remain time in second. */
-unsigned long thread_timer_remain_second(struct thread *thread)
+/* Return remain time in miliseconds. */
+unsigned long thread_timer_remain_msec(struct thread *thread)
 {
 	int64_t remain;
 
 	pthread_mutex_lock(&thread->mtx);
 	{
-		remain = monotime_until(&thread->u.sands, NULL) / 1000000LL;
+		remain = monotime_until(&thread->u.sands, NULL) / 1000LL;
 	}
 	pthread_mutex_unlock(&thread->mtx);
 
 	return remain < 0 ? 0 : remain;
+}
+
+/* Return remain time in seconds. */
+unsigned long thread_timer_remain_second(struct thread *thread)
+{
+	return thread_timer_remain_msec(thread) / 1000LL;
 }
 
 #define debugargdef  const char *funcname, const char *schedfrom, int fromln
@@ -665,7 +686,7 @@ struct timeval thread_timer_remain(struct thread *thread)
 }
 
 /* Get new thread.  */
-static struct thread *thread_get(struct thread_master *m, u_char type,
+static struct thread *thread_get(struct thread_master *m, uint8_t type,
 				 int (*func)(struct thread *), void *arg,
 				 debugargdef)
 {
@@ -711,6 +732,17 @@ static struct thread *thread_get(struct thread_master *m, u_char type,
 	thread->schedfrom_line = fromln;
 
 	return thread;
+}
+
+static void thread_free(struct thread_master *master, struct thread *thread)
+{
+	/* Update statistics. */
+	assert(master->alloc > 0);
+	master->alloc--;
+
+	/* Free allocated resources. */
+	pthread_mutex_destroy(&thread->mtx);
+	XFREE(MTYPE_THREAD, thread);
 }
 
 static int fd_poll(struct thread_master *m, struct pollfd *pfds, nfds_t pfdsize,
@@ -767,6 +799,7 @@ struct thread *funcname_thread_add_read_write(int dir, struct thread_master *m,
 {
 	struct thread *thread = NULL;
 
+	assert(fd >= 0 && fd < m->fd_limit);
 	pthread_mutex_lock(&m->mtx);
 	{
 		if (t_ptr
@@ -990,7 +1023,7 @@ static void thread_cancel_rw(struct thread_master *master, int fd, short state)
 		zlog_debug(
 			"[!] Received cancellation request for nonexistent rw job");
 		zlog_debug("[!] threadmaster: %s | fd: %d",
-			 master->name ? master->name : "", fd);
+			   master->name ? master->name : "", fd);
 		return;
 	}
 
@@ -1166,17 +1199,19 @@ void thread_cancel_event(struct thread_master *master, void *arg)
  */
 void thread_cancel(struct thread *thread)
 {
-	assert(thread->master->owner == pthread_self());
+	struct thread_master *master = thread->master;
 
-	pthread_mutex_lock(&thread->master->mtx);
+	assert(master->owner == pthread_self());
+
+	pthread_mutex_lock(&master->mtx);
 	{
 		struct cancel_req *cr =
 			XCALLOC(MTYPE_TMP, sizeof(struct cancel_req));
 		cr->thread = thread;
-		listnode_add(thread->master->cancel_req, cr);
-		do_thread_cancel(thread->master);
+		listnode_add(master->cancel_req, cr);
+		do_thread_cancel(master);
 	}
-	pthread_mutex_unlock(&thread->master->mtx);
+	pthread_mutex_unlock(&master->mtx);
 }
 
 /**
@@ -1463,7 +1498,7 @@ struct thread *thread_fetch(struct thread_master *m, struct thread *fetch)
 			}
 
 			/* else die */
-			flog_err(LIB_ERR_SYSTEM_CALL, "poll() error: %s",
+			flog_err(EC_LIB_SYSTEM_CALL, "poll() error: %s",
 				 safe_strerror(errno));
 			pthread_mutex_unlock(&m->mtx);
 			fetch = NULL;
@@ -1533,16 +1568,31 @@ void thread_set_yield_time(struct thread *thread, unsigned long yield_time)
 
 void thread_getrusage(RUSAGE_T *r)
 {
+#if defined RUSAGE_THREAD
+#define FRR_RUSAGE RUSAGE_THREAD
+#else
+#define FRR_RUSAGE RUSAGE_SELF
+#endif
 	monotime(&r->real);
-	getrusage(RUSAGE_SELF, &(r->cpu));
+	getrusage(FRR_RUSAGE, &(r->cpu));
 }
 
-/* We check thread consumed time. If the system has getrusage, we'll
-   use that to get in-depth stats on the performance of the thread in addition
-   to wall clock time stats from gettimeofday. */
+/*
+ * Call a thread.
+ *
+ * This function will atomically update the thread's usage history. At present
+ * this is the only spot where usage history is written. Nevertheless the code
+ * has been written such that the introduction of writers in the future should
+ * not need to update it provided the writers atomically perform only the
+ * operations done here, i.e. updating the total and maximum times. In
+ * particular, the maximum real and cpu times must be monotonically increasing
+ * or this code is not correct.
+ */
 void thread_call(struct thread *thread)
 {
-	unsigned long realtime, cputime;
+	_Atomic unsigned long realtime, cputime;
+	unsigned long exp;
+	unsigned long helper;
 	RUSAGE_T before, after;
 
 	GETRUSAGE(&before);
@@ -1554,16 +1604,35 @@ void thread_call(struct thread *thread)
 
 	GETRUSAGE(&after);
 
-	realtime = thread_consumed_time(&after, &before, &cputime);
-	thread->hist->real.total += realtime;
-	if (thread->hist->real.max < realtime)
-		thread->hist->real.max = realtime;
-	thread->hist->cpu.total += cputime;
-	if (thread->hist->cpu.max < cputime)
-		thread->hist->cpu.max = cputime;
+	realtime = thread_consumed_time(&after, &before, &helper);
+	cputime = helper;
 
-	++(thread->hist->total_calls);
-	thread->hist->types |= (1 << thread->add_type);
+	/* update realtime */
+	atomic_fetch_add_explicit(&thread->hist->real.total, realtime,
+				  memory_order_seq_cst);
+	exp = atomic_load_explicit(&thread->hist->real.max,
+				   memory_order_seq_cst);
+	while (exp < realtime
+	       && !atomic_compare_exchange_weak_explicit(
+			  &thread->hist->real.max, &exp, realtime,
+			  memory_order_seq_cst, memory_order_seq_cst))
+		;
+
+	/* update cputime */
+	atomic_fetch_add_explicit(&thread->hist->cpu.total, cputime,
+				  memory_order_seq_cst);
+	exp = atomic_load_explicit(&thread->hist->cpu.max,
+				   memory_order_seq_cst);
+	while (exp < cputime
+	       && !atomic_compare_exchange_weak_explicit(
+			  &thread->hist->cpu.max, &exp, cputime,
+			  memory_order_seq_cst, memory_order_seq_cst))
+		;
+
+	atomic_fetch_add_explicit(&thread->hist->total_calls, 1,
+				  memory_order_seq_cst);
+	atomic_fetch_or_explicit(&thread->hist->types, 1 << thread->add_type,
+				 memory_order_seq_cst);
 
 #ifdef CONSUMED_TIME_CHECK
 	if (realtime > CONSUMED_TIME_CHECK) {
@@ -1573,7 +1642,7 @@ void thread_call(struct thread *thread)
 		 * to fix.
 		 */
 		flog_warn(
-			LIB_WARN_SLOW_THREAD,
+			EC_LIB_SLOW_THREAD,
 			"SLOW THREAD: task %s (%lx) ran for %lums (cpu time %lums)",
 			thread->funcname, (unsigned long)thread->func,
 			realtime / 1000, cputime / 1000);
@@ -1586,25 +1655,27 @@ void funcname_thread_execute(struct thread_master *m,
 			     int (*func)(struct thread *), void *arg, int val,
 			     debugargdef)
 {
-	struct cpu_thread_history tmp;
-	struct thread dummy;
+	struct thread *thread;
 
-	memset(&dummy, 0, sizeof(struct thread));
+	/* Get or allocate new thread to execute. */
+	pthread_mutex_lock(&m->mtx);
+	{
+		thread = thread_get(m, THREAD_EVENT, func, arg, debugargpass);
 
-	pthread_mutex_init(&dummy.mtx, NULL);
-	dummy.type = THREAD_EVENT;
-	dummy.add_type = THREAD_EXECUTE;
-	dummy.master = NULL;
-	dummy.arg = arg;
-	dummy.u.val = val;
+		/* Set its event value. */
+		pthread_mutex_lock(&thread->mtx);
+		{
+			thread->add_type = THREAD_EXECUTE;
+			thread->u.val = val;
+			thread->ref = &thread;
+		}
+		pthread_mutex_unlock(&thread->mtx);
+	}
+	pthread_mutex_unlock(&m->mtx);
 
-	tmp.func = dummy.func = func;
-	tmp.funcname = dummy.funcname = funcname;
-	dummy.hist = hash_get(m->cpu_record, &tmp,
-			      (void *(*)(void *))cpu_record_hash_alloc);
+	/* Execute thread doing all accounting. */
+	thread_call(thread);
 
-	dummy.schedfrom = schedfrom;
-	dummy.schedfrom_line = fromln;
-
-	thread_call(&dummy);
+	/* Give back or free thread. */
+	thread_add_unuse(m, thread);
 }

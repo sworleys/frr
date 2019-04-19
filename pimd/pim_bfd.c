@@ -51,10 +51,12 @@ void pim_bfd_write_config(struct vty *vty, struct interface *ifp)
 	if (!bfd_info)
 		return;
 
+#if HAVE_BFDD == 0
 	if (CHECK_FLAG(bfd_info->flags, BFD_FLAG_PARAM_CFG))
 		vty_out(vty, " ip pim bfd %d %d %d\n", bfd_info->detect_mult,
 			bfd_info->required_min_rx, bfd_info->desired_min_tx);
 	else
+#endif /* ! HAVE_BFDD */
 		vty_out(vty, " ip pim bfd\n");
 }
 
@@ -179,8 +181,8 @@ void pim_bfd_trigger_event(struct pim_interface *pim_ifp,
  * pim_bfd_if_param_set - Set the configured BFD paramter values for
  *                         interface.
  */
-void pim_bfd_if_param_set(struct interface *ifp, u_int32_t min_rx,
-			  u_int32_t min_tx, u_int8_t detect_mult, int defaults)
+void pim_bfd_if_param_set(struct interface *ifp, uint32_t min_rx,
+			  uint32_t min_tx, uint8_t detect_mult, int defaults)
 {
 	struct pim_interface *pim_ifp = ifp->info;
 	int command = 0;
@@ -318,11 +320,12 @@ static int pim_bfd_nbr_replay(int command, struct zclient *zclient,
 					char str[INET_ADDRSTRLEN];
 
 					pim_inet4_dump("<bfd_nbr?>",
-						       neigh->source_addr,
-						       str, sizeof(str));
-					zlog_debug("%s: Replaying Pim Neigh %s to BFD vrf_id %u",
-						   __PRETTY_FUNCTION__, str,
-						   vrf->vrf_id);
+						       neigh->source_addr, str,
+						       sizeof(str));
+					zlog_debug(
+						"%s: Replaying Pim Neigh %s to BFD vrf_id %u",
+						__PRETTY_FUNCTION__, str,
+						vrf->vrf_id);
 				}
 				pim_bfd_reg_dereg_nbr(neigh,
 						      ZEBRA_BFD_DEST_UPDATE);

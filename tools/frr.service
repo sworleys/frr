@@ -1,11 +1,11 @@
 [Unit]
 Description=FRRouting
+Documentation=https://frrouting.readthedocs.io/en/latest/setup.html
 After=networking.service
 OnFailure=heartbeat-failed@%n.service
 
 [Service]
 Nice=-5
-EnvironmentFile=/etc/default/frr
 Type=forking
 NotifyAccess=all
 StartLimitInterval=3m
@@ -17,6 +17,7 @@ Restart=on-abnormal
 LimitNOFILE=1024
 ExecStart=/usr/lib/frr/frr start
 ExecStop=/usr/lib/frr/frr stop
-ExecReload=/usr/lib/frr/frr-reload.py --reload /etc/frr/frr.conf
+ExecReload=/usr/lib/frr/frr reload
+
 [Install]
 WantedBy=network-online.target

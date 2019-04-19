@@ -153,8 +153,9 @@ int ospf_apiserver_init(void)
 		NULL,		  /* ospf_apiserver_lsa_refresher */
 		ospf_apiserver_lsa_update, ospf_apiserver_lsa_delete);
 	if (rc != 0) {
-		flog_warn(OSPF_WARN_OPAQUE_REGISTRATION,
-			  "ospf_apiserver_init: Failed to register opaque type [0/0]");
+		flog_warn(
+			EC_OSPF_OPAQUE_REGISTRATION,
+			"ospf_apiserver_init: Failed to register opaque type [0/0]");
 	}
 
 	rc = 0;
@@ -181,14 +182,14 @@ void ospf_apiserver_term(void)
 
 	/* Free client list itself */
 	if (apiserver_list)
-		list_delete_and_null(&apiserver_list);
+		list_delete(&apiserver_list);
 
 	/* Free wildcard list */
 	/* XXX  */
 }
 
-static struct ospf_apiserver *lookup_apiserver(u_char lsa_type,
-					       u_char opaque_type)
+static struct ospf_apiserver *lookup_apiserver(uint8_t lsa_type,
+					       uint8_t opaque_type)
 {
 	struct listnode *n1, *n2;
 	struct registered_opaque_type *r;
@@ -767,8 +768,8 @@ static int ospf_apiserver_send_msg(struct ospf_apiserver *apiserv,
 	return 0;
 }
 
-int ospf_apiserver_send_reply(struct ospf_apiserver *apiserv, u_int32_t seqnr,
-			      u_char rc)
+int ospf_apiserver_send_reply(struct ospf_apiserver *apiserv, uint32_t seqnr,
+			      uint8_t rc)
 {
 	struct msg *msg = new_msg_reply(seqnr, rc);
 	int ret;
@@ -832,7 +833,7 @@ int ospf_apiserver_handle_msg(struct ospf_apiserver *apiserv, struct msg *msg)
  */
 
 int ospf_apiserver_register_opaque_type(struct ospf_apiserver *apiserv,
-					u_char lsa_type, u_char opaque_type)
+					uint8_t lsa_type, uint8_t opaque_type)
 {
 	struct registered_opaque_type *regtype;
 	int (*originator_func)(void *arg);
@@ -868,7 +869,7 @@ int ospf_apiserver_register_opaque_type(struct ospf_apiserver *apiserv,
 		NULL /* ospf_apiserver_lsa_delete */);
 
 	if (rc != 0) {
-		flog_warn(OSPF_WARN_OPAQUE_REGISTRATION,
+		flog_warn(EC_OSPF_OPAQUE_REGISTRATION,
 			  "Failed to register opaque type [%d/%d]", lsa_type,
 			  opaque_type);
 		return OSPF_API_OPAQUETYPEINUSE;
@@ -897,7 +898,7 @@ int ospf_apiserver_register_opaque_type(struct ospf_apiserver *apiserv,
 }
 
 int ospf_apiserver_unregister_opaque_type(struct ospf_apiserver *apiserv,
-					  u_char lsa_type, u_char opaque_type)
+					  uint8_t lsa_type, uint8_t opaque_type)
 {
 	struct listnode *node, *nnode;
 	struct registered_opaque_type *regtype;
@@ -936,8 +937,8 @@ int ospf_apiserver_unregister_opaque_type(struct ospf_apiserver *apiserv,
 
 
 static int apiserver_is_opaque_type_registered(struct ospf_apiserver *apiserv,
-					       u_char lsa_type,
-					       u_char opaque_type)
+					       uint8_t lsa_type,
+					       uint8_t opaque_type)
 {
 	struct listnode *node, *nnode;
 	struct registered_opaque_type *regtype;
@@ -959,8 +960,8 @@ int ospf_apiserver_handle_register_opaque_type(struct ospf_apiserver *apiserv,
 					       struct msg *msg)
 {
 	struct msg_register_opaque_type *rmsg;
-	u_char lsa_type;
-	u_char opaque_type;
+	uint8_t lsa_type;
+	uint8_t opaque_type;
 	int rc = 0;
 
 	/* Extract parameters from register opaque type message */
@@ -1137,8 +1138,8 @@ int ospf_apiserver_handle_unregister_opaque_type(struct ospf_apiserver *apiserv,
 						 struct msg *msg)
 {
 	struct msg_unregister_opaque_type *umsg;
-	u_char ltype;
-	u_char otype;
+	uint8_t ltype;
+	uint8_t otype;
 	int rc = 0;
 
 	/* Extract parameters from unregister opaque type message */
@@ -1165,7 +1166,7 @@ int ospf_apiserver_handle_register_event(struct ospf_apiserver *apiserv,
 {
 	struct msg_register_event *rmsg;
 	int rc;
-	u_int32_t seqnum;
+	uint32_t seqnum;
 
 	rmsg = (struct msg_register_event *)STREAM_DATA(msg->s);
 
@@ -1212,7 +1213,7 @@ static int apiserver_sync_callback(struct ospf_lsa *lsa, void *p_arg,
 
 	param = (struct param_t *)p_arg;
 	apiserv = param->apiserv;
-	seqnum = (u_int32_t)int_arg;
+	seqnum = (uint32_t)int_arg;
 
 	/* Check origin in filter. */
 	if ((param->filter->origin == ANY_ORIGIN)
@@ -1260,14 +1261,14 @@ int ospf_apiserver_handle_sync_lsdb(struct ospf_apiserver *apiserv,
 				    struct msg *msg)
 {
 	struct listnode *node, *nnode;
-	u_int32_t seqnum;
+	uint32_t seqnum;
 	int rc = 0;
 	struct msg_sync_lsdb *smsg;
 	struct ospf_apiserver_param_t {
 		struct ospf_apiserver *apiserv;
 		struct lsa_filter_type *filter;
 	} param;
-	u_int16_t mask;
+	uint16_t mask;
 	struct route_node *rn;
 	struct ospf_lsa *lsa;
 	struct ospf *ospf;
@@ -1290,13 +1291,13 @@ int ospf_apiserver_handle_sync_lsdb(struct ospf_apiserver *apiserv,
 	/* Iterate over all areas. */
 	for (ALL_LIST_ELEMENTS(ospf->areas, node, nnode, area)) {
 		int i;
-		u_int32_t *area_id = NULL;
+		uint32_t *area_id = NULL;
 
 		/* Compare area_id with area_ids in sync request. */
 		if ((i = smsg->filter.num_areas) > 0) {
 			/* Let area_id point to the list of area IDs,
 			 * which is at the end of smsg->filter. */
-			area_id = (u_int32_t *)(&smsg->filter + 1);
+			area_id = (uint32_t *)(&smsg->filter + 1);
 			while (i) {
 				if (*area_id == area->area_id.s_addr) {
 					break;
@@ -1312,27 +1313,27 @@ int ospf_apiserver_handle_sync_lsdb(struct ospf_apiserver *apiserv,
 		if (i) {
 			/* Check msg type. */
 			if (mask & Power2[OSPF_ROUTER_LSA])
-				LSDB_LOOP(ROUTER_LSDB(area), rn, lsa)
+				LSDB_LOOP (ROUTER_LSDB(area), rn, lsa)
 					apiserver_sync_callback(
 						lsa, (void *)&param, seqnum);
 			if (mask & Power2[OSPF_NETWORK_LSA])
-				LSDB_LOOP(NETWORK_LSDB(area), rn, lsa)
+				LSDB_LOOP (NETWORK_LSDB(area), rn, lsa)
 					apiserver_sync_callback(
 						lsa, (void *)&param, seqnum);
 			if (mask & Power2[OSPF_SUMMARY_LSA])
-				LSDB_LOOP(SUMMARY_LSDB(area), rn, lsa)
+				LSDB_LOOP (SUMMARY_LSDB(area), rn, lsa)
 					apiserver_sync_callback(
 						lsa, (void *)&param, seqnum);
 			if (mask & Power2[OSPF_ASBR_SUMMARY_LSA])
-				LSDB_LOOP(ASBR_SUMMARY_LSDB(area), rn, lsa)
+				LSDB_LOOP (ASBR_SUMMARY_LSDB(area), rn, lsa)
 					apiserver_sync_callback(
 						lsa, (void *)&param, seqnum);
 			if (mask & Power2[OSPF_OPAQUE_LINK_LSA])
-				LSDB_LOOP(OPAQUE_LINK_LSDB(area), rn, lsa)
+				LSDB_LOOP (OPAQUE_LINK_LSDB(area), rn, lsa)
 					apiserver_sync_callback(
 						lsa, (void *)&param, seqnum);
 			if (mask & Power2[OSPF_OPAQUE_AREA_LSA])
-				LSDB_LOOP(OPAQUE_AREA_LSDB(area), rn, lsa)
+				LSDB_LOOP (OPAQUE_AREA_LSDB(area), rn, lsa)
 					apiserver_sync_callback(
 						lsa, (void *)&param, seqnum);
 		}
@@ -1341,7 +1342,7 @@ int ospf_apiserver_handle_sync_lsdb(struct ospf_apiserver *apiserv,
 	/* For AS-external LSAs */
 	if (ospf->lsdb) {
 		if (mask & Power2[OSPF_AS_EXTERNAL_LSA])
-			LSDB_LOOP(EXTERNAL_LSDB(ospf), rn, lsa)
+			LSDB_LOOP (EXTERNAL_LSDB(ospf), rn, lsa)
 				apiserver_sync_callback(lsa, (void *)&param,
 							seqnum);
 	}
@@ -1349,7 +1350,7 @@ int ospf_apiserver_handle_sync_lsdb(struct ospf_apiserver *apiserv,
 	/* For AS-external opaque LSAs */
 	if (ospf->lsdb) {
 		if (mask & Power2[OSPF_OPAQUE_AS_LSA])
-			LSDB_LOOP(OPAQUE_AS_LSDB(ospf), rn, lsa)
+			LSDB_LOOP (OPAQUE_AS_LSDB(ospf), rn, lsa)
 				apiserver_sync_callback(lsa, (void *)&param,
 							seqnum);
 	}
@@ -1379,8 +1380,8 @@ struct ospf_lsa *ospf_apiserver_opaque_lsa_new(struct ospf_area *area,
 	struct stream *s;
 	struct lsa_header *newlsa;
 	struct ospf_lsa *new = NULL;
-	u_char options = 0x0;
-	u_int16_t length;
+	uint8_t options = 0x0;
+	uint16_t length;
 
 	struct ospf *ospf;
 
@@ -1419,7 +1420,7 @@ struct ospf_lsa *ospf_apiserver_opaque_lsa_new(struct ospf_area *area,
 		       ospf->router_id);
 
 	/* Set opaque-LSA body fields. */
-	stream_put(s, ((u_char *)protolsa) + sizeof(struct lsa_header),
+	stream_put(s, ((uint8_t *)protolsa) + sizeof(struct lsa_header),
 		   ntohs(protolsa->length) - sizeof(struct lsa_header));
 
 	/* Determine length of LSA. */
@@ -1427,19 +1428,7 @@ struct ospf_lsa *ospf_apiserver_opaque_lsa_new(struct ospf_area *area,
 	newlsa->length = htons(length);
 
 	/* Create OSPF LSA. */
-	if ((new = ospf_lsa_new()) == NULL) {
-		zlog_warn("ospf_apiserver_opaque_lsa_new: ospf_lsa_new() ?");
-		stream_free(s);
-		return NULL;
-	}
-
-	if ((new->data = ospf_lsa_data_new(length)) == NULL) {
-		zlog_warn(
-			"ospf_apiserver_opaque_lsa_new: ospf_lsa_data_new() ?");
-		ospf_lsa_unlock(&new);
-		stream_free(s);
-		return NULL;
-	}
+	new = ospf_lsa_new_and_data(length);
 
 	new->area = area;
 	new->oi = oi;
@@ -1676,7 +1665,7 @@ int ospf_apiserver_originate1(struct ospf_lsa *lsa)
 
 	/* Install this LSA into LSDB. */
 	if (ospf_lsa_install(ospf, lsa->oi, lsa) == NULL) {
-		flog_warn(OSPF_WARN_LSA_INSTALL_FAILURE,
+		flog_warn(EC_OSPF_LSA_INSTALL_FAILURE,
 			  "ospf_apiserver_originate1: ospf_lsa_install failed");
 		return -1;
 	}
@@ -1742,6 +1731,8 @@ struct ospf_lsa *ospf_apiserver_lsa_refresher(struct ospf_lsa *lsa)
 	struct ospf_lsa *new = NULL;
 	struct ospf *ospf;
 
+	assert(lsa);
+
 	ospf = ospf_lookup_by_vrf_id(VRF_DEFAULT);
 	assert(ospf);
 
@@ -1752,6 +1743,7 @@ struct ospf_lsa *ospf_apiserver_lsa_refresher(struct ospf_lsa *lsa)
 			dump_lsa_key(lsa));
 		lsa->data->ls_age =
 			htons(OSPF_LSA_MAXAGE); /* Flush it anyway. */
+		goto out;
 	}
 
 	if (IS_LSA_MAXAGE(lsa)) {
@@ -1786,7 +1778,7 @@ struct ospf_lsa *ospf_apiserver_lsa_refresher(struct ospf_lsa *lsa)
 	/* Install LSA into LSDB. */
 	if (ospf_lsa_install(ospf, new->oi, new) == NULL) {
 		flog_warn(
-			OSPF_WARN_LSA_INSTALL_FAILURE,
+			EC_OSPF_LSA_INSTALL_FAILURE,
 			"ospf_apiserver_lsa_refresher: ospf_lsa_install failed");
 		ospf_lsa_unlock(&new);
 		goto out;
@@ -1906,8 +1898,8 @@ static int apiserver_flush_opaque_type_callback(struct ospf_lsa *lsa,
 {
 	struct param_t {
 		struct ospf_apiserver *apiserv;
-		u_char lsa_type;
-		u_char opaque_type;
+		uint8_t lsa_type;
+		uint8_t opaque_type;
 	} * param;
 
 	/* Sanity check */
@@ -1929,12 +1921,12 @@ static int apiserver_flush_opaque_type_callback(struct ospf_lsa *lsa,
    type or a connection to an application closes and all those opaque
    LSAs need to be flushed the LSDB. */
 void ospf_apiserver_flush_opaque_lsa(struct ospf_apiserver *apiserv,
-				     u_char lsa_type, u_char opaque_type)
+				     uint8_t lsa_type, uint8_t opaque_type)
 {
 	struct param_t {
 		struct ospf_apiserver *apiserv;
-		u_char lsa_type;
-		u_char opaque_type;
+		uint8_t lsa_type;
+		uint8_t opaque_type;
 	} param;
 	struct listnode *node, *nnode;
 	struct ospf *ospf;
@@ -1954,18 +1946,18 @@ void ospf_apiserver_flush_opaque_lsa(struct ospf_apiserver *apiserv,
 
 	case OSPF_OPAQUE_LINK_LSA:
 		for (ALL_LIST_ELEMENTS(ospf->areas, node, nnode, area))
-			LSDB_LOOP(OPAQUE_LINK_LSDB(area), rn, lsa)
+			LSDB_LOOP (OPAQUE_LINK_LSDB(area), rn, lsa)
 				apiserver_flush_opaque_type_callback(
 					lsa, (void *)&param, 0);
 		break;
 	case OSPF_OPAQUE_AREA_LSA:
 		for (ALL_LIST_ELEMENTS(ospf->areas, node, nnode, area))
-			LSDB_LOOP(OPAQUE_AREA_LSDB(area), rn, lsa)
+			LSDB_LOOP (OPAQUE_AREA_LSDB(area), rn, lsa)
 				apiserver_flush_opaque_type_callback(
 					lsa, (void *)&param, 0);
 		break;
 	case OSPF_OPAQUE_AS_LSA:
-		LSDB_LOOP(OPAQUE_LINK_LSDB(ospf), rn, lsa)
+		LSDB_LOOP (OPAQUE_LINK_LSDB(ospf), rn, lsa)
 			apiserver_flush_opaque_type_callback(lsa,
 							     (void *)&param, 0);
 		break;
@@ -2032,7 +2024,7 @@ int ospf_apiserver_del_if(struct interface *ifp)
 
 	/* zlog_warn for debugging */
 	zlog_warn("ospf_apiserver_del_if");
-	zlog_warn("ifp name=%s status=%d index=%d\n", ifp->name, ifp->status,
+	zlog_warn("ifp name=%s status=%d index=%d", ifp->name, ifp->status,
 		  ifp->ifindex);
 
 	oi = ospf_apiserver_if_lookup_by_ifp(ifp);
@@ -2078,7 +2070,7 @@ void ospf_apiserver_show_info(struct vty *vty, struct ospf_lsa *lsa)
 {
 	struct opaque_lsa {
 		struct lsa_header header;
-		u_char data[1]; /* opaque data have variable length. This is
+		uint8_t data[1]; /* opaque data have variable length. This is
 				   start
 				   address */
 	};
@@ -2118,7 +2110,6 @@ void ospf_apiserver_show_info(struct vty *vty, struct ospf_lsa *lsa)
 		for (i = 0; i < opaquelen; i++) {
 			zlog_debug("0x%x ", olsa->data[i]);
 		}
-		zlog_debug("\n");
 	}
 	return;
 }
@@ -2357,7 +2348,7 @@ void ospf_apiserver_clients_notify_nsm_change(struct ospf_neighbor *nbr)
 	msg_free(msg);
 }
 
-static void apiserver_clients_lsa_change_notify(u_char msgtype,
+static void apiserver_clients_lsa_change_notify(uint8_t msgtype,
 						struct ospf_lsa *lsa)
 {
 	struct msg *msg;
@@ -2392,8 +2383,8 @@ static void apiserver_clients_lsa_change_notify(u_char msgtype,
 	/* Now send message to all clients with a matching filter */
 	for (ALL_LIST_ELEMENTS(apiserver_list, node, nnode, apiserv)) {
 		struct lsa_filter_type *filter;
-		u_int16_t mask;
-		u_int32_t *area;
+		uint16_t mask;
+		uint32_t *area;
 		int i;
 
 		/* Check filter for this client. */
@@ -2410,7 +2401,7 @@ static void apiserver_clients_lsa_change_notify(u_char msgtype,
 		}
 
 		if (i > 0) {
-			area = (u_int32_t *)(filter + 1);
+			area = (uint32_t *)(filter + 1);
 			while (i) {
 				if (*area == area_id.s_addr) {
 					break;
@@ -2446,7 +2437,7 @@ static void apiserver_clients_lsa_change_notify(u_char msgtype,
  */
 
 
-static int apiserver_notify_clients_lsa(u_char msgtype, struct ospf_lsa *lsa)
+static int apiserver_notify_clients_lsa(uint8_t msgtype, struct ospf_lsa *lsa)
 {
 	struct msg *msg;
 	/* default area for AS-External and Opaque11 LSAs */

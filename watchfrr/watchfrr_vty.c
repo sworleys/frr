@@ -25,7 +25,6 @@
 #include "log.h"
 #include "vty.h"
 #include "command.h"
-#include "libfrr.h"
 
 #include "watchfrr.h"
 
@@ -36,14 +35,27 @@ DEFUN(config_write_integrated,
       config_write_integrated_cmd,
       "write integrated",
       "Write running configuration to memory, network, or terminal\n"
-      "Write integrated all-daemon configuration file\n")
+      "Write integrated all-daemon frr.conf file\n")
 {
 	pid_t child;
 	sigset_t oldmask, sigmask;
 
+	const char *e_inprog = "Configuration write already in progress.";
+	const char *e_dmn = "Not all daemons are up, cannot write config.";
+
 	if (integrated_write_pid != -1) {
-		vty_out(vty, "%% configuration write already in progress.\n");
+		vty_out(vty, "%% %s\n", e_inprog);
 		return CMD_WARNING;
+	}
+
+	/* check that all daemons are up before clobbering config */
+	if (!check_all_up()) {
+		vty_out(vty, "%% %s\n", e_dmn);
+		/*
+		 * vtysh interprets this return value to mean that it should
+		 * not try to write the config itself
+		 */
+		return CMD_WARNING_CONFIG_FAILED;
 	}
 
 	fflush(stdout);
@@ -92,8 +104,7 @@ DEFUN(config_write_integrated,
 
 	/* don't allow the user to pass parameters, we're root here!
 	 * should probably harden vtysh at some point too... */
-	const char *flags = (quagga_compat_mode) ? "-wq" : "-w";
-	execl(VTYSH_BIN_PATH, "vtysh", flags, NULL);
+	execl(VTYSH_BIN_PATH, "vtysh", "-w", NULL);
 
 	/* unbuffered write; we just messed with stdout... */
 	char msg[512];
@@ -110,6 +121,16 @@ DEFUN_NOSH (show_debugging_watchfrr,
             DEBUG_STR
             WATCHFRR_STR)
 {
+	return CMD_SUCCESS;
+}
+
+DEFUN (show_watchfrr,
+       show_watchfrr_cmd,
+       "show watchfrr",
+       SHOW_STR
+       WATCHFRR_STR)
+{
+	watchfrr_status(vty);
 	return CMD_SUCCESS;
 }
 
@@ -148,4 +169,5 @@ void watchfrr_vty_init(void)
 	install_element(ENABLE_NODE, &config_write_integrated_cmd);
 	install_element(ENABLE_NODE, &show_debugging_watchfrr_cmd);
 	install_element(CONFIG_NODE, &show_debugging_watchfrr_cmd);
+	install_element(VIEW_NODE, &show_watchfrr_cmd);
 }

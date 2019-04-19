@@ -81,7 +81,7 @@ extern int setsockopt_ipv4_multicast(int sock, int optname,
 				     struct in_addr if_addr,
 				     unsigned int mcast_addr,
 				     ifindex_t ifindex);
-extern int setsockopt_ipv4_multicast_loop(int sock, u_char val);
+extern int setsockopt_ipv4_multicast_loop(int sock, uint8_t val);
 
 extern int setsockopt_ipv4_tos(int sock, int tos);
 
@@ -96,6 +96,41 @@ extern void sockopt_iphdrincl_swab_htosys(struct ip *iph);
 extern void sockopt_iphdrincl_swab_systoh(struct ip *iph);
 
 extern int sockopt_tcp_rtt(int);
+
+/*
+ * TCP MD5 signature option. This option allows TCP MD5 to be enabled on
+ * addresses.
+ *
+ * sock
+ *    Socket to enable option on.
+ *
+ * su
+ *    Sockunion specifying address to enable option on.
+ *
+ * password
+ *    MD5 auth password
+ */
 extern int sockopt_tcp_signature(int sock, union sockunion *su,
 				 const char *password);
+
+/*
+ * Extended TCP MD5 signature option. This option allows TCP MD5 to be enabled
+ * on prefixes.
+ *
+ * sock
+ *    Socket to enable option on.
+ *
+ * su
+ *    Sockunion specifying address (or prefix) to enable option on.
+ *
+ * prefixlen
+ *    0    - su is an address; fall back to non-extended mode
+ *    Else - su is a prefix; prefixlen is the mask length
+ *
+ * password
+ *    MD5 auth password
+ */
+extern int sockopt_tcp_signature_ext(int sock, union sockunion *su,
+				     uint16_t prefixlen, const char *password);
+
 #endif /*_ZEBRA_SOCKOPT_H */

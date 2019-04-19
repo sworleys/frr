@@ -1,9 +1,7 @@
 /*
  * Zebra connect library for PBR
- * Copyright (C) Cumulus Networks, Inc.
+ * Copyright (C) 2018 Cumulus Networks, Inc.
  *               Donald Sharp
- *
- * This file is part of FRR.
  *
  * FRR is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -25,6 +23,8 @@
 struct pbr_interface {
 	char mapname[100];
 };
+
+extern struct thread_master *master;
 
 extern void pbr_zebra_init(void);
 

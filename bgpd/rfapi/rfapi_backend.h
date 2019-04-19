@@ -37,24 +37,27 @@ void bgp_rfapi_destroy(struct bgp *bgp, struct rfapi *h);
 
 extern void rfapiProcessUpdate(struct peer *peer, void *rfd, struct prefix *p,
 			       struct prefix_rd *prd, struct attr *attr,
-			       afi_t afi, safi_t safi, u_char type,
-			       u_char sub_type, uint32_t *label);
+			       afi_t afi, safi_t safi, uint8_t type,
+			       uint8_t sub_type, uint32_t *label);
 
 
 extern void rfapiProcessWithdraw(struct peer *peer, void *rfd, struct prefix *p,
 				 struct prefix_rd *prd, struct attr *attr,
-				 afi_t afi, safi_t safi, u_char type, int kill);
+				 afi_t afi, safi_t safi, uint8_t type,
+				 int kill);
 
 extern void rfapiProcessPeerDown(struct peer *peer);
 
-extern void vnc_zebra_announce(struct prefix *p, struct bgp_info *new_select,
+extern void vnc_zebra_announce(struct prefix *p,
+			       struct bgp_path_info *new_select,
 			       struct bgp *bgp);
 
-extern void vnc_zebra_withdraw(struct prefix *p, struct bgp_info *old_select);
+extern void vnc_zebra_withdraw(struct prefix *p,
+			       struct bgp_path_info *old_select);
 
 
 extern void rfapi_vty_out_vncinfo(struct vty *vty, struct prefix *p,
-				  struct bgp_info *bi, safi_t safi);
+				  struct bgp_path_info *bpi, safi_t safi);
 
 
 extern void vnc_direct_bgp_vpn_enable(struct bgp *bgp, afi_t afi);

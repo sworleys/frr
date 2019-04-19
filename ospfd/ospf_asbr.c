@@ -58,9 +58,8 @@ void ospf_external_route_remove(struct ospf *ospf, struct prefix_ipv4 *p)
 
 			/* Remove route from zebra. */
 			if (or->type == OSPF_DESTINATION_NETWORK)
-				ospf_zebra_delete(ospf,
-						  (struct prefix_ipv4 *)&rn->p,
-						  or);
+				ospf_zebra_delete(
+					ospf, (struct prefix_ipv4 *)&rn->p, or);
 
 			ospf_route_free(or);
 			rn->info = NULL;
@@ -74,33 +73,13 @@ void ospf_external_route_remove(struct ospf *ospf, struct prefix_ipv4 *p)
 		  p->prefixlen);
 }
 
-/* Lookup external route. */
-struct ospf_route *ospf_external_route_lookup(struct ospf *ospf,
-					      struct prefix_ipv4 *p)
-{
-	struct route_node *rn;
-
-	rn = route_node_lookup(ospf->old_external_route, (struct prefix *)p);
-	if (rn) {
-		route_unlock_node(rn);
-		if (rn->info)
-			return rn->info;
-	}
-
-	zlog_warn("Route[%s/%d]: lookup, no such prefix", inet_ntoa(p->prefix),
-		  p->prefixlen);
-
-	return NULL;
-}
-
-
 /* Add an External info for AS-external-LSA. */
-struct external_info *ospf_external_info_new(u_char type, u_short instance)
+struct external_info *ospf_external_info_new(uint8_t type,
+					     unsigned short instance)
 {
 	struct external_info *new;
 
-	new = (struct external_info *)XCALLOC(MTYPE_OSPF_EXTERNAL_INFO,
-					      sizeof(struct external_info));
+	new = XCALLOC(MTYPE_OSPF_EXTERNAL_INFO, sizeof(struct external_info));
 	new->type = type;
 	new->instance = instance;
 
@@ -127,12 +106,10 @@ int ospf_route_map_set_compare(struct route_map_set_values *values1,
 }
 
 /* Add an External info for AS-external-LSA. */
-struct external_info *ospf_external_info_add(struct ospf *ospf, u_char type,
-					     u_short instance,
-					     struct prefix_ipv4 p,
-					     ifindex_t ifindex,
-					     struct in_addr nexthop,
-					     route_tag_t tag)
+struct external_info *
+ospf_external_info_add(struct ospf *ospf, uint8_t type, unsigned short instance,
+		       struct prefix_ipv4 p, ifindex_t ifindex,
+		       struct in_addr nexthop, route_tag_t tag)
 {
 	struct external_info *new;
 	struct route_node *rn;
@@ -189,8 +166,8 @@ struct external_info *ospf_external_info_add(struct ospf *ospf, u_char type,
 	return new;
 }
 
-void ospf_external_info_delete(struct ospf *ospf, u_char type, u_short instance,
-			       struct prefix_ipv4 p)
+void ospf_external_info_delete(struct ospf *ospf, uint8_t type,
+			       unsigned short instance, struct prefix_ipv4 p)
 {
 	struct route_node *rn;
 	struct ospf_external *ext;
@@ -208,8 +185,8 @@ void ospf_external_info_delete(struct ospf *ospf, u_char type, u_short instance,
 	}
 }
 
-struct external_info *ospf_external_info_lookup(struct ospf *ospf, u_char type,
-						u_short instance,
+struct external_info *ospf_external_info_lookup(struct ospf *ospf, uint8_t type,
+						unsigned short instance,
 						struct prefix_ipv4 *p)
 {
 	struct route_node *rn;
@@ -259,7 +236,7 @@ struct ospf_lsa *ospf_external_info_find_lsa(struct ospf *ospf,
 
 
 /* Update ASBR status. */
-void ospf_asbr_status_update(struct ospf *ospf, u_char status)
+void ospf_asbr_status_update(struct ospf *ospf, uint8_t status)
 {
 	zlog_info("ASBR[Status:%d]: Update", status);
 
@@ -285,8 +262,8 @@ void ospf_asbr_status_update(struct ospf *ospf, u_char status)
 	ospf_router_lsa_update(ospf);
 }
 
-void ospf_redistribute_withdraw(struct ospf *ospf, u_char type,
-				u_short instance)
+void ospf_redistribute_withdraw(struct ospf *ospf, uint8_t type,
+				unsigned short instance)
 {
 	struct route_node *rn;
 	struct external_info *ei;

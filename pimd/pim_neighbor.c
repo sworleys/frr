@@ -255,8 +255,8 @@ void pim_neighbor_timer_reset(struct pim_neighbor *neigh, uint16_t holdtime)
 			   neigh->interface->name);
 	}
 
-	thread_add_timer(master, on_neighbor_timer, neigh, neigh->holdtime,
-			 &neigh->t_expire_timer);
+	thread_add_timer(router->master, on_neighbor_timer, neigh,
+			 neigh->holdtime, &neigh->t_expire_timer);
 }
 
 static int on_neighbor_jp_timer(struct thread *t)
@@ -277,8 +277,8 @@ static int on_neighbor_jp_timer(struct thread *t)
 	rpf.rpf_addr.u.prefix4 = neigh->source_addr;
 	pim_joinprune_send(&rpf, neigh->upstream_jp_agg);
 
-	thread_add_timer(master, on_neighbor_jp_timer, neigh, qpim_t_periodic,
-			 &neigh->jp_timer);
+	thread_add_timer(router->master, on_neighbor_jp_timer, neigh,
+			 router->t_periodic, &neigh->jp_timer);
 
 	return 0;
 }
@@ -286,8 +286,8 @@ static int on_neighbor_jp_timer(struct thread *t)
 static void pim_neighbor_start_jp_timer(struct pim_neighbor *neigh)
 {
 	THREAD_TIMER_OFF(neigh->jp_timer);
-	thread_add_timer(master, on_neighbor_jp_timer, neigh, qpim_t_periodic,
-			 &neigh->jp_timer);
+	thread_add_timer(router->master, on_neighbor_jp_timer, neigh,
+			 router->t_periodic, &neigh->jp_timer);
 }
 
 static struct pim_neighbor *
@@ -397,7 +397,7 @@ static void delete_prefix_list(struct pim_neighbor *neigh)
 		}
 #endif
 
-		list_delete_and_null(&neigh->prefix_list);
+		list_delete(&neigh->prefix_list);
 	}
 }
 
@@ -407,7 +407,7 @@ void pim_neighbor_free(struct pim_neighbor *neigh)
 
 	delete_prefix_list(neigh);
 
-	list_delete_and_null(&neigh->upstream_jp_agg);
+	list_delete(&neigh->upstream_jp_agg);
 	THREAD_OFF(neigh->jp_timer);
 
 	if (neigh->bfd_info)
@@ -540,7 +540,7 @@ pim_neighbor_add(struct interface *ifp, struct in_addr source_addr,
 	   Upon PIM neighbor UP, iterate all RPs and update
 	   nexthop cache with this neighbor.
 	 */
-	pim_resolve_rp_nh(pim_ifp->pim);
+	pim_resolve_rp_nh(pim_ifp->pim, neigh);
 
 	pim_rp_setup(pim_ifp->pim);
 
@@ -801,7 +801,7 @@ void pim_neighbor_update(struct pim_neighbor *neigh,
 	if (neigh->prefix_list == addr_list) {
 		if (addr_list) {
 			flog_err(
-				LIB_ERR_DEVELOPMENT,
+				EC_LIB_DEVELOPMENT,
 				"%s: internal error: trying to replace same prefix list=%p",
 				__PRETTY_FUNCTION__, (void *)addr_list);
 		}

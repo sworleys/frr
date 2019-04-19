@@ -23,8 +23,8 @@
 
 #include "lib/ferr.h"
 
-enum rip_ferr_refs {
-	RIP_ERR_PACKET = RIP_FERR_START,
+enum rip_log_refs {
+	EC_RIP_PACKET = RIP_FERR_START,
 	RIP_ERR_CONFIG,
 };
 

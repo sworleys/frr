@@ -196,6 +196,8 @@ int ospf_area_range_set(struct ospf *ospf, struct in_addr area_id,
 
 	range = ospf_area_range_lookup(area, p);
 	if (range != NULL) {
+		if (!CHECK_FLAG(advertise, OSPF_AREA_RANGE_ADVERTISE))
+			range->cost_config = OSPF_AREA_RANGE_COST_UNSPEC;
 		if ((CHECK_FLAG(range->flags, OSPF_AREA_RANGE_ADVERTISE)
 		     && !CHECK_FLAG(advertise, OSPF_AREA_RANGE_ADVERTISE))
 		    || (!CHECK_FLAG(range->flags, OSPF_AREA_RANGE_ADVERTISE)
@@ -209,14 +211,16 @@ int ospf_area_range_set(struct ospf *ospf, struct in_addr area_id,
 
 	if (CHECK_FLAG(advertise, OSPF_AREA_RANGE_ADVERTISE))
 		SET_FLAG(range->flags, OSPF_AREA_RANGE_ADVERTISE);
-	else
+	else {
 		UNSET_FLAG(range->flags, OSPF_AREA_RANGE_ADVERTISE);
+		range->cost_config = OSPF_AREA_RANGE_COST_UNSPEC;
+	}
 
 	return 1;
 }
 
 int ospf_area_range_cost_set(struct ospf *ospf, struct in_addr area_id,
-			     struct prefix_ipv4 *p, u_int32_t cost)
+			     struct prefix_ipv4 *p, uint32_t cost)
 {
 	struct ospf_area *area;
 	struct ospf_area_range *range;
@@ -380,7 +384,7 @@ static void ospf_abr_nssa_check_status(struct ospf *ospf)
 	struct listnode *lnode, *nnode;
 
 	for (ALL_LIST_ELEMENTS(ospf->areas, lnode, nnode, area)) {
-		u_char old_state = area->NSSATranslatorState;
+		uint8_t old_state = area->NSSATranslatorState;
 
 		if (area->external_routing != OSPF_AREA_NSSA)
 			continue;
@@ -472,7 +476,7 @@ void ospf_check_abr_status(struct ospf *ospf)
 	int bb_act_attached = 0;
 	int areas_configured = 0;
 	int areas_act_attached = 0;
-	u_char new_flags = ospf->flags;
+	uint8_t new_flags = ospf->flags;
 
 	if (IS_DEBUG_OSPF_EVENT)
 		zlog_debug("ospf_check_abr_status(): Start");
@@ -586,12 +590,12 @@ static void ospf_abr_update_aggregate(struct ospf_area_range *range,
 	range->specifics++;
 }
 
-static void set_metric(struct ospf_lsa *lsa, u_int32_t metric)
+static void set_metric(struct ospf_lsa *lsa, uint32_t metric)
 {
 	struct summary_lsa *header;
-	u_char *mp;
+	uint8_t *mp;
 	metric = htonl(metric);
-	mp = (u_char *)&metric;
+	mp = (uint8_t *)&metric;
 	mp++;
 	header = (struct summary_lsa *)lsa->data;
 	memcpy(header->metric, mp, 3);
@@ -684,18 +688,18 @@ static int ospf_abr_translate_nssa(struct ospf_area *area, struct ospf_lsa *lsa)
 	return 0;
 }
 
-static void ospf_abr_translate_nssa_range(struct prefix_ipv4 *p, u_int32_t cost)
+static void ospf_abr_translate_nssa_range(struct prefix_ipv4 *p, uint32_t cost)
 {
 	/* The Type-7 is created from the aggregated prefix and forwarded
 	   for lsa installation and flooding... to be added... */
 }
 
-void ospf_abr_announce_network_to_area(struct prefix_ipv4 *p, u_int32_t cost,
+void ospf_abr_announce_network_to_area(struct prefix_ipv4 *p, uint32_t cost,
 				       struct ospf_area *area)
 {
 	struct ospf_lsa *lsa, *old = NULL;
 	struct summary_lsa *sl = NULL;
-	u_int32_t full_cost;
+	uint32_t full_cost;
 
 	if (IS_DEBUG_OSPF_EVENT)
 		zlog_debug("ospf_abr_announce_network_to_area(): Start");
@@ -743,7 +747,7 @@ void ospf_abr_announce_network_to_area(struct prefix_ipv4 *p, u_int32_t cost,
 
 				prefix2str((struct prefix *)p, buf,
 					   sizeof(buf));
-				flog_warn(OSPF_WARN_LSA_MISSING,
+				flog_warn(EC_OSPF_LSA_MISSING,
 					  "%s: Could not refresh %s to %s",
 					  __func__, buf,
 					  inet_ntoa(area->area_id));
@@ -766,7 +770,7 @@ void ospf_abr_announce_network_to_area(struct prefix_ipv4 *p, u_int32_t cost,
 			char buf[PREFIX2STR_BUFFER];
 
 			prefix2str((struct prefix *)p, buf, sizeof(buf));
-			flog_warn(OSPF_WARN_LSA_MISSING,
+			flog_warn(EC_OSPF_LSA_MISSING,
 				  "%s: Could not originate %s to %s", __func__,
 				  buf, inet_ntoa(area->area_id));
 			return;
@@ -979,7 +983,7 @@ static void ospf_abr_process_nssa_translates(struct ospf *ospf)
 				"looking at area %s",
 				inet_ntoa(area->area_id));
 
-		LSDB_LOOP(NSSA_LSDB(area), rn, lsa)
+		LSDB_LOOP (NSSA_LSDB(area), rn, lsa)
 			ospf_abr_translate_nssa(area, lsa);
 	}
 
@@ -1092,7 +1096,7 @@ static void ospf_abr_process_network_rt(struct ospf *ospf,
 		zlog_debug("ospf_abr_process_network_rt(): Stop");
 }
 
-static void ospf_abr_announce_rtr_to_area(struct prefix_ipv4 *p, u_int32_t cost,
+static void ospf_abr_announce_rtr_to_area(struct prefix_ipv4 *p, uint32_t cost,
 					  struct ospf_area *area)
 {
 	struct ospf_lsa *lsa, *old = NULL;
@@ -1135,7 +1139,7 @@ static void ospf_abr_announce_rtr_to_area(struct prefix_ipv4 *p, u_int32_t cost,
 			char buf[PREFIX2STR_BUFFER];
 
 			prefix2str((struct prefix *)p, buf, sizeof(buf));
-			flog_warn(OSPF_WARN_LSA_MISSING,
+			flog_warn(EC_OSPF_LSA_MISSING,
 				  "%s: Could not refresh/originate %s to %s",
 				  __func__, buf, inet_ntoa(area->area_id));
 			return;
@@ -1327,7 +1331,7 @@ ospf_abr_unapprove_translates(struct ospf *ospf) /* For NSSA Translations */
 	/* NSSA Translator is not checked, because it may have gone away,
 	  and we would want to flush any residuals anyway */
 
-	LSDB_LOOP(EXTERNAL_LSDB(ospf), rn, lsa)
+	LSDB_LOOP (EXTERNAL_LSDB(ospf), rn, lsa)
 		if (CHECK_FLAG(lsa->flags, OSPF_LSA_LOCAL_XLT)) {
 			UNSET_FLAG(lsa->flags, OSPF_LSA_APPROVED);
 			if (IS_DEBUG_OSPF_NSSA)
@@ -1357,7 +1361,7 @@ static void ospf_abr_unapprove_summaries(struct ospf *ospf)
 				"ospf_abr_unapprove_summaries(): "
 				"considering area %s",
 				inet_ntoa(area->area_id));
-		LSDB_LOOP(SUMMARY_LSDB(area), rn, lsa)
+		LSDB_LOOP (SUMMARY_LSDB(area), rn, lsa)
 			if (ospf_lsa_is_self_originated(ospf, lsa)) {
 				if (IS_DEBUG_OSPF_EVENT)
 					zlog_debug(
@@ -1367,7 +1371,7 @@ static void ospf_abr_unapprove_summaries(struct ospf *ospf)
 				UNSET_FLAG(lsa->flags, OSPF_LSA_APPROVED);
 			}
 
-		LSDB_LOOP(ASBR_SUMMARY_LSDB(area), rn, lsa)
+		LSDB_LOOP (ASBR_SUMMARY_LSDB(area), rn, lsa)
 			if (ospf_lsa_is_self_originated(ospf, lsa)) {
 				if (IS_DEBUG_OSPF_EVENT)
 					zlog_debug(
@@ -1635,7 +1639,7 @@ static void ospf_abr_remove_unapproved_translates(struct ospf *ospf)
 	if (IS_DEBUG_OSPF_NSSA)
 		zlog_debug("ospf_abr_remove_unapproved_translates(): Start");
 
-	LSDB_LOOP(EXTERNAL_LSDB(ospf), rn, lsa)
+	LSDB_LOOP (EXTERNAL_LSDB(ospf), rn, lsa)
 		ospf_abr_remove_unapproved_translates_apply(ospf, lsa);
 
 	if (IS_DEBUG_OSPF_NSSA)
@@ -1659,12 +1663,12 @@ static void ospf_abr_remove_unapproved_summaries(struct ospf *ospf)
 				"looking at area %s",
 				inet_ntoa(area->area_id));
 
-		LSDB_LOOP(SUMMARY_LSDB(area), rn, lsa)
+		LSDB_LOOP (SUMMARY_LSDB(area), rn, lsa)
 			if (ospf_lsa_is_self_originated(ospf, lsa))
 				if (!CHECK_FLAG(lsa->flags, OSPF_LSA_APPROVED))
 					ospf_lsa_flush_area(lsa, area);
 
-		LSDB_LOOP(ASBR_SUMMARY_LSDB(area), rn, lsa)
+		LSDB_LOOP (ASBR_SUMMARY_LSDB(area), rn, lsa)
 			if (ospf_lsa_is_self_originated(ospf, lsa))
 				if (!CHECK_FLAG(lsa->flags, OSPF_LSA_APPROVED))
 					ospf_lsa_flush_area(lsa, area);
@@ -1687,13 +1691,14 @@ static void ospf_abr_manage_discard_routes(struct ospf *ospf)
 				if (CHECK_FLAG(range->flags,
 					       OSPF_AREA_RANGE_ADVERTISE)) {
 					if (range->specifics)
-						ospf_add_discard_route(ospf,
-							ospf->new_table, area,
+						ospf_add_discard_route(
+							ospf, ospf->new_table,
+							area,
 							(struct prefix_ipv4
 								 *)&rn->p);
 					else
-						ospf_delete_discard_route(ospf,
-							ospf->new_table,
+						ospf_delete_discard_route(
+							ospf, ospf->new_table,
 							(struct prefix_ipv4
 								 *)&rn->p);
 				}

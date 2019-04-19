@@ -7,19 +7,30 @@
 # The following are the defaults. They can be overridden by setting a 
 # env variable to a different value
 
-WANT_LDP ?= 1
-WANT_PIM ?= 1
+# -Werror - don't enable this unless you're doing a dev package build
+WANT_WERROR ?= 0
+
 WANT_OSPFAPI ?= 1
-WANT_TCP_ZEBRA ?= 0
-WANT_BGP_VNC ?= 1
-WANT_CUMULUS_MODE ?= 0
+WANT_BGP_VNC ?= 0
+WANT_CUMULUS_MODE ?= 1
 WANT_MULTIPATH ?= 1
-WANT_SNMP ?= 0
+WANT_SNMP ?= 1
+WANT_RPKI ?= 0
 
+# NOTES:
+#
+# If you use WANT_RPKI, then there is a new dependency for librtr0 package
+#    and a build dependency of the librtr-dev package.
+#    While the librtr0 is added to the depenencies automatically, the build
+#    dependency can't be changed dynamically and building will fail if the
+#    librtr-dev isn't installed during package build
+#    Tested versions of both packages can be found at
+#    https://ci1.netdef.org/browse/RPKI-RTRLIB/latestSuccessful/artifact
+#
 # If multipath is enabled (WANT_MULTIPATH=1), then set number of multipaths here
-# Please be aware that 0 is NOT disabled, but treated as unlimited
+#    Please be aware that 0 is NOT disabled, but treated as unlimited
 
-MULTIPATH ?= 256
+MULTIPATH ?= 128
 
 # Set the following to the value required (or leave alone for the default below)
 # WANT_FRR_USER is used for the username and groupname of the FRR user account
@@ -27,18 +38,16 @@ MULTIPATH ?= 256
 WANT_FRR_USER ?= frr
 WANT_FRR_VTY_GROUP ?= frrvty
 
+# Don't build PDF docs by default
+# add build deps: texlive-latex-base, texlive-generic-recommended
+GENERATE_PDF ?= 0
+
 #
 ####################################
 
 export DH_VERBOSE=1
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 export DH_OPTIONS=-v
-export WANT_SNMP=1
-export WANT_PIM=1
-export WANT_LDP=1
-export WANT_CUMULUS_MODE=1
-export WANT_MULTIPATH=1
-export WANT_BGP_VNC=0
 
 ifeq ($(WANT_SNMP), 1)
   USE_SNMP=--enable-snmp
@@ -48,28 +57,10 @@ else
   $(warning "DEBIAN: SNMP disabled, see README.Debian")
 endif
 
-ifeq ($(WANT_LDP), 1)
-  USE_LDP=--enable-ldpd
-else
-  USE_LDP=--disable-ldpd
-endif
-
-ifeq ($(WANT_PIM), 1)
-  USE_PIM=--enable-pimd
-else
-  USE_PIM=--disable-pimd
-endif
-
 ifeq ($(WANT_OSPFAPI), 1)
   USE_OSPFAPI=--enable-ospfapi=yes
 else
   USE_OSPFAPI=--enable-ospfapi=no
-endif
-
-ifeq ($(WANT_TCP_ZEBRA),1)
-  USE_TCP_ZEBRA=--enable-tcp-zebra
-else
-  USE_TCP_ZEBRA=--disable-tcp-zebra
 endif
 
 ifeq ($(WANT_BGP_VNC), 1)
@@ -94,6 +85,18 @@ else
   USE_CUMULUS=--enable-cumulus=no
 endif
 
+ifeq ($(WANT_RPKI), 1)
+  USE_RPKI=--enable-rpki
+else
+  USE_RPKI=--disable-rpki
+endif
+
+ifeq ($(WANT_WERROR), 1)
+  USE_WERROR=--enable-werror
+else
+  USE_WERROR=--disable-werror
+endif
+
 ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
   DEBIAN_JOBS := $(subst parallel=,,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
 endif
@@ -105,15 +108,14 @@ endif
 %:
 	dh $@ --with=systemd,autoreconf --parallel --dbg-package=frr-dbg --list-missing
 
-override_dh_auto_configure:
-	# Frr needs /proc to check some BSD vs Linux specific stuff.
-	# Else it fails with an obscure error message pointing out that
-	# IPCTL_FORWARDING is an undefined symbol which is not very helpful.
-	@if ! [ -d /proc/1 ]; then \
-		echo "./configure needs a mounted /proc"; \
-		exit 1; \
-	fi
+override_dh_gencontrol:
+ifeq ($(WANT_RPKI), 1)
+	dh_gencontrol -- -Vdist:Depends="librtr0 (>= 0.5)"
+else
+	dh_gencontrol
+endif
 
+override_dh_auto_configure:
 	if ! [ -e config.status ]; then \
 	dh_auto_configure -- \
 		--enable-exampledir=/usr/share/doc/frr/examples/ \
@@ -123,42 +125,34 @@ override_dh_auto_configure:
 		$(USE_SNMP) \
 		$(USE_OSPFAPI) \
 		$(USE_MULTIPATH) \
-		$(USE_LDP) \
-		$(USE_TCP_ZEBRA) \
+		--enable-fpm \
 		$(USE_FRR_USER) $(USE_FRR_GROUP) \
 		$(USE_FRR_VTY_GROUP) \
 		--enable-configfile-mask=0640 \
 		--enable-logfile-mask=0640 \
-		--enable-werror \
+		$(USE_WERROR) \
 		--with-libpam \
 		--enable-systemd=yes \
-		--enable-datacenter=yes \
+		--enable-sharpd=yes \
 		$(USE_CUMULUS) \
-		$(USE_PIM) \
-		--enable-dependency-tracking \
-		--with-vtysh-pager=cat \
+		--enable-datacenter=yes \
+		--enable-bfdd=no \
+		--disable-dependency-tracking \
 		$(USE_BGP_VNC) \
+		$(USE_RPKI) \
 		$(shell dpkg-buildflags --export=configure); \
 	fi
 
 override_dh_auto_build:
-	#dh_auto_build
-	$(MAKE)
-	dh_auto_build -- -C doc draft-zebra-00.txt
-
-
-	# doc/ is a bit crazy
-ifeq ($(GENERATE_PDF), 1)
-	dh_auto_build -- -C doc frr.pdf || true # pdfetex fails with exit code 1 but still produces a good looking .pdf
-endif
-	rm -vf doc/frr.info
-	dh_auto_build -- -C doc frr.info
-	rm -vf doc/frr.info.html*
+	dh_auto_build
 
 override_dh_auto_test:
 
 override_dh_auto_install:
 	dh_auto_install
+
+	# installed in frr-pythontools
+	rm debian/tmp/usr/lib/frr/frr-reload.py
 
 	# cleaning up the info dir
 	rm -f debian/tmp/usr/share/info/dir*
@@ -167,16 +161,10 @@ override_dh_auto_install:
 	mkdir -p debian/tmp/etc/frr/
 	perl -pi -e 's#^!log file #!log file /var/log/frr/#' debian/tmp/usr/share/doc/frr/examples/*sample*
 
-	# installing the Frr specific SNMP MIB
-ifeq ($(WANT_SNMP), 1)
-	install -D -m 644 ./zebra/GNOME-PRODUCT-ZEBRA-MIB debian/tmp/usr/share/snmp/mibs/GNOME-PRODUCT-ZEBRA-MIB
-else
-	mkdir -p debian/tmp/usr/share/snmp/mibs/
-endif
-
-	# cleaning .la files
-	sed -i "/dependency_libs/ s/'.*'/''/" debian/tmp/usr/lib/*.la
-	sed -i "/dependency_libs/ s/'.*'/''/" debian/tmp/usr/lib/frr/modules/*.la
+	# we don't need .la files
+	rm debian/tmp/usr/lib/*.la
+	rm debian/tmp/usr/lib/frr/modules/*.la
+	rm debian/tmp/usr/lib/frr/libyang_plugins/*.la
 
 override_dh_systemd_start:
 	dh_systemd_start frr.service
@@ -186,7 +174,7 @@ override_dh_systemd_enable:
 
 # backports
 SRCPKG = frr
-KNOWN_BACKPORTS = debian8 debian9 ubuntu12.04 ubuntu14.04 ubuntu16.04 ubuntu17.10
+KNOWN_BACKPORTS = debian8 debian9 debian10 ubuntu14.04 ubuntu16.04 ubuntu17.10 ubuntu18.04
 DEBIAN_VERSION := $(shell dh_testdir && \
 		dpkg-parsechangelog -c1 < debian/changelog | \
 		sed -rn 's/^Version: ?//p')

@@ -56,7 +56,7 @@ static void		 lde_map_free(void *);
 static int		 lde_address_add(struct lde_nbr *, struct lde_addr *);
 static int		 lde_address_del(struct lde_nbr *, struct lde_addr *);
 static void		 lde_address_list_free(struct lde_nbr *);
-static void		 zclient_sync_init(u_short instance);
+static void zclient_sync_init(unsigned short instance);
 static void		 lde_label_list_init(void);
 static int		 lde_get_label_chunk(void);
 static void		 on_get_label_chunk_response(uint32_t start, uint32_t end);
@@ -1620,17 +1620,14 @@ lde_address_list_free(struct lde_nbr *ln)
 {
 	struct lde_addr		*lde_addr;
 
-	while ((lde_addr = TAILQ_FIRST(&ln->addr_list)) != NULL) {
-		TAILQ_REMOVE(&ln->addr_list, lde_addr, entry);
+	while ((lde_addr = TAILQ_POP_FIRST(&ln->addr_list, entry)) != NULL)
 		free(lde_addr);
-	}
 }
 
-static void
-zclient_sync_init(u_short instance)
+static void zclient_sync_init(unsigned short instance)
 {
 	/* Initialize special zclient for synchronous message exchanges. */
-	zclient_sync = zclient_new_notify(master, &zclient_options_default);
+	zclient_sync = zclient_new(master, &zclient_options_default);
 	zclient_sync->sock = -1;
 	zclient_sync->redist_default = ZEBRA_ROUTE_LDP;
 	zclient_sync->instance = instance;
@@ -1644,7 +1641,7 @@ zclient_sync_init(u_short instance)
 	sock_set_nonblock(zclient_sync->sock);
 
 	/* Connect to label manager */
-	while (lm_label_manager_connect(zclient_sync) != 0) {
+	while (lm_label_manager_connect(zclient_sync, 0) != 0) {
 		log_warnx("Error connecting to label manager!");
 		sleep(1);
 	}

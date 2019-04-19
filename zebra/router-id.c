@@ -38,13 +38,11 @@
 #include "rib.h"
 #include "vrf.h"
 
-#include "zebra/zserv.h"
+#include "zebra/zebra_router.h"
+#include "zebra/zapi_msg.h"
 #include "zebra/zebra_vrf.h"
 #include "zebra/router-id.h"
 #include "zebra/redistribute.h"
-
-/* master zebra server structure */
-extern struct zebra_t zebrad;
 
 static struct connected *router_id_find_node(struct list *l,
 					     struct connected *ifc)
@@ -113,7 +111,7 @@ static void router_id_set(struct prefix *p, vrf_id_t vrf_id)
 
 	router_id_get(&p2, vrf_id);
 
-	for (ALL_LIST_ELEMENTS_RO(zebrad.client_list, node, client))
+	for (ALL_LIST_ELEMENTS_RO(zrouter.client_list, node, client))
 		zsend_router_id_update(client, &p2, vrf_id);
 }
 
@@ -131,8 +129,7 @@ void router_id_add_address(struct connected *ifc)
 
 	router_id_get(&before, zvrf_id(zvrf));
 
-	if (!strncmp(ifc->ifp->name, "lo", 2)
-	    || !strncmp(ifc->ifp->name, "dummy", 5))
+	if (if_is_loopback(ifc->ifp))
 		l = zvrf->rid_lo_sorted_list;
 	else
 		l = zvrf->rid_all_sorted_list;
@@ -145,7 +142,7 @@ void router_id_add_address(struct connected *ifc)
 	if (prefix_same(&before, &after))
 		return;
 
-	for (ALL_LIST_ELEMENTS_RO(zebrad.client_list, node, client))
+	for (ALL_LIST_ELEMENTS_RO(zrouter.client_list, node, client))
 		zsend_router_id_update(client, &after, zvrf_id(zvrf));
 }
 
@@ -164,8 +161,7 @@ void router_id_del_address(struct connected *ifc)
 
 	router_id_get(&before, zvrf_id(zvrf));
 
-	if (!strncmp(ifc->ifp->name, "lo", 2)
-	    || !strncmp(ifc->ifp->name, "dummy", 5))
+	if (if_is_loopback(ifc->ifp))
 		l = zvrf->rid_lo_sorted_list;
 	else
 		l = zvrf->rid_all_sorted_list;
@@ -178,7 +174,7 @@ void router_id_del_address(struct connected *ifc)
 	if (prefix_same(&before, &after))
 		return;
 
-	for (ALL_LIST_ELEMENTS_RO(zebrad.client_list, node, client))
+	for (ALL_LIST_ELEMENTS_RO(zrouter.client_list, node, client))
 		zsend_router_id_update(client, &after, zvrf_id(zvrf));
 }
 

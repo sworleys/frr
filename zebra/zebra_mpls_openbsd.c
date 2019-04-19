@@ -26,6 +26,7 @@
 #include "zebra/rt.h"
 #include "zebra/zebra_mpls.h"
 #include "zebra/debug.h"
+#include "zebra/zebra_errors.h"
 
 #include "privs.h"
 #include "prefix.h"
@@ -36,13 +37,13 @@
 extern struct zebra_privs_t zserv_privs;
 
 struct {
-	u_int32_t rtseq;
+	uint32_t rtseq;
 	int fd;
 	int ioctl_fd;
 } kr_state;
 
 static int kernel_send_rtmsg_v4(int action, mpls_label_t in_label,
-				zebra_nhlfe_t *nhlfe)
+				const zebra_nhlfe_t *nhlfe)
 {
 	struct iovec iov[5];
 	struct rt_msghdr hdr;
@@ -117,15 +118,13 @@ static int kernel_send_rtmsg_v4(int action, mpls_label_t in_label,
 			hdr.rtm_mpls = MPLS_OP_SWAP;
 	}
 
-	if (zserv_privs.change(ZPRIVS_RAISE))
-		flog_err(LIB_ERR_PRIVILEGES, "Can't raise privileges");
-	ret = writev(kr_state.fd, iov, iovcnt);
-	if (zserv_privs.change(ZPRIVS_LOWER))
-		flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+	frr_elevate_privs(&zserv_privs) {
+		ret = writev(kr_state.fd, iov, iovcnt);
+	}
 
 	if (ret == -1)
-		flog_err(LIB_ERR_SOCKET, "%s: %s", __func__,
-			  safe_strerror(errno));
+		flog_err_sys(EC_LIB_SOCKET, "%s: %s", __func__,
+			     safe_strerror(errno));
 
 	return ret;
 }
@@ -136,7 +135,7 @@ static int kernel_send_rtmsg_v4(int action, mpls_label_t in_label,
 #endif
 
 static int kernel_send_rtmsg_v6(int action, mpls_label_t in_label,
-				zebra_nhlfe_t *nhlfe)
+				const zebra_nhlfe_t *nhlfe)
 {
 	struct iovec iov[5];
 	struct rt_msghdr hdr;
@@ -226,26 +225,39 @@ static int kernel_send_rtmsg_v6(int action, mpls_label_t in_label,
 			hdr.rtm_mpls = MPLS_OP_SWAP;
 	}
 
-	if (zserv_privs.change(ZPRIVS_RAISE))
-		flog_err(LIB_ERR_PRIVILEGES, "Can't raise privileges");
-	ret = writev(kr_state.fd, iov, iovcnt);
-	if (zserv_privs.change(ZPRIVS_LOWER))
-		flog_err(LIB_ERR_PRIVILEGES, "Can't lower privileges");
+	frr_elevate_privs(&zserv_privs) {
+		ret = writev(kr_state.fd, iov, iovcnt);
+	}
 
 	if (ret == -1)
-		flog_err(LIB_ERR_SOCKET, "%s: %s", __func__,
-			  safe_strerror(errno));
+		flog_err_sys(EC_LIB_SOCKET, "%s: %s", __func__,
+			     safe_strerror(errno));
 
 	return ret;
 }
 
-static int kernel_lsp_cmd(int action, zebra_lsp_t *lsp)
+static int kernel_lsp_cmd(struct zebra_dplane_ctx *ctx)
 {
-	zebra_nhlfe_t *nhlfe;
+	const zebra_nhlfe_t *nhlfe;
 	struct nexthop *nexthop = NULL;
 	unsigned int nexthop_num = 0;
+	int action;
 
-	for (nhlfe = lsp->nhlfe_list; nhlfe; nhlfe = nhlfe->next) {
+	switch (dplane_ctx_get_op(ctx)) {
+	case DPLANE_OP_LSP_DELETE:
+		action = RTM_DELETE;
+		break;
+	case DPLANE_OP_LSP_INSTALL:
+		action = RTM_ADD;
+		break;
+	case DPLANE_OP_LSP_UPDATE:
+		action = RTM_CHANGE;
+		break;
+	default:
+		return -1;
+	}
+
+	for (nhlfe = dplane_ctx_get_nhlfe(ctx); nhlfe; nhlfe = nhlfe->next) {
 		nexthop = nhlfe->nexthop;
 		if (!nexthop)
 			continue;
@@ -260,7 +272,7 @@ static int kernel_lsp_cmd(int action, zebra_lsp_t *lsp)
 			&& (CHECK_FLAG(nhlfe->flags, NHLFE_FLAG_INSTALLED)
 			    && CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB)))) {
 			if (nhlfe->nexthop->nh_label->num_labels > 1) {
-				flog_warn(ZEBRA_ERR_MAX_LABELS_PUSH,
+				flog_warn(EC_ZEBRA_MAX_LABELS_PUSH,
 					  "%s: can't push %u labels at once "
 					  "(maximum is 1)",
 					  __func__,
@@ -272,12 +284,16 @@ static int kernel_lsp_cmd(int action, zebra_lsp_t *lsp)
 
 			switch (NHLFE_FAMILY(nhlfe)) {
 			case AF_INET:
-				kernel_send_rtmsg_v4(action, lsp->ile.in_label,
-						     nhlfe);
+				kernel_send_rtmsg_v4(
+					action,
+					dplane_ctx_get_in_label(ctx),
+					nhlfe);
 				break;
 			case AF_INET6:
-				kernel_send_rtmsg_v6(action, lsp->ile.in_label,
-						     nhlfe);
+				kernel_send_rtmsg_v6(
+					action,
+					dplane_ctx_get_in_label(ctx),
+					nhlfe);
 				break;
 			default:
 				break;
@@ -288,75 +304,27 @@ static int kernel_lsp_cmd(int action, zebra_lsp_t *lsp)
 	return (0);
 }
 
-void kernel_add_lsp(zebra_lsp_t *lsp)
+enum zebra_dplane_result kernel_lsp_update(struct zebra_dplane_ctx *ctx)
 {
 	int ret;
 
-	if (!lsp || !lsp->best_nhlfe) { // unexpected
-		kernel_lsp_pass_fail(lsp, SOUTHBOUND_INSTALL_FAILURE);
-		return;
-	}
+	ret = kernel_lsp_cmd(ctx);
 
-	ret = kernel_lsp_cmd(RTM_ADD, lsp);
-
-	kernel_lsp_pass_fail(lsp,
-			     (!ret) ?
-			     SOUTHBOUND_INSTALL_SUCCESS :
-			     SOUTHBOUND_INSTALL_FAILURE);
+	return (ret == 0 ?
+		ZEBRA_DPLANE_REQUEST_SUCCESS : ZEBRA_DPLANE_REQUEST_FAILURE);
 }
 
-void kernel_upd_lsp(zebra_lsp_t *lsp)
-{
-	int ret;
-
-	if (!lsp || !lsp->best_nhlfe) { // unexpected
-		kernel_lsp_pass_fail(lsp, SOUTHBOUND_INSTALL_FAILURE);
-		return;
-	}
-
-	ret = kernel_lsp_cmd(RTM_CHANGE, lsp);
-
-	kernel_lsp_pass_fail(lsp,
-			     (!ret) ?
-			     SOUTHBOUND_INSTALL_SUCCESS :
-			     SOUTHBOUND_INSTALL_FAILURE);
-	return;
-}
-
-void kernel_del_lsp(zebra_lsp_t *lsp)
-{
-	int ret;
-
-	if (!lsp) { // unexpected
-		kernel_lsp_pass_fail(lsp,
-				     SOUTHBOUND_DELETE_FAILURE);
-		return;
-	}
-
-	if (!CHECK_FLAG(lsp->flags, LSP_FLAG_INSTALLED)) {
-		kernel_lsp_pass_fail(lsp,
-				     SOUTHBOUND_DELETE_FAILURE);
-		return;
-	}
-
-	ret = kernel_lsp_cmd(RTM_DELETE, lsp);
-
-	kernel_lsp_pass_fail(lsp,
-			     (!ret) ?
-			     SOUTHBOUND_DELETE_SUCCESS :
-			     SOUTHBOUND_DELETE_FAILURE);
-}
-
-static int kmpw_install(struct zebra_pw *pw)
+static enum zebra_dplane_result kmpw_install(struct zebra_dplane_ctx *ctx)
 {
 	struct ifreq ifr;
 	struct ifmpwreq imr;
 	struct sockaddr_storage ss;
 	struct sockaddr_in *sa_in = (struct sockaddr_in *)&ss;
 	struct sockaddr_in6 *sa_in6 = (struct sockaddr_in6 *)&ss;
+	const union g_addr *gaddr;
 
 	memset(&imr, 0, sizeof(imr));
-	switch (pw->type) {
+	switch (dplane_ctx_get_pw_type(ctx)) {
 	case PW_TYPE_ETHERNET:
 		imr.imr_type = IMR_TYPE_ETHERNET;
 		break;
@@ -365,67 +333,91 @@ static int kmpw_install(struct zebra_pw *pw)
 		break;
 	default:
 		zlog_debug("%s: unhandled pseudowire type (%#X)", __func__,
-			   pw->type);
-		return -1;
+			   dplane_ctx_get_pw_type(ctx));
+		return ZEBRA_DPLANE_REQUEST_FAILURE;
 	}
 
-	if (pw->flags & F_PSEUDOWIRE_CWORD)
+	if (dplane_ctx_get_pw_flags(ctx) & F_PSEUDOWIRE_CWORD)
 		imr.imr_flags |= IMR_FLAG_CONTROLWORD;
 
 	/* pseudowire nexthop */
 	memset(&ss, 0, sizeof(ss));
-	switch (pw->af) {
+	gaddr = dplane_ctx_get_pw_dest(ctx);
+	switch (dplane_ctx_get_pw_af(ctx)) {
 	case AF_INET:
 		sa_in->sin_family = AF_INET;
 		sa_in->sin_len = sizeof(struct sockaddr_in);
-		sa_in->sin_addr = pw->nexthop.ipv4;
+		sa_in->sin_addr = gaddr->ipv4;
 		break;
 	case AF_INET6:
 		sa_in6->sin6_family = AF_INET6;
 		sa_in6->sin6_len = sizeof(struct sockaddr_in6);
-		sa_in6->sin6_addr = pw->nexthop.ipv6;
+		sa_in6->sin6_addr = gaddr->ipv6;
 		break;
 	default:
 		zlog_debug("%s: unhandled pseudowire address-family (%u)",
-			   __func__, pw->af);
-		return -1;
+			   __func__, dplane_ctx_get_pw_af(ctx));
+		return ZEBRA_DPLANE_REQUEST_FAILURE;
 	}
 	memcpy(&imr.imr_nexthop, (struct sockaddr *)&ss,
 	       sizeof(imr.imr_nexthop));
 
 	/* pseudowire local/remote labels */
-	imr.imr_lshim.shim_label = pw->local_label;
-	imr.imr_rshim.shim_label = pw->remote_label;
+	imr.imr_lshim.shim_label = dplane_ctx_get_pw_local_label(ctx);
+	imr.imr_rshim.shim_label = dplane_ctx_get_pw_remote_label(ctx);
 
 	/* ioctl */
 	memset(&ifr, 0, sizeof(ifr));
-	strlcpy(ifr.ifr_name, pw->ifname, sizeof(ifr.ifr_name));
+	strlcpy(ifr.ifr_name, dplane_ctx_get_pw_ifname(ctx),
+		sizeof(ifr.ifr_name));
 	ifr.ifr_data = (caddr_t)&imr;
 	if (ioctl(kr_state.ioctl_fd, SIOCSETMPWCFG, &ifr) == -1) {
-		flog_err(LIB_ERR_SYSTEM_CALL, "ioctl SIOCSETMPWCFG: %s",
-			  safe_strerror(errno));
-		return -1;
+		flog_err_sys(EC_LIB_SYSTEM_CALL, "ioctl SIOCSETMPWCFG: %s",
+			     safe_strerror(errno));
+		return ZEBRA_DPLANE_REQUEST_FAILURE;
 	}
 
-	return 0;
+	return ZEBRA_DPLANE_REQUEST_SUCCESS;
 }
 
-static int kmpw_uninstall(struct zebra_pw *pw)
+static enum zebra_dplane_result kmpw_uninstall(struct zebra_dplane_ctx *ctx)
 {
 	struct ifreq ifr;
 	struct ifmpwreq imr;
 
 	memset(&ifr, 0, sizeof(ifr));
 	memset(&imr, 0, sizeof(imr));
-	strlcpy(ifr.ifr_name, pw->ifname, sizeof(ifr.ifr_name));
+	strlcpy(ifr.ifr_name, dplane_ctx_get_pw_ifname(ctx),
+		sizeof(ifr.ifr_name));
 	ifr.ifr_data = (caddr_t)&imr;
 	if (ioctl(kr_state.ioctl_fd, SIOCSETMPWCFG, &ifr) == -1) {
-		flog_err(LIB_ERR_SYSTEM_CALL, "ioctl SIOCSETMPWCFG: %s",
-			  safe_strerror(errno));
-		return -1;
+		flog_err_sys(EC_LIB_SYSTEM_CALL, "ioctl SIOCSETMPWCFG: %s",
+			     safe_strerror(errno));
+		return ZEBRA_DPLANE_REQUEST_FAILURE;
 	}
 
-	return 0;
+	return ZEBRA_DPLANE_REQUEST_SUCCESS;
+}
+
+/*
+ * Pseudowire update api for openbsd.
+ */
+enum zebra_dplane_result kernel_pw_update(struct zebra_dplane_ctx *ctx)
+{
+	enum zebra_dplane_result result = ZEBRA_DPLANE_REQUEST_FAILURE;
+
+	switch (dplane_ctx_get_op(ctx)) {
+	case DPLANE_OP_PW_INSTALL:
+		result = kmpw_install(ctx);
+		break;
+	case DPLANE_OP_PW_UNINSTALL:
+		result = kmpw_uninstall(ctx);
+		break;
+	default:
+		break;
+	}
+
+	return result;
 }
 
 #define MAX_RTSOCK_BUF	128 * 1024
@@ -435,13 +427,13 @@ int mpls_kernel_init(void)
 	socklen_t optlen;
 
 	if ((kr_state.fd = socket(AF_ROUTE, SOCK_RAW, 0)) == -1) {
-		flog_err_sys(LIB_ERR_SOCKET, "%s: socket", __func__);
+		flog_err_sys(EC_LIB_SOCKET, "%s: socket", __func__);
 		return -1;
 	}
 
 	if ((kr_state.ioctl_fd = socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0))
 	    == -1) {
-		flog_err_sys(LIB_ERR_SOCKET, "%s: ioctl socket", __func__);
+		flog_err_sys(EC_LIB_SOCKET, "%s: ioctl socket", __func__);
 		return -1;
 	}
 
@@ -450,7 +442,7 @@ int mpls_kernel_init(void)
 	if (getsockopt(kr_state.fd, SOL_SOCKET, SO_RCVBUF, &default_rcvbuf,
 		       &optlen)
 	    == -1)
-		flog_err_sys(LIB_ERR_SOCKET,
+		flog_err_sys(EC_LIB_SOCKET,
 			     "kr_init getsockopt SOL_SOCKET SO_RCVBUF");
 	else
 		for (rcvbuf = MAX_RTSOCK_BUF;
@@ -463,10 +455,6 @@ int mpls_kernel_init(void)
 			; /* nothing */
 
 	kr_state.rtseq = 1;
-
-	/* register hook to install/uninstall pseudowires */
-	hook_register(pw_install, kmpw_install);
-	hook_register(pw_uninstall, kmpw_uninstall);
 
 	return 0;
 }

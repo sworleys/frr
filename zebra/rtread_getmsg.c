@@ -28,9 +28,12 @@
 #include "if.h"
 #include "vrf.h"
 #include "vty.h"
+#include "lib_errors.h"
 
 #include "zebra/rib.h"
 #include "zebra/rt.h"
+#include "zebra/zebra_pbr.h"
+#include "zebra/zebra_errors.h"
 
 /* Thank you, Solaris, for polluting application symbol namespace. */
 #undef hook_register
@@ -77,7 +80,7 @@ static void handle_route_entry(mib2_ipRouteEntry_t *routeEntry)
 	struct prefix prefix;
 	struct in_addr tmpaddr;
 	struct nexthop nh;
-	u_char zebra_flags = 0;
+	uint8_t zebra_flags = 0;
 
 	if (routeEntry->ipRouteInfo.re_ire_type & IRE_CACHETABLE)
 		return;
@@ -118,7 +121,7 @@ void route_read(struct zebra_ns *zns)
 	int flags, dev, retval, process;
 
 	if ((dev = open(_PATH_GETMSG_ROUTE, O_RDWR)) == -1) {
-		flog_err_sys(LIB_ERR_SYSTEM_CALL, "can't open %s: %s",
+		flog_err_sys(EC_LIB_SYSTEM_CALL, "can't open %s: %s",
 			     _PATH_GETMSG_ROUTE, safe_strerror(errno));
 		return;
 	}
@@ -140,7 +143,7 @@ void route_read(struct zebra_ns *zns)
 	flags = 0;
 
 	if (putmsg(dev, &msgdata, NULL, flags) == -1) {
-		flog_err_sys(LIB_ERR_SOCKET, "putmsg failed: %s",
+		flog_err_sys(EC_LIB_SOCKET, "putmsg failed: %s",
 			     safe_strerror(errno));
 		goto exit;
 	}
@@ -153,7 +156,7 @@ void route_read(struct zebra_ns *zns)
 		retval = getmsg(dev, &msgdata, NULL, &flags);
 
 		if (retval == -1) {
-			flog_err_sys(LIB_ERR_SYSTEM_CALL,
+			flog_err_sys(EC_LIB_SYSTEM_CALL,
 				     "getmsg(ctl) failed: %s",
 				     safe_strerror(errno));
 			goto exit;
@@ -212,7 +215,7 @@ void route_read(struct zebra_ns *zns)
 			retval = getmsg(dev, NULL, &msgdata, &flags);
 
 			if (retval == -1) {
-				flog_err_sys(LIB_ERR_SYSTEM_CALL,
+				flog_err_sys(EC_LIB_SYSTEM_CALL,
 					     "getmsg(data) failed: %s",
 					     safe_strerror(errno));
 				goto exit;
@@ -258,11 +261,20 @@ void macfdb_read_for_bridge(struct zebra_ns *zns, struct interface *ifp,
 {
 }
 
+void macfdb_read_specific_mac(struct zebra_ns *zns, struct interface *br_if,
+			      struct ethaddr *mac, vlanid_t vid)
+{
+}
+
 void neigh_read(struct zebra_ns *zns)
 {
 }
 
 void neigh_read_for_vlan(struct zebra_ns *zns, struct interface *vlan_if)
+{
+}
+
+void neigh_read_specific_ip(struct ipaddr *ip, struct interface *vlan_if)
 {
 }
 

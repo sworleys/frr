@@ -24,12 +24,22 @@
 
 #define array_size(ar) (sizeof(ar) / sizeof(ar[0]))
 
+#if defined(HAVE_MALLOC_SIZE) && !defined(HAVE_MALLOC_USABLE_SIZE)
+#define malloc_usable_size(x) malloc_size(x)
+#define HAVE_MALLOC_USABLE_SIZE
+#endif
+
 #define SIZE_VAR ~0UL
 struct memtype {
 	struct memtype *next, **ref;
 	const char *name;
 	_Atomic size_t n_alloc;
+	_Atomic size_t n_max;
 	_Atomic size_t size;
+#ifdef HAVE_MALLOC_USABLE_SIZE
+	_Atomic size_t total;
+	_Atomic size_t max_size;
+#endif
 };
 
 struct memgroup {

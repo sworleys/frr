@@ -59,6 +59,26 @@ static int ns_default_ns_fd;
 
 static int ns_debug;
 
+struct ns_map_nsid {
+	RB_ENTRY(ns_map_nsid) id_entry;
+	ns_id_t ns_id_external;
+	ns_id_t ns_id;
+};
+
+static inline int ns_map_compare(const struct ns_map_nsid *a,
+				   const struct ns_map_nsid *b)
+{
+	return (a->ns_id - b->ns_id);
+}
+
+RB_HEAD(ns_map_nsid_head, ns_map_nsid);
+RB_PROTOTYPE(ns_map_nsid_head, ns_map_nsid, id_entry, ns_map_compare);
+RB_GENERATE(ns_map_nsid_head, ns_map_nsid, id_entry, ns_map_compare);
+struct ns_map_nsid_head ns_map_nsid_list = RB_INITIALIZER(&ns_map_nsid_list);
+
+static ns_id_t ns_id_external_numbering;
+
+
 #ifndef CLONE_NEWNET
 #define CLONE_NEWNET 0x40000000
 /* New network namespace (lo, device, names sockets, etc) */
@@ -176,7 +196,7 @@ static struct ns *ns_get_created_internal(struct ns *ns, char *name,
 			zlog_info("NS %s is created.", ns->name);
 	}
 	if (ns_master.ns_new_hook)
-		(*ns_master.ns_new_hook) (ns);
+		(*ns_master.ns_new_hook)(ns);
 	return ns;
 }
 
@@ -199,17 +219,17 @@ static int ns_enable_internal(struct ns *ns, void (*func)(ns_id_t, void *))
 		}
 
 		if (!ns_is_enabled(ns)) {
-			flog_err(LIB_ERR_SYSTEM_CALL,
-				  "Can not enable NS %u: %s!", ns->ns_id,
-				  safe_strerror(errno));
+			flog_err_sys(EC_LIB_SYSTEM_CALL,
+				     "Can not enable NS %u: %s!", ns->ns_id,
+				     safe_strerror(errno));
 			return 0;
 		}
 
 		/* Non default NS. leave */
 		if (ns->ns_id == NS_UNKNOWN) {
-			flog_err(LIB_ERR_NS,
-				  "Can not enable NS %s %u: Invalid NSID",
-				  ns->name, ns->ns_id);
+			flog_err(EC_LIB_NS,
+				 "Can not enable NS %s %u: Invalid NSID",
+				 ns->name, ns->ns_id);
 			return 0;
 		}
 		if (func)
@@ -252,8 +272,7 @@ static void ns_disable_internal(struct ns *ns)
 {
 	if (ns_is_enabled(ns)) {
 		if (ns_debug)
-			zlog_info("NS %u is to be disabled.",
-				  ns->ns_id);
+			zlog_info("NS %u is to be disabled.", ns->ns_id);
 
 		if (ns_master.ns_disable_hook)
 			(*ns_master.ns_disable_hook)(ns);
@@ -263,6 +282,38 @@ static void ns_disable_internal(struct ns *ns)
 
 		ns->fd = -1;
 	}
+}
+
+/* VRF list existance check by name. */
+static struct ns_map_nsid *ns_map_nsid_lookup_by_nsid(ns_id_t ns_id)
+{
+	struct ns_map_nsid ns_map;
+
+	ns_map.ns_id = ns_id;
+	return RB_FIND(ns_map_nsid_head, &ns_map_nsid_list, &ns_map);
+}
+
+ns_id_t ns_map_nsid_with_external(ns_id_t ns_id, bool map)
+{
+	struct ns_map_nsid *ns_map;
+	vrf_id_t ns_id_external;
+
+	ns_map = ns_map_nsid_lookup_by_nsid(ns_id);
+	if (ns_map && !map) {
+		ns_id_external = ns_map->ns_id_external;
+		RB_REMOVE(ns_map_nsid_head, &ns_map_nsid_list, ns_map);
+		return ns_id_external;
+	}
+	if (ns_map)
+		return ns_map->ns_id_external;
+	ns_map = XCALLOC(MTYPE_NS, sizeof(struct ns_map_nsid));
+	/* increase vrf_id
+	 * default vrf is the first one : 0
+	 */
+	ns_map->ns_id_external = ns_id_external_numbering++;
+	ns_map->ns_id = ns_id;
+	RB_INSERT(ns_map_nsid_head, &ns_map_nsid_list, ns_map);
+	return ns_map->ns_id_external;
 }
 
 struct ns *ns_get_created(struct ns *ns, char *name, ns_id_t ns_id)
@@ -293,15 +344,13 @@ void ns_delete(struct ns *ns)
 	// if_terminate (&ns->iflist);
 
 	RB_REMOVE(ns_head, &ns_tree, ns);
-	if (ns->name)
-		XFREE(MTYPE_NS_NAME, ns->name);
+	XFREE(MTYPE_NS_NAME, ns->name);
 
 	XFREE(MTYPE_NS, ns);
 }
 
 /* Look up the data pointer of the specified VRF. */
-void *
-ns_info_lookup(ns_id_t ns_id)
+void *ns_info_lookup(ns_id_t ns_id)
 {
 	struct ns *ns = ns_lookup_internal(ns_id);
 
@@ -387,10 +436,11 @@ char *ns_netns_pathname(struct vty *vty, const char *name)
 
 	if (!result) {
 		if (vty)
-			vty_out(vty, "Invalid pathname: %s\n",
+			vty_out(vty, "Invalid pathname for %s: %s\n",
+				pathname,
 				safe_strerror(errno));
 		else
-			flog_warn(LIB_WARN_LINUX_NS,
+			flog_warn(EC_LIB_LINUX_NS,
 				  "Invalid pathname for %s: %s", pathname,
 				  safe_strerror(errno));
 		return NULL;
@@ -399,9 +449,9 @@ char *ns_netns_pathname(struct vty *vty, const char *name)
 	if (check_base != NULL && strlen(check_base) + 1 > NS_NAMSIZ) {
 		if (vty)
 			vty_out(vty, "NS name (%s) invalid: too long (>%d)\n",
-				check_base, NS_NAMSIZ-1);
+				check_base, NS_NAMSIZ - 1);
 		else
-			flog_warn(LIB_WARN_LINUX_NS,
+			flog_warn(EC_LIB_LINUX_NS,
 				  "NS name (%s) invalid: too long (>%d)",
 				  check_base, NS_NAMSIZ - 1);
 		return NULL;
@@ -418,51 +468,44 @@ void ns_init(void)
 	if (ns_initialised == 1)
 		return;
 	errno = 0;
-#ifdef HAVE_NETNS
-	if (have_netns_enabled < 0)
+	if (have_netns())
 		ns_default_ns_fd = open(NS_DEFAULT_NAME, O_RDONLY);
 	else {
 		ns_default_ns_fd = -1;
 		default_ns = NULL;
 	}
-#else
-	ns_default_ns_fd = -1;
-	default_ns = NULL;
-#endif /* HAVE_NETNS */
-	if (ns_default_ns_fd == -1)
-		flog_err(LIB_ERR_NS,
-			  "NS initialisation failure (%s)",
-			  safe_strerror(errno));
 	ns_current_ns_fd = -1;
 	ns_initialised = 1;
 }
 
 /* Initialize NS module. */
-void ns_init_management(ns_id_t default_ns_id)
+void ns_init_management(ns_id_t default_ns_id, ns_id_t internal_ns)
 {
 	int fd;
 
 	ns_init();
 	default_ns = ns_get_created_internal(NULL, NULL, default_ns_id);
 	if (!default_ns) {
-		flog_err(LIB_ERR_NS, "%s: failed to create the default NS!",
-			  __func__);
+		flog_err(EC_LIB_NS, "%s: failed to create the default NS!",
+			 __func__);
 		exit(1);
 	}
 	if (have_netns()) {
 		fd = open(NS_DEFAULT_NAME, O_RDONLY);
 		default_ns->fd = fd;
 	}
+	default_ns->internal_ns_id = internal_ns;
+
 	/* Set the default NS name. */
 	default_ns->name = XSTRDUP(MTYPE_NS_NAME, NS_DEFAULT_NAME);
 	if (ns_debug)
-		zlog_info("%s: default NSID is %u",
-			  __func__, default_ns->ns_id);
+		zlog_info("%s: default NSID is %u", __func__,
+			  default_ns->ns_id);
 
 	/* Enable the default NS. */
 	if (!ns_enable(default_ns, NULL)) {
-		flog_err(LIB_ERR_NS, "%s: failed to enable the default NS!",
-			  __func__);
+		flog_err(EC_LIB_NS, "%s: failed to enable the default NS!",
+			 __func__);
 		exit(1);
 	}
 }
@@ -546,4 +589,3 @@ ns_id_t ns_get_default_id(void)
 		return default_ns->ns_id;
 	return NS_DEFAULT_INTERNAL;
 }
-

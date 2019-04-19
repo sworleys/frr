@@ -33,9 +33,6 @@
 DECLARE_MTYPE(HOST)
 DECLARE_MTYPE(COMPLETION)
 
-/* for test-commands.c */
-DECLARE_MTYPE(STRVEC)
-
 /* Host configuration variable */
 struct host {
 	/* Host name of this router. */
@@ -65,7 +62,6 @@ struct host {
 	/* Flags for services */
 	int advanced;
 	int encrypt;
-	int obfuscate;
 
 	/* Banner configuration. */
 	const char *motd;
@@ -79,14 +75,15 @@ enum node_type {
 	AUTH_ENABLE_NODE,	/* Authentication mode for change enable. */
 	ENABLE_NODE,		 /* Enable node. */
 	CONFIG_NODE,		 /* Config node. Default mode of config file. */
-	SERVICE_NODE,		 /* Service node. */
 	DEBUG_NODE,		 /* Debug node. */
 	VRF_DEBUG_NODE,		 /* Vrf Debug node. */
+	NORTHBOUND_DEBUG_NODE,	 /* Northbound Debug node. */
 	DEBUG_VNC_NODE,		 /* Debug VNC node. */
 	AAA_NODE,		 /* AAA node. */
 	KEYCHAIN_NODE,		 /* Key-chain node. */
 	KEYCHAIN_KEY_NODE,       /* Key-chain key node. */
 	LOGICALROUTER_NODE,      /* Logical-Router node. */
+	IP_NODE,		 /* Static ip route node. */
 	VRF_NODE,		 /* VRF mode node. */
 	INTERFACE_NODE,		 /* Interface mode node. */
 	NH_GROUP_NODE,		 /* Nexthop-Group mode node. */
@@ -121,9 +118,6 @@ enum node_type {
 	LDP_L2VPN_NODE,		 /* LDP L2VPN node */
 	LDP_PSEUDOWIRE_NODE,     /* LDP Pseudowire node */
 	ISIS_NODE,		 /* ISIS protocol mode */
-	MASC_NODE,		 /* MASC for multicast.  */
-	IRDP_NODE,		 /* ICMP Router Discovery Protocol mode. */
-	IP_NODE,		 /* Static ip route node. */
 	ACCESS_NODE,		 /* Access list node. */
 	PREFIX_NODE,		 /* Prefix list node. */
 	ACCESS_IPV6_NODE,	/* Access list node. */
@@ -144,10 +138,17 @@ enum node_type {
 	BGP_EVPN_VNI_NODE,       /* BGP EVPN VNI */
 	RPKI_NODE,     /* RPKI node for configuration of RPKI cache server
 			  connections.*/
+	BGP_FLOWSPECV4_NODE,	/* BGP IPv4 FLOWSPEC Address-Family */
+	BGP_FLOWSPECV6_NODE,	/* BGP IPv6 FLOWSPEC Address-Family */
+	BFD_NODE,		 /* BFD protocol mode. */
+	BFD_PEER_NODE,		 /* BFD peer configuration mode. */
+	OPENFABRIC_NODE,	/* OpenFabric router configuration node */
+	VRRP_NODE,		 /* VRRP node */
 	NODE_TYPE_MAX, /* maximum */
 };
 
 extern vector cmdvec;
+extern const struct message tokennames[];
 extern const char *node_names[];
 
 /* Node which has some commands and prompt string and configuration
@@ -224,6 +225,9 @@ struct cmd_node {
 	DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr, 0, 0)            \
 	funcdecl_##funcname
 
+#define DEFPY_NOSH(funcname, cmdname, cmdstr, helpstr)                         \
+	DEFPY(funcname, cmdname, cmdstr, helpstr)
+
 #define DEFPY_ATTR(funcname, cmdname, cmdstr, helpstr, attr)                   \
 	DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr, attr, 0)         \
 	funcdecl_##funcname
@@ -243,9 +247,6 @@ struct cmd_node {
 
 #define DEFUN_HIDDEN(funcname, cmdname, cmdstr, helpstr)                       \
 	DEFUN_ATTR(funcname, cmdname, cmdstr, helpstr, CMD_ATTR_HIDDEN)
-
-#define DEFUN_DEPRECATED(funcname, cmdname, cmdstr, helpstr)                   \
-	DEFUN_ATTR(funcname, cmdname, cmdstr, helpstr, CMD_ATTR_DEPRECATED)
 
 /* DEFUN_NOSH for commands that vtysh should ignore */
 #define DEFUN_NOSH(funcname, cmdname, cmdstr, helpstr)                         \
@@ -309,8 +310,14 @@ struct cmd_node {
 #define DEFPY(funcname, cmdname, cmdstr, helpstr)                              \
 	DEFUN(funcname, cmdname, cmdstr, helpstr)
 
+#define DEFPY_NOSH(funcname, cmdname, cmdstr, helpstr)                         \
+	DEFUN_NOSH(funcname, cmdname, cmdstr, helpstr)
+
 #define DEFPY_ATTR(funcname, cmdname, cmdstr, helpstr, attr)                   \
 	DEFUN_ATTR(funcname, cmdname, cmdstr, helpstr, attr)
+
+#define DEFPY_HIDDEN(funcname, cmdname, cmdstr, helpstr)                       \
+	DEFUN_HIDDEN(funcname, cmdname, cmdstr, helpstr)
 #endif /* VTYSH_EXTRACT_PL */
 
 /* Some macroes */
@@ -341,7 +348,7 @@ struct cmd_node {
 #define BGP_SOFT_RSCLIENT_RIB_STR "Soft reconfig for rsclient RIB\n"
 #define OSPF_STR "OSPF information\n"
 #define NEIGHBOR_STR "Specify neighbor router\n"
-#define DEBUG_STR "Debugging functions (see also 'undebug')\n"
+#define DEBUG_STR "Debugging functions\n"
 #define UNDEBUG_STR "Disable debugging functions (see also 'debug')\n"
 #define ROUTER_STR "Enable a routing process\n"
 #define AS_STR "AS number\n"
@@ -353,7 +360,7 @@ struct cmd_node {
 #define IN_STR  "Filter incoming routing updates\n"
 #define V4NOTATION_STR "specify by IPv4 address notation(e.g. 0.0.0.0)\n"
 #define OSPF6_NUMBER_STR "Specify by number\n"
-#define INTERFACE_STR "Interface infomation\n"
+#define INTERFACE_STR "Interface information\n"
 #define IFNAME_STR "Interface name(e.g. ep0)\n"
 #define IP6_STR "IPv6 Information\n"
 #define OSPF6_STR "Open Shortest Path First (OSPF) for IPv6\n"
@@ -363,7 +370,6 @@ struct cmd_node {
 #define PREFIX_LIST_STR "Build a prefix list\n"
 #define OSPF6_DUMP_TYPE_LIST                                                   \
 	"<neighbor|interface|area|lsa|zebra|config|dbex|spf|route|lsdb|redistribute|hook|asbr|prefix|abr>"
-#define ISIS_STR "IS-IS information\n"
 #define AREA_TAG_STR "[area tag]\n"
 #define COMMUNITY_AANN_STR "Community number where AA and NN are (0-65535)\n"
 #define COMMUNITY_VAL_STR  "Community number in AA:NN format (where AA and NN are (0-65535)) or local-AS|no-advertise|no-export|internet or additive\n"
@@ -376,7 +382,12 @@ struct cmd_node {
 #define WATCHFRR_STR "watchfrr information\n"
 #define ZEBRA_STR "Zebra information\n"
 
+#define CMD_VNI_RANGE "(1-16777215)"
 #define CONF_BACKUP_EXT ".sav"
+
+/* Command warnings. */
+#define NO_PASSWD_CMD_WARNING                                                  \
+	"Please be aware that removing the password is a security risk and you should think twice about this command.\n"
 
 /* IPv4 only machine should not accept IPv6 address for peer's IP
    address.  So we replace VTY command string like below. */
@@ -414,9 +425,31 @@ extern char **cmd_complete_command(vector, struct vty *, int *status);
 extern const char *cmd_prompt(enum node_type);
 extern int command_config_read_one_line(struct vty *vty,
 					const struct cmd_element **,
-					int use_config_node);
+					uint32_t line_num, int use_config_node);
 extern int config_from_file(struct vty *, FILE *, unsigned int *line_num);
 extern enum node_type node_parent(enum node_type);
+/*
+ * Execute command under the given vty context.
+ *
+ * vty
+ *    The vty context to execute under.
+ *
+ * cmd
+ *    The command string to execute.
+ *
+ * matched
+ *    If non-null and a match was found, the address of the matched command is
+ *    stored here. No action otherwise.
+ *
+ * vtysh
+ *    Whether or not this is being called from vtysh. If this is nonzero,
+ *    XXX: then what?
+ *
+ * Returns:
+ *    XXX: what does it return
+ */
+extern int cmd_execute(struct vty *vty, const char *cmd,
+		       const struct cmd_element **matched, int vtysh);
 extern int cmd_execute_command(vector, struct vty *,
 			       const struct cmd_element **, int);
 extern int cmd_execute_command_strict(vector, struct vty *,
@@ -444,38 +477,6 @@ extern void print_version(const char *);
 
 extern int cmd_banner_motd_file(const char *);
 
-/*
- * Reversible obfuscation.
- *
- * Implements a Caesar cipher. Printable ASCII in, printable ASCII out.
- *
- * No spaces (0x20) allowed in plaintext, ciphertext or key. No spaces produced
- * in output.
- *
- * --------------------------------------------------------------------------
- * SUBSTITUTION CIPHERS OFFER NO SECURITY. DO NOT USE THIS IN SECURE SYSTEMS.
- * SUBSTITUTION CIPHERS OFFER NO SECURITY. DO NOT USE THIS IN SECURE SYSTEMS.
- * SUBSTITUTION CIPHERS OFFER NO SECURITY. DO NOT USE THIS IN SECURE SYSTEMS.
- * SUBSTITUTION CIPHERS OFFER NO SECURITY. DO NOT USE THIS IN SECURE SYSTEMS.
- * SUBSTITUTION CIPHERS OFFER NO SECURITY. DO NOT USE THIS IN SECURE SYSTEMS.
- * --------------------------------------------------------------------------
- *
- * encrypt
- *    true  = encrypt
- *    false = decrypt
- *
- * text
- *    null-terminated input text; should be plaintext when encrypt = true,
- *    ciphertext when encrypt = false; must be printable ASCII without spaces
- *
- * key
- *    null terminated key; must be printable ASCII without spaces
- *
- * Returns:
- *    `text`, encrypted or decrypted in-place.
- */
-char *caesar(bool encrypt, char *text, const char *key);
-
 /* struct host global, ick */
 extern struct host host;
 
@@ -490,4 +491,5 @@ extern void
 cmd_variable_handler_register(const struct cmd_variable_handler *cvh);
 extern char *cmd_variable_comp2str(vector comps, unsigned short cols);
 
+extern void command_setup_early_logging(const char *dest, const char *level);
 #endif /* _ZEBRA_COMMAND_H */

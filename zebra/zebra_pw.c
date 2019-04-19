@@ -27,7 +27,8 @@
 
 #include "zebra/debug.h"
 #include "zebra/rib.h"
-#include "zebra/zserv.h"
+#include "zebra/zebra_router.h"
+#include "zebra/zapi_msg.h"
 #include "zebra/zebra_rnh.h"
 #include "zebra/zebra_vrf.h"
 #include "zebra/zebra_pw.h"
@@ -40,8 +41,6 @@ DEFINE_HOOK(pw_install, (struct zebra_pw * pw), (pw))
 DEFINE_HOOK(pw_uninstall, (struct zebra_pw * pw), (pw))
 
 #define MPLS_NO_LABEL MPLS_INVALID_LABEL
-
-extern struct zebra_t zebrad;
 
 static int zebra_pw_enabled(struct zebra_pw *);
 static void zebra_pw_install(struct zebra_pw *);
@@ -97,9 +96,10 @@ void zebra_pw_del(struct zebra_vrf *zvrf, struct zebra_pw *pw)
 	zebra_deregister_rnh_pseudowire(pw->vrf_id, pw);
 
 	/* uninstall */
-	if (pw->status == PW_STATUS_UP)
+	if (pw->status == PW_STATUS_UP) {
 		hook_call(pw_uninstall, pw);
-	else if (pw->install_retry_timer)
+		dplane_pw_uninstall(pw);
+	} else if (pw->install_retry_timer)
 		THREAD_TIMER_OFF(pw->install_retry_timer);
 
 	/* unlink and release memory */
@@ -170,7 +170,8 @@ static void zebra_pw_install(struct zebra_pw *pw)
 			   pw->vrf_id, pw->ifname,
 			   zebra_route_string(pw->protocol));
 
-	if (hook_call(pw_install, pw)) {
+	hook_call(pw_install, pw);
+	if (dplane_pw_install(pw) == ZEBRA_DPLANE_REQUEST_FAILURE) {
 		zebra_pw_install_failure(pw);
 		return;
 	}
@@ -191,6 +192,7 @@ static void zebra_pw_uninstall(struct zebra_pw *pw)
 
 	/* ignore any possible error */
 	hook_call(pw_uninstall, pw);
+	dplane_pw_uninstall(pw);
 
 	if (zebra_pw_enabled(pw))
 		zebra_pw_update_status(pw, PW_STATUS_DOWN);
@@ -212,7 +214,7 @@ void zebra_pw_install_failure(struct zebra_pw *pw)
 
 	/* schedule to retry later */
 	THREAD_TIMER_OFF(pw->install_retry_timer);
-	thread_add_timer(zebrad.master, zebra_pw_install_retry, pw,
+	thread_add_timer(zrouter.master, zebra_pw_install_retry, pw,
 			 PW_INSTALL_RETRY_INTERVAL, &pw->install_retry_timer);
 
 	zebra_pw_update_status(pw, PW_STATUS_DOWN);
@@ -268,7 +270,7 @@ static int zebra_pw_check_reachability(struct zebra_pw *pw)
 	return 0;
 }
 
-void zebra_pw_client_close(struct zserv *client)
+static int zebra_pw_client_close(struct zserv *client)
 {
 	struct vrf *vrf;
 	struct zebra_vrf *zvrf;
@@ -282,12 +284,16 @@ void zebra_pw_client_close(struct zserv *client)
 			zebra_pw_del(zvrf, pw);
 		}
 	}
+
+	return 0;
 }
 
 void zebra_pw_init(struct zebra_vrf *zvrf)
 {
 	RB_INIT(zebra_pw_head, &zvrf->pseudowires);
 	RB_INIT(zebra_static_pw_head, &zvrf->static_pseudowires);
+
+	hook_register(zserv_client_close, zebra_pw_client_close);
 }
 
 void zebra_pw_exit(struct zebra_vrf *zvrf)
@@ -303,15 +309,14 @@ void zebra_pw_exit(struct zebra_vrf *zvrf)
 
 DEFUN_NOSH (pseudowire_if,
 	    pseudowire_if_cmd,
-	    "[no] pseudowire IFNAME",
-	    NO_STR
+	    "pseudowire IFNAME",
 	    "Static pseudowire configuration\n"
 	    "Pseudowire name\n")
 {
 	struct zebra_vrf *zvrf;
 	struct zebra_pw *pw;
-	int idx = 0;
 	const char *ifname;
+	int idx = 0;
 
 	zvrf = vrf_info_lookup(VRF_DEFAULT);
 	if (!zvrf)
@@ -319,22 +324,47 @@ DEFUN_NOSH (pseudowire_if,
 
 	argv_find(argv, argc, "IFNAME", &idx);
 	ifname = argv[idx]->arg;
+
 	pw = zebra_pw_find(zvrf, ifname);
 	if (pw && pw->protocol != ZEBRA_ROUTE_STATIC) {
 		vty_out(vty, "%% Pseudowire is not static\n");
 		return CMD_WARNING;
 	}
 
-	if (argv_find(argv, argc, "no", &idx)) {
-		if (!pw)
-			return CMD_SUCCESS;
-		zebra_pw_del(zvrf, pw);
-		return CMD_SUCCESS;
-	}
-
 	if (!pw)
 		pw = zebra_pw_add(zvrf, ifname, ZEBRA_ROUTE_STATIC, NULL);
 	VTY_PUSH_CONTEXT(PW_NODE, pw);
+
+	return CMD_SUCCESS;
+}
+
+DEFUN (no_pseudowire_if,
+       no_pseudowire_if_cmd,
+       "no pseudowire IFNAME",
+       NO_STR
+       "Static pseudowire configuration\n"
+       "Pseudowire name\n")
+{
+	struct zebra_vrf *zvrf;
+	struct zebra_pw *pw;
+	const char *ifname;
+	int idx = 0;
+
+	zvrf = vrf_info_lookup(VRF_DEFAULT);
+	if (!zvrf)
+		return CMD_WARNING;
+
+	argv_find(argv, argc, "IFNAME", &idx);
+	ifname = argv[idx]->arg;
+
+	pw = zebra_pw_find(zvrf, ifname);
+	if (pw) {
+		if (pw->protocol != ZEBRA_ROUTE_STATIC) {
+			vty_out(vty, "%% Pseudowire is not static\n");
+			return CMD_WARNING;
+		}
+		zebra_pw_del(zvrf, pw);
+	}
 
 	return CMD_SUCCESS;
 }
@@ -526,6 +556,7 @@ void zebra_pw_vty_init(void)
 	install_default(PW_NODE);
 
 	install_element(CONFIG_NODE, &pseudowire_if_cmd);
+	install_element(CONFIG_NODE, &no_pseudowire_if_cmd);
 	install_element(PW_NODE, &pseudowire_labels_cmd);
 	install_element(PW_NODE, &pseudowire_neighbor_cmd);
 	install_element(PW_NODE, &pseudowire_control_word_cmd);

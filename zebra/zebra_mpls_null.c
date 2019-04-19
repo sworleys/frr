@@ -24,21 +24,23 @@
 
 #if !defined(HAVE_NETLINK) && !defined(OPEN_BSD)
 
-void kernel_add_lsp(zebra_lsp_t *lsp)
-{
-	return;
-}
-void kernel_upd_lsp(zebra_lsp_t *lsp)
-{
-	return;
-}
-void kernel_del_lsp(zebra_lsp_t *lsp)
-{
-	return;
-}
 int mpls_kernel_init(void)
 {
 	return -1;
 };
+
+/*
+ * Pseudowire update api - note that the default has been
+ * to report 'success' for pw updates on unsupported platforms.
+ */
+enum zebra_dplane_result kernel_pw_update(struct zebra_dplane_ctx *ctx)
+{
+	return ZEBRA_DPLANE_REQUEST_SUCCESS;
+}
+
+enum zebra_dplane_result kernel_lsp_update(struct zebra_dplane_ctx *ctx)
+{
+	return ZEBRA_DPLANE_REQUEST_FAILURE;
+}
 
 #endif /* !defined(HAVE_NETLINK) && !defined(OPEN_BSD) */

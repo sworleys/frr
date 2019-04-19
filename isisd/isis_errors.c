@@ -24,15 +24,15 @@
 #include "isis_errors.h"
 
 /* clang-format off */
-static struct ferr_ref ferr_isis_err[] = {
+static struct log_ref ferr_isis_err[] = {
 	{
-		.code = ISIS_ERR_PACKET,
+		.code = EC_ISIS_PACKET,
 		.title = "ISIS Packet Error",
 		.description = "Isis has detected an error with a packet from a peer",
 		.suggestion = "Gather log information and open an issue then restart FRR"
 	},
 	{
-		.code = ISIS_ERR_CONFIG,
+		.code = EC_ISIS_CONFIG,
 		.title = "ISIS Configuration Error",
 		.description = "Isis has detected an error within configuration for the router",
 		.suggestion = "Ensure configuration is correct"
@@ -45,5 +45,5 @@ static struct ferr_ref ferr_isis_err[] = {
 
 void isis_error_init(void)
 {
-	ferr_ref_add(ferr_isis_err);
+	log_ref_add(ferr_isis_err);
 }

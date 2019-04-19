@@ -96,8 +96,9 @@ struct external_info *ospf_external_info_check(struct ospf *ospf,
 
 		redist_on =
 			is_prefix_default(&p)
-				? vrf_bitmap_check(zclient->default_information,
-						   ospf->vrf_id)
+				? vrf_bitmap_check(
+					  zclient->default_information[AFI_IP],
+					  ospf->vrf_id)
 				: (zclient->mi_redist[AFI_IP][type].enabled
 				   || vrf_bitmap_check(
 					      zclient->redist[AFI_IP][type],
@@ -218,7 +219,7 @@ static void ospf_process_self_originated_lsa(struct ospf *ospf,
 		break;
 	case OSPF_OPAQUE_AS_LSA:
 		ospf_opaque_lsa_refresh(new);
-			/* Reconsideration may needed. */ /* XXX */
+		/* Reconsideration may needed. */ /* XXX */
 		break;
 	default:
 		break;
@@ -319,7 +320,7 @@ int ospf_flood(struct ospf *ospf, struct ospf_neighbor *nbr,
 
 	/* Do some internal house keeping that is needed here */
 	SET_FLAG(new->flags, OSPF_LSA_RECEIVED);
-	ospf_lsa_is_self_originated(ospf, new); /* Let it set the flag */
+	(void)ospf_lsa_is_self_originated(ospf, new); /* Let it set the flag */
 
 	/* Install the new LSA in the link state database
 	   (replacing the current database copy).  This may cause the
@@ -539,7 +540,6 @@ static int ospf_flood_through_interface(struct ospf_interface *oi,
 	    IP addresses for these packets are the neighbors' IP
 	    addresses.   */
 	if (oi->type == OSPF_IFTYPE_NBMA) {
-		struct route_node *rn;
 		struct ospf_neighbor *nbr;
 
 		for (rn = route_top(oi->nbrs); rn; rn = route_next(rn))
@@ -810,8 +810,7 @@ struct ospf_lsa *ospf_ls_request_new(struct lsa_header *lsah)
 {
 	struct ospf_lsa *new;
 
-	new = ospf_lsa_new();
-	new->data = ospf_lsa_data_new(OSPF_LSA_HEADER_SIZE);
+	new = ospf_lsa_new_and_data(OSPF_LSA_HEADER_SIZE);
 	memcpy(new->data, lsah, OSPF_LSA_HEADER_SIZE);
 
 	return new;

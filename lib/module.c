@@ -1,23 +1,17 @@
 /*
  * Copyright (c) 2015-16  David Lamparter, for NetDEF, Inc.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
  *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #include "config.h"
@@ -42,10 +36,11 @@ static struct frrmod_info frrmod_default_info = {
 	.description = "libfrr core module",
 };
 union _frrmod_runtime_u frrmod_default = {
-	.r = {
-		.info = &frrmod_default_info,
-		.finished_loading = 1,
-	},
+	.r =
+		{
+			.info = &frrmod_default_info,
+			.finished_loading = 1,
+		},
 };
 
 // if defined(HAVE_SYS_WEAK_ALIAS_ATTRIBUTE)
@@ -74,7 +69,7 @@ struct frrmod_runtime *frrmod_load(const char *spec, const char *dir, char *err,
 				   size_t err_len)
 {
 	void *handle = NULL;
-	char name[PATH_MAX], fullpath[PATH_MAX], *args;
+	char name[PATH_MAX], fullpath[PATH_MAX * 2], *args;
 	struct frrmod_runtime *rtinfo, **rtinfop;
 	const struct frrmod_info *info;
 
@@ -84,7 +79,7 @@ struct frrmod_runtime *frrmod_load(const char *spec, const char *dir, char *err,
 		*args++ = '\0';
 
 	if (!strchr(name, '/')) {
-		if (!handle && execname) {
+		if (execname) {
 			snprintf(fullpath, sizeof(fullpath), "%s/%s_%s.so", dir,
 				 execname, name);
 			handle = dlopen(fullpath, RTLD_NOW | RTLD_GLOBAL);
@@ -146,8 +141,7 @@ struct frrmod_runtime *frrmod_load(const char *spec, const char *dir, char *err,
 	return rtinfo;
 
 out_fail:
-	if (rtinfo->load_args)
-		XFREE(MTYPE_MODULE_LOADARGS, rtinfo->load_args);
+	XFREE(MTYPE_MODULE_LOADARGS, rtinfo->load_args);
 	XFREE(MTYPE_MODULE_LOADNAME, rtinfo->load_name);
 	return NULL;
 }

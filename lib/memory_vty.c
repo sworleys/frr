@@ -21,11 +21,16 @@
 
 #include <zebra.h>
 /* malloc.h is generally obsolete, however GNU Libc mallinfo wants it. */
-#if (defined(GNU_LINUX) && defined(HAVE_MALLINFO))
+#ifdef HAVE_MALLOC_H
 #include <malloc.h>
-#endif /* HAVE_MALLINFO */
+#endif
+#ifdef HAVE_MALLOC_MALLOC_H
+#include <malloc/malloc.h>
+#endif
 #include <dlfcn.h>
+#ifdef HAVE_LINK_H
 #include <link.h>
+#endif
 
 #include "log.h"
 #include "memory.h"
@@ -70,18 +75,45 @@ static int show_memory_mallinfo(struct vty *vty)
 static int qmem_walker(void *arg, struct memgroup *mg, struct memtype *mt)
 {
 	struct vty *vty = arg;
-	if (!mt)
+	if (!mt) {
 		vty_out(vty, "--- qmem %s ---\n", mg->name);
-	else {
+		vty_out(vty, "%-30s: %8s %-8s%s %8s %9s\n",
+			"Type", "Current#", "  Size",
+#ifdef HAVE_MALLOC_USABLE_SIZE
+			"     Total",
+#else
+			"",
+#endif
+			"Max#",
+#ifdef HAVE_MALLOC_USABLE_SIZE
+			"MaxBytes"
+#else
+			""
+#endif
+			);
+	} else {
 		if (mt->n_alloc != 0) {
 			char size[32];
 			snprintf(size, sizeof(size), "%6zu", mt->size);
-			vty_out(vty, "%-30s: %10zu  %s\n", mt->name,
+#ifdef HAVE_MALLOC_USABLE_SIZE
+#define TSTR " %9zu"
+#define TARG , mt->total
+#define TARG2 , mt->max_size
+#else
+#define TSTR ""
+#define TARG
+#define TARG2
+#endif
+			vty_out(vty, "%-30s: %8zu %-8s"TSTR" %8zu"TSTR"\n",
+				mt->name,
 				mt->n_alloc,
 				mt->size == 0 ? ""
 					      : mt->size == SIZE_VAR
-							? "(variably sized)"
-							: size);
+							? "variable"
+							: size
+				TARG,
+				mt->n_max
+				TARG2);
 		}
 	}
 	return 0;

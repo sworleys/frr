@@ -21,14 +21,32 @@
 #ifndef _ZEBRA_VTY_H
 #define _ZEBRA_VTY_H
 
+#include <sys/types.h>
+#include <regex.h>
+
 #include "thread.h"
 #include "log.h"
 #include "sockunion.h"
 #include "qobj.h"
 #include "compiler.h"
+#include "northbound.h"
 
 #define VTY_BUFSIZ 4096
 #define VTY_MAXHIST 20
+#define VTY_MAXDEPTH 8
+
+#define VTY_MAXCFGCHANGES 8
+
+struct vty_error {
+	char error_buf[VTY_BUFSIZ];
+	uint32_t line_num;
+};
+
+struct vty_cfg_change {
+	char xpath[XPATH_MAXLEN];
+	enum nb_operation operation;
+	const char *value;
+};
 
 /* VTY struct. */
 struct vty {
@@ -37,6 +55,13 @@ struct vty {
 
 	/* output FD, to support stdin/stdout combination */
 	int wfd;
+
+	/* File output, used for VTYSH only */
+	FILE *of;
+	FILE *of_saved;
+
+	/* whether we are using pager or not */
+	bool is_paged;
 
 	/* Is this vty connect to file or not */
 	enum { VTY_TERM, VTY_FILE, VTY_SHELL, VTY_SHELL_SERV } type;
@@ -47,6 +72,13 @@ struct vty {
 	/* Failure count */
 	int fail;
 
+	/* Output filer regex */
+	bool filter;
+	regex_t include;
+
+	/* Line buffer */
+	struct buffer *lbuf;
+
 	/* Output buffer. */
 	struct buffer *obuf;
 
@@ -54,7 +86,7 @@ struct vty {
 	char *buf;
 
 	/* Command input error buffer */
-	char *error_buf;
+	struct list *error;
 
 	/* Command cursor point */
 	int cp;
@@ -73,6 +105,30 @@ struct vty {
 
 	/* History insert end point */
 	int hindex;
+
+	/* Changes enqueued to be applied in the candidate configuration. */
+	size_t num_cfg_changes;
+	struct vty_cfg_change cfg_changes[VTY_MAXCFGCHANGES];
+
+	/* XPath of the current node */
+	int xpath_index;
+	char xpath[VTY_MAXDEPTH][XPATH_MAXLEN];
+
+	/* In configure mode. */
+	bool config;
+
+	/* Private candidate configuration mode. */
+	bool private_config;
+
+	/* Candidate configuration. */
+	struct nb_config *candidate_config;
+
+	/* Base candidate configuration. */
+	struct nb_config *candidate_config_base;
+
+	/* Confirmed-commit timeout and rollback configuration. */
+	struct thread *t_confirmed_commit_timeout;
+	struct nb_config *confirmed_commit_rollback;
 
 	/* qobj object ID (replacement for "index") */
 	uint64_t qobj_index;
@@ -111,9 +167,6 @@ struct vty {
 
 	/* Terminal monitor. */
 	int monitor;
-
-	/* In configure mode. */
-	int config;
 
 	/* Read and write thread. */
 	struct thread *t_read;
@@ -174,10 +227,38 @@ static inline void vty_push_context(struct vty *vty, int node, uint64_t id)
 	struct structname *ptr = VTY_GET_CONTEXT_SUB(structname);              \
 	VTY_CHECK_CONTEXT(ptr);
 #define VTY_DECLVAR_INSTANCE_CONTEXT(structname, ptr)                          \
-	if (vty->qobj_index == 0)					       \
-		return CMD_NOT_MY_INSTANCE;				       \
+	if (vty->qobj_index == 0)                                              \
+		return CMD_NOT_MY_INSTANCE;                                    \
 	struct structname *ptr = VTY_GET_CONTEXT(structname);                  \
 	VTY_CHECK_CONTEXT(ptr);
+
+/* XPath macros. */
+#define VTY_PUSH_XPATH(nodeval, value)                                         \
+	do {                                                                   \
+		if (vty->xpath_index >= VTY_MAXDEPTH) {                        \
+			vty_out(vty, "%% Reached maximum CLI depth (%u)\n",    \
+				VTY_MAXDEPTH);                                 \
+			return CMD_WARNING;                                    \
+		}                                                              \
+		vty->node = nodeval;                                           \
+		strlcpy(vty->xpath[vty->xpath_index], value,                   \
+			sizeof(vty->xpath[0]));                                \
+		vty->xpath_index++;                                            \
+	} while (0)
+
+#define VTY_CURR_XPATH vty->xpath[vty->xpath_index - 1]
+
+#define VTY_CHECK_XPATH                                                        \
+	do {                                                                   \
+		if (vty->xpath_index > 0                                       \
+		    && !yang_dnode_exists(vty->candidate_config->dnode,        \
+					  VTY_CURR_XPATH)) {                   \
+			vty_out(vty,                                           \
+				"Current configuration object was deleted "    \
+				"by another process.\n\n");                    \
+			return CMD_WARNING;                                    \
+		}                                                              \
+	} while (0)
 
 struct vty_arg {
 	const char *name;
@@ -188,45 +269,6 @@ struct vty_arg {
 
 /* Integrated configuration file. */
 #define INTEGRATE_DEFAULT_CONFIG "frr.conf"
-
-#if CONFDATE > 20180401
-CPP_NOTICE("It's probably time to remove VTY_NEWLINE compatibility foo.")
-#endif
-
-/* for compatibility */
-#define VNL "\n" CPP_WARN("VNL has been replaced with \\n.")
-#define VTYNL "\n" CPP_WARN("VTYNL has been replaced with \\n.")
-#define VTY_NEWLINE "\n" CPP_WARN("VTY_NEWLINE has been replaced with \\n.")
-#define VTY_GET_INTEGER(desc, v, str)                                          \
-	{                                                                      \
-		(v) = strtoul((str), NULL, 10);                                \
-	}                                                                      \
-	CPP_WARN("VTY_GET_INTEGER is no longer useful, use strtoul() or DEFPY.")
-#define VTY_GET_INTEGER_RANGE(desc, v, str, min, max)                          \
-	{                                                                      \
-		(v) = strtoul((str), NULL, 10);                                \
-	}                                                                      \
-	CPP_WARN(                                                              \
-		"VTY_GET_INTEGER_RANGE is no longer useful, use strtoul() or DEFPY.")
-#define VTY_GET_ULONG(desc, v, str)                                            \
-	{                                                                      \
-		(v) = strtoul((str), NULL, 10);                                \
-	}                                                                      \
-	CPP_WARN("VTY_GET_ULONG is no longer useful, use strtoul() or DEFPY.")
-#define VTY_GET_ULL(desc, v, str)                                              \
-	{                                                                      \
-		(v) = strtoull((str), NULL, 10);                               \
-	}                                                                      \
-	CPP_WARN("VTY_GET_ULL is no longer useful, use strtoull() or DEFPY.")
-#define VTY_GET_IPV4_ADDRESS(desc, v, str)                                     \
-	inet_aton((str), &(v)) CPP_WARN(                                       \
-		"VTY_GET_IPV4_ADDRESS is no longer useful, use inet_aton() or DEFPY.")
-#define VTY_GET_IPV4_PREFIX(desc, v, str)                                      \
-	str2prefix_ipv4((str), &(v)) CPP_WARN(                                 \
-		"VTY_GET_IPV4_PREFIX is no longer useful, use str2prefix_ipv4() or DEFPY.")
-#define vty_outln(vty, str, ...)                                               \
-	vty_out(vty, str "\n", ##__VA_ARGS__) CPP_WARN(                        \
-		"vty_outln is no longer useful, use vty_out(...\\n...)")
 
 /* Default time out value */
 #define VTY_TIMEOUT_DEFAULT 600
@@ -242,6 +284,9 @@ CPP_NOTICE("It's probably time to remove VTY_NEWLINE compatibility foo.")
 #ifndef IS_DIRECTORY_SEP
 #define IS_DIRECTORY_SEP(c) ((c) == DIRECTORY_SEP)
 #endif
+
+/* Exported variables */
+extern struct vty *vty_exclusive_lock;
 
 /* Prototypes. */
 extern void vty_init(struct thread_master *);
@@ -259,17 +304,21 @@ extern struct vty *vty_stdio(void (*atclose)(int isexit));
 extern int vty_out(struct vty *, const char *, ...) PRINTF_ATTRIBUTE(2, 3);
 extern void vty_frame(struct vty *, const char *, ...) PRINTF_ATTRIBUTE(2, 3);
 extern void vty_endframe(struct vty *, const char *);
+bool vty_set_include(struct vty *vty, const char *regexp);
 
-extern void vty_read_config(const char *, char *);
+extern bool vty_read_config(struct nb_config *config, const char *config_file,
+			    char *config_default_dir);
 extern void vty_time_print(struct vty *, int);
 extern void vty_serv_sock(const char *, unsigned short, const char *);
 extern void vty_close(struct vty *);
 extern char *vty_get_cwd(void);
 extern void vty_log(const char *level, const char *proto, const char *fmt,
 		    struct timestamp_control *, va_list);
-extern int vty_config_lock(struct vty *);
-extern int vty_config_unlock(struct vty *);
-extern void vty_config_lockless(void);
+extern int vty_config_enter(struct vty *vty, bool private_config,
+			    bool exclusive);
+extern void vty_config_exit(struct vty *);
+extern int vty_config_exclusive_lock(struct vty *vty);
+extern void vty_config_exclusive_unlock(struct vty *vty);
 extern int vty_shell(struct vty *);
 extern int vty_shell_serv(struct vty *);
 extern void vty_hello(struct vty *);

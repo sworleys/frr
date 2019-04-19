@@ -85,10 +85,9 @@ DEFUN (debug_bgp_vnc,
 
 DEFUN (no_debug_bgp_vnc,
        no_debug_bgp_vnc_cmd,
-       "<no debug|undebug> bgp vnc <rfapi-query|import-bi-attach|import-del-remote|verbose>",
+       "no debug bgp vnc <rfapi-query|import-bi-attach|import-del-remote|verbose>",
        NO_STR
        DEBUG_STR
-       "Undebug\n"
        BGP_STR
        VNC_STR
        "rfapi query handling\n"
@@ -98,10 +97,8 @@ DEFUN (no_debug_bgp_vnc,
 {
 	size_t i;
 
-	if (strmatch(argv[0]->text, "no"))
-		argc--, argv++;
 	for (i = 0; i < (sizeof(vncdebug) / sizeof(struct vnc_debug)); ++i) {
-		if (strmatch(argv[3]->text, vncdebug[i].name)) {
+		if (strmatch(argv[argc - 1]->text, vncdebug[i].name)) {
 			if (vty->node == CONFIG_NODE) {
 				conf_vnc_debug &= ~vncdebug[i].bit;
 				term_vnc_debug &= ~vncdebug[i].bit;
@@ -117,17 +114,15 @@ DEFUN (no_debug_bgp_vnc,
 	return CMD_WARNING_CONFIG_FAILED;
 }
 
-
 /***********************************************************************
  *	no debug bgp vnc all
  ***********************************************************************/
 
 DEFUN (no_debug_bgp_vnc_all,
        no_debug_bgp_vnc_all_cmd,
-       "<no debug|undebug> all bgp vnc",
+       "no debug all bgp vnc",
        NO_STR
        DEBUG_STR
-       "Undebug command\n"
        "Disable all VNC debugging\n"
        BGP_STR
        VNC_STR)
@@ -169,7 +164,7 @@ static int bgp_vnc_config_write_debug(struct vty *vty)
 	int write = 0;
 	size_t i;
 
-	for (i = 0; i < (sizeof(vncdebug) / sizeof(struct vnc_debug)); ++i) {
+	for (i = 0; i < array_size(vncdebug); ++i) {
 		if (conf_vnc_debug & vncdebug[i].bit) {
 			vty_out(vty, "debug bgp vnc %s\n", vncdebug[i].name);
 			write++;
@@ -188,6 +183,8 @@ void vnc_debug_init(void)
 	install_element(ENABLE_NODE, &debug_bgp_vnc_cmd);
 	install_element(CONFIG_NODE, &debug_bgp_vnc_cmd);
 	install_element(ENABLE_NODE, &no_debug_bgp_vnc_cmd);
+	install_element(CONFIG_NODE, &no_debug_bgp_vnc_cmd);
 
 	install_element(ENABLE_NODE, &no_debug_bgp_vnc_all_cmd);
+	install_element(CONFIG_NODE, &no_debug_bgp_vnc_all_cmd);
 }

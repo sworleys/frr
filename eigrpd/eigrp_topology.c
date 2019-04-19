@@ -53,7 +53,7 @@
 #include "eigrpd/eigrp_memory.h"
 
 static int eigrp_nexthop_entry_cmp(struct eigrp_nexthop_entry *,
-				    struct eigrp_nexthop_entry *);
+				   struct eigrp_nexthop_entry *);
 
 /*
  * Returns linkedlist used as topology table
@@ -61,7 +61,7 @@ static int eigrp_nexthop_entry_cmp(struct eigrp_nexthop_entry *,
  * del - assigned function executed before deleting topology node by list
  * function
  */
-struct route_table *eigrp_topology_new()
+struct route_table *eigrp_topology_new(void)
 {
 	return route_table_init();
 }
@@ -70,7 +70,7 @@ struct route_table *eigrp_topology_new()
  * Returns new created toplogy node
  * cmp - assigned function for comparing topology entry
  */
-struct eigrp_prefix_entry *eigrp_prefix_entry_new()
+struct eigrp_prefix_entry *eigrp_prefix_entry_new(void)
 {
 	struct eigrp_prefix_entry *new;
 	new = XCALLOC(MTYPE_EIGRP_PREFIX_ENTRY,
@@ -88,7 +88,7 @@ struct eigrp_prefix_entry *eigrp_prefix_entry_new()
  * Topology entry comparison
  */
 static int eigrp_nexthop_entry_cmp(struct eigrp_nexthop_entry *entry1,
-				    struct eigrp_nexthop_entry *entry2)
+				   struct eigrp_nexthop_entry *entry2)
 {
 	if (entry1->distance < entry2->distance)
 		return -1;
@@ -102,7 +102,7 @@ static int eigrp_nexthop_entry_cmp(struct eigrp_nexthop_entry *entry1,
  * Returns new topology entry
  */
 
-struct eigrp_nexthop_entry *eigrp_nexthop_entry_new()
+struct eigrp_nexthop_entry *eigrp_nexthop_entry_new(void)
 {
 	struct eigrp_nexthop_entry *new;
 
@@ -119,15 +119,8 @@ struct eigrp_nexthop_entry *eigrp_nexthop_entry_new()
  */
 void eigrp_topology_free(struct route_table *table)
 {
-	route_table_finish(table);
-}
-
-/*
- * Deleting all topology nodes in table
- */
-void eigrp_topology_cleanup(struct route_table *table)
-{
 	eigrp_topology_delete_all(table);
+	route_table_finish(table);
 }
 
 /*
@@ -143,10 +136,10 @@ void eigrp_prefix_entry_add(struct route_table *topology,
 		if (IS_DEBUG_EIGRP_EVENT) {
 			char buf[PREFIX_STRLEN];
 
-			zlog_debug("%s: %s Should we have found this entry in the topo table?",
-				   __PRETTY_FUNCTION__,
-				   prefix2str(pe->destination, buf,
-					      sizeof(buf)));
+			zlog_debug(
+				"%s: %s Should we have found this entry in the topo table?",
+				__PRETTY_FUNCTION__,
+				prefix2str(pe->destination, buf, sizeof(buf)));
 		}
 	}
 
@@ -158,7 +151,7 @@ void eigrp_prefix_entry_add(struct route_table *topology,
  * Adding topology entry to topology node
  */
 void eigrp_nexthop_entry_add(struct eigrp_prefix_entry *node,
-			      struct eigrp_nexthop_entry *entry)
+			     struct eigrp_nexthop_entry *entry)
 {
 	struct list *l = list_new();
 
@@ -171,7 +164,7 @@ void eigrp_nexthop_entry_add(struct eigrp_prefix_entry *node,
 		eigrp_zebra_route_add(node->destination, l);
 	}
 
-	list_delete_and_null(&l);
+	list_delete(&l);
 }
 
 /*
@@ -181,7 +174,12 @@ void eigrp_prefix_entry_delete(struct route_table *table,
 			       struct eigrp_prefix_entry *pe)
 {
 	struct eigrp *eigrp = eigrp_lookup();
+	struct eigrp_nexthop_entry *ne;
+	struct listnode *node, *nnode;
 	struct route_node *rn;
+
+	if (!eigrp)
+		return;
 
 	rn = route_node_lookup(table, pe->destination);
 	if (!rn)
@@ -193,13 +191,16 @@ void eigrp_prefix_entry_delete(struct route_table *table,
 	 */
 	listnode_delete(eigrp->topology_changes_internalIPV4, pe);
 
-	list_delete_and_null(&pe->entries);
-	list_delete_and_null(&pe->rij);
+	for (ALL_LIST_ELEMENTS(pe->entries, node, nnode, ne))
+		eigrp_nexthop_entry_delete(pe, ne);
+	list_delete(&pe->entries);
+	list_delete(&pe->rij);
 	eigrp_zebra_route_delete(pe->destination);
+	prefix_free(pe->destination);
 
 	rn->info = NULL;
-	route_unlock_node(rn);  //Lookup above
-	route_unlock_node(rn);  //Initial creation
+	route_unlock_node(rn); // Lookup above
+	route_unlock_node(rn); // Initial creation
 	XFREE(MTYPE_EIGRP_PREFIX_ENTRY, pe);
 }
 
@@ -207,7 +208,7 @@ void eigrp_prefix_entry_delete(struct route_table *table,
  * Deleting topology entry from topology node
  */
 void eigrp_nexthop_entry_delete(struct eigrp_prefix_entry *node,
-				 struct eigrp_nexthop_entry *entry)
+				struct eigrp_nexthop_entry *entry)
 {
 	if (listnode_lookup(node->entries, entry) != NULL) {
 		listnode_delete(node->entries, entry);
@@ -232,18 +233,6 @@ void eigrp_topology_delete_all(struct route_table *topology)
 
 		eigrp_prefix_entry_delete(topology, pe);
 	}
-}
-
-/*
- * Return 0 if topology is not empty
- * otherwise return 1
- */
-unsigned int eigrp_topology_table_isempty(struct list *topology)
-{
-	if (topology->count)
-		return 1;
-	else
-		return 0;
 }
 
 struct eigrp_prefix_entry *
@@ -287,7 +276,7 @@ struct list *eigrp_topology_get_successor(struct eigrp_prefix_entry *table_node)
 	 * If we have no successors return NULL
 	 */
 	if (!successors->count) {
-		list_delete_and_null(&successors);
+		list_delete(&successors);
 		successors = NULL;
 	}
 
@@ -356,17 +345,18 @@ struct list *eigrp_neighbor_prefixes_lookup(struct eigrp *eigrp,
 	return prefixes;
 }
 
-enum metric_change eigrp_topology_update_distance(struct eigrp_fsm_action_message *msg)
+enum metric_change
+eigrp_topology_update_distance(struct eigrp_fsm_action_message *msg)
 {
 	struct eigrp *eigrp = msg->eigrp;
 	struct eigrp_prefix_entry *prefix = msg->prefix;
 	struct eigrp_nexthop_entry *entry = msg->entry;
 	enum metric_change change = METRIC_SAME;
-	u_int32_t new_reported_distance;
+	uint32_t new_reported_distance;
 
 	assert(entry);
 
-	switch(msg->data_type) {
+	switch (msg->data_type) {
 	case EIGRP_CONNECTED:
 		if (prefix->nt == EIGRP_TOPOLOGY_TYPE_CONNECTED)
 			return change;
@@ -383,8 +373,8 @@ enum metric_change eigrp_topology_update_distance(struct eigrp_fsm_action_messag
 			return change; // No change
 		}
 
-		new_reported_distance = eigrp_calculate_metrics(eigrp,
-								msg->metrics);
+		new_reported_distance =
+			eigrp_calculate_metrics(eigrp, msg->metrics);
 
 		if (entry->reported_distance < new_reported_distance) {
 			change = METRIC_INCREASE;
@@ -408,11 +398,11 @@ enum metric_change eigrp_topology_update_distance(struct eigrp_fsm_action_messag
 		}
 		break;
 	default:
-		flog_err(LIB_ERR_DEVELOPMENT, "%s: Please implement handler",
-			  __PRETTY_FUNCTION__);
+		flog_err(EC_LIB_DEVELOPMENT, "%s: Please implement handler",
+			 __PRETTY_FUNCTION__);
 		break;
 	}
- distance_done:
+distance_done:
 	/*
 	 * Move to correct position in list according to new distance
 	 */
@@ -426,6 +416,9 @@ void eigrp_topology_update_all_node_flags(struct eigrp *eigrp)
 {
 	struct eigrp_prefix_entry *pe;
 	struct route_node *rn;
+
+	if (!eigrp)
+		return;
 
 	for (rn = route_top(eigrp->topology_table); rn; rn = route_next(rn)) {
 		pe = rn->info;
@@ -443,18 +436,27 @@ void eigrp_topology_update_node_flags(struct eigrp_prefix_entry *dest)
 	struct eigrp_nexthop_entry *entry;
 	struct eigrp *eigrp = eigrp_lookup();
 
+	assert(eigrp);
+
 	for (ALL_LIST_ELEMENTS_RO(dest->entries, node, entry)) {
-		if (((uint64_t)entry->distance
-		     <= (uint64_t)dest->distance * (uint64_t)eigrp->variance)
-		    && entry->distance != EIGRP_MAX_METRIC) // is successor
-		{
-			entry->flags |= EIGRP_NEXTHOP_ENTRY_SUCCESSOR_FLAG;
-			entry->flags &= ~EIGRP_NEXTHOP_ENTRY_FSUCCESSOR_FLAG;
-		} else if (entry->reported_distance
-			   < dest->fdistance) // is feasible successor
-		{
-			entry->flags |= EIGRP_NEXTHOP_ENTRY_FSUCCESSOR_FLAG;
-			entry->flags &= ~EIGRP_NEXTHOP_ENTRY_SUCCESSOR_FLAG;
+		if (entry->reported_distance < dest->fdistance) {
+			// is feasible successor, can be successor
+			if (((uint64_t)entry->distance
+			     <= (uint64_t)dest->distance
+					* (uint64_t)eigrp->variance)
+			    && entry->distance != EIGRP_MAX_METRIC) {
+				// is successor
+				entry->flags |=
+					EIGRP_NEXTHOP_ENTRY_SUCCESSOR_FLAG;
+				entry->flags &=
+					~EIGRP_NEXTHOP_ENTRY_FSUCCESSOR_FLAG;
+			} else {
+				// is feasible successor only
+				entry->flags |=
+					EIGRP_NEXTHOP_ENTRY_FSUCCESSOR_FLAG;
+				entry->flags &=
+					~EIGRP_NEXTHOP_ENTRY_SUCCESSOR_FLAG;
+			}
 		} else {
 			entry->flags &= ~EIGRP_NEXTHOP_ENTRY_FSUCCESSOR_FLAG;
 			entry->flags &= ~EIGRP_NEXTHOP_ENTRY_SUCCESSOR_FLAG;
@@ -465,18 +467,21 @@ void eigrp_topology_update_node_flags(struct eigrp_prefix_entry *dest)
 void eigrp_update_routing_table(struct eigrp_prefix_entry *prefix)
 {
 	struct eigrp *eigrp = eigrp_lookup();
-	struct list *successors =
-		eigrp_topology_get_successor_max(prefix, eigrp->max_paths);
+	struct list *successors;
 	struct listnode *node;
 	struct eigrp_nexthop_entry *entry;
 
+	if (!eigrp)
+		return;
+
+	successors = eigrp_topology_get_successor_max(prefix, eigrp->max_paths);
+
 	if (successors) {
-		eigrp_zebra_route_add(prefix->destination,
-				      successors);
+		eigrp_zebra_route_add(prefix->destination, successors);
 		for (ALL_LIST_ELEMENTS_RO(successors, node, entry))
 			entry->flags |= EIGRP_NEXTHOP_ENTRY_INTABLE_FLAG;
 
-		list_delete_and_null(&successors);
+		list_delete(&successors);
 	} else {
 		eigrp_zebra_route_delete(prefix->destination);
 		for (ALL_LIST_ELEMENTS_RO(prefix->entries, node, entry))

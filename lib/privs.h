@@ -55,6 +55,14 @@ struct zebra_privs_t {
 	zebra_capabilities_t *caps_i; /* caps to allow inheritance of */
 	int cap_num_p;		      /* number of caps in arrays */
 	int cap_num_i;
+
+	/* Mutex and counter used to avoid race conditions in multi-threaded
+	 * processes. The privs elevation is process-wide, so we need to
+	 * avoid changing the privilege status across threads.
+	 */
+	pthread_mutex_t mutex;
+	uint32_t refcount;
+
 	const char *user; /* user and group to run as */
 	const char *group;
 	const char *vty_group; /* group to chown vty socket to */
@@ -62,6 +70,7 @@ struct zebra_privs_t {
 	int (*change)(zebra_privs_ops_t); /* change privileges, 0 on success */
 	zebra_privs_current_t (*current_state)(
 		void); /* current privilege state */
+	const char *raised_in_funcname;
 };
 
 struct zprivs_ids_t {
@@ -80,5 +89,43 @@ extern void zprivs_init(struct zebra_privs_t *zprivs);
 extern void zprivs_terminate(struct zebra_privs_t *);
 /* query for runtime uid's and gid's, eg vty needs this */
 extern void zprivs_get_ids(struct zprivs_ids_t *);
+
+/*
+ * Wrapper around zprivs, to be used as:
+ *   frr_elevate_privs(&privs) {
+ *     ... code ...
+ *     if (error)
+ *       break;         -- break can be used to get out of the block
+ *     ... code ...
+ *   }
+ *
+ * The argument to frr_elevate_privs() can be NULL to leave privileges as-is
+ * (mostly useful for conditional privilege-raising, i.e.:)
+ *   frr_elevate_privs(cond ? &privs : NULL) {}
+ *
+ * NB: The code block is always executed, regardless of whether privileges
+ * could be raised or not, or whether NULL was given or not.  This is fully
+ * intentional;  the user may have configured some RBAC or similar that we
+ * are not aware of, but that allows our code to proceed without privileges.
+ *
+ * The point of this wrapper is to prevent accidental bugs where privileges
+ * are elevated but then not dropped.  This can happen when, for example, a
+ * "return", "goto" or "break" in the middle of the elevated-privilege code
+ * skips past the privilege dropping call.
+ *
+ * The macro below uses variable cleanup to drop privileges as soon as the
+ * code block is left in any way (and thus the _privs variable goes out of
+ * scope.)  _once is just a trick to run the loop exactly once.
+ */
+extern struct zebra_privs_t *_zprivs_raise(struct zebra_privs_t *privs,
+					   const char *funcname);
+extern void _zprivs_lower(struct zebra_privs_t **privs);
+
+#define frr_elevate_privs(privs)                                               \
+	for (struct zebra_privs_t *_once = NULL,                               \
+				  *_privs __attribute__(                       \
+					  (unused, cleanup(_zprivs_lower))) =  \
+					  _zprivs_raise(privs, __func__);      \
+	     _once == NULL; _once = (void *)1)
 
 #endif /* _ZEBRA_PRIVS_H */

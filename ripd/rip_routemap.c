@@ -37,33 +37,18 @@
 struct rip_metric_modifier {
 	enum { metric_increment, metric_decrement, metric_absolute } type;
 	bool used;
-	u_int8_t metric;
+	uint8_t metric;
 };
-
-/* Hook function for updating route_map assignment. */
-/* ARGSUSED */
-static void rip_route_map_update(const char *notused)
-{
-	int i;
-
-	if (rip) {
-		for (i = 0; i < ZEBRA_ROUTE_MAX; i++) {
-			if (rip->route_map[i].name)
-				rip->route_map[i].map =
-					route_map_lookup_by_name(
-						rip->route_map[i].name);
-		}
-	}
-}
 
 /* `match metric METRIC' */
 /* Match function return 1 if match is success else return zero. */
-static route_map_result_t route_match_metric(void *rule, struct prefix *prefix,
+static route_map_result_t route_match_metric(void *rule,
+					     const struct prefix *prefix,
 					     route_map_object_t type,
 					     void *object)
 {
-	u_int32_t *metric;
-	u_int32_t check;
+	uint32_t *metric;
+	uint32_t check;
 	struct rip_info *rinfo;
 
 	if (type == RMAP_RIP) {
@@ -85,9 +70,9 @@ static route_map_result_t route_match_metric(void *rule, struct prefix *prefix,
 /* Route map `match metric' match statement. `arg' is METRIC value */
 static void *route_match_metric_compile(const char *arg)
 {
-	u_int32_t *metric;
+	uint32_t *metric;
 
-	metric = XMALLOC(MTYPE_ROUTE_MAP_COMPILED, sizeof(u_int32_t));
+	metric = XMALLOC(MTYPE_ROUTE_MAP_COMPILED, sizeof(uint32_t));
 	*metric = atoi(arg);
 
 	if (*metric > 0)
@@ -111,7 +96,7 @@ struct route_map_rule_cmd route_match_metric_cmd = {
 /* `match interface IFNAME' */
 /* Match function return 1 if match is success else return zero. */
 static route_map_result_t route_match_interface(void *rule,
-						struct prefix *prefix,
+						const struct prefix *prefix,
 						route_map_object_t type,
 						void *object)
 {
@@ -159,7 +144,7 @@ struct route_map_rule_cmd route_match_interface_cmd = {
 
 /* Match function return 1 if match is success else return zero. */
 static route_map_result_t route_match_ip_next_hop(void *rule,
-						  struct prefix *prefix,
+						  const struct prefix *prefix,
 						  route_map_object_t type,
 						  void *object)
 {
@@ -170,9 +155,8 @@ static route_map_result_t route_match_ip_next_hop(void *rule,
 	if (type == RMAP_RIP) {
 		rinfo = object;
 		p.family = AF_INET;
-		p.prefix =
-			(rinfo->nh.gate.ipv4.s_addr) ?
-			rinfo->nh.gate.ipv4 : rinfo->from;
+		p.prefix = (rinfo->nh.gate.ipv4.s_addr) ? rinfo->nh.gate.ipv4
+							: rinfo->from;
 		p.prefixlen = IPV4_MAX_BITLEN;
 
 		alist = access_list_lookup(AFI_IP, (char *)rule);
@@ -207,7 +191,7 @@ static struct route_map_rule_cmd route_match_ip_next_hop_cmd = {
 /* `match ip next-hop prefix-list PREFIX_LIST' */
 
 static route_map_result_t
-route_match_ip_next_hop_prefix_list(void *rule, struct prefix *prefix,
+route_match_ip_next_hop_prefix_list(void *rule, const struct prefix *prefix,
 				    route_map_object_t type, void *object)
 {
 	struct prefix_list *plist;
@@ -217,9 +201,8 @@ route_match_ip_next_hop_prefix_list(void *rule, struct prefix *prefix,
 	if (type == RMAP_RIP) {
 		rinfo = object;
 		p.family = AF_INET;
-		p.prefix =
-			(rinfo->nh.gate.ipv4.s_addr) ?
-			rinfo->nh.gate.ipv4 : rinfo->from;
+		p.prefix = (rinfo->nh.gate.ipv4.s_addr) ? rinfo->nh.gate.ipv4
+							: rinfo->from;
 		p.prefixlen = IPV4_MAX_BITLEN;
 
 		plist = prefix_list_lookup(AFI_IP, (char *)rule);
@@ -253,7 +236,7 @@ static struct route_map_rule_cmd route_match_ip_next_hop_prefix_list_cmd = {
 /* Match function should return 1 if match is success else return
    zero. */
 static route_map_result_t route_match_ip_address(void *rule,
-						 struct prefix *prefix,
+						 const struct prefix *prefix,
 						 route_map_object_t type,
 						 void *object)
 {
@@ -292,7 +275,7 @@ static struct route_map_rule_cmd route_match_ip_address_cmd = {
 /* `match ip address prefix-list PREFIX_LIST' */
 
 static route_map_result_t
-route_match_ip_address_prefix_list(void *rule, struct prefix *prefix,
+route_match_ip_address_prefix_list(void *rule, const struct prefix *prefix,
 				   route_map_object_t type, void *object)
 {
 	struct prefix_list *plist;
@@ -326,7 +309,7 @@ static struct route_map_rule_cmd route_match_ip_address_prefix_list_cmd = {
 
 /* `match tag TAG' */
 /* Match function return 1 if match is success else return zero. */
-static route_map_result_t route_match_tag(void *rule, struct prefix *prefix,
+static route_map_result_t route_match_tag(void *rule, const struct prefix *p,
 					  route_map_object_t type, void *object)
 {
 	route_tag_t *tag;
@@ -356,7 +339,8 @@ static struct route_map_rule_cmd route_match_tag_cmd = {
 /* `set metric METRIC' */
 
 /* Set metric to attribute. */
-static route_map_result_t route_set_metric(void *rule, struct prefix *prefix,
+static route_map_result_t route_set_metric(void *rule,
+					   const struct prefix *prefix,
 					   route_map_object_t type,
 					   void *object)
 {
@@ -427,8 +411,9 @@ static void *route_set_metric_compile(const char *arg)
 		return mod;
 	}
 	if (metric > RIP_METRIC_INFINITY) {
-		zlog_info("%s: Metric specified: %ld is greater than RIP_METRIC_INFINITY, using INFINITY instead",
-			   __PRETTY_FUNCTION__, metric);
+		zlog_info(
+			"%s: Metric specified: %ld is greater than RIP_METRIC_INFINITY, using INFINITY instead",
+			__PRETTY_FUNCTION__, metric);
 		mod->metric = RIP_METRIC_INFINITY;
 	} else
 		mod->metric = metric;
@@ -454,7 +439,7 @@ static struct route_map_rule_cmd route_set_metric_cmd = {
 
 /* Set nexthop to object.  ojbect must be pointer to struct attr. */
 static route_map_result_t route_set_ip_nexthop(void *rule,
-					       struct prefix *prefix,
+					       const struct prefix *prefix,
 					       route_map_object_t type,
 					       void *object)
 {
@@ -506,7 +491,7 @@ static struct route_map_rule_cmd route_set_ip_nexthop_cmd = {
 /* `set tag TAG' */
 
 /* Set tag to object.  ojbect must be pointer to struct attr. */
-static route_map_result_t route_set_tag(void *rule, struct prefix *prefix,
+static route_map_result_t route_set_tag(void *rule, const struct prefix *prefix,
 					route_map_object_t type, void *object)
 {
 	route_tag_t *tag;
@@ -532,18 +517,10 @@ static struct route_map_rule_cmd route_set_tag_cmd = {
 #define MATCH_STR "Match values from routing table\n"
 #define SET_STR "Set values in destination routing protocol\n"
 
-void rip_route_map_reset()
-{
-	;
-}
-
 /* Route-map init */
-void rip_route_map_init()
+void rip_route_map_init(void)
 {
 	route_map_init();
-
-	route_map_add_hook(rip_route_map_update);
-	route_map_delete_hook(rip_route_map_update);
 
 	route_map_match_interface_hook(generic_match_add);
 	route_map_no_match_interface_hook(generic_match_delete);

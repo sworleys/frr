@@ -1,9 +1,7 @@
 /*
  * PBR - vty code
- * Copyright (C) Cumulus Networks, Inc.
+ * Copyright (C) 2018 Cumulus Networks, Inc.
  *               Donald Sharp
- *
- * This file is part of FRR.
  *
  * FRR is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -29,6 +27,7 @@
 #include "nexthop_group.h"
 #include "log.h"
 #include "debug.h"
+#include "pbr.h"
 
 #include "pbrd/pbr_nht.h"
 #include "pbrd/pbr_map.h"
@@ -98,12 +97,13 @@ DEFPY(pbr_set_table_range,
 {
 	/* upper bound is 2^32 - 2^10 */
 	int ret = CMD_WARNING;
+	const int minrange = 1000;
 
 	/* validate given bounds */
 	if (lb > ub)
 		vty_out(vty, "%% Lower bound must be less than upper bound\n");
-	else if (ub - lb < 10)
-		vty_out(vty, "%% Range breadth must be at least 10\n");
+	else if (ub - lb < minrange)
+		vty_out(vty, "%% Range breadth must be at least %d\n", minrange);
 	else {
 		ret = CMD_SUCCESS;
 		pbr_nht_set_tableid_range((uint32_t) lb, (uint32_t) ub);
@@ -122,6 +122,8 @@ DEFPY(pbr_map_match_src, pbr_map_match_src_cmd,
 	"v6 Prefix\n")
 {
 	struct pbr_map_sequence *pbrms = VTY_GET_CONTEXT(pbr_map_sequence);
+
+	pbrms->family = prefix->family;
 
 	if (!no) {
 		if (prefix_same(pbrms->src, prefix))
@@ -149,6 +151,8 @@ DEFPY(pbr_map_match_dst, pbr_map_match_dst_cmd,
 	"v6 Prefix\n")
 {
 	struct pbr_map_sequence *pbrms = VTY_GET_CONTEXT(pbr_map_sequence);
+
+	pbrms->family = prefix->family;
 
 	if (!no) {
 		if (prefix_same(pbrms->dst, prefix))
@@ -217,12 +221,18 @@ DEFPY(pbr_map_nexthop_group, pbr_map_nexthop_group_cmd,
 }
 
 DEFPY(pbr_map_nexthop, pbr_map_nexthop_cmd,
-      "[no] set nexthop <A.B.C.D|X:X::X:X>$addr [INTERFACE]$intf [nexthop-vrf NAME$name]",
+      "[no] set nexthop\
+        <\
+	  <A.B.C.D|X:X::X:X>$addr [INTERFACE$intf]\
+	  |INTERFACE$intf\
+	>\
+        [nexthop-vrf NAME$name]",
       NO_STR
       "Set for the PBR-MAP\n"
       "Specify one of the nexthops in this map\n"
       "v4 Address\n"
       "v6 Address\n"
+      "Interface to use\n"
       "Interface to use\n"
       "If the nexthop is in a different vrf tell us\n"
       "The nexthop-vrf Name\n")
@@ -251,47 +261,46 @@ DEFPY(pbr_map_nexthop, pbr_map_nexthop_cmd,
 	memset(&nhop, 0, sizeof(nhop));
 	nhop.vrf_id = vrf->vrf_id;
 
-	if (addr->sa.sa_family == AF_INET) {
-		nhop.gate.ipv4.s_addr = addr->sin.sin_addr.s_addr;
-		if (intf) {
-			nhop.type = NEXTHOP_TYPE_IPV4_IFINDEX;
-			nhop.ifindex = ifname2ifindex(intf, vrf->vrf_id);
-			if (nhop.ifindex == IFINDEX_INTERNAL) {
-				vty_out(vty,
-					"Specified Intf %s does not exist in vrf: %s\n",
-					intf, vrf->name);
-				return CMD_WARNING_CONFIG_FAILED;
-			}
-		} else
-			nhop.type = NEXTHOP_TYPE_IPV4;
-	} else {
-		memcpy(&nhop.gate.ipv6, &addr->sin6.sin6_addr, 16);
-		if (intf) {
-			nhop.type = NEXTHOP_TYPE_IPV6_IFINDEX;
-			nhop.ifindex = ifname2ifindex(intf, vrf->vrf_id);
-			if (nhop.ifindex == IFINDEX_INTERNAL) {
-				vty_out(vty,
-					"Specified Intf %s does not exist in vrf: %s\n",
-					intf, vrf->name);
-				return CMD_WARNING_CONFIG_FAILED;
-			}
-		} else {
-			if (IN6_IS_ADDR_LINKLOCAL(&nhop.gate.ipv6)) {
-				vty_out(vty,
-					"Specified a v6 LL with no interface, rejecting\n");
-				return CMD_WARNING_CONFIG_FAILED;
-			}
-			nhop.type = NEXTHOP_TYPE_IPV6;
+	if (intf) {
+		nhop.ifindex = ifname2ifindex(intf, vrf->vrf_id);
+		if (nhop.ifindex == IFINDEX_INTERNAL) {
+			vty_out(vty,
+				"Specified Intf %s does not exist in vrf: %s\n",
+				intf, vrf->name);
+			return CMD_WARNING_CONFIG_FAILED;
 		}
 	}
+
+	if (addr) {
+		if (addr->sa.sa_family == AF_INET) {
+			nhop.gate.ipv4.s_addr = addr->sin.sin_addr.s_addr;
+			if (intf)
+				nhop.type = NEXTHOP_TYPE_IPV4_IFINDEX;
+			else
+				nhop.type = NEXTHOP_TYPE_IPV4;
+		} else {
+			nhop.gate.ipv6 = addr->sin6.sin6_addr;
+			if (intf)
+				nhop.type = NEXTHOP_TYPE_IPV6_IFINDEX;
+			else {
+				if (IN6_IS_ADDR_LINKLOCAL(&nhop.gate.ipv6)) {
+					vty_out(vty,
+						"Specified a v6 LL with no interface, rejecting\n");
+					return CMD_WARNING_CONFIG_FAILED;
+				}
+				nhop.type = NEXTHOP_TYPE_IPV6;
+			}
+		}
+	} else
+		nhop.type = NEXTHOP_TYPE_IFINDEX;
 
 	if (pbrms->nhg)
 		nh = nexthop_exists(pbrms->nhg, &nhop);
 	else {
-		char buf[100];
+		char buf[PBR_NHC_NAMELEN];
 
 		if (no) {
-			vty_out(vty, "No nexthops to delete");
+			vty_out(vty, "No nexthops to delete\n");
 			return CMD_WARNING_CONFIG_FAILED;
 		}
 
@@ -299,6 +308,7 @@ DEFPY(pbr_map_nexthop, pbr_map_nexthop_cmd,
 		pbrms->internal_nhg_name =
 			XSTRDUP(MTYPE_TMP,
 				pbr_nht_nexthop_make_name(pbrms->parent->name,
+							  PBR_NHC_NAMELEN,
 							  pbrms->seqno,
 							  buf));
 		nh = NULL;
@@ -325,6 +335,14 @@ DEFPY(pbr_map_nexthop, pbr_map_nexthop_cmd,
 		pbr_map_check(pbrms);
 	}
 
+	if (nhop.type == NEXTHOP_TYPE_IFINDEX) {
+		struct interface *ifp;
+
+		ifp = if_lookup_by_index(nhop.ifindex, nhop.vrf_id);
+		if (ifp)
+			pbr_nht_nexthop_interface_update(ifp);
+	}
+
 	return CMD_SUCCESS;
 }
 
@@ -339,39 +357,45 @@ DEFPY (pbr_policy,
 	struct pbr_map *pbrm, *old_pbrm;
 	struct pbr_interface *pbr_ifp = ifp->info;
 
+	old_pbrm = NULL;
 	pbrm = pbrm_find(mapname);
 
 	if (!pbr_ifp) {
-		/*
-		 * Some one could have fat fingered the interface
-		 * name
-		 */
+		/* we don't want one and we don't have one, so... */
+		if (no)
+			return CMD_SUCCESS;
+
+		/* Some one could have fat fingered the interface name */
 		pbr_ifp = pbr_if_new(ifp);
 	}
 
 	if (no) {
 		if (strcmp(pbr_ifp->mapname, mapname) == 0) {
-			strcpy(pbr_ifp->mapname, "");
-
+			pbr_ifp->mapname[0] = '\0';
 			if (pbrm)
 				pbr_map_interface_delete(pbrm, ifp);
 		}
 	} else {
-		if (strcmp(pbr_ifp->mapname, "") == 0) {
-			strcpy(pbr_ifp->mapname, mapname);
+		if (strcmp(pbr_ifp->mapname, "") != 0) {
+			old_pbrm = pbrm_find(pbr_ifp->mapname);
 
-			if (pbrm)
-				pbr_map_add_interface(pbrm, ifp);
-		} else {
-			if (!(strcmp(pbr_ifp->mapname, mapname) == 0)) {
-				old_pbrm = pbrm_find(pbr_ifp->mapname);
-				if (old_pbrm)
-					pbr_map_interface_delete(old_pbrm, ifp);
-				strcpy(pbr_ifp->mapname, mapname);
-				if (pbrm)
-					pbr_map_add_interface(pbrm, ifp);
-			}
+			/*
+			 * So if we have an old pbrm we should only
+			 * delete it if we are actually deleting and
+			 * moving to a new pbrm
+			 */
+			if (old_pbrm && old_pbrm != pbrm)
+				pbr_map_interface_delete(old_pbrm, ifp);
 		}
+		snprintf(pbr_ifp->mapname, sizeof(pbr_ifp->mapname),
+			 "%s", mapname);
+
+		/*
+		 * So only reinstall if the old_pbrm and this pbrm are
+		 * different.
+		 */
+		if (pbrm && pbrm != old_pbrm)
+			pbr_map_add_interface(pbrm, ifp);
 	}
 
 	return CMD_SUCCESS;
@@ -509,6 +533,56 @@ DEFPY (show_pbr_interface,
 	return CMD_SUCCESS;
 }
 
+/* PBR debugging CLI ------------------------------------------------------- */
+
+static struct cmd_node debug_node = {DEBUG_NODE, "", 1};
+
+DEFPY(debug_pbr,
+      debug_pbr_cmd,
+      "[no] debug pbr [{map$map|zebra$zebra|nht$nht|events$events}]",
+      NO_STR
+      DEBUG_STR
+      PBR_STR
+      "Policy maps\n"
+      "PBRD <-> Zebra communications\n"
+      "Nexthop tracking\n"
+      "Events\n")
+{
+	uint32_t mode = DEBUG_NODE2MODE(vty->node);
+
+	if (map)
+		DEBUG_MODE_SET(&pbr_dbg_map, mode, !no);
+	if (zebra)
+		DEBUG_MODE_SET(&pbr_dbg_zebra, mode, !no);
+	if (nht)
+		DEBUG_MODE_SET(&pbr_dbg_nht, mode, !no);
+	if (events)
+		DEBUG_MODE_SET(&pbr_dbg_event, mode, !no);
+
+	/* no specific debug --> act on all of them */
+	if (strmatch(argv[argc - 1]->text, "pbr"))
+		pbr_debug_set_all(mode, !no);
+
+	return CMD_SUCCESS;
+}
+
+DEFUN_NOSH(show_debugging_pbr,
+	   show_debugging_pbr_cmd,
+	   "show debugging [pbr]",
+	   SHOW_STR
+	   DEBUG_STR
+	   PBR_STR)
+{
+	vty_out(vty, "PBR debugging status:\n");
+
+	pbr_debug_config_write_helper(vty, false);
+
+	return CMD_SUCCESS;
+}
+
+/* ------------------------------------------------------------------------- */
+
+
 static struct cmd_node interface_node = {
 	INTERFACE_NODE, "%s(config-if)# ", 1 /* vtysh ? yes */
 };
@@ -525,6 +599,9 @@ static int pbr_interface_config_write(struct vty *vty)
 			else
 				vty_frame(vty, "interface %s vrf %s\n",
 					  ifp->name, vrf->name);
+
+			if (ifp->desc)
+				vty_out(vty, " description %s\n", ifp->desc);
 
 			pbr_map_write_interfaces(vty, ifp);
 
@@ -547,18 +624,18 @@ static int pbr_vty_map_config_write_sequence(struct vty *vty,
 	vty_out(vty, "pbr-map %s seq %u\n", pbrm->name, pbrms->seqno);
 
 	if (pbrms->src)
-		vty_out(vty, "  match src-ip %s\n",
+		vty_out(vty, " match src-ip %s\n",
 			prefix2str(pbrms->src, buff, sizeof(buff)));
 
 	if (pbrms->dst)
-		vty_out(vty, "  match dst-ip %s\n",
+		vty_out(vty, " match dst-ip %s\n",
 			prefix2str(pbrms->dst, buff, sizeof(buff)));
 
 	if (pbrms->nhgrp_name)
-		vty_out(vty, "  set nexthop-group %s\n", pbrms->nhgrp_name);
+		vty_out(vty, " set nexthop-group %s\n", pbrms->nhgrp_name);
 
 	if (pbrms->nhg) {
-		vty_out(vty, "  set ");
+		vty_out(vty, " set ");
 		nexthop_group_write_nexthop(vty, pbrms->nhg->nexthop);
 	}
 
@@ -593,6 +670,12 @@ void pbr_vty_init(void)
 	install_node(&pbr_map_node,
 		     pbr_vty_map_config_write);
 
+	/* debug */
+	install_node(&debug_node, pbr_debug_config_write);
+	install_element(VIEW_NODE, &debug_pbr_cmd);
+	install_element(CONFIG_NODE, &debug_pbr_cmd);
+	install_element(VIEW_NODE, &show_debugging_pbr_cmd);
+
 	install_default(PBRMAP_NODE);
 
 	install_element(CONFIG_NODE, &pbr_map_cmd);
@@ -607,6 +690,4 @@ void pbr_vty_init(void)
 	install_element(VIEW_NODE, &show_pbr_map_cmd);
 	install_element(VIEW_NODE, &show_pbr_interface_cmd);
 	install_element(VIEW_NODE, &show_pbr_nexthop_group_cmd);
-
-	pbr_debug_init_vty();
 }

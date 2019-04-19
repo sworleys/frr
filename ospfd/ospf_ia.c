@@ -196,7 +196,7 @@ static int process_summary_lsa(struct ospf_area *area, struct route_table *rt,
 	struct ospf_route *abr_or, *new_or;
 	struct summary_lsa *sl;
 	struct prefix_ipv4 p, abr;
-	u_int32_t metric;
+	uint32_t metric;
 
 	if (lsa == NULL)
 		return 0;
@@ -282,7 +282,7 @@ static void ospf_examine_summaries(struct ospf_area *area,
 	struct ospf_lsa *lsa;
 	struct route_node *rn;
 
-	LSDB_LOOP(lsdb_rt, rn, lsa)
+	LSDB_LOOP (lsdb_rt, rn, lsa)
 		process_summary_lsa(area, rt, rtrs, lsa);
 }
 
@@ -302,7 +302,7 @@ static void ospf_update_network_route(struct ospf *ospf, struct route_table *rt,
 	struct route_node *rn;
 	struct ospf_route * or, *abr_or, *new_or;
 	struct prefix_ipv4 abr;
-	u_int32_t cost;
+	uint32_t cost;
 
 	abr.family = AF_INET;
 	abr.prefix = lsa->header.adv_router;
@@ -427,7 +427,7 @@ static void ospf_update_router_route(struct ospf *ospf,
 {
 	struct ospf_route * or, *abr_or, *new_or;
 	struct prefix_ipv4 abr;
-	u_int32_t cost;
+	uint32_t cost;
 
 	abr.family = AF_INET;
 	abr.prefix = lsa->header.adv_router;
@@ -523,7 +523,7 @@ static int process_transit_summary_lsa(struct ospf_area *area,
 	struct ospf *ospf = area->ospf;
 	struct summary_lsa *sl;
 	struct prefix_ipv4 p;
-	u_int32_t metric;
+	uint32_t metric;
 
 	if (lsa == NULL)
 		return 0;
@@ -582,30 +582,26 @@ static void ospf_examine_transit_summaries(struct ospf_area *area,
 	struct ospf_lsa *lsa;
 	struct route_node *rn;
 
-	LSDB_LOOP(lsdb_rt, rn, lsa)
+	LSDB_LOOP (lsdb_rt, rn, lsa)
 		process_transit_summary_lsa(area, rt, rtrs, lsa);
 }
 
 void ospf_ia_routing(struct ospf *ospf, struct route_table *rt,
 		     struct route_table *rtrs)
 {
+	struct listnode *node;
 	struct ospf_area *area;
 
 	if (IS_DEBUG_OSPF_EVENT)
 		zlog_debug("ospf_ia_routing():start");
 
 	if (IS_OSPF_ABR(ospf)) {
-		struct listnode *node;
-		struct ospf_area *area;
-
 		switch (ospf->abr_type) {
 		case OSPF_ABR_STAND:
 			if (IS_DEBUG_OSPF_EVENT)
 				zlog_debug("ospf_ia_routing():Standard ABR");
 
 			if ((area = ospf->backbone)) {
-				struct listnode *node;
-
 				if (IS_DEBUG_OSPF_EVENT) {
 					zlog_debug(
 						"ospf_ia_routing():backbone area found");
@@ -694,8 +690,6 @@ void ospf_ia_routing(struct ospf *ospf, struct route_table *rt,
 			break;
 		}
 	} else {
-		struct listnode *node;
-
 		if (IS_DEBUG_OSPF_EVENT)
 			zlog_debug(
 				"ospf_ia_routing():not ABR, considering all areas");

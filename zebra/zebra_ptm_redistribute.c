@@ -22,7 +22,9 @@
 #include "prefix.h"
 #include "vty.h"
 #include "stream.h"
-#include "zebra/zserv.h"
+#include "zebra/zebra_router.h"
+#include "zebra/zapi_msg.h"
+#include "zebra/zebra_ptm.h"
 #include "zebra/zebra_ptm_redistribute.h"
 #include "zebra/zebra_memory.h"
 
@@ -34,12 +36,7 @@ static int zsend_interface_bfd_update(int cmd, struct zserv *client,
 	int blen;
 	struct stream *s;
 
-	/* Check this client need interface information. */
-	if (!client->ifinfo)
-		return 0;
-
-	s = client->obuf;
-	stream_reset(s);
+	s = stream_new(ZEBRA_MAX_PACKET_SIZ);
 
 	zclient_create_header(s, cmd, vrf_id);
 	if (ifp)
@@ -66,7 +63,7 @@ static int zsend_interface_bfd_update(int cmd, struct zserv *client,
 	stream_putw_at(s, 0, stream_get_endp(s));
 
 	client->if_bfd_cnt++;
-	return zebra_server_send_message(client);
+	return zserv_send_message(client, s);
 }
 
 void zebra_interface_bfd_update(struct interface *ifp, struct prefix *dp,
@@ -75,12 +72,8 @@ void zebra_interface_bfd_update(struct interface *ifp, struct prefix *dp,
 	struct listnode *node, *nnode;
 	struct zserv *client;
 
-	for (ALL_LIST_ELEMENTS(zebrad.client_list, node, nnode, client)) {
-		/* Supporting for OSPF, BGP and PIM */
-		if (client->proto != ZEBRA_ROUTE_OSPF
-		    && client->proto != ZEBRA_ROUTE_BGP
-		    && client->proto != ZEBRA_ROUTE_OSPF6
-		    && client->proto != ZEBRA_ROUTE_PIM)
+	for (ALL_LIST_ELEMENTS(zrouter.client_list, node, nnode, client)) {
+		if (!IS_BFD_ENABLED_PROTOCOL(client->proto))
 			continue;
 
 		/* Notify to the protocol daemons. */
@@ -93,8 +86,7 @@ static int zsend_bfd_peer_replay(int cmd, struct zserv *client)
 {
 	struct stream *s;
 
-	s = client->obuf;
-	stream_reset(s);
+	s = stream_new(ZEBRA_MAX_PACKET_SIZ);
 
 	zclient_create_header(s, cmd, VRF_DEFAULT);
 
@@ -102,7 +94,7 @@ static int zsend_bfd_peer_replay(int cmd, struct zserv *client)
 	stream_putw_at(s, 0, stream_get_endp(s));
 
 	client->bfd_peer_replay_cnt++;
-	return zebra_server_send_message(client);
+	return zserv_send_message(client, s);
 }
 
 void zebra_bfd_peer_replay_req(void)
@@ -110,12 +102,8 @@ void zebra_bfd_peer_replay_req(void)
 	struct listnode *node, *nnode;
 	struct zserv *client;
 
-	for (ALL_LIST_ELEMENTS(zebrad.client_list, node, nnode, client)) {
-		/* Supporting for BGP */
-		if ((client->proto != ZEBRA_ROUTE_BGP)
-		    && (client->proto != ZEBRA_ROUTE_OSPF)
-		    && (client->proto != ZEBRA_ROUTE_OSPF6)
-		    && (client->proto != ZEBRA_ROUTE_PIM))
+	for (ALL_LIST_ELEMENTS(zrouter.client_list, node, nnode, client)) {
+		if (!IS_BFD_ENABLED_PROTOCOL(client->proto))
 			continue;
 
 		/* Notify to the protocol daemons. */

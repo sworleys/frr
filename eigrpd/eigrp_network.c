@@ -48,75 +48,55 @@
 #include "eigrpd/eigrp_vty.h"
 #include "eigrpd/eigrp_network.h"
 
-static int eigrp_network_match_iface(const struct connected *,
-				     const struct prefix *);
+static int eigrp_network_match_iface(const struct prefix *connected_prefix,
+				     const struct prefix *prefix);
 static void eigrp_network_run_interface(struct eigrp *, struct prefix *,
 					struct interface *);
 
 int eigrp_sock_init(void)
 {
 	int eigrp_sock;
-	int ret, hincl = 1;
+	int ret;
+#ifdef IP_HDRINCL
+	int hincl = 1;
+#endif
 
-	if (eigrpd_privs.change(ZPRIVS_RAISE))
-		flog_err(LIB_ERR_PRIVILEGES,
-			  "eigrp_sock_init: could not raise privs, %s",
-			  safe_strerror(errno));
-
-	eigrp_sock = socket(AF_INET, SOCK_RAW, IPPROTO_EIGRPIGP);
-	if (eigrp_sock < 0) {
-		int save_errno = errno;
-		if (eigrpd_privs.change(ZPRIVS_LOWER))
-			flog_err(LIB_ERR_PRIVILEGES,
-				  "eigrp_sock_init: could not lower privs, %s",
-				  safe_strerror(errno));
-		flog_err(LIB_ERR_SOCKET, "eigrp_read_sock_init: socket: %s",
-			  safe_strerror(save_errno));
-		exit(1);
-	}
+	frr_elevate_privs(&eigrpd_privs) {
+		eigrp_sock = socket(AF_INET, SOCK_RAW, IPPROTO_EIGRPIGP);
+		if (eigrp_sock < 0) {
+			zlog_err("eigrp_read_sock_init: socket: %s",
+				 safe_strerror(errno));
+			exit(1);
+		}
 
 #ifdef IP_HDRINCL
-	/* we will include IP header with packet */
-	ret = setsockopt(eigrp_sock, IPPROTO_IP, IP_HDRINCL, &hincl,
-			 sizeof(hincl));
-	if (ret < 0) {
-		int save_errno = errno;
-		if (eigrpd_privs.change(ZPRIVS_LOWER))
-			flog_err(LIB_ERR_PRIVILEGES,
-				  "eigrp_sock_init: could not lower privs, %s",
-				  safe_strerror(errno));
-		zlog_warn("Can't set IP_HDRINCL option for fd %d: %s",
-			  eigrp_sock, safe_strerror(save_errno));
-	}
+		/* we will include IP header with packet */
+		ret = setsockopt(eigrp_sock, IPPROTO_IP, IP_HDRINCL, &hincl,
+				 sizeof(hincl));
+		if (ret < 0) {
+			zlog_warn("Can't set IP_HDRINCL option for fd %d: %s",
+				  eigrp_sock, safe_strerror(errno));
+		}
 #elif defined(IPTOS_PREC_INTERNETCONTROL)
 #warning "IP_HDRINCL not available on this system"
 #warning "using IPTOS_PREC_INTERNETCONTROL"
-	ret = setsockopt_ipv4_tos(eigrp_sock, IPTOS_PREC_INTERNETCONTROL);
-	if (ret < 0) {
-		int save_errno = errno;
-		if (eigrpd_privs.change(ZPRIVS_LOWER))
-			flog_err(LIB_ERR_PRIVILEGES,
-				  "eigrpd_sock_init: could not lower privs, %s",
-				  safe_strerror(errno));
-		zlog_warn("can't set sockopt IP_TOS %d to socket %d: %s", tos,
-			  eigrp_sock, safe_strerror(save_errno));
-		close(eigrp_sock); /* Prevent sd leak. */
-		return ret;
-	}
+		ret = setsockopt_ipv4_tos(eigrp_sock,
+					  IPTOS_PREC_INTERNETCONTROL);
+		if (ret < 0) {
+			zlog_warn("can't set sockopt IP_TOS %d to socket %d: %s",
+				  tos, eigrp_sock, safe_strerror(errno));
+			close(eigrp_sock); /* Prevent sd leak. */
+			return ret;
+		}
 #else /* !IPTOS_PREC_INTERNETCONTROL */
 #warning "IP_HDRINCL not available, nor is IPTOS_PREC_INTERNETCONTROL"
-	zlog_warn("IP_HDRINCL option not available");
+		zlog_warn("IP_HDRINCL option not available");
 #endif /* IP_HDRINCL */
 
-	ret = setsockopt_ifindex(AF_INET, eigrp_sock, 1);
-
-	if (ret < 0)
-		zlog_warn("Can't set pktinfo option for fd %d", eigrp_sock);
-
-	if (eigrpd_privs.change(ZPRIVS_LOWER)) {
-		flog_err(LIB_ERR_PRIVILEGES,
-			  "eigrp_sock_init: could not lower privs, %s",
-			  safe_strerror(errno));
+		ret = setsockopt_ifindex(AF_INET, eigrp_sock, 1);
+		if (ret < 0)
+			zlog_warn("Can't set pktinfo option for fd %d",
+				  eigrp_sock);
 	}
 
 	return eigrp_sock;
@@ -128,9 +108,6 @@ void eigrp_adjust_sndbuflen(struct eigrp *eigrp, unsigned int buflen)
 	/* Check if any work has to be done at all. */
 	if (eigrp->maxsndbuflen >= buflen)
 		return;
-	if (eigrpd_privs.change(ZPRIVS_RAISE))
-		flog_err(LIB_ERR_PRIVILEGES, "%s: could not raise privs, %s",
-			  __func__, safe_strerror(errno));
 
 	/* Now we try to set SO_SNDBUF to what our caller has requested
 	 * (the MTU of a newly added interface). However, if the OS has
@@ -148,15 +125,12 @@ void eigrp_adjust_sndbuflen(struct eigrp *eigrp, unsigned int buflen)
 		eigrp->maxsndbuflen = (unsigned int)newbuflen;
 	else
 		zlog_warn("%s: failed to get SO_SNDBUF", __func__);
-	if (eigrpd_privs.change(ZPRIVS_LOWER))
-		flog_err(LIB_ERR_PRIVILEGES, "%s: could not lower privs, %s",
-			  __func__, safe_strerror(errno));
 }
 
 int eigrp_if_ipmulticast(struct eigrp *top, struct prefix *p,
 			 unsigned int ifindex)
 {
-	u_char val;
+	uint8_t val;
 	int ret, len;
 
 	val = 0;
@@ -251,7 +225,7 @@ int eigrp_network_set(struct eigrp *eigrp, struct prefix *p)
 	rn->info = (void *)pref;
 
 	/* Schedule Router ID Update. */
-	if (eigrp->router_id == 0)
+	if (eigrp->router_id.s_addr == 0)
 		eigrp_router_id_update(eigrp);
 	/* Run network config now. */
 	/* Get target interface. */
@@ -265,11 +239,11 @@ int eigrp_network_set(struct eigrp *eigrp, struct prefix *p)
 /* Check whether interface matches given network
  * returns: 1, true. 0, false
  */
-static int eigrp_network_match_iface(const struct connected *co,
+static int eigrp_network_match_iface(const struct prefix *co_prefix,
 				     const struct prefix *net)
 {
 	/* new approach: more elegant and conceptually clean */
-	return prefix_match_network_statement(net, CONNECTED_PREFIX(co));
+	return prefix_match_network_statement(net, co_prefix);
 }
 
 static void eigrp_network_run_interface(struct eigrp *eigrp, struct prefix *p,
@@ -286,12 +260,10 @@ static void eigrp_network_run_interface(struct eigrp *eigrp, struct prefix *p,
 		if (CHECK_FLAG(co->flags, ZEBRA_IFA_SECONDARY))
 			continue;
 
-		if (p->family == co->address->family
-		    && !ifp->info
-		    && eigrp_network_match_iface(co, p)) {
+		if (p->family == co->address->family && !ifp->info
+		    && eigrp_network_match_iface(co->address, p)) {
 
 			ei = eigrp_if_new(eigrp, ifp, co->address);
-			ei->connected = co;
 
 			/* Relate eigrp interface to eigrp instance. */
 			ei->eigrp = eigrp;
@@ -319,7 +291,7 @@ void eigrp_if_update(struct interface *ifp)
 	 */
 	for (ALL_LIST_ELEMENTS(eigrp_om->eigrp, node, nnode, eigrp)) {
 		/* EIGRP must be on and Router-ID must be configured. */
-		if (!eigrp || eigrp->router_id == 0)
+		if (!eigrp || eigrp->router_id.s_addr == 0)
 			continue;
 
 		/* Run each network for this interface. */
@@ -353,21 +325,20 @@ int eigrp_network_unset(struct eigrp *eigrp, struct prefix *p)
 
 	/* Find interfaces that not configured already.  */
 	for (ALL_LIST_ELEMENTS(eigrp->eiflist, node, nnode, ei)) {
-		int found = 0;
-		struct connected *co = ei->connected;
+		bool found = false;
 
 		for (rn = route_top(eigrp->networks); rn; rn = route_next(rn)) {
 			if (rn->info == NULL)
 				continue;
 
-			if (eigrp_network_match_iface(co, &rn->p)) {
-				found = 1;
+			if (eigrp_network_match_iface(ei->address, &rn->p)) {
+				found = true;
 				route_unlock_node(rn);
 				break;
 			}
 		}
 
-		if (found == 0) {
+		if (!found) {
 			eigrp_if_free(ei, INTERFACE_DOWN_BY_VTY);
 		}
 	}
@@ -375,8 +346,8 @@ int eigrp_network_unset(struct eigrp *eigrp, struct prefix *p)
 	return 1;
 }
 
-u_int32_t eigrp_calculate_metrics(struct eigrp *eigrp,
-				  struct eigrp_metrics metric)
+uint32_t eigrp_calculate_metrics(struct eigrp *eigrp,
+				 struct eigrp_metrics metric)
 {
 	uint64_t temp_metric;
 	temp_metric = 0;
@@ -403,34 +374,34 @@ u_int32_t eigrp_calculate_metrics(struct eigrp *eigrp,
 				+ eigrp->k_values[3]);
 
 	if (temp_metric <= EIGRP_MAX_METRIC)
-		return (u_int32_t)temp_metric;
+		return (uint32_t)temp_metric;
 	else
 		return EIGRP_MAX_METRIC;
 }
 
-u_int32_t eigrp_calculate_total_metrics(struct eigrp *eigrp,
-					struct eigrp_nexthop_entry *entry)
+uint32_t eigrp_calculate_total_metrics(struct eigrp *eigrp,
+				       struct eigrp_nexthop_entry *entry)
 {
 	struct eigrp_interface *ei = entry->ei;
 
 	entry->total_metric = entry->reported_metric;
-	uint64_t temp_delay = (uint64_t)entry->total_metric.delay
-			      + (uint64_t)eigrp_delay_to_scaled(ei->params.delay);
+	uint64_t temp_delay =
+		(uint64_t)entry->total_metric.delay
+		+ (uint64_t)eigrp_delay_to_scaled(ei->params.delay);
 	entry->total_metric.delay = temp_delay > EIGRP_MAX_METRIC
 					    ? EIGRP_MAX_METRIC
-					    : (u_int32_t)temp_delay;
+					    : (uint32_t)temp_delay;
 
-	u_int32_t bw =
-		eigrp_bandwidth_to_scaled(ei->params.bandwidth);
+	uint32_t bw = eigrp_bandwidth_to_scaled(ei->params.bandwidth);
 	entry->total_metric.bandwidth = entry->total_metric.bandwidth > bw
-					       ? bw
-					       : entry->total_metric.bandwidth;
+						? bw
+						: entry->total_metric.bandwidth;
 
 	return eigrp_calculate_metrics(eigrp, entry->total_metric);
 }
 
-u_char eigrp_metrics_is_same(struct eigrp_metrics metric1,
-			     struct eigrp_metrics metric2)
+uint8_t eigrp_metrics_is_same(struct eigrp_metrics metric1,
+			      struct eigrp_metrics metric2)
 {
 	if ((metric1.bandwidth == metric2.bandwidth)
 	    && (metric1.delay == metric2.delay)

@@ -40,8 +40,10 @@ void nexthop_group_delete(struct nexthop_group **nhg);
 
 void nexthop_add(struct nexthop **target, struct nexthop *nexthop);
 void nexthop_del(struct nexthop_group *nhg, struct nexthop *nexthop);
-void copy_nexthops(struct nexthop **tnh, struct nexthop *nh,
+void copy_nexthops(struct nexthop **tnh, const struct nexthop *nh,
 		   struct nexthop *rparent);
+
+uint32_t nexthop_group_hash(const struct nexthop_group *nhg);
 
 /* The following for loop allows to iterate over the nexthop
  * structure of routes.
@@ -56,10 +58,15 @@ void copy_nexthops(struct nexthop **tnh, struct nexthop *nh,
 	(nhop);								\
 	(nhop) = nexthop_next(nhop)
 
+#define ALL_NEXTHOPS_PTR(head, nhop)					\
+	(nhop) = ((head)->nexthop);					\
+	(nhop);								\
+	(nhop) = nexthop_next(nhop)
+
 
 struct nexthop_hold {
 	char *nhvrf_name;
-	union sockunion addr;
+	union sockunion *addr;
 	char *intf;
 };
 

@@ -128,8 +128,7 @@ static struct access_master *access_master_get(afi_t afi)
 /* Allocate new filter structure. */
 static struct filter *filter_new(void)
 {
-	return (struct filter *)XCALLOC(MTYPE_ACCESS_FILTER,
-					sizeof(struct filter));
+	return XCALLOC(MTYPE_ACCESS_FILTER, sizeof(struct filter));
 }
 
 static void filter_free(struct filter *filter)
@@ -157,12 +156,12 @@ static const char *filter_type_str(struct filter *filter)
 }
 
 /* If filter match to the prefix then return 1. */
-static int filter_match_cisco(struct filter *mfilter, struct prefix *p)
+static int filter_match_cisco(struct filter *mfilter, const struct prefix *p)
 {
 	struct filter_cisco *filter;
 	struct in_addr mask;
-	u_int32_t check_addr;
-	u_int32_t check_mask;
+	uint32_t check_addr;
+	uint32_t check_mask;
 
 	filter = &mfilter->u.cfilter;
 	check_addr = p->u.prefix4.s_addr & ~filter->addr_mask.s_addr;
@@ -181,7 +180,7 @@ static int filter_match_cisco(struct filter *mfilter, struct prefix *p)
 }
 
 /* If filter match to the prefix then return 1. */
-static int filter_match_zebra(struct filter *mfilter, struct prefix *p)
+static int filter_match_zebra(struct filter *mfilter, const struct prefix *p)
 {
 	struct filter_zebra *filter = NULL;
 
@@ -202,8 +201,7 @@ static int filter_match_zebra(struct filter *mfilter, struct prefix *p)
 /* Allocate new access list structure. */
 static struct access_list *access_list_new(void)
 {
-	return (struct access_list *)XCALLOC(MTYPE_ACCESS_LIST,
-					     sizeof(struct access_list));
+	return XCALLOC(MTYPE_ACCESS_LIST, sizeof(struct access_list));
 }
 
 /* Free allocated access_list. */
@@ -242,11 +240,9 @@ static void access_list_delete(struct access_list *access)
 	else
 		list->head = access->next;
 
-	if (access->name)
-		XFREE(MTYPE_ACCESS_LIST_STR, access->name);
+	XFREE(MTYPE_ACCESS_LIST_STR, access->name);
 
-	if (access->remark)
-		XFREE(MTYPE_TMP, access->remark);
+	XFREE(MTYPE_TMP, access->remark);
 
 	access_list_free(access);
 }
@@ -372,10 +368,11 @@ static struct access_list *access_list_get(afi_t afi, const char *name)
 }
 
 /* Apply access list to object (which should be struct prefix *). */
-enum filter_type access_list_apply(struct access_list *access, void *object)
+enum filter_type access_list_apply(struct access_list *access,
+				   const void *object)
 {
 	struct filter *filter;
-	struct prefix *p = (struct prefix *)object;
+	const struct prefix *p = (const struct prefix *)object;
 
 	if (access == NULL)
 		return FILTER_DENY;
@@ -549,8 +546,7 @@ static int vty_access_list_remark_unset(struct vty *vty, afi_t afi,
 		access->remark = NULL;
 	}
 
-	if (access->head == NULL && access->tail == NULL
-	    && access->remark == NULL)
+	if (access->head == NULL && access->tail == NULL)
 		access_list_delete(access);
 
 	return CMD_SUCCESS;
@@ -1302,7 +1298,7 @@ static int filter_set_zebra(struct vty *vty, const char *name_str,
 
 DEFUN (mac_access_list,
        mac_access_list_cmd,
-       "mac access-list WORD <deny|permit> MAC",
+       "mac access-list WORD <deny|permit> X:X:X:X:X:X",
        "Add a mac access-list\n"
        "Add an access list entry\n"
        "MAC zebra access-list name\n"
@@ -1316,7 +1312,7 @@ DEFUN (mac_access_list,
 
 DEFUN (no_mac_access_list,
        no_mac_access_list_cmd,
-       "no mac access-list WORD <deny|permit> MAC",
+       "no mac access-list WORD <deny|permit> X:X:X:X:X:X",
        NO_STR
        "Remove a mac access-list\n"
        "Remove an access list entry\n"
@@ -2212,14 +2208,14 @@ static void access_list_init_ipv6(void)
 	install_element(CONFIG_NODE, &no_ipv6_access_list_remark_comment_cmd);
 }
 
-void access_list_init()
+void access_list_init(void)
 {
 	access_list_init_ipv4();
 	access_list_init_ipv6();
 	access_list_init_mac();
 }
 
-void access_list_reset()
+void access_list_reset(void)
 {
 	access_list_reset_ipv4();
 	access_list_reset_ipv6();

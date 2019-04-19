@@ -38,7 +38,7 @@ void setsockopt_so_recvbuf(int sock, int size)
 		size /= 2;
 
 	if (size != orig_req)
-		flog_err(LIB_ERR_SOCKET,
+		flog_err(EC_LIB_SOCKET,
 			 "%s: fd %d: SO_RCVBUF set to %d (requested %d)",
 			 __func__, sock, size, orig_req);
 }
@@ -52,21 +52,21 @@ void setsockopt_so_sendbuf(const int sock, int size)
 		size /= 2;
 
 	if (size != orig_req)
-		flog_err(LIB_ERR_SOCKET,
+		flog_err(EC_LIB_SOCKET,
 			 "%s: fd %d: SO_SNDBUF set to %d (requested %d)",
 			 __func__, sock, size, orig_req);
 }
 
 int getsockopt_so_sendbuf(const int sock)
 {
-	u_int32_t optval;
+	uint32_t optval;
 	socklen_t optlen = sizeof(optval);
 	int ret = getsockopt(sock, SOL_SOCKET, SO_SNDBUF, (char *)&optval,
 			     &optlen);
 	if (ret < 0) {
-		flog_err(LIB_ERR_SYSTEM_CALL,
-			  "fd %d: can't getsockopt SO_SNDBUF: %d (%s)", sock,
-			  errno, safe_strerror(errno));
+		flog_err_sys(EC_LIB_SYSTEM_CALL,
+			     "fd %d: can't getsockopt SO_SNDBUF: %d (%s)", sock,
+			     errno, safe_strerror(errno));
 		return ret;
 	}
 	return optval;
@@ -77,9 +77,9 @@ static void *getsockopt_cmsg_data(struct msghdr *msgh, int level, int type)
 	struct cmsghdr *cmsg;
 	void *ptr = NULL;
 
-	for (cmsg = ZCMSG_FIRSTHDR(msgh); cmsg != NULL;
+	for (cmsg = CMSG_FIRSTHDR(msgh); cmsg != NULL;
 	     cmsg = CMSG_NXTHDR(msgh, cmsg))
-		if (cmsg->cmsg_level == level && cmsg->cmsg_type)
+		if (cmsg->cmsg_level == level && cmsg->cmsg_type == type)
 			return (ptr = CMSG_DATA(cmsg));
 
 	return NULL;
@@ -94,13 +94,13 @@ int setsockopt_ipv6_pktinfo(int sock, int val)
 	ret = setsockopt(sock, IPPROTO_IPV6, IPV6_RECVPKTINFO, &val,
 			 sizeof(val));
 	if (ret < 0)
-		flog_err(LIB_ERR_SOCKET,
+		flog_err(EC_LIB_SOCKET,
 			 "can't setsockopt IPV6_RECVPKTINFO : %s",
 			 safe_strerror(errno));
 #else  /*RFC2292*/
 	ret = setsockopt(sock, IPPROTO_IPV6, IPV6_PKTINFO, &val, sizeof(val));
 	if (ret < 0)
-		flog_err(LIB_ERR_SOCKET, "can't setsockopt IPV6_PKTINFO : %s",
+		flog_err(EC_LIB_SOCKET, "can't setsockopt IPV6_PKTINFO : %s",
 			 safe_strerror(errno));
 #endif /* INIA_IPV6 */
 	return ret;
@@ -117,7 +117,7 @@ int setsockopt_ipv6_checksum(int sock, int val)
 	ret = setsockopt(sock, IPPROTO_IPV6, IPV6_CHECKSUM, &val, sizeof(val));
 #endif /* GNU_LINUX */
 	if (ret < 0)
-		flog_err(LIB_ERR_SOCKET, "can't setsockopt IPV6_CHECKSUM");
+		flog_err(EC_LIB_SOCKET, "can't setsockopt IPV6_CHECKSUM");
 	return ret;
 }
 
@@ -129,8 +129,7 @@ int setsockopt_ipv6_multicast_hops(int sock, int val)
 	ret = setsockopt(sock, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &val,
 			 sizeof(val));
 	if (ret < 0)
-		flog_err(LIB_ERR_SOCKET,
-			 "can't setsockopt IPV6_MULTICAST_HOPS");
+		flog_err(EC_LIB_SOCKET, "can't setsockopt IPV6_MULTICAST_HOPS");
 	return ret;
 }
 
@@ -142,7 +141,7 @@ int setsockopt_ipv6_unicast_hops(int sock, int val)
 	ret = setsockopt(sock, IPPROTO_IPV6, IPV6_UNICAST_HOPS, &val,
 			 sizeof(val));
 	if (ret < 0)
-		flog_err(LIB_ERR_SOCKET, "can't setsockopt IPV6_UNICAST_HOPS");
+		flog_err(EC_LIB_SOCKET, "can't setsockopt IPV6_UNICAST_HOPS");
 	return ret;
 }
 
@@ -154,11 +153,11 @@ int setsockopt_ipv6_hoplimit(int sock, int val)
 	ret = setsockopt(sock, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &val,
 			 sizeof(val));
 	if (ret < 0)
-		flog_err(LIB_ERR_SOCKET, "can't setsockopt IPV6_RECVHOPLIMIT");
+		flog_err(EC_LIB_SOCKET, "can't setsockopt IPV6_RECVHOPLIMIT");
 #else /*RFC2292*/
 	ret = setsockopt(sock, IPPROTO_IPV6, IPV6_HOPLIMIT, &val, sizeof(val));
 	if (ret < 0)
-		flog_err(LIB_ERR_SOCKET, "can't setsockopt IPV6_HOPLIMIT");
+		flog_err(EC_LIB_SOCKET, "can't setsockopt IPV6_HOPLIMIT");
 #endif
 	return ret;
 }
@@ -171,8 +170,7 @@ int setsockopt_ipv6_multicast_loop(int sock, int val)
 	ret = setsockopt(sock, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, &val,
 			 sizeof(val));
 	if (ret < 0)
-		flog_err(LIB_ERR_SOCKET,
-			 "can't setsockopt IPV6_MULTICAST_LOOP");
+		flog_err(EC_LIB_SOCKET, "can't setsockopt IPV6_MULTICAST_LOOP");
 	return ret;
 }
 
@@ -193,7 +191,7 @@ int setsockopt_ipv6_tclass(int sock, int tclass)
 	ret = setsockopt(sock, IPPROTO_IPV6, IPV6_TCLASS, &tclass,
 			 sizeof(tclass));
 	if (ret < 0)
-		flog_err(LIB_ERR_SOCKET,
+		flog_err(EC_LIB_SOCKET,
 			 "Can't set IPV6_TCLASS option for fd %d to %#x: %s",
 			 sock, tclass, safe_strerror(errno));
 #endif
@@ -390,14 +388,14 @@ int setsockopt_ipv4_multicast_if(int sock, struct in_addr if_addr,
 #endif
 }
 
-int setsockopt_ipv4_multicast_loop(int sock, u_char val)
+int setsockopt_ipv4_multicast_loop(int sock, uint8_t val)
 {
 	int ret;
 
 	ret = setsockopt(sock, IPPROTO_IP, IP_MULTICAST_LOOP, (void *)&val,
 			 sizeof(val));
 	if (ret < 0)
-		flog_err(LIB_ERR_SOCKET, "can't setsockopt IP_MULTICAST_LOOP");
+		flog_err(EC_LIB_SOCKET, "can't setsockopt IP_MULTICAST_LOOP");
 
 	return ret;
 }
@@ -409,13 +407,13 @@ static int setsockopt_ipv4_ifindex(int sock, ifindex_t val)
 #if defined(IP_PKTINFO)
 	if ((ret = setsockopt(sock, IPPROTO_IP, IP_PKTINFO, &val, sizeof(val)))
 	    < 0)
-		flog_err(LIB_ERR_SOCKET,
+		flog_err(EC_LIB_SOCKET,
 			 "Can't set IP_PKTINFO option for fd %d to %d: %s",
 			 sock, val, safe_strerror(errno));
 #elif defined(IP_RECVIF)
 	if ((ret = setsockopt(sock, IPPROTO_IP, IP_RECVIF, &val, sizeof(val)))
 	    < 0)
-		flog_err(LIB_ERR_SOCKET,
+		flog_err(EC_LIB_SOCKET,
 			 "Can't set IP_RECVIF option for fd %d to %d: %s", sock,
 			 val, safe_strerror(errno));
 #else
@@ -435,7 +433,7 @@ int setsockopt_ipv4_tos(int sock, int tos)
 
 	ret = setsockopt(sock, IPPROTO_IP, IP_TOS, &tos, sizeof(tos));
 	if (ret < 0)
-		flog_err(LIB_ERR_SOCKET,
+		flog_err(EC_LIB_SOCKET,
 			 "Can't set IP_TOS option for fd %d to %#x: %s", sock,
 			 tos, safe_strerror(errno));
 	return ret;
@@ -454,7 +452,7 @@ int setsockopt_ifindex(int af, int sock, ifindex_t val)
 		ret = setsockopt_ipv6_pktinfo(sock, val);
 		break;
 	default:
-		flog_err(LIB_ERR_DEVELOPMENT,
+		flog_err(EC_LIB_DEVELOPMENT,
 			 "setsockopt_ifindex: unknown address family %d", af);
 	}
 	return ret;
@@ -469,8 +467,7 @@ int setsockopt_ifindex(int af, int sock, ifindex_t val)
  */
 static ifindex_t getsockopt_ipv4_ifindex(struct msghdr *msgh)
 {
-	/* XXX: initialize to zero?  (Always overwritten, so just cosmetic.) */
-	ifindex_t ifindex = -1;
+	ifindex_t ifindex;
 
 #if defined(IP_PKTINFO)
 	/* Linux pktinfo based ifindex retrieval */
@@ -478,7 +475,11 @@ static ifindex_t getsockopt_ipv4_ifindex(struct msghdr *msgh)
 
 	pktinfo = (struct in_pktinfo *)getsockopt_cmsg_data(msgh, IPPROTO_IP,
 							    IP_PKTINFO);
-	/* XXX Can pktinfo be NULL?  Clean up post 0.98. */
+
+	/* getsockopt_ifindex() will forward this, being 0 "not found" */
+	if (pktinfo == NULL)
+		return 0;
+
 	ifindex = pktinfo->ipi_ifindex;
 
 #elif defined(IP_RECVIF)
@@ -541,7 +542,7 @@ ifindex_t getsockopt_ifindex(int af, struct msghdr *msgh)
 		return (getsockopt_ipv6_ifindex(msgh));
 		break;
 	default:
-		flog_err(LIB_ERR_DEVELOPMENT,
+		flog_err(EC_LIB_DEVELOPMENT,
 			 "getsockopt_ifindex: unknown address family %d", af);
 		return 0;
 	}
@@ -586,34 +587,30 @@ int sockopt_tcp_rtt(int sock)
 #endif
 }
 
-int sockopt_tcp_signature(int sock, union sockunion *su, const char *password)
+int sockopt_tcp_signature_ext(int sock, union sockunion *su, uint16_t prefixlen,
+			      const char *password)
 {
-#if defined(HAVE_TCP_MD5_LINUX24) && defined(GNU_LINUX)
-/* Support for the old Linux 2.4 TCP-MD5 patch, taken from Hasso Tepper's
- * version of the Quagga patch (based on work by Rick Payne, and Bruce
- * Simpson)
- */
-#define TCP_MD5_AUTH 13
-#define TCP_MD5_AUTH_ADD 1
-#define TCP_MD5_AUTH_DEL 2
-	struct tcp_rfc2385_cmd {
-		u_int8_t command;  /* Command - Add/Delete */
-		u_int32_t address; /* IPV4 address associated */
-		u_int8_t keylen;   /* MD5 Key len (do NOT assume 0 terminated
-				      ascii) */
-		void *key;	 /* MD5 Key */
-	} cmd;
-	struct in_addr *addr = &su->sin.sin_addr;
+#ifndef HAVE_DECL_TCP_MD5SIG
+	/*
+	 * We have been asked to enable MD5 auth for an address, but our
+	 * platform doesn't support that
+	 */
+	return -2;
+#endif
 
-	cmd.command = (password != NULL ? TCP_MD5_AUTH_ADD : TCP_MD5_AUTH_DEL);
-	cmd.address = addr->s_addr;
-	cmd.keylen = (password != NULL ? strlen(password) : 0);
-	cmd.key = password;
+#ifndef TCP_MD5SIG_EXT
+	/*
+	 * We have been asked to enable MD5 auth for a prefix, but our platform
+	 * doesn't support that
+	 */
+	if (prefixlen > 0)
+		return -2;
+#endif
 
-	return setsockopt(sock, IPPROTO_TCP, TCP_MD5_AUTH, &cmd, sizeof cmd);
-
-#elif HAVE_DECL_TCP_MD5SIG
+#if HAVE_DECL_TCP_MD5SIG
 	int ret;
+
+	int optname = TCP_MD5SIG;
 #ifndef GNU_LINUX
 	/*
 	 * XXX Need to do PF_KEY operation here to add/remove an SA entry,
@@ -666,12 +663,29 @@ int sockopt_tcp_signature(int sock, union sockunion *su, const char *password)
 
 	memset(&md5sig, 0, sizeof(md5sig));
 	memcpy(&md5sig.tcpm_addr, su2, sizeof(*su2));
+
 	md5sig.tcpm_keylen = keylen;
 	if (keylen)
 		memcpy(md5sig.tcpm_key, password, keylen);
 	sockunion_free(susock);
+
+	/*
+	 * Handle support for MD5 signatures on prefixes, if available and
+	 * requested. Technically the #ifdef check below is not needed because
+	 * if prefixlen > 0 and we don't have support for this feature we would
+	 * have already returned by now, but leaving it there to be explicit.
+	 */
+#ifdef TCP_MD5SIG_EXT
+	if (prefixlen > 0) {
+		md5sig.tcpm_prefixlen = prefixlen;
+		md5sig.tcpm_flags = TCP_MD5SIG_FLAG_PREFIX;
+		optname = TCP_MD5SIG_EXT;
+	}
+#endif /* TCP_MD5SIG_EXT */
+
 #endif /* GNU_LINUX */
-	if ((ret = setsockopt(sock, IPPROTO_TCP, TCP_MD5SIG, &md5sig,
+
+	if ((ret = setsockopt(sock, IPPROTO_TCP, optname, &md5sig,
 			      sizeof md5sig))
 	    < 0) {
 		/* ENOENT is harmless.  It is returned when we clear a password
@@ -680,12 +694,16 @@ int sockopt_tcp_signature(int sock, union sockunion *su, const char *password)
 		if (ENOENT == errno)
 			ret = 0;
 		else
-			flog_err(LIB_ERR_SYSTEM_CALL,
-				  "sockopt_tcp_signature: setsockopt(%d): %s",
-				  sock, safe_strerror(errno));
+			flog_err_sys(
+				EC_LIB_SYSTEM_CALL,
+				"sockopt_tcp_signature: setsockopt(%d): %s",
+				sock, safe_strerror(errno));
 	}
 	return ret;
-#else  /* HAVE_TCP_MD5SIG */
-	return -2;
-#endif /* !HAVE_TCP_MD5SIG */
+#endif /* HAVE_TCP_MD5SIG */
+}
+
+int sockopt_tcp_signature(int sock, union sockunion *su, const char *password)
+{
+	return sockopt_tcp_signature_ext(sock, su, 0, password);
 }

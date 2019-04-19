@@ -36,17 +36,19 @@
 
 static void pim_instance_terminate(struct pim_instance *pim)
 {
+	pim_vxlan_exit(pim);
+
 	if (pim->ssm_info) {
 		pim_ssm_terminate(pim->ssm_info);
 		pim->ssm_info = NULL;
 	}
 
 	if (pim->static_routes)
-		list_delete_and_null(&pim->static_routes);
-
-	pim_rp_free(pim);
+		list_delete(&pim->static_routes);
 
 	pim_upstream_terminate(pim);
+
+	pim_rp_free(pim);
 
 	/* Traverse and cleanup rpf_hash */
 	if (pim->rpf_hash) {
@@ -85,11 +87,12 @@ static struct pim_instance *pim_instance_init(struct vrf *vrf)
 	pim->spt.switchover = PIM_SPT_IMMEDIATE;
 	pim->spt.plist = NULL;
 
-	pim_msdp_init(pim, master);
+	pim_msdp_init(pim, router->master);
+	pim_vxlan_init(pim);
 
 	snprintf(hash_name, 64, "PIM %s RPF Hash", vrf->name);
-	pim->rpf_hash =	hash_create_size(256, pim_rpf_hash_key,
-					 pim_rpf_equal, hash_name);
+	pim->rpf_hash = hash_create_size(256, pim_rpf_hash_key, pim_rpf_equal,
+					 hash_name);
 
 	if (PIM_DEBUG_ZEBRA)
 		zlog_debug("%s: NHT rpf hash init ", __PRETTY_FUNCTION__);
@@ -100,9 +103,6 @@ static struct pim_instance *pim_instance_init(struct vrf *vrf)
 	pim->static_routes->del = (void (*)(void *))pim_static_route_free;
 
 	pim->send_v6_secondary = 1;
-
-	if (vrf->vrf_id == VRF_DEFAULT)
-		pimg = pim;
 
 	pim_rp_init(pim);
 
@@ -131,9 +131,6 @@ static int pim_vrf_new(struct vrf *vrf)
 	zlog_debug("VRF Created: %s(%u)", vrf->name, vrf->vrf_id);
 
 	vrf->info = (void *)pim;
-
-	if (vrf->vrf_id == VRF_DEFAULT)
-		pimg = pim;
 
 	pim_ssmpingd_init(pim);
 	return 0;
@@ -188,7 +185,7 @@ static int pim_vrf_config_write(struct vty *vty)
 		pim_global_config_write_worker(pim, vty);
 
 		if (vrf->vrf_id != VRF_DEFAULT)
-			vty_endframe(vty, "!\n");
+			vty_endframe(vty, " exit-vrf\n!\n");
 	}
 
 	return 0;
@@ -196,9 +193,10 @@ static int pim_vrf_config_write(struct vty *vty)
 
 void pim_vrf_init(void)
 {
-	vrf_init(pim_vrf_new, pim_vrf_enable, pim_vrf_disable, pim_vrf_delete);
+	vrf_init(pim_vrf_new, pim_vrf_enable, pim_vrf_disable,
+		 pim_vrf_delete, NULL);
 
-	vrf_cmd_init(pim_vrf_config_write);
+	vrf_cmd_init(pim_vrf_config_write, &pimd_privs);
 }
 
 void pim_vrf_terminate(void)

@@ -405,9 +405,9 @@ int pim_assert_build_msg(uint8_t *pim_msg, int buf_size, struct interface *ifp,
 	}
 
 	/* Metric preference */
-	pim_write_uint32(pim_msg_curr, rpt_bit_flag
-					       ? metric_preference | 0x80000000
-					       : metric_preference);
+	pim_write_uint32(pim_msg_curr,
+			 rpt_bit_flag ? metric_preference | 0x80000000
+				      : metric_preference);
 	pim_msg_curr += 4;
 
 	/* Route metric */
@@ -569,7 +569,7 @@ static void pim_assert_timer_set(struct pim_ifchannel *ch, int interval)
 			   ch->interface->name);
 	}
 
-	thread_add_timer(master, on_assert_timer, ch, interval,
+	thread_add_timer(router->master, on_assert_timer, ch, interval,
 			 &ch->t_ifassert_timer);
 }
 

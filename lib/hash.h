@@ -35,15 +35,20 @@ DECLARE_MTYPE(HASH_BACKET)
 #define HASHWALK_CONTINUE 0
 #define HASHWALK_ABORT -1
 
-struct hash_backet {
+#if CONFDATE > 20200225
+CPP_NOTICE("hash.h: time to remove hash_backet #define")
+#endif
+#define hash_backet hash_bucket
+
+struct hash_bucket {
 	/*
-	 * if this backet is the head of the linked listed, len denotes the
+	 * if this bucket is the head of the linked listed, len denotes the
 	 * number of elements in the list
 	 */
 	int len;
 
 	/* Linked list.  */
-	struct hash_backet *next;
+	struct hash_bucket *next;
 
 	/* Hash key. */
 	unsigned int key;
@@ -60,8 +65,8 @@ struct hashstats {
 };
 
 struct hash {
-	/* Hash backet. */
-	struct hash_backet **index;
+	/* Hash bucket. */
+	struct hash_bucket **index;
 
 	/* Hash table size. Must be power of 2 */
 	unsigned int size;
@@ -73,7 +78,7 @@ struct hash {
 	unsigned int (*hash_key)(void *);
 
 	/* Data compare function. */
-	int (*hash_cmp)(const void *, const void *);
+	bool (*hash_cmp)(const void *, const void *);
 
 	/* Backet alloc. */
 	unsigned long count;
@@ -115,7 +120,7 @@ struct hash {
  *    a new hash table
  */
 extern struct hash *hash_create(unsigned int (*hash_key)(void *),
-				int (*hash_cmp)(const void *, const void *),
+				bool (*hash_cmp)(const void *, const void *),
 				const char *name);
 
 /*
@@ -150,7 +155,8 @@ extern struct hash *hash_create(unsigned int (*hash_key)(void *),
  */
 extern struct hash *
 hash_create_size(unsigned int size, unsigned int (*hash_key)(void *),
-		 int (*hash_cmp)(const void *, const void *), const char *name);
+		 bool (*hash_cmp)(const void *, const void *),
+		 const char *name);
 
 /*
  * Retrieve or insert data from / into a hash table.
@@ -167,7 +173,9 @@ hash_create_size(unsigned int size, unsigned int (*hash_key)(void *),
  *    hash table to operate on
  *
  * data
- *    data to insert or retrieve
+ *    data to insert or retrieve - A hash bucket will not be created if
+ *    the alloc_func returns a NULL pointer and nothing will be added to
+ *    the hash.  As such bucket->data will always be non-NULL.
  *
  * alloc_func
  *    function to call if the item is not found in the hash table. This
@@ -232,7 +240,11 @@ extern void *hash_release(struct hash *hash, void *data);
  * Iterate over the elements in a hash table.
  *
  * It is safe to delete items passed to the iteration function from the hash
- * table during iteration.
+ * table during iteration.  Please note that adding entries to the hash
+ * during the walk will cause undefined behavior in that some new entries
+ * will be walked and some will not.  So do not do this.
+ *
+ * The bucket passed to func will have a non-NULL data pointer.
  *
  * hash
  *    hash table to operate on
@@ -244,13 +256,17 @@ extern void *hash_release(struct hash *hash, void *data);
  *    arbitrary argument passed as the second parameter in each call to 'func'
  */
 extern void hash_iterate(struct hash *hash,
-			 void (*func)(struct hash_backet *, void *), void *arg);
+			 void (*func)(struct hash_bucket *, void *), void *arg);
 
 /*
  * Iterate over the elements in a hash table, stopping on condition.
  *
  * It is safe to delete items passed to the iteration function from the hash
- * table during iteration.
+ * table during iteration.  Please note that adding entries to the hash
+ * during the walk will cause undefined behavior in that some new entries
+ * will be walked and some will not.  So do not do this.
+ *
+ * The bucket passed to func will have a non-NULL data pointer.
  *
  * hash
  *    hash table to operate on
@@ -263,7 +279,7 @@ extern void hash_iterate(struct hash *hash,
  *    arbitrary argument passed as the second parameter in each call to 'func'
  */
 extern void hash_walk(struct hash *hash,
-		      int (*func)(struct hash_backet *, void *), void *arg);
+		      int (*func)(struct hash_bucket *, void *), void *arg);
 
 /*
  * Remove all elements from a hash table.

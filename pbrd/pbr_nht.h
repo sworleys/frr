@@ -3,8 +3,6 @@
  * Copyright (C) 2018 Cumulus Networks, Inc.
  *               Donald Sharp
  *
- * This file is part of FRR.
- *
  * FRR is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
  * Free Software Foundation; either version 2, or (at your option) any
@@ -27,8 +25,10 @@
 
 #include "pbr_map.h"
 
+#define PBR_NHC_NAMELEN PBR_MAP_NAMELEN + 10
+
 struct pbr_nexthop_group_cache {
-	char name[100];
+	char name[PBR_NHC_NAMELEN];
 
 	uint32_t table_id;
 
@@ -56,9 +56,13 @@ extern void pbr_nht_write_table_range(struct vty *vty);
 extern void pbr_nht_set_tableid_range(uint32_t low, uint32_t high);
 
 /*
- * Get the next tableid to use for installation
+ * Get the next tableid to use for installation.
+ *
+ * peek
+ *    If set to true, retrieves the next ID without marking it used. The next
+ *    call will return the same ID.
  */
-extern uint32_t pbr_nht_get_next_tableid(void);
+extern uint32_t pbr_nht_get_next_tableid(bool peek);
 /*
  * Get the next rule number to use for installation
  */
@@ -103,7 +107,7 @@ extern uint32_t pbr_nht_get_table(const char *name);
 
 extern bool pbr_nht_get_installed(const char *name);
 
-extern char *pbr_nht_nexthop_make_name(char *name, uint32_t seqno,
+extern char *pbr_nht_nexthop_make_name(char *name, size_t l, uint32_t seqno,
 				       char *buffer);
 
 extern void pbr_nht_show_nexthop_group(struct vty *vty, const char *name);
@@ -112,6 +116,11 @@ extern void pbr_nht_show_nexthop_group(struct vty *vty, const char *name);
  * When we get a callback from zebra about a nexthop changing
  */
 extern void pbr_nht_nexthop_update(struct zapi_route *nhr);
+
+/*
+ * When we get a callback from zebra about an interface status update.
+ */
+extern void pbr_nht_nexthop_interface_update(struct interface *ifp);
 
 extern void pbr_nht_init(void);
 #endif

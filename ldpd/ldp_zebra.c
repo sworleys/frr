@@ -142,9 +142,9 @@ zebra_send_mpls_labels(int cmd, struct kroute *kr)
 		stream_put_in_addr(s, &kr->nexthop.v4);
 		break;
 	case AF_INET6:
-		stream_write(s, (u_char *)&kr->prefix.v6, 16);
+		stream_write(s, (uint8_t *)&kr->prefix.v6, 16);
 		stream_putc(s, kr->prefixlen);
-		stream_write(s, (u_char *)&kr->nexthop.v6, 16);
+		stream_write(s, (uint8_t *)&kr->nexthop.v6, 16);
 		break;
 	default:
 		fatalx("kr_change: unknown af");
@@ -533,7 +533,7 @@ void
 ldp_zebra_init(struct thread_master *master)
 {
 	/* Set default values. */
-	zclient = zclient_new_notify(master, &zclient_options_default);
+	zclient = zclient_new(master, &zclient_options_default);
 	zclient_init(zclient, ZEBRA_ROUTE_LDP, 0, &ldpd_privs);
 
 	/* set callbacks */

@@ -24,6 +24,7 @@
 
 #include <zclient.h>
 #include <vty.h>
+#include <distribute.h>
 
 #include "ripng_memory.h"
 
@@ -42,11 +43,6 @@
 #define RIPNG_METRIC_INFINITY           16
 #define RIPNG_METRIC_NEXTHOP          0xff
 #define RIPNG_GROUP              "ff02::9"
-
-/* RIPng timers. */
-#define RIPNG_UPDATE_TIMER_DEFAULT      30
-#define RIPNG_TIMEOUT_TIMER_DEFAULT    180
-#define RIPNG_GARBAGE_TIMER_DEFAULT    120
 
 /* RIPng peer timeout value. */
 #define RIPNG_PEER_TIMER_DEFAULT       180
@@ -77,9 +73,6 @@
 #define RIPNG_DEFAULT_ACCEPT_NONE        1
 #define RIPNG_DEFAULT_ACCEPT             2
 
-/* Default value for "default-metric" command. */
-#define RIPNG_DEFAULT_METRIC_DEFAULT     1
-
 /* For max RTE calculation. */
 #ifndef IPV6_HDRLEN
 #define IPV6_HDRLEN 40
@@ -89,33 +82,30 @@
 #define IFMINMTU    576
 #endif /* IFMINMTU */
 
+/* YANG paths */
+#define RIPNG_INSTANCE	"/frr-ripngd:ripngd/instance"
+#define RIPNG_IFACE	"/frr-interface:lib/interface/frr-ripngd:ripng"
+
 /* RIPng structure. */
 struct ripng {
 	/* RIPng socket. */
 	int sock;
 
 	/* RIPng Parameters.*/
-	u_char command;
-	u_char version;
-	unsigned long update_time;
-	unsigned long timeout_time;
-	unsigned long garbage_time;
+	uint8_t command;
+	uint8_t version;
+	uint16_t update_time;
+	uint16_t timeout_time;
+	uint16_t garbage_time;
 	int max_mtu;
-	int default_metric;
-	int default_information;
+	uint8_t default_metric;
 
 	/* Input/output buffer of RIPng. */
 	struct stream *ibuf;
 	struct stream *obuf;
 
 	/* RIPng routing information base. */
-	struct route_table *table;
-
-	/* RIPng only static route information. */
-	struct route_table *route;
-
-	/* RIPng aggregate route information. */
-	struct route_table *aggregate;
+	struct agg_table *table;
 
 	/* RIPng threads. */
 	struct thread *t_read;
@@ -130,42 +120,45 @@ struct ripng {
 	struct thread *t_triggered_interval;
 
 	/* RIPng ECMP flag */
-	unsigned int ecmp;
+	bool ecmp;
 
 	/* For redistribute route map. */
 	struct {
 		char *name;
 		struct route_map *map;
-		int metric_config;
-		u_int32_t metric;
+		bool metric_config;
+		uint8_t metric;
 	} route_map[ZEBRA_ROUTE_MAX];
+
+	/* For distribute-list container */
+	struct distribute_ctx *distribute_ctx;
 };
 
 /* Routing table entry. */
 struct rte {
 	struct in6_addr addr; /* RIPng destination prefix */
-	u_int16_t tag;	/* RIPng tag */
-	u_char prefixlen;     /* Length of the RIPng prefix */
-	u_char metric;	/* Metric of the RIPng route */
+	uint16_t tag;	 /* RIPng tag */
+	uint8_t prefixlen;    /* Length of the RIPng prefix */
+	uint8_t metric;       /* Metric of the RIPng route */
 			      /* The nexthop is stored by the structure
 			       * ripng_nexthop within ripngd.c */
 };
 
 /* RIPNG send packet. */
 struct ripng_packet {
-	u_char command;
-	u_char version;
-	u_int16_t zero;
+	uint8_t command;
+	uint8_t version;
+	uint16_t zero;
 	struct rte rte[1];
 };
 
 /* Each route's information. */
 struct ripng_info {
 	/* This route's type.  Static, ripng or aggregate. */
-	u_char type;
+	uint8_t type;
 
 	/* Sub type for static route. */
-	u_char sub_type;
+	uint8_t sub_type;
 
 	/* RIPng specific information */
 	struct in6_addr nexthop;
@@ -175,10 +168,10 @@ struct ripng_info {
 	ifindex_t ifindex;
 
 	/* Metric of this route.  */
-	u_char metric;
+	uint8_t metric;
 
 	/* Tag field of RIPng packet.*/
-	u_int16_t tag;
+	uint16_t tag;
 
 	/* For aggregation. */
 	unsigned int suppress;
@@ -186,7 +179,7 @@ struct ripng_info {
 /* Flags of RIPng route. */
 #define RIPNG_RTF_FIB      1
 #define RIPNG_RTF_CHANGED  2
-	u_char flags;
+	uint8_t flags;
 
 	/* Garbage collect timer. */
 	struct thread *t_timeout;
@@ -194,11 +187,11 @@ struct ripng_info {
 
 	/* Route-map features - this variables can be changed. */
 	struct in6_addr nexthop_out;
-	u_char metric_set;
-	u_char metric_out;
-	u_int16_t tag_out;
+	uint8_t metric_set;
+	uint8_t metric_out;
+	uint16_t tag_out;
 
-	struct route_node *rp;
+	struct agg_node *rp;
 };
 
 #ifdef notyet
@@ -207,10 +200,10 @@ struct ripng_info {
 struct ripng_tag
 {
   /* Tag value. */
-  u_int16_t tag;
+  uint16_t tag;
 
   /* Port. */
-  u_int16_t port;
+  uint16_t port;
 
   /* Multicast group. */
   struct in6_addr maddr;
@@ -222,10 +215,10 @@ struct ripng_tag
   int distance;
 
   /* Split horizon. */
-  u_char split_horizon;
+  uint8_t split_horizon;
 
   /* Poison reverse. */
-  u_char poison_reverse;
+  uint8_t poison_reverse;
 };
 #endif /* 0 */
 #endif /* not yet */
@@ -247,7 +240,6 @@ struct ripng_interface {
 
 	/* Split horizon flag. */
 	split_horizon_policy_t split_horizon;
-	split_horizon_policy_t split_horizon_default;
 
 /* For filter type slot. */
 #define RIPNG_FILTER_IN  0
@@ -271,10 +263,10 @@ struct ripng_interface {
 #endif /* notyet */
 
 	/* Default information originate. */
-	u_char default_originate;
+	uint8_t default_originate;
 
 	/* Default information only. */
-	u_char default_only;
+	uint8_t default_only;
 
 	/* Wake up thread. */
 	struct thread *t_wakeup;
@@ -295,7 +287,7 @@ struct ripng_peer {
 	time_t uptime;
 
 	/* Peer RIP version. */
-	u_char version;
+	uint8_t version;
 
 	/* Statistics. */
 	int recv_badpackets;
@@ -325,45 +317,67 @@ enum ripng_event {
 		}                                                              \
 	} while (0)
 
+#define RIPNG_OFFSET_LIST_IN  0
+#define RIPNG_OFFSET_LIST_OUT 1
+#define RIPNG_OFFSET_LIST_MAX 2
+
+struct ripng_offset_list {
+	char *ifname;
+
+	struct {
+		char *alist_name;
+		/* struct access_list *alist; */
+		uint8_t metric;
+	} direct[RIPNG_OFFSET_LIST_MAX];
+};
+
 /* Extern variables. */
 extern struct ripng *ripng;
+extern struct list *peer_list;
 extern struct zebra_privs_t ripngd_privs;
 extern struct thread_master *master;
 
 /* Prototypes. */
 extern void ripng_init(void);
-extern void ripng_reset(void);
 extern void ripng_clean(void);
 extern void ripng_clean_network(void);
 extern void ripng_interface_clean(void);
-extern void ripng_interface_reset(void);
+extern int ripng_enable_network_add(struct prefix *p);
+extern int ripng_enable_network_delete(struct prefix *p);
+extern int ripng_enable_if_add(const char *ifname);
+extern int ripng_enable_if_delete(const char *ifname);
+extern int ripng_passive_interface_set(const char *ifname);
+extern int ripng_passive_interface_unset(const char *ifname);
 extern void ripng_passive_interface_clean(void);
 extern void ripng_if_init(void);
 extern void ripng_route_map_init(void);
-extern void ripng_route_map_reset(void);
 extern void ripng_terminate(void);
 /* zclient_init() is done by ripng_zebra.c:zebra_init() */
 extern void zebra_init(struct thread_master *);
 extern void ripng_zebra_stop(void);
-extern void ripng_zclient_reset(void);
-extern void ripng_offset_init(void);
-
-extern int config_write_ripng_offset_list(struct vty *);
+extern void ripng_redistribute_conf_update(int type);
+extern void ripng_redistribute_conf_delete(int type);
 
 extern void ripng_peer_init(void);
-extern void ripng_peer_update(struct sockaddr_in6 *, u_char);
+extern void ripng_peer_update(struct sockaddr_in6 *, uint8_t);
 extern void ripng_peer_bad_route(struct sockaddr_in6 *);
 extern void ripng_peer_bad_packet(struct sockaddr_in6 *);
 extern void ripng_peer_display(struct vty *);
 extern struct ripng_peer *ripng_peer_lookup(struct in6_addr *);
 extern struct ripng_peer *ripng_peer_lookup_next(struct in6_addr *);
 
+extern struct ripng_offset_list *ripng_offset_list_new(const char *ifname);
+extern void ripng_offset_list_del(struct ripng_offset_list *offset);
+extern struct ripng_offset_list *ripng_offset_list_lookup(const char *ifname);
+extern struct ripng_offset_list *ripng_offset_list_lookup(const char *ifname);
 extern int ripng_offset_list_apply_in(struct prefix_ipv6 *, struct interface *,
-				      u_char *);
+				      uint8_t *);
 extern int ripng_offset_list_apply_out(struct prefix_ipv6 *, struct interface *,
-				       u_char *);
+				       uint8_t *);
+extern void ripng_offset_init(void);
 extern void ripng_offset_clean(void);
 
+extern int ripng_route_rte(struct ripng_info *rinfo);
 extern struct ripng_info *ripng_info_new(void);
 extern void ripng_info_free(struct ripng_info *rinfo);
 extern void ripng_event(enum ripng_event, int);
@@ -374,19 +388,20 @@ extern void ripng_redistribute_delete(int, int, struct prefix_ipv6 *,
 				      ifindex_t);
 extern void ripng_redistribute_withdraw(int type);
 
+extern void ripng_ecmp_disable(void);
 extern void ripng_distribute_update_interface(struct interface *);
 extern void ripng_if_rmap_update_interface(struct interface *);
 
-extern void ripng_zebra_ipv6_add(struct route_node *);
-extern void ripng_zebra_ipv6_delete(struct route_node *);
+extern void ripng_zebra_ipv6_add(struct agg_node *node);
+extern void ripng_zebra_ipv6_delete(struct agg_node *node);
 
 extern void ripng_redistribute_clean(void);
 extern int ripng_redistribute_check(int);
-extern void ripng_redistribute_write(struct vty *, int);
+extern void ripng_redistribute_write(struct vty *);
 
 extern int ripng_write_rte(int num, struct stream *s, struct prefix_ipv6 *p,
-			   struct in6_addr *nexthop, u_int16_t tag,
-			   u_char metric);
+			   struct in6_addr *nexthop, uint16_t tag,
+			   uint8_t metric);
 extern int ripng_send_packet(caddr_t buf, int bufsize, struct sockaddr_in6 *to,
 			     struct interface *ifp);
 
@@ -406,10 +421,16 @@ extern int ripng_interface_address_add(int command, struct zclient *,
 extern int ripng_interface_address_delete(int command, struct zclient *,
 					  zebra_size_t, vrf_id_t);
 
-extern int ripng_network_write(struct vty *, int);
+extern int ripng_create(int socket);
+extern int ripng_make_socket(void);
+extern int ripng_network_write(struct vty *);
 
 extern struct ripng_info *ripng_ecmp_add(struct ripng_info *);
 extern struct ripng_info *ripng_ecmp_replace(struct ripng_info *);
 extern struct ripng_info *ripng_ecmp_delete(struct ripng_info *);
+
+/* Northbound. */
+extern void ripng_cli_init(void);
+extern const struct frr_yang_module_info frr_ripngd_info;
 
 #endif /* _ZEBRA_RIPNG_RIPNGD_H */

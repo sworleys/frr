@@ -39,13 +39,13 @@
 /* BGP nexthop cache value structure. */
 struct bgp_nexthop_cache {
 	/* IGP route's metric. */
-	u_int32_t metric;
+	uint32_t metric;
 
 	/* Nexthop number and nexthop linked list.*/
-	u_char nexthop_num;
+	uint8_t nexthop_num;
 	struct nexthop *nexthop;
 	time_t last_update;
-	u_int16_t flags;
+	uint16_t flags;
 
 #define BGP_NEXTHOP_VALID             (1 << 0)
 #define BGP_NEXTHOP_REGISTERED        (1 << 1)
@@ -55,7 +55,7 @@ struct bgp_nexthop_cache {
 #define BGP_STATIC_ROUTE_EXACT_MATCH  (1 << 5)
 #define BGP_NEXTHOP_LABELED_VALID     (1 << 6)
 
-	u_int16_t change_flags;
+	uint16_t change_flags;
 
 #define BGP_NEXTHOP_CHANGED           (1 << 0)
 #define BGP_NEXTHOP_METRIC_CHANGED    (1 << 1)
@@ -63,7 +63,7 @@ struct bgp_nexthop_cache {
 
 	struct bgp_node *node;
 	void *nht_info; /* In BGP, peer session */
-	LIST_HEAD(path_list, bgp_info) paths;
+	LIST_HEAD(path_list, bgp_path_info) paths;
 	unsigned int path_count;
 	struct bgp *bgp;
 };
@@ -74,8 +74,6 @@ struct tip_addr {
 	int refcnt;
 };
 
-extern int bgp_nexthop_lookup(afi_t, struct peer *peer, struct bgp_info *,
-			      int *, int *);
 extern void bgp_connected_add(struct bgp *bgp, struct connected *c);
 extern void bgp_connected_delete(struct bgp *bgp, struct connected *c);
 extern int bgp_subgrp_multiaccess_check_v4(struct in_addr nexthop,

@@ -37,7 +37,7 @@ enum ipaddr_type_t {
 struct ipaddr {
 	enum ipaddr_type_t ipa_type;
 	union {
-		u_char addr;
+		uint8_t addr;
 		struct in_addr _v4_addr;
 		struct in6_addr _v6_addr;
 	} ip;
@@ -51,6 +51,9 @@ struct ipaddr {
 
 #define SET_IPADDR_V4(p)  (p)->ipa_type = IPADDR_V4
 #define SET_IPADDR_V6(p)  (p)->ipa_type = IPADDR_V6
+
+#define IPADDRSZ(p)                                                            \
+	IS_IPADDR_V4((p)) ? sizeof(struct in_addr) : sizeof(struct in6_addr)
 
 static inline int str2ipaddr(const char *str, struct ipaddr *ip)
 {
@@ -95,7 +98,7 @@ static inline char *ipaddr2str(struct ipaddr *ip, char *buf, int size)
 static inline void ipv4_to_ipv4_mapped_ipv6(struct in6_addr *in6,
 					    struct in_addr in)
 {
-	u_int32_t addr_type = htonl(0xFFFF);
+	uint32_t addr_type = htonl(0xFFFF);
 
 	memset(in6, 0, sizeof(struct in6_addr));
 	memcpy((char *)in6 + 8, &addr_type, sizeof(addr_type));

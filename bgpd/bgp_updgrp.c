@@ -86,9 +86,8 @@ static void sync_init(struct update_subgroup *subgrp)
 	BGP_ADV_FIFO_INIT(&subgrp->sync->update);
 	BGP_ADV_FIFO_INIT(&subgrp->sync->withdraw);
 	BGP_ADV_FIFO_INIT(&subgrp->sync->withdraw_low);
-	subgrp->hash = hash_create(baa_hash_key,
-				   baa_hash_cmp,
-				   "BGP SubGroup Hash");
+	subgrp->hash =
+		hash_create(baa_hash_key, baa_hash_cmp, "BGP SubGroup Hash");
 
 	/* We use a larger buffer for subgrp->work in the event that:
 	 * - We RX a BGP_UPDATE where the attributes alone are just
@@ -111,8 +110,7 @@ static void sync_init(struct update_subgroup *subgrp)
 
 static void sync_delete(struct update_subgroup *subgrp)
 {
-	if (subgrp->sync)
-		XFREE(MTYPE_BGP_SYNCHRONISE, subgrp->sync);
+	XFREE(MTYPE_BGP_SYNCHRONISE, subgrp->sync);
 	subgrp->sync = NULL;
 	if (subgrp->hash)
 		hash_free(subgrp->hash);
@@ -145,14 +143,14 @@ static void conf_copy(struct peer *dst, struct peer *src, afi_t afi,
 	dst->v_routeadv = src->v_routeadv;
 	dst->flags = src->flags;
 	dst->af_flags[afi][safi] = src->af_flags[afi][safi];
-	if (dst->host)
-		XFREE(MTYPE_BGP_PEER_HOST, dst->host);
+	XFREE(MTYPE_BGP_PEER_HOST, dst->host);
 
 	dst->host = XSTRDUP(MTYPE_BGP_PEER_HOST, src->host);
 	dst->cap = src->cap;
 	dst->af_cap[afi][safi] = src->af_cap[afi][safi];
 	dst->afc_nego[afi][safi] = src->afc_nego[afi][safi];
 	dst->orf_plist[afi][safi] = src->orf_plist[afi][safi];
+	dst->addpath_type[afi][safi] = src->addpath_type[afi][safi];
 	dst->local_as = src->local_as;
 	dst->change_local_as = src->change_local_as;
 	dst->shared_network = src->shared_network;
@@ -208,27 +206,19 @@ static void conf_release(struct peer *src, afi_t afi, safi_t safi)
 
 	srcfilter = &src->filter[afi][safi];
 
-	if (src->default_rmap[afi][safi].name)
-		XFREE(MTYPE_ROUTE_MAP_NAME, src->default_rmap[afi][safi].name);
+	XFREE(MTYPE_ROUTE_MAP_NAME, src->default_rmap[afi][safi].name);
 
-	if (srcfilter->dlist[FILTER_OUT].name)
-		XFREE(MTYPE_BGP_FILTER_NAME, srcfilter->dlist[FILTER_OUT].name);
+	XFREE(MTYPE_BGP_FILTER_NAME, srcfilter->dlist[FILTER_OUT].name);
 
-	if (srcfilter->plist[FILTER_OUT].name)
-		XFREE(MTYPE_BGP_FILTER_NAME, srcfilter->plist[FILTER_OUT].name);
+	XFREE(MTYPE_BGP_FILTER_NAME, srcfilter->plist[FILTER_OUT].name);
 
-	if (srcfilter->aslist[FILTER_OUT].name)
-		XFREE(MTYPE_BGP_FILTER_NAME,
-		      srcfilter->aslist[FILTER_OUT].name);
+	XFREE(MTYPE_BGP_FILTER_NAME, srcfilter->aslist[FILTER_OUT].name);
 
-	if (srcfilter->map[RMAP_OUT].name)
-		XFREE(MTYPE_BGP_FILTER_NAME, srcfilter->map[RMAP_OUT].name);
+	XFREE(MTYPE_BGP_FILTER_NAME, srcfilter->map[RMAP_OUT].name);
 
-	if (srcfilter->usmap.name)
-		XFREE(MTYPE_BGP_FILTER_NAME, srcfilter->usmap.name);
+	XFREE(MTYPE_BGP_FILTER_NAME, srcfilter->usmap.name);
 
-	if (src->host)
-		XFREE(MTYPE_BGP_PEER_HOST, src->host);
+	XFREE(MTYPE_BGP_PEER_HOST, src->host);
 	src->host = NULL;
 }
 
@@ -323,6 +313,7 @@ static unsigned int updgrp_hash_key_make(void *p)
 	key = jhash_1word(peer->sort, key); /* EBGP or IBGP */
 	key = jhash_1word((peer->flags & PEER_UPDGRP_FLAGS), key);
 	key = jhash_1word((flags & PEER_UPDGRP_AF_FLAGS), key);
+	key = jhash_1word((uint32_t)peer->addpath_type[afi][safi], key);
 	key = jhash_1word((peer->cap & PEER_UPDGRP_CAP_FLAGS), key);
 	key = jhash_1word((peer->af_cap[afi][safi] & PEER_UPDGRP_AF_CAP_FLAGS),
 			  key);
@@ -394,7 +385,7 @@ static unsigned int updgrp_hash_key_make(void *p)
 	return key;
 }
 
-static int updgrp_hash_cmp(const void *p1, const void *p2)
+static bool updgrp_hash_cmp(const void *p1, const void *p2)
 {
 	const struct update_group *grp1;
 	const struct update_group *grp2;
@@ -408,7 +399,7 @@ static int updgrp_hash_cmp(const void *p1, const void *p2)
 	safi_t safi;
 
 	if (!p1 || !p2)
-		return 0;
+		return false;
 
 	grp1 = p1;
 	grp2 = p2;
@@ -423,68 +414,71 @@ static int updgrp_hash_cmp(const void *p1, const void *p2)
 
 	/* put EBGP and IBGP peers in different update groups */
 	if (pe1->sort != pe2->sort)
-		return 0;
+		return false;
 
 	/* check peer flags */
 	if ((pe1->flags & PEER_UPDGRP_FLAGS)
 	    != (pe2->flags & PEER_UPDGRP_FLAGS))
-		return 0;
+		return false;
 
 	/* If there is 'local-as' configured, it should match. */
 	if (pe1->change_local_as != pe2->change_local_as)
-		return 0;
+		return false;
 
 	/* flags like route reflector client */
 	if ((flags1 & PEER_UPDGRP_AF_FLAGS) != (flags2 & PEER_UPDGRP_AF_FLAGS))
-		return 0;
+		return false;
+
+	if (pe1->addpath_type[afi][safi] != pe2->addpath_type[afi][safi])
+		return false;
 
 	if ((pe1->cap & PEER_UPDGRP_CAP_FLAGS)
 	    != (pe2->cap & PEER_UPDGRP_CAP_FLAGS))
-		return 0;
+		return false;
 
 	if ((pe1->af_cap[afi][safi] & PEER_UPDGRP_AF_CAP_FLAGS)
 	    != (pe2->af_cap[afi][safi] & PEER_UPDGRP_AF_CAP_FLAGS))
-		return 0;
+		return false;
 
 	if (pe1->v_routeadv != pe2->v_routeadv)
-		return 0;
+		return false;
 
 	if (pe1->group != pe2->group)
-		return 0;
+		return false;
 
 	/* route-map names should be the same */
 	if ((fl1->map[RMAP_OUT].name && !fl2->map[RMAP_OUT].name)
 	    || (!fl1->map[RMAP_OUT].name && fl2->map[RMAP_OUT].name)
 	    || (fl1->map[RMAP_OUT].name && fl2->map[RMAP_OUT].name
 		&& strcmp(fl1->map[RMAP_OUT].name, fl2->map[RMAP_OUT].name)))
-		return 0;
+		return false;
 
 	if ((fl1->dlist[FILTER_OUT].name && !fl2->dlist[FILTER_OUT].name)
 	    || (!fl1->dlist[FILTER_OUT].name && fl2->dlist[FILTER_OUT].name)
 	    || (fl1->dlist[FILTER_OUT].name && fl2->dlist[FILTER_OUT].name
 		&& strcmp(fl1->dlist[FILTER_OUT].name,
 			  fl2->dlist[FILTER_OUT].name)))
-		return 0;
+		return false;
 
 	if ((fl1->plist[FILTER_OUT].name && !fl2->plist[FILTER_OUT].name)
 	    || (!fl1->plist[FILTER_OUT].name && fl2->plist[FILTER_OUT].name)
 	    || (fl1->plist[FILTER_OUT].name && fl2->plist[FILTER_OUT].name
 		&& strcmp(fl1->plist[FILTER_OUT].name,
 			  fl2->plist[FILTER_OUT].name)))
-		return 0;
+		return false;
 
 	if ((fl1->aslist[FILTER_OUT].name && !fl2->aslist[FILTER_OUT].name)
 	    || (!fl1->aslist[FILTER_OUT].name && fl2->aslist[FILTER_OUT].name)
 	    || (fl1->aslist[FILTER_OUT].name && fl2->aslist[FILTER_OUT].name
 		&& strcmp(fl1->aslist[FILTER_OUT].name,
 			  fl2->aslist[FILTER_OUT].name)))
-		return 0;
+		return false;
 
 	if ((fl1->usmap.name && !fl2->usmap.name)
 	    || (!fl1->usmap.name && fl2->usmap.name)
 	    || (fl1->usmap.name && fl2->usmap.name
 		&& strcmp(fl1->usmap.name, fl2->usmap.name)))
-		return 0;
+		return false;
 
 	if ((pe1->default_rmap[afi][safi].name
 	     && !pe2->default_rmap[afi][safi].name)
@@ -494,19 +488,19 @@ static int updgrp_hash_cmp(const void *p1, const void *p2)
 		&& pe2->default_rmap[afi][safi].name
 		&& strcmp(pe1->default_rmap[afi][safi].name,
 			  pe2->default_rmap[afi][safi].name)))
-		return 0;
+		return false;
 
 	if ((afi == AFI_IP6) && (pe1->shared_network != pe2->shared_network))
-		return 0;
+		return false;
 
 	if ((CHECK_FLAG(pe1->flags, PEER_FLAG_LONESOUL)
 	     || CHECK_FLAG(pe1->af_cap[afi][safi], PEER_CAP_ORF_PREFIX_SM_RCV)
 	     || CHECK_FLAG(pe1->af_cap[afi][safi],
 			   PEER_CAP_ORF_PREFIX_SM_OLD_RCV))
 	    && !sockunion_same(&pe1->su, &pe2->su))
-		return 0;
+		return false;
 
-	return 1;
+	return true;
 }
 
 static void peer_lonesoul_or_not(struct peer *peer, int set)
@@ -737,12 +731,10 @@ static void update_group_delete(struct update_group *updgrp)
 	hash_release(updgrp->bgp->update_groups[updgrp->afid], updgrp);
 	conf_release(updgrp->conf, updgrp->afi, updgrp->safi);
 
-	if (updgrp->conf->host)
-		XFREE(MTYPE_BGP_PEER_HOST, updgrp->conf->host);
+	XFREE(MTYPE_BGP_PEER_HOST, updgrp->conf->host);
 	updgrp->conf->host = NULL;
 
-	if (updgrp->conf->ifname)
-		XFREE(MTYPE_BGP_PEER_IFNAME, updgrp->conf->ifname);
+	XFREE(MTYPE_BGP_PEER_IFNAME, updgrp->conf->ifname);
 
 	XFREE(MTYPE_BGP_PEER, updgrp->conf);
 	XFREE(MTYPE_BGP_UPDGRP, updgrp);
@@ -814,7 +806,7 @@ static void update_subgroup_delete(struct update_subgroup *subgrp)
 		THREAD_TIMER_OFF(subgrp->t_coalesce);
 	sync_delete(subgrp);
 
-	if (BGP_DEBUG(update_groups, UPDATE_GROUPS))
+	if (BGP_DEBUG(update_groups, UPDATE_GROUPS) && subgrp->update_group)
 		zlog_debug("delete subgroup u%" PRIu64 ":s%" PRIu64,
 			   subgrp->update_group->id, subgrp->id);
 
@@ -907,7 +899,7 @@ static void update_subgroup_add_peer(struct update_subgroup *subgrp,
 static void update_subgroup_remove_peer_internal(struct update_subgroup *subgrp,
 						 struct peer_af *paf)
 {
-	assert(subgrp && paf);
+	assert(subgrp && paf && subgrp->update_group);
 
 	if (bgp_debug_peer_updout_enabled(paf->peer->host)) {
 		UPDGRP_PEER_DBG_DIS(subgrp->update_group);
@@ -1183,6 +1175,8 @@ static void update_subgroup_copy_adj_out(struct update_subgroup *source,
 		aout_copy->attr =
 			aout->attr ? bgp_attr_intern(aout->attr) : NULL;
 	}
+
+	dest->scount = source->scount;
 }
 
 /*
@@ -1387,9 +1381,9 @@ static int updgrp_policy_update_walkcb(struct update_group *updgrp, void *arg)
 	return UPDWALK_CONTINUE;
 }
 
-static int update_group_walkcb(struct hash_backet *backet, void *arg)
+static int update_group_walkcb(struct hash_bucket *bucket, void *arg)
 {
-	struct update_group *updgrp = backet->data;
+	struct update_group *updgrp = bucket->data;
 	struct updwalk_context *wctx = arg;
 	int ret = (*wctx->cb)(updgrp, wctx->context);
 	return ret;
@@ -1546,8 +1540,7 @@ void update_bgp_group_init(struct bgp *bgp)
 
 	AF_FOREACH (afid)
 		bgp->update_groups[afid] =
-			hash_create(updgrp_hash_key_make,
-				    updgrp_hash_cmp,
+			hash_create(updgrp_hash_key_make, updgrp_hash_cmp,
 				    "BGP Update Group Hash");
 }
 
@@ -1633,9 +1626,9 @@ void update_group_adjust_peer(struct peer_af *paf)
 	if (!updgrp) {
 		updgrp = update_group_create(paf);
 		if (!updgrp) {
-			flog_err(BGP_ERR_UPDGRP_CREATE,
-				  "couldn't create update group for peer %s",
-				  paf->peer->host);
+			flog_err(EC_BGP_UPDGRP_CREATE,
+				 "couldn't create update group for peer %s",
+				 paf->peer->host);
 			return;
 		}
 	}
@@ -1879,11 +1872,12 @@ void subgroup_trigger_write(struct update_subgroup *subgrp)
 	 * the subgroup output queue into their own output queue. This action
 	 * will trigger a write job on the I/O thread.
 	 */
-	SUBGRP_FOREACH_PEER(subgrp, paf)
-	if (paf->peer->status == Established)
-		thread_add_timer_msec(bm->master, bgp_generate_updgrp_packets,
-				      paf->peer, 0,
-				      &paf->peer->t_generate_updgrp_packets);
+	SUBGRP_FOREACH_PEER (subgrp, paf)
+		if (paf->peer->status == Established)
+			thread_add_timer_msec(
+				bm->master, bgp_generate_updgrp_packets,
+				paf->peer, 0,
+				&paf->peer->t_generate_updgrp_packets);
 }
 
 int update_group_clear_update_dbg(struct update_group *updgrp, void *arg)
@@ -1898,23 +1892,4 @@ int bgp_addpath_encode_tx(struct peer *peer, afi_t afi, safi_t safi)
 	return (CHECK_FLAG(peer->af_cap[afi][safi], PEER_CAP_ADDPATH_AF_TX_ADV)
 		&& CHECK_FLAG(peer->af_cap[afi][safi],
 			      PEER_CAP_ADDPATH_AF_RX_RCV));
-}
-
-/*
- * Return true if this is a path we should advertise due to a
- * configured addpath-tx knob
- */
-int bgp_addpath_tx_path(struct peer *peer, afi_t afi, safi_t safi,
-			struct bgp_info *ri)
-{
-	if (CHECK_FLAG(peer->af_flags[afi][safi],
-		       PEER_FLAG_ADDPATH_TX_ALL_PATHS))
-		return 1;
-
-	if (CHECK_FLAG(peer->af_flags[afi][safi],
-		       PEER_FLAG_ADDPATH_TX_BESTPATH_PER_AS)
-	    && CHECK_FLAG(ri->flags, BGP_INFO_DMED_SELECTED))
-		return 1;
-
-	return 0;
 }

@@ -72,18 +72,16 @@ int nexthop_same_no_recurse(const struct nexthop *next1,
 	return 1;
 }
 
-int
-nexthop_same_firsthop (struct nexthop *next1, struct nexthop *next2)
+int nexthop_same_firsthop(struct nexthop *next1, struct nexthop *next2)
 {
 	int type1 = NEXTHOP_FIRSTHOPTYPE(next1->type);
 	int type2 = NEXTHOP_FIRSTHOPTYPE(next2->type);
 
 	if (type1 != type2)
 		return 0;
-	switch (type1)
-	{
+	switch (type1) {
 	case NEXTHOP_TYPE_IPV4_IFINDEX:
-		if (! IPV4_ADDR_SAME (&next1->gate.ipv4, &next2->gate.ipv4))
+		if (!IPV4_ADDR_SAME(&next1->gate.ipv4, &next2->gate.ipv4))
 			return 0;
 		if (next1->ifindex != next2->ifindex)
 			return 0;
@@ -93,7 +91,7 @@ nexthop_same_firsthop (struct nexthop *next1, struct nexthop *next2)
 			return 0;
 		break;
 	case NEXTHOP_TYPE_IPV6_IFINDEX:
-		if (! IPV6_ADDR_SAME (&next1->gate.ipv6, &next2->gate.ipv6))
+		if (!IPV6_ADDR_SAME(&next1->gate.ipv6, &next2->gate.ipv6))
 			return 0;
 		if (next1->ifindex != next2->ifindex)
 			return 0;
@@ -123,12 +121,17 @@ const char *nexthop_type_to_str(enum nexthop_types_t nh_type)
 /*
  * Check if the labels match for the 2 nexthops specified.
  */
-int nexthop_labels_match(struct nexthop *nh1, struct nexthop *nh2)
+int nexthop_labels_match(const struct nexthop *nh1, const struct nexthop *nh2)
 {
-	struct mpls_label_stack *nhl1, *nhl2;
+	const struct mpls_label_stack *nhl1, *nhl2;
 
 	nhl1 = nh1->nh_label;
 	nhl2 = nh2->nh_label;
+
+	/* No labels is a match */
+	if (!nhl1 && !nhl2)
+		return 1;
+
 	if (!nhl1 || !nhl2)
 		return 0;
 
@@ -214,12 +217,13 @@ bool nexthop_same(const struct nexthop *nh1, const struct nexthop *nh2)
 		break;
 	}
 
-	return true;
+	/* Compare labels too (if present) */
+	return (!!nexthop_labels_match(nh1, nh2));
 }
 
 /* Update nexthop with label information. */
 void nexthop_add_labels(struct nexthop *nexthop, enum lsp_types_t type,
-			u_int8_t num_labels, mpls_label_t *label)
+			uint8_t num_labels, mpls_label_t *label)
 {
 	struct mpls_label_stack *nh_label;
 	int i;
@@ -250,15 +254,11 @@ const char *nexthop2str(const struct nexthop *nexthop, char *str, int size)
 		snprintf(str, size, "if %u", nexthop->ifindex);
 		break;
 	case NEXTHOP_TYPE_IPV4:
-		snprintf(str, size, "%s", inet_ntoa(nexthop->gate.ipv4));
-		break;
 	case NEXTHOP_TYPE_IPV4_IFINDEX:
 		snprintf(str, size, "%s if %u", inet_ntoa(nexthop->gate.ipv4),
 			 nexthop->ifindex);
 		break;
 	case NEXTHOP_TYPE_IPV6:
-		snprintf(str, size, "%s", inet6_ntoa(nexthop->gate.ipv6));
-		break;
 	case NEXTHOP_TYPE_IPV6_IFINDEX:
 		snprintf(str, size, "%s if %u", inet6_ntoa(nexthop->gate.ipv6),
 			 nexthop->ifindex);
@@ -314,14 +314,52 @@ unsigned int nexthop_level(struct nexthop *nexthop)
 	return rv;
 }
 
-uint32_t nexthop_hash(struct nexthop *nexthop)
+uint32_t nexthop_hash(const struct nexthop *nexthop)
 {
-	uint32_t key;
+	uint32_t key = 0x45afe398;
 
-	key = jhash_1word(nexthop->vrf_id, 0x45afe398);
-	key = jhash_1word(nexthop->ifindex, key);
-	key = jhash_1word(nexthop->type, key);
-	key = jhash(&nexthop->gate, sizeof(union g_addr), key);
+	key = jhash_3words(nexthop->type, nexthop->vrf_id,
+			   nexthop->nh_label_type, key);
+	/* gate and blackhole are together in a union */
+	key = jhash(&nexthop->gate, sizeof(nexthop->gate), key);
+	key = jhash(&nexthop->src, sizeof(nexthop->src), key);
+	key = jhash(&nexthop->rmap_src, sizeof(nexthop->rmap_src), key);
 
+	if (nexthop->nh_label) {
+		int labels = nexthop->nh_label->num_labels;
+		int i = 0;
+
+		while (labels >= 3) {
+			key = jhash_3words(nexthop->nh_label->label[i],
+					   nexthop->nh_label->label[i + 1],
+					   nexthop->nh_label->label[i + 2],
+					   key);
+			labels -= 3;
+			i += 3;
+		}
+
+		if (labels >= 2) {
+			key = jhash_2words(nexthop->nh_label->label[i],
+					   nexthop->nh_label->label[i + 1],
+					   key);
+			labels -= 2;
+			i += 2;
+		}
+
+		if (labels >= 1)
+			key = jhash_1word(nexthop->nh_label->label[i], key);
+	}
+
+	switch (nexthop->type) {
+	case NEXTHOP_TYPE_IPV4_IFINDEX:
+	case NEXTHOP_TYPE_IPV6_IFINDEX:
+	case NEXTHOP_TYPE_IFINDEX:
+		key = jhash_1word(nexthop->ifindex, key);
+		break;
+	case NEXTHOP_TYPE_BLACKHOLE:
+	case NEXTHOP_TYPE_IPV4:
+	case NEXTHOP_TYPE_IPV6:
+		break;
+	}
 	return key;
 }

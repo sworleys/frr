@@ -44,7 +44,7 @@ static unsigned lsp_hash_key(void *lp)
 	return jhash(lsp->hdr.lsp_id, ISIS_SYS_ID_LEN + 2, 0x55aa5a5a);
 }
 
-static int lsp_hash_cmp(const void *a, const void *b)
+static bool lsp_hash_cmp(const void *a, const void *b)
 {
 	const struct isis_lsp *la = a, *lb = b;
 
@@ -71,7 +71,7 @@ void isis_lsp_hash_free(struct isis_lsp_hash *ih)
 }
 
 struct isis_lsp *isis_lsp_hash_lookup(struct isis_lsp_hash *ih,
-			    struct isis_lsp *lsp)
+				      struct isis_lsp *lsp)
 {
 	return hash_lookup(ih->h, lsp);
 }

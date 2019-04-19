@@ -8,6 +8,9 @@ sbin_PROGRAMS += pimd/pimd
 bin_PROGRAMS += pimd/mtracebis
 noinst_PROGRAMS += pimd/test_igmpv3_join
 dist_examples_DATA += pimd/pimd.conf.sample
+vtysh_scan += $(top_srcdir)/pimd/pim_cmd.c
+man8 += $(MANBUILD)/pimd.8
+man8 += $(MANBUILD)/mtracebis.8
 endif
 
 pimd_libpim_a_SOURCES = \
@@ -21,6 +24,7 @@ pimd_libpim_a_SOURCES = \
 	pimd/pim_ifchannel.c \
 	pimd/pim_igmp.c \
 	pimd/pim_igmp_mtrace.c \
+	pimd/pim_igmp_stats.c \
 	pimd/pim_igmpv2.c \
 	pimd/pim_igmpv3.c \
 	pimd/pim_instance.c \
@@ -56,6 +60,7 @@ pimd_libpim_a_SOURCES = \
 	pimd/pim_vty.c \
 	pimd/pim_zebra.c \
 	pimd/pim_zlookup.c \
+	pimd/pim_vxlan.c \
 	pimd/pimd.c \
 	# end
 
@@ -71,6 +76,7 @@ noinst_HEADERS += \
 	pimd/pim_igmp.h \
 	pimd/pim_igmp_join.h \
 	pimd/pim_igmp_mtrace.h \
+	pimd/pim_igmp_stats.h \
 	pimd/pim_igmpv2.h \
 	pimd/pim_igmpv3.h \
 	pimd/pim_instance.h \
@@ -105,10 +111,15 @@ noinst_HEADERS += \
 	pimd/pim_vty.h \
 	pimd/pim_zebra.h \
 	pimd/pim_zlookup.h \
+	pimd/pim_vxlan.h \
+	pimd/pim_vxlan_instance.h \
 	pimd/pimd.h \
 	pimd/mtracebis_netlink.h \
 	pimd/mtracebis_routeget.h \
 	# end
+
+pimd/pim_cmd_clippy.c: $(CLIPPY_DEPS)
+pimd/pim_cmd.$(OBJEXT): pimd/pim_cmd_clippy.c
 
 pimd_pimd_LDADD = pimd/libpim.a lib/libfrr.la @LIBCAP@
 pimd_pimd_SOURCES = pimd/pim_main.c

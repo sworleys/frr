@@ -3,8 +3,6 @@
  * Copyright (C) 2018 Cumulus Networks, Inc.
  *               Donald Sharp
  *
- * This file is part of FRR.
- *
  * FRR is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
  * Free Software Foundation; either version 2, or (at your option) any
@@ -33,7 +31,8 @@ struct pbr_map {
 	/*
 	 * The name of the PBR_MAP
 	 */
-	char name[100];
+#define PBR_MAP_NAMELEN 100
+	char name[PBR_MAP_NAMELEN];
 
 	struct list *seqnumbers;
 
@@ -90,6 +89,11 @@ struct pbr_map_sequence {
 	struct prefix *dst;
 
 	/*
+	 * Family of the src/dst.  Needed when deleting since we clear them
+	 */
+	unsigned char family;
+
+	/*
 	 * The nexthop group we auto create
 	 * for when the user specifies a individual
 	 * nexthop
@@ -143,6 +147,8 @@ extern void pbr_map_delete_nexthop_group(struct pbr_map_sequence *pbrms);
 extern void pbr_map_add_interface(struct pbr_map *pbrm, struct interface *ifp);
 extern void pbr_map_interface_delete(struct pbr_map *pbrm,
 				     struct interface *ifp);
+extern void pbr_map_final_interface_deletion(struct pbr_map *pbrm,
+					     struct pbr_map_interface *pmi);
 extern void pbr_map_write_interfaces(struct vty *vty, struct interface *ifp);
 extern void pbr_map_init(void);
 

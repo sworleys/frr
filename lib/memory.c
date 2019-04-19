@@ -17,6 +17,15 @@
 #include <zebra.h>
 
 #include <stdlib.h>
+#ifdef HAVE_MALLOC_H
+#include <malloc.h>
+#endif
+#ifdef HAVE_MALLOC_NP_H
+#include <malloc_np.h>
+#endif
+#ifdef HAVE_MALLOC_MALLOC_H
+#include <malloc/malloc.h>
+#endif
 
 #include "memory.h"
 #include "log.h"
@@ -27,11 +36,21 @@ struct memgroup **mg_insert = &mg_first;
 DEFINE_MGROUP(LIB, "libfrr")
 DEFINE_MTYPE(LIB, TMP, "Temporary memory")
 
-static inline void mt_count_alloc(struct memtype *mt, size_t size)
+static inline void mt_count_alloc(struct memtype *mt, size_t size, void *ptr)
 {
+	size_t current;
 	size_t oldsize;
 
-	atomic_fetch_add_explicit(&mt->n_alloc, 1, memory_order_relaxed);
+	current = 1 + atomic_fetch_add_explicit(&mt->n_alloc, 1,
+						memory_order_relaxed);
+
+	oldsize = atomic_load_explicit(&mt->n_max, memory_order_relaxed);
+	if (current > oldsize)
+		/* note that this may fail, but approximation is sufficient */
+		atomic_compare_exchange_weak_explicit(&mt->n_max, &oldsize,
+						      current,
+						      memory_order_relaxed,
+						      memory_order_relaxed);
 
 	oldsize = atomic_load_explicit(&mt->size, memory_order_relaxed);
 	if (oldsize == 0)
@@ -40,21 +59,44 @@ static inline void mt_count_alloc(struct memtype *mt, size_t size)
 	if (oldsize != 0 && oldsize != size && oldsize != SIZE_VAR)
 		atomic_store_explicit(&mt->size, SIZE_VAR,
 				      memory_order_relaxed);
+
+#ifdef HAVE_MALLOC_USABLE_SIZE
+	size_t mallocsz = malloc_usable_size(ptr);
+
+	current = mallocsz + atomic_fetch_add_explicit(&mt->total, mallocsz,
+						       memory_order_relaxed);
+	oldsize = atomic_load_explicit(&mt->max_size, memory_order_relaxed);
+	if (current > oldsize)
+		/* note that this may fail, but approximation is sufficient */
+		atomic_compare_exchange_weak_explicit(&mt->max_size, &oldsize,
+						      current,
+						      memory_order_relaxed,
+						      memory_order_relaxed);
+#endif
 }
 
-static inline void mt_count_free(struct memtype *mt)
+static inline void mt_count_free(struct memtype *mt, void *ptr)
 {
 	assert(mt->n_alloc);
 	atomic_fetch_sub_explicit(&mt->n_alloc, 1, memory_order_relaxed);
+
+#ifdef HAVE_MALLOC_USABLE_SIZE
+	size_t mallocsz = malloc_usable_size(ptr);
+
+	atomic_fetch_sub_explicit(&mt->total, mallocsz, memory_order_relaxed);
+#endif
 }
 
 static inline void *mt_checkalloc(struct memtype *mt, void *ptr, size_t size)
 {
 	if (__builtin_expect(ptr == NULL, 0)) {
-		memory_oom(size, mt->name);
+		if (size) {
+			/* malloc(0) is allowed to return NULL */
+			memory_oom(size, mt->name);
+		}
 		return NULL;
 	}
-	mt_count_alloc(mt, size);
+	mt_count_alloc(mt, size, ptr);
 	return ptr;
 }
 
@@ -71,19 +113,19 @@ void *qcalloc(struct memtype *mt, size_t size)
 void *qrealloc(struct memtype *mt, void *ptr, size_t size)
 {
 	if (ptr)
-		mt_count_free(mt);
+		mt_count_free(mt, ptr);
 	return mt_checkalloc(mt, ptr ? realloc(ptr, size) : malloc(size), size);
 }
 
 void *qstrdup(struct memtype *mt, const char *str)
 {
-	return mt_checkalloc(mt, strdup(str), strlen(str) + 1);
+	return str ? mt_checkalloc(mt, strdup(str), strlen(str) + 1) : NULL;
 }
 
 void qfree(struct memtype *mt, void *ptr)
 {
 	if (ptr)
-		mt_count_free(mt);
+		mt_count_free(mt, ptr);
 	free(ptr);
 }
 
@@ -132,7 +174,7 @@ static int qmem_exit_walker(void *arg, struct memgroup *mg, struct memtype *mt)
 
 int log_memstats(FILE *fp, const char *prefix)
 {
-	struct exit_dump_args eda = { .fp = fp, .prefix = prefix, .error = 0 };
+	struct exit_dump_args eda = {.fp = fp, .prefix = prefix, .error = 0};
 	qmem_walk(qmem_exit_walker, &eda);
 	return eda.error;
 }

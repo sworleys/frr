@@ -22,7 +22,15 @@
  * 02111-1307, USA.
  */
 
+%top{
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+}
 %{
+/* ignore flex generated code in static analyzer */
+#ifndef __clang_analyzer__
+
 /* ignore harmless bugs in old versions of flex */
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #pragma GCC diagnostic ignored "-Wmissing-prototypes"
@@ -40,8 +48,8 @@ IPV4            A\.B\.C\.D
 IPV4_PREFIX     A\.B\.C\.D\/M
 IPV6            X:X::X:X
 IPV6_PREFIX     X:X::X:X\/M
-MAC             M:A:C
-MAC_PREFIX      M:A:C\/M
+MAC             X:X:X:X:X:X
+MAC_PREFIX      X:X:X:X:X:X\/M
 VARIABLE        [A-Z][-_A-Z:0-9]+
 WORD            (\-|\+)?[a-zA-Z0-9\*][-+_a-zA-Z0-9\*]*
 NUMBER          (\-|\+)?[0-9]{1,20}
@@ -91,3 +99,5 @@ void cleanup_lexer (yyscan_t *scn)
   // yy_delete_buffer (buffer, *scn);
   yylex_destroy(*scn);
 }
+
+#endif /* __clang_analyzer__ */

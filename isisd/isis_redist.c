@@ -30,6 +30,7 @@
 #include "stream.h"
 #include "table.h"
 #include "vty.h"
+#include "srcdest_table.h"
 
 #include "isisd/dict.h"
 #include "isisd/isis_constants.h"
@@ -86,33 +87,13 @@ struct route_table *get_ext_reach(struct isis_area *area, int family, int level)
 	return area->ext_reach[protocol][level - 1];
 }
 
-static struct route_node *
-isis_redist_route_node_create(route_table_delegate_t *delegate,
-			      struct route_table *table)
-{
-	struct route_node *node;
-	node = XCALLOC(MTYPE_ISIS_EXT_ROUTE, sizeof(*node));
-	return node;
-}
-
-static void isis_redist_route_node_destroy(route_table_delegate_t *delegate,
-					   struct route_table *table,
-					   struct route_node *node)
-{
-	if (node->info)
-		XFREE(MTYPE_ISIS_EXT_INFO, node->info);
-	XFREE(MTYPE_ISIS_EXT_ROUTE, node);
-}
-
-static route_table_delegate_t isis_redist_rt_delegate = {
-	.create_node = isis_redist_route_node_create,
-	.destroy_node = isis_redist_route_node_destroy};
-
 /* Install external reachability information into a
  * specific area for a specific level.
  * Schedule an lsp regenerate if necessary */
 static void isis_redist_install(struct isis_area *area, int level,
-				struct prefix *p, struct isis_ext_info *info)
+				const struct prefix *p,
+				const struct prefix_ipv6 *src_p,
+				struct isis_ext_info *info)
 {
 	int family = p->family;
 	struct route_table *er_table = get_ext_reach(area, family, level);
@@ -126,7 +107,7 @@ static void isis_redist_install(struct isis_area *area, int level,
 		return;
 	}
 
-	er_node = route_node_get(er_table, p);
+	er_node = srcdest_rnode_get(er_table, p, src_p);
 	if (er_node->info) {
 		route_unlock_node(er_node);
 
@@ -145,7 +126,8 @@ static void isis_redist_install(struct isis_area *area, int level,
  * specific area for a specific level.
  * Schedule an lsp regenerate if necessary. */
 static void isis_redist_uninstall(struct isis_area *area, int level,
-				  struct prefix *p)
+				  const struct prefix *p,
+				  const struct prefix_ipv6 *src_p)
 {
 	int family = p->family;
 	struct route_table *er_table = get_ext_reach(area, family, level);
@@ -159,7 +141,7 @@ static void isis_redist_uninstall(struct isis_area *area, int level,
 		return;
 	}
 
-	er_node = route_node_lookup(er_table, p);
+	er_node = srcdest_rnode_lookup(er_table, p, src_p);
 	if (!er_node)
 		return;
 	else
@@ -177,15 +159,15 @@ static void isis_redist_uninstall(struct isis_area *area, int level,
  * and prefix, using the given redistribution settings. */
 static void isis_redist_update_ext_reach(struct isis_area *area, int level,
 					 struct isis_redist *redist,
-					 struct prefix *p,
+					 const struct prefix *p,
+					 const struct prefix_ipv6 *src_p,
 					 struct isis_ext_info *info)
 {
 	struct isis_ext_info area_info;
 	route_map_result_t map_ret;
 
 	memcpy(&area_info, info, sizeof(area_info));
-	if (redist->metric != 0xffffffff)
-		area_info.metric = redist->metric;
+	area_info.metric = redist->metric;
 
 	if (redist->map_name) {
 		map_ret =
@@ -200,9 +182,9 @@ static void isis_redist_update_ext_reach(struct isis_area *area, int level,
 		area_info.distance = 255;
 
 	if (area_info.distance < 255)
-		isis_redist_install(area, level, p, &area_info);
+		isis_redist_install(area, level, p, src_p, &area_info);
 	else
-		isis_redist_uninstall(area, level, p);
+		isis_redist_uninstall(area, level, p, src_p);
 }
 
 static void isis_redist_ensure_default(struct isis *isis, int family)
@@ -223,7 +205,7 @@ static void isis_redist_ensure_default(struct isis *isis, int family)
 	} else
 		assert(!"Unknown family!");
 
-	ei_node = route_node_get(ei_table, &p);
+	ei_node = srcdest_rnode_get(ei_table, &p, NULL);
 	if (ei_node->info) {
 		route_unlock_node(ei_node);
 		return;
@@ -239,8 +221,8 @@ static void isis_redist_ensure_default(struct isis *isis, int family)
 }
 
 /* Handle notification about route being added */
-void isis_redist_add(int type, struct prefix *p, u_char distance,
-		     uint32_t metric)
+void isis_redist_add(int type, struct prefix *p, struct prefix_ipv6 *src_p,
+		     uint8_t distance, uint32_t metric)
 {
 	int family = p->family;
 	struct route_table *ei_table = get_ext_info(isis, family);
@@ -263,7 +245,7 @@ void isis_redist_add(int type, struct prefix *p, u_char distance,
 		return;
 	}
 
-	ei_node = route_node_get(ei_table, p);
+	ei_node = srcdest_rnode_get(ei_table, p, src_p);
 	if (ei_node->info)
 		route_unlock_node(ei_node);
 	else
@@ -275,8 +257,10 @@ void isis_redist_add(int type, struct prefix *p, u_char distance,
 	info->distance = distance;
 	info->metric = metric;
 
-	if (is_default_prefix(p))
+	if (is_default_prefix(p)
+	    && (!src_p || !src_p->prefixlen)) {
 		type = DEFAULT_ROUTE;
+	}
 
 	for (ALL_LIST_ELEMENTS_RO(isis->area_list, node, area))
 		for (level = 1; level <= ISIS_LEVELS; level++) {
@@ -285,11 +269,11 @@ void isis_redist_add(int type, struct prefix *p, u_char distance,
 				continue;
 
 			isis_redist_update_ext_reach(area, level, redist, p,
-						     info);
+						     src_p, info);
 		}
 }
 
-void isis_redist_delete(int type, struct prefix *p)
+void isis_redist_delete(int type, struct prefix *p, struct prefix_ipv6 *src_p)
 {
 	int family = p->family;
 	struct route_table *ei_table = get_ext_info(isis, family);
@@ -305,12 +289,14 @@ void isis_redist_delete(int type, struct prefix *p)
 	zlog_debug("%s: Removing route %s from %s.", __func__, debug_buf,
 		   zebra_route_string(type));
 
-	if (is_default_prefix(p)) {
+	if (is_default_prefix(p)
+	    && (!src_p || !src_p->prefixlen)) {
 		/* Don't remove default route but add synthetic route for use
 		 * by "default-information originate always". Areas without the
 		 * "always" setting will ignore routes with origin
 		 * DEFAULT_ROUTE. */
-		isis_redist_add(DEFAULT_ROUTE, p, 254, MAX_WIDE_PATH_METRIC);
+		isis_redist_add(DEFAULT_ROUTE, p, NULL,
+				254, MAX_WIDE_PATH_METRIC);
 		return;
 	}
 
@@ -320,7 +306,7 @@ void isis_redist_delete(int type, struct prefix *p)
 		return;
 	}
 
-	ei_node = route_node_lookup(ei_table, p);
+	ei_node = srcdest_rnode_lookup(ei_table, p, src_p);
 	if (!ei_node || !ei_node->info) {
 		char buf[BUFSIZ];
 		prefix2str(p, buf, sizeof(buf));
@@ -335,12 +321,12 @@ void isis_redist_delete(int type, struct prefix *p)
 	route_unlock_node(ei_node);
 
 	for (ALL_LIST_ELEMENTS_RO(isis->area_list, node, area))
-		for (level = 1; level < ISIS_LEVELS; level++) {
+		for (level = ISIS_LEVEL1; level <= ISIS_LEVEL2; level++) {
 			redist = get_redist_settings(area, family, type, level);
 			if (!redist->redist)
 				continue;
 
-			isis_redist_uninstall(area, level, p);
+			isis_redist_uninstall(area, level, p, src_p);
 		}
 
 	XFREE(MTYPE_ISIS_EXT_INFO, ei_node->info);
@@ -390,7 +376,7 @@ static void isis_redist_update_zebra_subscriptions(struct isis *isis)
 			 * routes to Zebra and has nothing to do with
 			 * redistribution,
 			 * so skip it. */
-			if (type == ZEBRA_ROUTE_ISIS)
+			if (type == PROTO_TYPE)
 				continue;
 
 			afi_t afi = afi_for_redist_protocol(protocol);
@@ -402,9 +388,8 @@ static void isis_redist_update_zebra_subscriptions(struct isis *isis)
 		}
 }
 
-static void isis_redist_set(struct isis_area *area, int level, int family,
-			    int type, uint32_t metric, const char *routemap,
-			    int originate_type)
+void isis_redist_set(struct isis_area *area, int level, int family, int type,
+		     uint32_t metric, const char *routemap, int originate_type)
 {
 	int protocol = redist_protocol(family);
 	struct isis_redist *redist =
@@ -419,17 +404,14 @@ static void isis_redist_set(struct isis_area *area, int level, int family,
 	isis_redist_routemap_set(redist, routemap);
 
 	if (!area->ext_reach[protocol][level - 1]) {
-		area->ext_reach[protocol][level - 1] =
-			route_table_init_with_delegate(
-				&isis_redist_rt_delegate);
+		area->ext_reach[protocol][level - 1] = srcdest_table_init();
 	}
 
-	for (i = 0; i < REDIST_PROTOCOL_COUNT; i++)
+	for (i = 0; i < REDIST_PROTOCOL_COUNT; i++) {
 		if (!area->isis->ext_info[i]) {
-			area->isis->ext_info[i] =
-				route_table_init_with_delegate(
-					&isis_redist_rt_delegate);
+			area->isis->ext_info[i] = srcdest_table_init();
 		}
+	}
 
 	isis_redist_update_zebra_subscriptions(area->isis);
 
@@ -437,25 +419,32 @@ static void isis_redist_set(struct isis_area *area, int level, int family,
 		isis_redist_ensure_default(area->isis, family);
 
 	ei_table = get_ext_info(area->isis, family);
-	for (rn = route_top(ei_table); rn; rn = route_next(rn)) {
+	for (rn = route_top(ei_table); rn; rn = srcdest_route_next(rn)) {
 		if (!rn->info)
 			continue;
 		info = rn->info;
 
+		const struct prefix *p, *src_p;
+
+		srcdest_rnode_prefixes(rn, &p, &src_p);
+
 		if (type == DEFAULT_ROUTE) {
-			if (!is_default_prefix(&rn->p))
+			if (!is_default_prefix(p)
+			    || (src_p && src_p->prefixlen)) {
 				continue;
+			}
 		} else {
 			if (info->origin != type)
 				continue;
 		}
 
-		isis_redist_update_ext_reach(area, level, redist, &rn->p, info);
+		isis_redist_update_ext_reach(area, level, redist, p,
+					     (const struct prefix_ipv6 *)src_p,
+					     info);
 	}
 }
 
-static void isis_redist_unset(struct isis_area *area, int level, int family,
-			      int type)
+void isis_redist_unset(struct isis_area *area, int level, int family, int type)
 {
 	struct isis_redist *redist =
 		get_redist_settings(area, family, type, level);
@@ -473,14 +462,19 @@ static void isis_redist_unset(struct isis_area *area, int level, int family,
 		return;
 	}
 
-	for (rn = route_top(er_table); rn; rn = route_next(rn)) {
+	for (rn = route_top(er_table); rn; rn = srcdest_route_next(rn)) {
 		if (!rn->info)
 			continue;
 		info = rn->info;
 
+		const struct prefix *p, *src_p;
+		srcdest_rnode_prefixes(rn, &p, &src_p);
+
 		if (type == DEFAULT_ROUTE) {
-			if (!is_default_prefix(&rn->p))
+			if (!is_default_prefix(p)
+			    || (src_p && src_p->prefixlen)) {
 				continue;
+			}
 		} else {
 			if (info->origin != type)
 				continue;
@@ -508,8 +502,7 @@ void isis_redist_area_finish(struct isis_area *area)
 				redist = &area->redist_settings[protocol][type]
 							       [level];
 				redist->redist = 0;
-				if (redist->map_name)
-					XFREE(MTYPE_ISIS, redist->map_name);
+				XFREE(MTYPE_ISIS, redist->map_name);
 			}
 			route_table_finish(area->ext_reach[protocol][level]);
 		}
@@ -517,15 +510,15 @@ void isis_redist_area_finish(struct isis_area *area)
 	isis_redist_update_zebra_subscriptions(area->isis);
 }
 
+#ifdef FABRICD
 DEFUN (isis_redistribute,
        isis_redistribute_cmd,
-       "redistribute <ipv4|ipv6> " FRR_REDIST_STR_ISISD " <level-1|level-2> [<metric (0-16777215)|route-map WORD>]",
+       "redistribute <ipv4|ipv6> " PROTO_REDIST_STR
+       " [<metric (0-16777215)|route-map WORD>]",
        REDIST_STR
        "Redistribute IPv4 routes\n"
        "Redistribute IPv6 routes\n"
-       FRR_REDIST_HELP_STR_ISISD
-       "Redistribute into level-1\n"
-       "Redistribute into level-2\n"
+       PROTO_REDIST_HELP
        "Metric for redistributed routes\n"
        "ISIS default metric\n"
        "Route map reference\n"
@@ -533,14 +526,13 @@ DEFUN (isis_redistribute,
 {
 	int idx_afi = 1;
 	int idx_protocol = 2;
-	int idx_level = 3;
-	int idx_metric_rmap = 4;
+	int idx_metric_rmap = fabricd ? 3 : 4;
 	VTY_DECLVAR_CONTEXT(isis_area, area);
 	int family;
 	int afi;
 	int type;
 	int level;
-	unsigned long metric;
+	unsigned long metric = 0;
 	const char *routemap = NULL;
 
 	family = str2family(argv[idx_afi]->text);
@@ -555,20 +547,12 @@ DEFUN (isis_redistribute,
 	if (type < 0)
 		return CMD_WARNING_CONFIG_FAILED;
 
-	if (!strcmp("level-1", argv[idx_level]->arg))
-		level = 1;
-	else if (!strcmp("level-2", argv[idx_level]->arg))
-		level = 2;
-	else
-		return CMD_WARNING_CONFIG_FAILED;
+	level = 2;
 
 	if ((area->is_type & level) != level) {
 		vty_out(vty, "Node is not a level-%d IS\n", level);
 		return CMD_WARNING_CONFIG_FAILED;
 	}
-
-	metric = 0xffffffff;
-	routemap = NULL;
 
 	if (argc > idx_metric_rmap + 1) {
 		if (argv[idx_metric_rmap + 1]->arg[0] == '\0')
@@ -592,18 +576,15 @@ DEFUN (isis_redistribute,
 
 DEFUN (no_isis_redistribute,
        no_isis_redistribute_cmd,
-       "no redistribute <ipv4|ipv6> " FRR_REDIST_STR_ISISD " <level-1|level-2>",
+       "no redistribute <ipv4|ipv6> " PROTO_REDIST_STR,
        NO_STR
        REDIST_STR
        "Redistribute IPv4 routes\n"
        "Redistribute IPv6 routes\n"
-       FRR_REDIST_HELP_STR_ISISD
-       "Redistribute into level-1\n"
-       "Redistribute into level-2\n")
+       PROTO_REDIST_HELP)
 {
 	int idx_afi = 2;
 	int idx_protocol = 3;
-	int idx_level = 4;
 	VTY_DECLVAR_CONTEXT(isis_area, area);
 	int type;
 	int level;
@@ -622,7 +603,7 @@ DEFUN (no_isis_redistribute,
 	if (type < 0)
 		return CMD_WARNING_CONFIG_FAILED;
 
-	level = strmatch("level-1", argv[idx_level]->text) ? 1 : 2;
+	level = 2;
 
 	isis_redist_unset(area, level, family, type);
 	return 0;
@@ -630,13 +611,12 @@ DEFUN (no_isis_redistribute,
 
 DEFUN (isis_default_originate,
        isis_default_originate_cmd,
-       "default-information originate <ipv4|ipv6> <level-1|level-2> [always] [<metric (0-16777215)|route-map WORD>]",
+       "default-information originate <ipv4|ipv6>"
+       " [always] [<metric (0-16777215)|route-map WORD>]",
        "Control distribution of default information\n"
        "Distribute a default route\n"
        "Distribute default route for IPv4\n"
        "Distribute default route for IPv6\n"
-       "Distribute default route into level-1\n"
-       "Distribute default route into level-2\n"
        "Always advertise default route\n"
        "Metric for default route\n"
        "ISIS default metric\n"
@@ -644,21 +624,20 @@ DEFUN (isis_default_originate,
        "Pointer to route-map entries\n")
 {
 	int idx_afi = 2;
-	int idx_level = 3;
-	int idx_always = 4;
-	int idx_metric_rmap = 4;
+	int idx_always = fabricd ? 3 : 4;
+	int idx_metric_rmap = fabricd ? 3 : 4;
 	VTY_DECLVAR_CONTEXT(isis_area, area);
 	int family;
 	int originate_type = DEFAULT_ORIGINATE;
 	int level;
-	unsigned long metric = 0xffffffff;
+	unsigned long metric = 0;
 	const char *routemap = NULL;
 
 	family = str2family(argv[idx_afi]->text);
 	if (family < 0)
 		return CMD_WARNING_CONFIG_FAILED;
 
-	level = strmatch("level-1", argv[idx_level]->text) ? 1 : 2;
+	level = 2;
 
 	if ((area->is_type & level) != level) {
 		vty_out(vty, "Node is not a level-%d IS\n", level);
@@ -692,17 +671,14 @@ DEFUN (isis_default_originate,
 
 DEFUN (no_isis_default_originate,
        no_isis_default_originate_cmd,
-       "no default-information originate <ipv4|ipv6> <level-1|level-2>",
+       "no default-information originate <ipv4|ipv6>",
        NO_STR
        "Control distribution of default information\n"
        "Distribute a default route\n"
        "Distribute default route for IPv4\n"
-       "Distribute default route for IPv6\n"
-       "Distribute default route into level-1\n"
-       "Distribute default route into level-2\n")
+       "Distribute default route for IPv6\n")
 {
 	int idx_afi = 3;
-	int idx_level = 4;
 	VTY_DECLVAR_CONTEXT(isis_area, area);
 	int family;
 	int level;
@@ -711,16 +687,12 @@ DEFUN (no_isis_default_originate,
 	if (family < 0)
 		return CMD_WARNING_CONFIG_FAILED;
 
-	if (strmatch("level-1", argv[idx_level]->text))
-		level = 1;
-	else if (strmatch("level-2", argv[idx_level]->text))
-		level = 2;
-	else
-		return CMD_WARNING_CONFIG_FAILED;
+	level = 2;
 
 	isis_redist_unset(area, level, family, DEFAULT_ROUTE);
 	return 0;
 }
+#endif /* ifdef FABRICD */
 
 int isis_redist_config_write(struct vty *vty, struct isis_area *area,
 			     int family)
@@ -739,16 +711,18 @@ int isis_redist_config_write(struct vty *vty, struct isis_area *area,
 		return 0;
 
 	for (type = 0; type < ZEBRA_ROUTE_MAX; type++) {
-		if (type == ZEBRA_ROUTE_ISIS)
+		if (type == PROTO_TYPE)
 			continue;
 
 		for (level = 1; level <= ISIS_LEVELS; level++) {
 			redist = get_redist_settings(area, family, type, level);
 			if (!redist->redist)
 				continue;
-			vty_out(vty, " redistribute %s %s level-%d", family_str,
-				zebra_route_string(type), level);
-			if (redist->metric != 0xffffffff)
+			vty_out(vty, " redistribute %s %s", family_str,
+				zebra_route_string(type));
+			if (!fabricd)
+				vty_out(vty, " level-%d", level);
+			if (redist->metric)
 				vty_out(vty, " metric %u", redist->metric);
 			if (redist->map_name)
 				vty_out(vty, " route-map %s", redist->map_name);
@@ -762,11 +736,13 @@ int isis_redist_config_write(struct vty *vty, struct isis_area *area,
 			get_redist_settings(area, family, DEFAULT_ROUTE, level);
 		if (!redist->redist)
 			continue;
-		vty_out(vty, " default-information originate %s level-%d",
-			family_str, level);
+		vty_out(vty, " default-information originate %s",
+			family_str);
+		if (!fabricd)
+			vty_out(vty, " level-%d", level);
 		if (redist->redist == DEFAULT_ORIGINATE_ALWAYS)
 			vty_out(vty, " always");
-		if (redist->metric != 0xffffffff)
+		if (redist->metric)
 			vty_out(vty, " metric %u", redist->metric);
 		if (redist->map_name)
 			vty_out(vty, " route-map %s", redist->map_name);
@@ -779,8 +755,11 @@ int isis_redist_config_write(struct vty *vty, struct isis_area *area,
 
 void isis_redist_init(void)
 {
-	install_element(ISIS_NODE, &isis_redistribute_cmd);
-	install_element(ISIS_NODE, &no_isis_redistribute_cmd);
-	install_element(ISIS_NODE, &isis_default_originate_cmd);
-	install_element(ISIS_NODE, &no_isis_default_originate_cmd);
+#ifdef FABRICD
+	install_element(ROUTER_NODE, &isis_redistribute_cmd);
+	install_element(ROUTER_NODE, &no_isis_redistribute_cmd);
+
+	install_element(ROUTER_NODE, &isis_default_originate_cmd);
+	install_element(ROUTER_NODE, &no_isis_default_originate_cmd);
+#endif /* ifdef FABRICD */
 }

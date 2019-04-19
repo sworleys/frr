@@ -23,11 +23,11 @@
 
 #include "lib/ferr.h"
 
-enum babel_ferr_refs {
-	BABEL_ERR_MEMORY = BABEL_FERR_START,
-	BABEL_ERR_PACKET,
-	BABEL_ERR_CONFIG,
-	BABEL_ERR_ROUTE,
+enum babel_log_refs {
+	EC_BABEL_MEMORY = BABEL_FERR_START,
+	EC_BABEL_PACKET,
+	EC_BABEL_CONFIG,
+	EC_BABEL_ROUTE,
 };
 
 extern void babel_error_init(void);

@@ -21,6 +21,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
@@ -303,7 +307,7 @@ format_thousands(unsigned int value)
     static char buf[4][15];
     static int i = 0;
     i = (i + 1) % 4;
-    snprintf(buf[i], 15, "%d.%.3d", value / 1000, value % 1000);
+    snprintf(buf[i], 15, "%u.%.3u", value / 1000, value % 1000);
     return buf[i];
 }
 
@@ -437,7 +441,7 @@ uchar_to_in6addr(struct in6_addr *dest, const unsigned char *src)
 }
 
 int
-daemonise()
+daemonise(void)
 {
     int rc;
 

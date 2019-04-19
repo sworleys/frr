@@ -24,13 +24,14 @@
 #include "log.h"
 #include "lib_errors.h"
 
+#include "zebra/rib.h"
+#include "zebra/zebra_dplane.h"
 #if defined(HAVE_NETLINK)
 
 #include <linux/net_namespace.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 
-#include "rib.h"
 #include "zebra_ns.h"
 #include "kernel_netlink.h"
 #endif /* defined(HAVE_NETLINK) */
@@ -49,8 +50,8 @@
 
 #define NETLINK_SOCKET_BUFFER_SIZE 512
 #define NETLINK_ALIGNTO             4
-#define NETLINK_ALIGN(len)          (((len)+NETLINK_ALIGNTO-1)	\
-				     & ~(NETLINK_ALIGNTO-1))
+#define NETLINK_ALIGN(len)                                                     \
+	(((len) + NETLINK_ALIGNTO - 1) & ~(NETLINK_ALIGNTO - 1))
 #define NETLINK_NLATTR_LEN(_a, _b)   (unsigned int)((char *)_a - (char *)_b)
 
 #endif /* defined(HAVE_NETLINK) */
@@ -79,52 +80,50 @@ static struct nlmsghdr *initiate_nlh(char *buf, unsigned int *seq, int type)
 	return nlh;
 }
 
-static int send_receive(int sock, struct nlmsghdr *nlh,
-			unsigned int seq, char *buf)
+static int send_receive(int sock, struct nlmsghdr *nlh, unsigned int seq,
+			char *buf)
 {
 	int ret;
-	static const struct sockaddr_nl snl = {
-		.nl_family = AF_NETLINK
-	};
+	static const struct sockaddr_nl snl = {.nl_family = AF_NETLINK};
 
 	ret = sendto(sock, (const void *)nlh, (size_t)nlh->nlmsg_len, 0,
-		     (struct sockaddr *) &snl, (socklen_t)sizeof(snl));
+		     (struct sockaddr *)&snl, (socklen_t)sizeof(snl));
 	if (ret < 0) {
-		flog_err(LIB_ERR_SOCKET, "netlink( %u) sendmsg() error: %s",
-			  sock, safe_strerror(errno));
+		flog_err_sys(EC_LIB_SOCKET, "netlink( %u) sendmsg() error: %s",
+			     sock, safe_strerror(errno));
 		return -1;
 	}
 
 	/* reception */
 	struct sockaddr_nl addr;
 	struct iovec iov = {
-		.iov_base       = buf,
-		.iov_len        = NETLINK_SOCKET_BUFFER_SIZE,
+		.iov_base = buf, .iov_len = NETLINK_SOCKET_BUFFER_SIZE,
 	};
 	struct msghdr msg = {
-		.msg_name       = &addr,
-		.msg_namelen    = sizeof(struct sockaddr_nl),
-		.msg_iov        = &iov,
-		.msg_iovlen     = 1,
-		.msg_control    = NULL,
+		.msg_name = &addr,
+		.msg_namelen = sizeof(struct sockaddr_nl),
+		.msg_iov = &iov,
+		.msg_iovlen = 1,
+		.msg_control = NULL,
 		.msg_controllen = 0,
-		.msg_flags      = 0,
+		.msg_flags = 0,
 	};
 	ret = recvmsg(sock, &msg, 0);
 	if (ret < 0) {
-		flog_err(LIB_ERR_SOCKET,
-			  "netlink recvmsg: error %d (errno %u)", ret, errno);
+		flog_err_sys(EC_LIB_SOCKET,
+			     "netlink recvmsg: error %d (errno %u)", ret,
+			     errno);
 		return -1;
 	}
 	if (msg.msg_flags & MSG_TRUNC) {
-		flog_err(ZEBRA_ERR_NETLINK_LENGTH_ERROR,
-			  "netlink recvmsg : error message truncated");
+		flog_err(EC_ZEBRA_NETLINK_LENGTH_ERROR,
+			 "netlink recvmsg : error message truncated");
 		return -1;
 	}
 	/* nlh already points to buf */
 	if (nlh->nlmsg_seq != seq) {
 		flog_err(
-			ZEBRA_ERR_NETLINK_BAD_SEQUENCE,
+			EC_ZEBRA_NETLINK_BAD_SEQUENCE,
 			"netlink recvmsg: bad sequence number %x (expected %x)",
 			seq, nlh->nlmsg_seq);
 		return -1;
@@ -138,20 +137,20 @@ static int send_receive(int sock, struct nlmsghdr *nlh,
 static ns_id_t extract_nsid(struct nlmsghdr *nlh, char *buf)
 {
 	ns_id_t ns_id = NS_UNKNOWN;
-	int offset = NETLINK_ALIGN(sizeof(struct nlmsghdr)) +
-		NETLINK_ALIGN(sizeof(struct rtgenmsg));
+	int offset = NETLINK_ALIGN(sizeof(struct nlmsghdr))
+		     + NETLINK_ALIGN(sizeof(struct rtgenmsg));
 	int curr_length = offset;
 	void *tail = (void *)((char *)nlh + NETLINK_ALIGN(nlh->nlmsg_len));
 	struct nlattr *attr;
 
 	for (attr = (struct nlattr *)((char *)buf + offset);
-	     NETLINK_NLATTR_LEN(tail, attr) >= sizeof(struct nlattr) &&
-		     attr->nla_len >= sizeof(struct nlattr) &&
-		     attr->nla_len <= NETLINK_NLATTR_LEN(tail, attr);
+	     NETLINK_NLATTR_LEN(tail, attr) >= sizeof(struct nlattr)
+	     && attr->nla_len >= sizeof(struct nlattr)
+	     && attr->nla_len <= NETLINK_NLATTR_LEN(tail, attr);
 	     attr += NETLINK_ALIGN(attr->nla_len)) {
 		curr_length += attr->nla_len;
 		if ((attr->nla_type & NLA_TYPE_MASK) == NETNSA_NSID) {
-			u_int32_t *ptr = (u_int32_t *)(attr);
+			uint32_t *ptr = (uint32_t *)(attr);
 
 			ns_id = ptr[1];
 			break;
@@ -178,8 +177,9 @@ ns_id_t zebra_ns_id_get(const char *netnspath)
 	/* netlink socket */
 	sock = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
 	if (sock < 0) {
-		flog_err(LIB_ERR_SOCKET,"netlink( %u) socket() error: %s",
-			  sock, safe_strerror(errno));
+		flog_err_sys(EC_LIB_SOCKET, "netlink( %u) socket() error: %s",
+			     sock, safe_strerror(errno));
+		close(fd);
 		return NS_UNKNOWN;
 	}
 	memset(&snl, 0, sizeof(snl));
@@ -188,9 +188,9 @@ ns_id_t zebra_ns_id_get(const char *netnspath)
 	snl.nl_pid = 0; /* AUTO PID */
 	ret = bind(sock, (struct sockaddr *)&snl, sizeof(snl));
 	if (ret < 0) {
-		flog_err(LIB_ERR_SOCKET,
-			  "netlink( %u) socket() bind error: %s", sock,
-			  safe_strerror(errno));
+		flog_err_sys(EC_LIB_SOCKET,
+			     "netlink( %u) socket() bind error: %s", sock,
+			     safe_strerror(errno));
 		close(sock);
 		close(fd);
 		return NS_UNKNOWN;
@@ -220,49 +220,41 @@ ns_id_t zebra_ns_id_get(const char *netnspath)
 	nlh = (struct nlmsghdr *)buf;
 
 	/* message to analyse : NEWNSID response */
-	len = ret;
 	ret = 0;
-	do {
-		if (nlh->nlmsg_type >= NLMSG_MIN_TYPE) {
-			return_nsid = extract_nsid(nlh, buf);
-			if (return_nsid != NS_UNKNOWN)
-				break;
-		} else {
-			if (nlh->nlmsg_type == NLMSG_ERROR) {
-				struct nlmsgerr *err = (struct nlmsgerr *)
-					((char *)nlh +
-					 NETLINK_ALIGN(sizeof(
-						struct nlmsghdr)));
+	if (nlh->nlmsg_type >= NLMSG_MIN_TYPE) {
+		return_nsid = extract_nsid(nlh, buf);
+	} else {
+		if (nlh->nlmsg_type == NLMSG_ERROR) {
+			struct nlmsgerr *err =
+				(struct nlmsgerr
+					 *)((char *)nlh
+					    + NETLINK_ALIGN(
+						      sizeof(struct nlmsghdr)));
 
-				ret = -1;
-				if (err->error < 0)
-					errno = -err->error;
-				else
-					errno = err->error;
-				if (errno == 0) {
-					/* request NEWNSID was successfull
-					 * return EEXIST error to get GETNSID
-					 */
-					errno = EEXIST;
-				}
-			} else {
-				/* other errors ignored
-				 * attempt to get nsid
+			ret = -1;
+			if (err->error < 0)
+				errno = -err->error;
+			else
+				errno = err->error;
+			if (errno == 0) {
+				/* request NEWNSID was successfull
+				 * return EEXIST error to get GETNSID
 				 */
-				ret = -1;
 				errno = EEXIST;
-				break;
 			}
+		} else {
+			/* other errors ignored
+			 * attempt to get nsid
+			 */
+			ret = -1;
+			errno = EEXIST;
 		}
-		len = len - NETLINK_ALIGN(nlh->nlmsg_len);
-		nlh = (struct nlmsghdr *)((char *)nlh +
-					  NETLINK_ALIGN(nlh->nlmsg_len));
-	} while (len != 0 && return_nsid != NS_UNKNOWN && ret == 0);
+	}
 
 	if (ret <= 0) {
 		if (errno != EEXIST && ret != 0) {
 			flog_err(
-				LIB_ERR_SOCKET,
+				EC_LIB_SOCKET,
 				"netlink( %u) recvfrom() error 2 when reading: %s",
 				fd, safe_strerror(errno));
 			close(sock);
@@ -298,10 +290,12 @@ ns_id_t zebra_ns_id_get(const char *netnspath)
 				if (return_nsid != NS_UNKNOWN)
 					break;
 			} else if (nlh->nlmsg_type == NLMSG_ERROR) {
-				struct nlmsgerr *err = (struct nlmsgerr *)
-					((char *)nlh +
-					 NETLINK_ALIGN(sizeof(
-						 struct nlmsghdr)));
+				struct nlmsgerr *err =
+					(struct nlmsgerr
+						 *)((char *)nlh
+						    + NETLINK_ALIGN(sizeof(
+							      struct
+							      nlmsghdr)));
 				if (err->error < 0)
 					errno = -err->error;
 				else
@@ -309,9 +303,10 @@ ns_id_t zebra_ns_id_get(const char *netnspath)
 				break;
 			}
 			len = len - NETLINK_ALIGN(nlh->nlmsg_len);
-			nlh = (struct nlmsghdr *)((char *)nlh +
-				  NETLINK_ALIGN(nlh->nlmsg_len));
-		} while (len != 0 && return_nsid != NS_UNKNOWN && ret == 0);
+			nlh = (struct nlmsghdr *)((char *)nlh
+						  + NETLINK_ALIGN(
+							    nlh->nlmsg_len));
+		} while (len != 0 && ret == 0);
 	}
 
 	close(fd);
@@ -333,7 +328,7 @@ static void zebra_ns_create_netns_directory(void)
 	/* S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH */
 	if (mkdir(NS_RUN_DIR, 0755)) {
 		if (errno != EEXIST) {
-			flog_warn(ZEBRA_ERR_NAMESPACE_DIR_INACCESSIBLE,
+			flog_warn(EC_ZEBRA_NAMESPACE_DIR_INACCESSIBLE,
 				  "NS check: failed to access %s", NS_RUN_DIR);
 			return;
 		}
@@ -360,8 +355,7 @@ ns_id_t zebra_ns_id_get_default(void)
 	}
 	close(fd);
 	return zebra_ns_id_get((char *)NS_DEFAULT_NAME);
-#else /* HAVE_NETNS */
+#else  /* HAVE_NETNS */
 	return NS_DEFAULT_INTERNAL;
 #endif /* !HAVE_NETNS */
 }
-

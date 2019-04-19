@@ -51,9 +51,10 @@ enum blackhole_type {
 };
 
 /* IPV[46] -> IPV[46]_IFINDEX */
-#define NEXTHOP_FIRSTHOPTYPE(type) \
-	((type) == NEXTHOP_TYPE_IFINDEX || (type) == NEXTHOP_TYPE_BLACKHOLE) \
-		? (type) : ((type) | 1)
+#define NEXTHOP_FIRSTHOPTYPE(type)                                             \
+	((type) == NEXTHOP_TYPE_IFINDEX || (type) == NEXTHOP_TYPE_BLACKHOLE)   \
+		? (type)                                                       \
+		: ((type) | 1)
 
 /* Nexthop structure. */
 struct nexthop {
@@ -70,7 +71,7 @@ struct nexthop {
 
 	enum nexthop_types_t type;
 
-	u_char flags;
+	uint8_t flags;
 #define NEXTHOP_FLAG_ACTIVE     (1 << 0) /* This nexthop is alive. */
 #define NEXTHOP_FLAG_FIB        (1 << 1) /* FIB nexthop. */
 #define NEXTHOP_FLAG_RECURSIVE  (1 << 2) /* Recursive nexthop. */
@@ -78,10 +79,10 @@ struct nexthop {
 #define NEXTHOP_FLAG_MATCHED    (1 << 4) /* Already matched vs a nexthop */
 #define NEXTHOP_FLAG_FILTERED   (1 << 5) /* rmap filtered, used by static only */
 #define NEXTHOP_FLAG_DUPLICATE  (1 << 6) /* nexthop duplicates another active one */
-#define NEXTHOP_FLAG_EVPN_RVTEP (1 << 7) /* EVPN remote vtep nexthop */
-#define NEXTHOP_IS_ACTIVE(flags) \
-	(CHECK_FLAG(flags, NEXTHOP_FLAG_ACTIVE) \
-		&& !CHECK_FLAG(flags, NEXTHOP_FLAG_DUPLICATE))
+#define NEXTHOP_FLAG_RNH_FILTERED  (1 << 7) /* rmap filtered, used by rnh */
+#define NEXTHOP_IS_ACTIVE(flags)                                               \
+	(CHECK_FLAG(flags, NEXTHOP_FLAG_ACTIVE)                                \
+	 && !CHECK_FLAG(flags, NEXTHOP_FLAG_DUPLICATE))
 
 	/* Nexthop address */
 	union {
@@ -113,7 +114,7 @@ struct nexthop *nexthop_new(void);
 void nexthop_free(struct nexthop *nexthop);
 void nexthops_free(struct nexthop *nexthop);
 
-void nexthop_add_labels(struct nexthop *, enum lsp_types_t, u_int8_t,
+void nexthop_add_labels(struct nexthop *, enum lsp_types_t, uint8_t,
 			mpls_label_t *);
 void nexthop_del_labels(struct nexthop *);
 
@@ -132,17 +133,19 @@ void nexthop_del_labels(struct nexthop *);
  * Returns:
  *    32-bit hash of nexthop
  */
-uint32_t nexthop_hash(struct nexthop *nexthop);
+uint32_t nexthop_hash(const struct nexthop *nexthop);
 
 extern bool nexthop_same(const struct nexthop *nh1, const struct nexthop *nh2);
 
 extern const char *nexthop_type_to_str(enum nexthop_types_t nh_type);
 extern int nexthop_same_no_recurse(const struct nexthop *next1,
 				   const struct nexthop *next2);
-extern int nexthop_labels_match(struct nexthop *nh1, struct nexthop *nh2);
-extern int nexthop_same_firsthop (struct nexthop *next1, struct nexthop *next2);
+extern int nexthop_labels_match(const struct nexthop *nh1,
+				const struct nexthop *nh2);
+extern int nexthop_same_firsthop(struct nexthop *next1, struct nexthop *next2);
 
-extern const char *nexthop2str(const struct nexthop *nexthop, char *str, int size);
+extern const char *nexthop2str(const struct nexthop *nexthop,
+			       char *str, int size);
 extern struct nexthop *nexthop_next(struct nexthop *nexthop);
 extern unsigned int nexthop_level(struct nexthop *nexthop);
 #endif /*_LIB_NEXTHOP_H */

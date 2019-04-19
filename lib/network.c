@@ -25,7 +25,7 @@
 #include "lib_errors.h"
 
 /* Read nbytes from fd and store into ptr. */
-int readn(int fd, u_char *ptr, int nbytes)
+int readn(int fd, uint8_t *ptr, int nbytes)
 {
 	int nleft;
 	int nread;
@@ -48,7 +48,7 @@ int readn(int fd, u_char *ptr, int nbytes)
 }
 
 /* Write nbytes from ptr to fd. */
-int writen(int fd, const u_char *ptr, int nbytes)
+int writen(int fd, const uint8_t *ptr, int nbytes)
 {
 	int nleft;
 	int nwritten;
@@ -79,13 +79,13 @@ int set_nonblocking(int fd)
 	   should
 	   never be negative. */
 	if ((flags = fcntl(fd, F_GETFL)) < 0) {
-		flog_err(LIB_ERR_SYSTEM_CALL,
+		flog_err(EC_LIB_SYSTEM_CALL,
 			 "fcntl(F_GETFL) failed for fd %d: %s", fd,
 			 safe_strerror(errno));
 		return -1;
 	}
 	if (fcntl(fd, F_SETFL, (flags | O_NONBLOCK)) < 0) {
-		flog_err(LIB_ERR_SYSTEM_CALL,
+		flog_err(EC_LIB_SYSTEM_CALL,
 			 "fcntl failed setting fd %d non-blocking: %s", fd,
 			 safe_strerror(errno));
 		return -1;
@@ -108,12 +108,12 @@ int set_cloexec(int fd)
 
 float htonf(float host)
 {
-	u_int32_t lu1, lu2;
+	uint32_t lu1, lu2;
 	float convert;
 
-	memcpy(&lu1, &host, sizeof(u_int32_t));
+	memcpy(&lu1, &host, sizeof(uint32_t));
 	lu2 = htonl(lu1);
-	memcpy(&convert, &lu2, sizeof(u_int32_t));
+	memcpy(&convert, &lu2, sizeof(uint32_t));
 	return convert;
 }
 

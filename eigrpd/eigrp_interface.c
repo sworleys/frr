@@ -109,7 +109,7 @@ int eigrp_if_delete_hook(struct interface *ifp)
 	if (!ei)
 		return 0;
 
-	list_delete_and_null(&ei->nbrs);
+	list_delete(&ei->nbrs);
 
 	eigrp = ei->eigrp;
 	listnode_delete(eigrp->eiflist, ei);
@@ -122,13 +122,12 @@ int eigrp_if_delete_hook(struct interface *ifp)
 
 struct list *eigrp_iflist;
 
-void eigrp_if_init()
+void eigrp_if_init(void)
 {
 	/* Initialize Zebra interface data structure. */
-	//hook_register_prio(if_add, 0, eigrp_if_new);
+	// hook_register_prio(if_add, 0, eigrp_if_new);
 	hook_register_prio(if_del, 0, eigrp_if_delete_hook);
 }
-
 
 
 void eigrp_del_if_params(struct eigrp_if_params *eip)
@@ -160,8 +159,7 @@ int eigrp_if_up(struct eigrp_interface *ei)
 	thread_add_event(master, eigrp_hello_timer, ei, (1), NULL);
 
 	/*Prepare metrics*/
-	metric.bandwidth =
-		eigrp_bandwidth_to_scaled(ei->params.bandwidth);
+	metric.bandwidth = eigrp_bandwidth_to_scaled(ei->params.bandwidth);
 	metric.delay = eigrp_delay_to_scaled(ei->params.delay);
 	metric.load = ei->params.load;
 	metric.reliability = ei->params.reliability;
@@ -185,9 +183,7 @@ int eigrp_if_up(struct eigrp_interface *ei)
 
 	struct prefix dest_addr;
 
-	dest_addr.family = AF_INET;
-	dest_addr.u.prefix4 = ei->connected->address->u.prefix4;
-	dest_addr.prefixlen = ei->connected->address->prefixlen;
+	dest_addr = *ei->address;
 	apply_mask(&dest_addr);
 	pe = eigrp_topology_table_lookup_ipv4(eigrp->topology_table,
 					      &dest_addr);
@@ -310,8 +306,7 @@ void eigrp_if_set_multicast(struct eigrp_interface *ei)
 		 * group. */
 		if (ei->member_allrouters) {
 			/* Only actually drop if this is the last reference */
-			eigrp_if_drop_allspfrouters(ei->eigrp,
-						    ei->address,
+			eigrp_if_drop_allspfrouters(ei->eigrp, ei->address,
 						    ei->ifp->ifindex);
 			/* Unset the flag regardless of whether the system call
 			   to leave
@@ -323,7 +318,7 @@ void eigrp_if_set_multicast(struct eigrp_interface *ei)
 	}
 }
 
-u_char eigrp_default_iftype(struct interface *ifp)
+uint8_t eigrp_default_iftype(struct interface *ifp)
 {
 	if (if_is_pointopoint(ifp))
 		return EIGRP_IFTYPE_POINTOPOINT;
@@ -333,19 +328,21 @@ u_char eigrp_default_iftype(struct interface *ifp)
 		return EIGRP_IFTYPE_BROADCAST;
 }
 
-void eigrp_if_free(struct eigrp_interface *ei,
-		   int source)
+void eigrp_if_free(struct eigrp_interface *ei, int source)
 {
 	struct prefix dest_addr;
 	struct eigrp_prefix_entry *pe;
 	struct eigrp *eigrp = eigrp_lookup();
+
+	if (!eigrp)
+		return;
 
 	if (source == INTERFACE_DOWN_BY_VTY) {
 		THREAD_OFF(ei->t_hello);
 		eigrp_hello_send(ei, EIGRP_HELLO_GRACEFUL_SHUTDOWN, NULL);
 	}
 
-	dest_addr = *ei->connected->address;
+	dest_addr = *ei->address;
 	apply_mask(&dest_addr);
 	pe = eigrp_topology_table_lookup_ipv4(eigrp->topology_table,
 					      &dest_addr);
@@ -354,7 +351,7 @@ void eigrp_if_free(struct eigrp_interface *ei,
 
 	eigrp_if_down(ei);
 
-	list_delete_and_null(&ei->nbrs);
+	list_delete(&ei->nbrs);
 	listnode_delete(ei->eigrp->eiflist, ei);
 }
 
@@ -417,32 +414,32 @@ struct eigrp_interface *eigrp_if_lookup_by_name(struct eigrp *eigrp,
 	return NULL;
 }
 
-u_int32_t eigrp_bandwidth_to_scaled(u_int32_t bandwidth)
+uint32_t eigrp_bandwidth_to_scaled(uint32_t bandwidth)
 {
 	uint64_t temp_bandwidth = (256ull * 10000000) / bandwidth;
 
 	temp_bandwidth = temp_bandwidth < EIGRP_MAX_METRIC ? temp_bandwidth
 							   : EIGRP_MAX_METRIC;
 
-	return (u_int32_t)temp_bandwidth;
+	return (uint32_t)temp_bandwidth;
 }
 
-u_int32_t eigrp_scaled_to_bandwidth(u_int32_t scaled)
+uint32_t eigrp_scaled_to_bandwidth(uint32_t scaled)
 {
 	uint64_t temp_scaled = scaled * (256ull * 10000000);
 
 	temp_scaled =
 		temp_scaled < EIGRP_MAX_METRIC ? temp_scaled : EIGRP_MAX_METRIC;
 
-	return (u_int32_t)temp_scaled;
+	return (uint32_t)temp_scaled;
 }
 
-u_int32_t eigrp_delay_to_scaled(u_int32_t delay)
+uint32_t eigrp_delay_to_scaled(uint32_t delay)
 {
 	return delay * 256;
 }
 
-u_int32_t eigrp_scaled_to_delay(u_int32_t scaled)
+uint32_t eigrp_scaled_to_delay(uint32_t scaled)
 {
 	return scaled / 256;
 }

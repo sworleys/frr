@@ -31,9 +31,6 @@ void isis_event_circuit_type_change(struct isis_circuit *circuit, int newtype);
 /*
  * Events related to adjacencies
  */
-void isis_event_adjacency_state_change(struct isis_adjacency *adj,
-				       int newstate);
-
 int isis_event_dis_status_change(struct thread *thread);
 
 /*
@@ -43,6 +40,6 @@ int isis_event_dis_status_change(struct thread *thread);
 #define AUTH_ERROR_TYPE_SNP   2
 #define AUTH_ERROR_TYPE_HELLO 1
 void isis_event_auth_failure(char *area_tag, const char *error_string,
-			     u_char *sysid);
+			     uint8_t *sysid);
 
 #endif /* _ZEBRA_ISIS_EVENTS_H */

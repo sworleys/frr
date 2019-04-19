@@ -29,75 +29,31 @@
 #include "zebra/rib.h"
 #include "zebra/zebra_ns.h"
 #include "zebra/zebra_mpls.h"
+#include "zebra/zebra_dplane.h"
+
+#define RSYSTEM_ROUTE(type)                                                    \
+	((type) == ZEBRA_ROUTE_KERNEL || (type) == ZEBRA_ROUTE_CONNECT)
 
 /*
- * Philosophy Note:
- *
- * Flags being SET/UNSET do not belong in the South Bound
- * Interface.  This Setting belongs at the calling level
- * because we can and will have multiple different interfaces
- * and we will have potentially multiple different
- * modules/filters to call.  As such Setting/Unsetting
- * success failure should be handled by the caller.
+ * Update or delete a route, LSP, or pseudowire from the kernel,
+ * using info from a dataplane context.
  */
+extern enum zebra_dplane_result kernel_route_update(
+	struct zebra_dplane_ctx *ctx);
 
+extern enum zebra_dplane_result kernel_lsp_update(
+	struct zebra_dplane_ctx *ctx);
 
-enum southbound_results {
-	SOUTHBOUND_INSTALL_SUCCESS,
-	SOUTHBOUND_INSTALL_FAILURE,
-	SOUTHBOUND_DELETE_SUCCESS,
-	SOUTHBOUND_DELETE_FAILURE,
-};
-
-/*
- * Install/delete the specified prefix p from the kernel
- *
- * old = NULL, new = pointer - Install new
- * old = pointer, new = pointer - Route replace Old w/ New
- * old = pointer, new = NULL, - Route Delete
- *
- * Please note not all kernels support route replace
- * semantics so we will end up with a delete than
- * a re-add.
- */
-extern void kernel_route_rib(struct route_node *rn, struct prefix *p,
-			     struct prefix *src_p, struct route_entry *old,
-			     struct route_entry *new);
-
-/*
- * So route install/failure may not be immediately known
- * so let's separate it out and allow the result to
- * be passed back up.
- */
-extern void kernel_route_rib_pass_fail(struct route_node *rn,
-				       struct prefix *p,
-				       struct route_entry *re,
-				       enum southbound_results res);
+enum zebra_dplane_result kernel_pw_update(struct zebra_dplane_ctx *ctx);
 
 extern int kernel_address_add_ipv4(struct interface *, struct connected *);
 extern int kernel_address_delete_ipv4(struct interface *, struct connected *);
-extern int kernel_address_add_ipv6 (struct interface *, struct connected *);
-extern int kernel_address_delete_ipv6 (struct interface *, struct connected *);
-extern int kernel_neigh_update(int cmd, int ifindex, uint32_t addr,
-			       char *lla, int llalen, ns_id_t ns_id);
+extern int kernel_address_add_ipv6(struct interface *, struct connected *);
+extern int kernel_address_delete_ipv6(struct interface *, struct connected *);
+extern int kernel_neigh_update(int cmd, int ifindex, uint32_t addr, char *lla,
+			       int llalen, ns_id_t ns_id);
 extern int kernel_interface_set_master(struct interface *master,
 				       struct interface *slave);
-
-extern void kernel_add_lsp(zebra_lsp_t *lsp);
-extern void kernel_upd_lsp(zebra_lsp_t *lsp);
-extern void kernel_del_lsp(zebra_lsp_t *lsp);
-
-/*
- * Add the ability to pass back up the lsp install/delete
- * success/failure.
- *
- * This functions goal is similiar to kernel_route_rib_pass_fail
- * in that we are separating out the mechanics for
- * the install/failure to set/unset flags and to notify
- * as needed.
- */
-extern void kernel_lsp_pass_fail(zebra_lsp_t *lsp,
-				 enum southbound_results res);
 
 extern int mpls_kernel_init(void);
 
@@ -116,6 +72,8 @@ extern int kernel_del_mac(struct interface *ifp, vlanid_t vid,
 extern int kernel_add_neigh(struct interface *ifp, struct ipaddr *ip,
 			    struct ethaddr *mac, uint8_t flags);
 extern int kernel_del_neigh(struct interface *ifp, struct ipaddr *ip);
+extern int kernel_upd_neigh(struct interface *ifp, struct ipaddr *ip,
+                           struct ethaddr *mac, uint8_t flags, uint16_t state);
 
 /*
  * Southbound Initialization routines to get initial starting
@@ -123,12 +81,17 @@ extern int kernel_del_neigh(struct interface *ifp, struct ipaddr *ip);
  */
 extern void interface_list(struct zebra_ns *zns);
 extern void kernel_init(struct zebra_ns *zns);
-extern void kernel_terminate(struct zebra_ns *zns);
+extern void kernel_terminate(struct zebra_ns *zns, bool complete);
 extern void macfdb_read(struct zebra_ns *zns);
 extern void macfdb_read_for_bridge(struct zebra_ns *zns, struct interface *ifp,
 				   struct interface *br_if);
+extern void macfdb_read_specific_mac(struct zebra_ns *zns,
+				     struct interface *br_if,
+				     struct ethaddr *mac, vlanid_t vid);
 extern void neigh_read(struct zebra_ns *zns);
 extern void neigh_read_for_vlan(struct zebra_ns *zns, struct interface *ifp);
+extern void neigh_read_specific_ip(struct ipaddr *ip,
+				   struct interface *vlan_if);
 extern void route_read(struct zebra_ns *zns);
 
 #endif /* _ZEBRA_RT_H */

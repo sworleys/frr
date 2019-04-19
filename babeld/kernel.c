@@ -21,6 +21,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #include <sys/time.h>
 #include <sys/param.h>
 #include <time.h>
@@ -207,7 +211,7 @@ if_eui64(int ifindex, unsigned char *eui)
         return -1;
     }
 
-    u_char len = (u_char) ifp->hw_addr_len;
+    uint8_t len = (uint8_t)ifp->hw_addr_len;
     char *tmp = (void*) ifp->hw_addr;
 
     if (len == 8) {

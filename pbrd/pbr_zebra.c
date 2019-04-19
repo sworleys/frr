@@ -1,9 +1,7 @@
 /*
  * Zebra connect code.
- * Copyright (C) Cumulus Networks, Inc.
+ * Copyright (C) 2018 Cumulus Networks, Inc.
  *               Donald Sharp
- *
- * This file is part of FRR.
  *
  * FRR is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -45,10 +43,7 @@
 DEFINE_MTYPE_STATIC(PBRD, PBR_INTERFACE, "PBR Interface")
 
 /* Zebra structure to hold current status. */
-struct zclient *zclient = NULL;
-
-/* For registering threads. */
-extern struct thread_master *master;
+struct zclient *zclient;
 
 struct pbr_interface *pbr_if_new(struct interface *ifp)
 {
@@ -59,7 +54,8 @@ struct pbr_interface *pbr_if_new(struct interface *ifp)
 
 	pbr_ifp = XCALLOC(MTYPE_PBR_INTERFACE, sizeof(*pbr_ifp));
 
-	return (pbr_ifp);
+	ifp->info = pbr_ifp;
+	return pbr_ifp;
 }
 
 /* Inteface addition message from zebra. */
@@ -73,12 +69,13 @@ static int interface_add(int command, struct zclient *zclient,
 	if (!ifp)
 		return 0;
 
-	if (!ifp->info) {
-		struct pbr_interface *pbr_ifp;
+	DEBUGD(&pbr_dbg_zebra,
+	       "%s: %s", __PRETTY_FUNCTION__, ifp->name);
 
-		pbr_ifp = pbr_if_new(ifp);
-		ifp->info = pbr_ifp;
-	}
+	if (!ifp->info)
+		pbr_if_new(ifp);
+
+	pbr_nht_nexthop_interface_update(ifp);
 
 	return 0;
 }
@@ -97,6 +94,9 @@ static int interface_delete(int command, struct zclient *zclient,
 	if (ifp == NULL)
 		return 0;
 
+	DEBUGD(&pbr_dbg_zebra,
+	       "%s: %s", __PRETTY_FUNCTION__, ifp->name);
+
 	if_set_index(ifp, IFINDEX_INTERNAL);
 
 	return 0;
@@ -105,7 +105,14 @@ static int interface_delete(int command, struct zclient *zclient,
 static int interface_address_add(int command, struct zclient *zclient,
 				 zebra_size_t length, vrf_id_t vrf_id)
 {
-	zebra_interface_address_read(command, zclient->ibuf, vrf_id);
+	struct connected *c;
+	char buf[PREFIX_STRLEN];
+
+	c = zebra_interface_address_read(command, zclient->ibuf, vrf_id);
+
+	DEBUGD(&pbr_dbg_zebra,
+	       "%s: %s added %s", __PRETTY_FUNCTION__, c->ifp->name,
+	       prefix2str(c->address, buf, sizeof(buf)));
 
 	return 0;
 }
@@ -114,11 +121,16 @@ static int interface_address_delete(int command, struct zclient *zclient,
 				    zebra_size_t length, vrf_id_t vrf_id)
 {
 	struct connected *c;
+	char buf[PREFIX_STRLEN];
 
 	c = zebra_interface_address_read(command, zclient->ibuf, vrf_id);
 
 	if (!c)
 		return 0;
+
+	DEBUGD(&pbr_dbg_zebra,
+	       "%s: %s deleted %s", __PRETTY_FUNCTION__, c->ifp->name,
+	       prefix2str(c->address, buf, sizeof(buf)));
 
 	connected_free(c);
 	return 0;
@@ -127,8 +139,14 @@ static int interface_address_delete(int command, struct zclient *zclient,
 static int interface_state_up(int command, struct zclient *zclient,
 			      zebra_size_t length, vrf_id_t vrf_id)
 {
+	struct interface *ifp;
 
-	zebra_interface_state_read(zclient->ibuf, vrf_id);
+	ifp = zebra_interface_state_read(zclient->ibuf, vrf_id);
+
+	DEBUGD(&pbr_dbg_zebra,
+	       "%s: %s is up", __PRETTY_FUNCTION__, ifp->name);
+
+	pbr_nht_nexthop_interface_update(ifp);
 
 	return 0;
 }
@@ -136,8 +154,14 @@ static int interface_state_up(int command, struct zclient *zclient,
 static int interface_state_down(int command, struct zclient *zclient,
 				zebra_size_t length, vrf_id_t vrf_id)
 {
+	struct interface *ifp;
 
-	zebra_interface_state_read(zclient->ibuf, vrf_id);
+	ifp = zebra_interface_state_read(zclient->ibuf, vrf_id);
+
+	DEBUGD(&pbr_dbg_zebra,
+	       "%s: %s is down", __PRETTY_FUNCTION__, ifp->name);
+
+	pbr_nht_nexthop_interface_update(ifp);
 
 	return 0;
 }
@@ -150,10 +174,10 @@ static int route_notify_owner(int command, struct zclient *zclient,
 	uint32_t table_id;
 	char buf[PREFIX_STRLEN];
 
-	prefix2str(&p, buf, sizeof(buf));
-
 	if (!zapi_route_notify_decode(zclient->ibuf, &p, &table_id, &note))
 		return -1;
+
+	prefix2str(&p, buf, sizeof(buf));
 
 	switch (note) {
 	case ZAPI_ROUTE_FAIL_INSTALL:
@@ -215,27 +239,33 @@ static int rule_notify_owner(int command, struct zclient *zclient,
 
 	switch (note) {
 	case ZAPI_RULE_FAIL_INSTALL:
-		DEBUGD(&pbr_dbg_zebra, "%s: Recieved RULE_FAIL_INSTALL",
-		       __PRETTY_FUNCTION__);
 		pbrms->installed &= ~installed;
+		DEBUGD(&pbr_dbg_zebra,
+		       "%s: Received RULE_FAIL_INSTALL: %" PRIu64,
+		       __PRETTY_FUNCTION__, pbrms->installed);
 		break;
 	case ZAPI_RULE_INSTALLED:
 		pbrms->installed |= installed;
-		DEBUGD(&pbr_dbg_zebra, "%s: Recived RULE_INSTALLED",
-		       __PRETTY_FUNCTION__);
+		DEBUGD(&pbr_dbg_zebra, "%s: Received RULE_INSTALLED: %" PRIu64,
+		       __PRETTY_FUNCTION__, pbrms->installed);
 		break;
+	case ZAPI_RULE_FAIL_REMOVE:
 	case ZAPI_RULE_REMOVED:
 		pbrms->installed &= ~installed;
-		DEBUGD(&pbr_dbg_zebra, "%s: Received RULE REMOVED",
-		       __PRETTY_FUNCTION__);
+		DEBUGD(&pbr_dbg_zebra, "%s: Received RULE REMOVED: %" PRIu64,
+		       __PRETTY_FUNCTION__, pbrms->installed);
 		break;
 	}
+
+	pbr_map_final_interface_deletion(pbrms->parent, pmi);
 
 	return 0;
 }
 
 static void zebra_connected(struct zclient *zclient)
 {
+	DEBUGD(&pbr_dbg_zebra, "%s: Registering for fun and profit",
+	       __PRETTY_FUNCTION__);
 	zclient_send_reg_requests(zclient, VRF_DEFAULT);
 }
 
@@ -243,10 +273,14 @@ static void route_add_helper(struct zapi_route *api, struct nexthop_group nhg,
 			     uint8_t install_afi)
 {
 	struct zapi_nexthop *api_nh;
+	char buf[PREFIX_STRLEN];
 	struct nexthop *nhop;
 	int i;
 
 	api->prefix.family = install_afi;
+
+	DEBUGD(&pbr_dbg_zebra, "\tEncoding %s",
+	       prefix2str(&api->prefix, buf, sizeof(buf)));
 
 	i = 0;
 	for (ALL_NEXTHOPS(nhg, nhop)) {
@@ -291,6 +325,9 @@ void route_add(struct pbr_nexthop_group_cache *pnhgc, struct nexthop_group nhg,
 {
 	struct zapi_route api;
 
+	DEBUGD(&pbr_dbg_zebra, "%s for Table: %d", __PRETTY_FUNCTION__,
+	       pnhgc->table_id);
+
 	memset(&api, 0, sizeof(api));
 
 	api.vrf_id = VRF_DEFAULT;
@@ -330,6 +367,9 @@ void route_delete(struct pbr_nexthop_group_cache *pnhgc, afi_t afi)
 {
 	struct zapi_route api;
 
+	DEBUGD(&pbr_dbg_zebra, "%s for Table: %d", __PRETTY_FUNCTION__,
+	       pnhgc->table_id);
+
 	memset(&api, 0, sizeof(api));
 	api.vrf_id = VRF_DEFAULT;
 	api.type = ZEBRA_ROUTE_PBR;
@@ -359,8 +399,6 @@ void route_delete(struct pbr_nexthop_group_cache *pnhgc, afi_t afi)
 		       __PRETTY_FUNCTION__);
 		break;
 	}
-
-	return;
 }
 
 static int pbr_zebra_nexthop_update(int command, struct zclient *zclient,
@@ -370,7 +408,10 @@ static int pbr_zebra_nexthop_update(int command, struct zclient *zclient,
 	char buf[PREFIX2STR_BUFFER];
 	uint32_t i;
 
-	zapi_nexthop_update_decode(zclient->ibuf, &nhr);
+	if (!zapi_nexthop_update_decode(zclient->ibuf, &nhr)) {
+		zlog_warn("Failure to decode Nexthop update message");
+		return 0;
+	}
 
 	if (DEBUG_MODE_CHECK(&pbr_dbg_zebra, DEBUG_MODE_ALL)) {
 
@@ -400,7 +441,7 @@ void pbr_zebra_init(void)
 {
 	struct zclient_options opt = { .receive_notify = true };
 
-	zclient = zclient_new_notify(master, &opt);
+	zclient = zclient_new(master, &opt);
 
 	zclient_init(zclient, ZEBRA_ROUTE_PBR, 0, &pbr_privs);
 	zclient->zebra_connected = zebra_connected;
@@ -451,7 +492,7 @@ void pbr_send_rnh(struct nexthop *nhop, bool reg)
 
 static void pbr_encode_pbr_map_sequence_prefix(struct stream *s,
 					       struct prefix *p,
-					       u_char family)
+					       unsigned char  family)
 {
 	struct prefix any;
 
@@ -470,14 +511,11 @@ static void pbr_encode_pbr_map_sequence(struct stream *s,
 					struct pbr_map_sequence *pbrms,
 					struct interface *ifp)
 {
-	u_char family;
+	unsigned char family;
 
 	family = AF_INET;
-	if (pbrms->src)
-		family = pbrms->src->family;
-
-	if (pbrms->dst)
-		family = pbrms->dst->family;
+	if (pbrms->family)
+		family = pbrms->family;
 
 	stream_putl(s, pbrms->seqno);
 	stream_putl(s, pbrms->ruleno);
@@ -486,6 +524,7 @@ static void pbr_encode_pbr_map_sequence(struct stream *s,
 	stream_putw(s, 0);  /* src port */
 	pbr_encode_pbr_map_sequence_prefix(s, pbrms->dst, family);
 	stream_putw(s, 0);  /* dst port */
+	stream_putl(s, 0);  /* fwmark */
 	if (pbrms->nhgrp_name)
 		stream_putl(s, pbr_nht_get_table(pbrms->nhgrp_name));
 	else if (pbrms->nhg)
@@ -498,7 +537,7 @@ void pbr_send_pbr_map(struct pbr_map_sequence *pbrms,
 {
 	struct pbr_map *pbrm = pbrms->parent;
 	struct stream *s;
-	uint64_t is_installed = 1 << pmi->install_bit;
+	uint64_t is_installed = (uint64_t)1 << pmi->install_bit;
 
 	is_installed &= pbrms->installed;
 

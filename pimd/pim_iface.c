@@ -46,6 +46,8 @@
 #include "pim_rp.h"
 #include "pim_nht.h"
 #include "pim_jp_agg.h"
+#include "pim_igmp_join.h"
+#include "pim_vxlan.h"
 
 static void pim_if_igmp_join_del_all(struct interface *ifp);
 static int igmp_join_sock(const char *ifname, ifindex_t ifindex,
@@ -107,7 +109,8 @@ static int pim_sec_addr_comp(const void *p1, const void *p2)
 	return 0;
 }
 
-struct pim_interface *pim_if_new(struct interface *ifp, int igmp, int pim)
+struct pim_interface *pim_if_new(struct interface *ifp, bool igmp, bool pim,
+				 bool ispimreg, bool is_vxlan_term)
 {
 	struct pim_interface *pim_ifp;
 
@@ -168,13 +171,15 @@ struct pim_interface *pim_if_new(struct interface *ifp, int igmp, int pim)
 	pim_ifp->sec_addr_list->cmp =
 		(int (*)(void *, void *))pim_sec_addr_comp;
 
+	pim_ifp->activeactive = false;
+
 	RB_INIT(pim_ifchannel_rb, &pim_ifp->ifchannel_rb);
 
 	ifp->info = pim_ifp;
 
 	pim_sock_reset(ifp);
 
-	pim_if_add_vif(ifp);
+	pim_if_add_vif(ifp, ispimreg, is_vxlan_term);
 
 	return pim_ifp;
 }
@@ -199,13 +204,12 @@ void pim_if_delete(struct interface *ifp)
 
 	pim_if_del_vif(ifp);
 
-	list_delete_and_null(&pim_ifp->igmp_socket_list);
-	list_delete_and_null(&pim_ifp->pim_neighbor_list);
-	list_delete_and_null(&pim_ifp->upstream_switch_list);
-	list_delete_and_null(&pim_ifp->sec_addr_list);
+	list_delete(&pim_ifp->igmp_socket_list);
+	list_delete(&pim_ifp->pim_neighbor_list);
+	list_delete(&pim_ifp->upstream_switch_list);
+	list_delete(&pim_ifp->sec_addr_list);
 
-	if (pim_ifp->boundary_oil_plist)
-		XFREE(MTYPE_PIM_INTERFACE, pim_ifp->boundary_oil_plist);
+	XFREE(MTYPE_PIM_INTERFACE, pim_ifp->boundary_oil_plist);
 
 	while (!RB_EMPTY(pim_ifchannel_rb, &pim_ifp->ifchannel_rb)) {
 		ch = RB_ROOT(pim_ifchannel_rb, &pim_ifp->ifchannel_rb);
@@ -380,8 +384,7 @@ static int pim_sec_addr_update(struct interface *ifp)
 	struct pim_secondary_addr *sec_addr;
 	int changed = 0;
 
-	for (ALL_LIST_ELEMENTS_RO(pim_ifp->sec_addr_list, node,
-				  sec_addr)) {
+	for (ALL_LIST_ELEMENTS_RO(pim_ifp->sec_addr_list, node, sec_addr)) {
 		sec_addr->flags |= PIM_SEC_ADDRF_STALE;
 	}
 
@@ -528,7 +531,11 @@ void pim_if_addr_add(struct connected *ifc)
 			/* if addr new, add IGMP socket */
 			if (ifc->address->family == AF_INET)
 				pim_igmp_sock_add(pim_ifp->igmp_socket_list,
-						  ifaddr, ifp);
+						  ifaddr, ifp, false);
+		} else if (igmp->mtrace_only) {
+			igmp_sock_delete(igmp);
+			pim_igmp_sock_add(pim_ifp->igmp_socket_list, ifaddr,
+					  ifp, false);
 		}
 
 		/* Replay Static IGMP groups */
@@ -565,6 +572,20 @@ void pim_if_addr_add(struct connected *ifc)
 			}
 		}
 	} /* igmp */
+	else {
+		struct igmp_sock *igmp;
+
+		/* lookup IGMP socket */
+		igmp = pim_igmp_sock_lookup_ifaddr(pim_ifp->igmp_socket_list,
+						   ifaddr);
+		if (ifc->address->family == AF_INET) {
+			if (igmp)
+				igmp_sock_delete(igmp);
+			/* if addr new, add IGMP socket */
+			pim_igmp_sock_add(pim_ifp->igmp_socket_list, ifaddr,
+					  ifp, true);
+		}
+	} /* igmp mtrace only */
 
 	if (PIM_IF_TEST_PIM(pim_ifp->options)) {
 
@@ -608,7 +629,7 @@ void pim_if_addr_add(struct connected *ifc)
 	  address assigned, then try to create a vif_index.
 	*/
 	if (pim_ifp->mroute_vif_index < 0) {
-		pim_if_add_vif(ifp);
+		pim_if_add_vif(ifp, false, false /*vxlan_term*/);
 	}
 	pim_ifchannel_scan_forward_start(ifp);
 }
@@ -741,7 +762,7 @@ void pim_if_addr_add_all(struct interface *ifp)
 	 * address assigned, then try to create a vif_index.
 	 */
 	if (pim_ifp->mroute_vif_index < 0) {
-		pim_if_add_vif(ifp);
+		pim_if_add_vif(ifp, false, false /*vxlan_term*/);
 	}
 	pim_ifchannel_scan_forward_start(ifp);
 
@@ -906,7 +927,7 @@ static int pim_iface_next_vif_index(struct interface *ifp)
 
   see also pim_if_find_vifindex_by_ifindex()
  */
-int pim_if_add_vif(struct interface *ifp)
+int pim_if_add_vif(struct interface *ifp, bool ispimreg, bool is_vxlan_term)
 {
 	struct pim_interface *pim_ifp = ifp->info;
 	struct in_addr ifaddr;
@@ -928,8 +949,7 @@ int pim_if_add_vif(struct interface *ifp)
 	}
 
 	ifaddr = pim_ifp->primary_address;
-	if (ifp->ifindex != PIM_OIF_PIM_REGISTER_VIF
-	    && PIM_INADDR_IS_ANY(ifaddr)) {
+	if (!ispimreg && !is_vxlan_term && PIM_INADDR_IS_ANY(ifaddr)) {
 		zlog_warn(
 			"%s: could not get address for interface %s ifindex=%d",
 			__PRETTY_FUNCTION__, ifp->name, ifp->ifindex);
@@ -958,6 +978,10 @@ int pim_if_add_vif(struct interface *ifp)
 	}
 
 	pim_ifp->pim->iface_vif_index[pim_ifp->mroute_vif_index] = 1;
+
+	/* if the device qualifies as pim_vxlan iif/oif update vxlan entries */
+	pim_vxlan_add_vif(ifp);
+
 	return 0;
 }
 
@@ -971,6 +995,9 @@ int pim_if_del_vif(struct interface *ifp)
 			  ifp->name, ifp->ifindex);
 		return -1;
 	}
+
+	/* if the device was a pim_vxlan iif/oif update vxlan mroute entries */
+	pim_vxlan_del_vif(ifp);
 
 	pim_mroute_del_vif(ifp);
 
@@ -1139,7 +1166,7 @@ long pim_if_t_suppressed_msec(struct interface *ifp)
 
 	/* t_suppressed = t_periodic * rand(1.1, 1.4) */
 	ramount = 1100 + (random() % (1400 - 1100 + 1));
-	t_suppressed_msec = qpim_t_periodic * ramount;
+	t_suppressed_msec = router->t_periodic * ramount;
 
 	return t_suppressed_msec;
 }
@@ -1177,8 +1204,18 @@ static int igmp_join_sock(const char *ifname, ifindex_t ifindex,
 		return -1;
 	}
 
-	if (pim_socket_join_source(join_fd, ifindex, group_addr, source_addr,
-				   ifname)) {
+	if (pim_igmp_join_source(join_fd, ifindex, group_addr, source_addr)) {
+		char group_str[INET_ADDRSTRLEN];
+		char source_str[INET_ADDRSTRLEN];
+		pim_inet4_dump("<grp?>", group_addr, group_str,
+			       sizeof(group_str));
+		pim_inet4_dump("<src?>", source_addr, source_str,
+			       sizeof(source_str));
+		zlog_warn(
+			"%s: setsockopt(fd=%d) failure for IGMP group %s source %s ifindex %d on interface %s: errno=%d: %s",
+			__PRETTY_FUNCTION__, join_fd, group_str, source_str,
+			ifindex, ifname, errno, safe_strerror(errno));
+
 		close(join_fd);
 		return -2;
 	}
@@ -1202,6 +1239,7 @@ static struct igmp_join *igmp_join_new(struct interface *ifp,
 	if (join_fd < 0) {
 		char group_str[INET_ADDRSTRLEN];
 		char source_str[INET_ADDRSTRLEN];
+
 		pim_inet4_dump("<grp?>", group_addr, group_str,
 			       sizeof(group_str));
 		pim_inet4_dump("<src?>", source_addr, source_str,
@@ -1225,7 +1263,7 @@ static struct igmp_join *igmp_join_new(struct interface *ifp,
 }
 
 ferr_r pim_if_igmp_join_add(struct interface *ifp, struct in_addr group_addr,
-			 struct in_addr source_addr)
+			    struct in_addr source_addr)
 {
 	struct pim_interface *pim_ifp;
 	struct igmp_join *ij;
@@ -1238,9 +1276,6 @@ ferr_r pim_if_igmp_join_add(struct interface *ifp, struct in_addr group_addr,
 
 	if (!pim_ifp->igmp_join_list) {
 		pim_ifp->igmp_join_list = list_new();
-		if (!pim_ifp->igmp_join_list) {
-			return ferr_cfg_invalid("Insufficient memory");
-		}
 		pim_ifp->igmp_join_list->del = (void (*)(void *))igmp_join_free;
 	}
 
@@ -1323,7 +1358,7 @@ int pim_if_igmp_join_del(struct interface *ifp, struct in_addr group_addr,
 	listnode_delete(pim_ifp->igmp_join_list, ij);
 	igmp_join_free(ij);
 	if (listcount(pim_ifp->igmp_join_list) < 1) {
-		list_delete_and_null(&pim_ifp->igmp_join_list);
+		list_delete(&pim_ifp->igmp_join_list);
 		pim_ifp->igmp_join_list = 0;
 	}
 
@@ -1442,7 +1477,8 @@ void pim_if_create_pimreg(struct pim_instance *pim)
 		pim->regiface = if_create(pimreg_name, pim->vrf_id);
 		pim->regiface->ifindex = PIM_OIF_PIM_REGISTER_VIF;
 
-		pim_if_new(pim->regiface, 0, 0);
+		pim_if_new(pim->regiface, false, false, true,
+			false /*vxlan_term*/);
 	}
 }
 

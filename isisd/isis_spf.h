@@ -27,11 +27,21 @@
 struct isis_spftree;
 
 struct isis_spftree *isis_spftree_new(struct isis_area *area);
+void isis_spf_invalidate_routes(struct isis_spftree *tree);
+void isis_spf_verify_routes(struct isis_area *area,
+			    struct isis_spftree **trees);
 void isis_spftree_del(struct isis_spftree *spftree);
 void spftree_area_init(struct isis_area *area);
 void spftree_area_del(struct isis_area *area);
 void spftree_area_adj_del(struct isis_area *area, struct isis_adjacency *adj);
-int isis_spf_schedule(struct isis_area *area, int level);
+#define isis_spf_schedule(area, level) \
+	_isis_spf_schedule((area), (level), __func__, \
+			   __FILE__, __LINE__)
+int _isis_spf_schedule(struct isis_area *area, int level,
+		       const char *func, const char *file, int line);
 void isis_spf_cmds_init(void);
 void isis_spf_print(struct isis_spftree *spftree, struct vty *vty);
+struct isis_spftree *isis_run_hopcount_spf(struct isis_area *area,
+					   uint8_t *sysid,
+					   struct isis_spftree *spftree);
 #endif /* _ZEBRA_ISIS_SPF_H */

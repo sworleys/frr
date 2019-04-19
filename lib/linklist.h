@@ -52,7 +52,9 @@ struct list {
 };
 
 #define listnextnode(X) ((X) ? ((X)->next) : NULL)
+#define listnextnode_unchecked(X) ((X)->next)
 #define listhead(X) ((X) ? ((X)->head) : NULL)
+#define listhead_unchecked(X) ((X)->head)
 #define listtail(X) ((X) ? ((X)->tail) : NULL)
 #define listcount(X) ((X)->count)
 #define list_isempty(X) ((X)->head == NULL && (X)->tail == NULL)
@@ -78,7 +80,20 @@ extern struct list *list_new(void);
  * data
  *    element to add
  */
-extern void listnode_add(struct list *list, void *data);
+extern struct listnode *listnode_add(struct list *list, void *data);
+
+/*
+ * Add a new element to the beginning of a list.
+ *
+ * Runtime is O(1).
+ *
+ * list
+ *    list to operate on
+ *
+ * data
+ *    element to add
+ */
+extern void listnode_add_head(struct list *list, void *data);
 
 /*
  * Insert a new element into a list with insertion sort.
@@ -221,18 +236,24 @@ extern void list_sort(struct list *list,
 		      int (*cmp)(const void **, const void **));
 
 /*
- * The usage of list_delete is being transitioned to pass in
- * the double pointer to remove use after free's.
- * list_free usage is deprecated, it leads to memory leaks
- * of the linklist nodes.  Please use list_delete_and_null
+ * Convert a list to an array of void pointers.
  *
- * In Oct of 2018, rename list_delete_and_null to list_delete
- * and remove list_delete_original and the list_delete #define
- * Additionally remove list_free entirely
+ * Starts from the list head and ends either on the last node of the list or
+ * when the provided array cannot store any more elements.
+ *
+ * list
+ *    list to convert
+ *
+ * arr
+ *    Pre-allocated array of void *
+ *
+ * arrlen
+ *    Number of elements in arr
+ *
+ * Returns:
+ *    arr
  */
-#if CONFDATE > 20181001
-CPP_NOTICE("list_delete without double pointer is deprecated, please fixup")
-#endif
+void **list_to_array(struct list *list, void **arr, size_t arrlen);
 
 /*
  * Delete a list and NULL its pointer.
@@ -243,23 +264,7 @@ CPP_NOTICE("list_delete without double pointer is deprecated, please fixup")
  *    pointer to list pointer; this will be set to NULL after the list has been
  *    deleted
  */
-extern void list_delete_and_null(struct list **plist);
-
-/*
- * Delete a list.
- *
- * If non-null, list->del is called with each data element.
- *
- * plist
- *    pointer to list pointer
- */
-extern void list_delete_original(struct list *list);
-#define list_delete(X)                                                         \
-	list_delete_original((X))                                              \
-		CPP_WARN("Please transition to using list_delete_and_null")
-#define list_free(X)                                                           \
-	list_delete_original((X))                                              \
-		CPP_WARN("Please transition tousing list_delete_and_null")
+extern void list_delete(struct list **plist);
 
 /*
  * Delete all nodes from a list without deleting the list itself.

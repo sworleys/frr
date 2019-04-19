@@ -76,8 +76,8 @@ int ospf_interface_neighbor_count(struct ospf_interface *oi)
 int ospf_if_get_output_cost(struct ospf_interface *oi)
 {
 	/* If all else fails, use default OSPF cost */
-	u_int32_t cost;
-	u_int32_t bw, refbw;
+	uint32_t cost;
+	uint32_t bw, refbw;
 
 	/* ifp speed and bw can be 0 in some platforms, use ospf default bw
 	   if bw is configured under interface it would be used.
@@ -96,7 +96,7 @@ int ospf_if_get_output_cost(struct ospf_interface *oi)
 	/* See if a cost can be calculated from the zebra processes
 	   interface bandwidth field. */
 	else {
-		cost = (u_int32_t)((double)refbw / (double)bw + (double)0.5);
+		cost = (uint32_t)((double)refbw / (double)bw + (double)0.5);
 		if (cost < 1)
 			cost = 1;
 		else if (cost > 65535)
@@ -108,7 +108,7 @@ int ospf_if_get_output_cost(struct ospf_interface *oi)
 
 void ospf_if_recalculate_output_cost(struct interface *ifp)
 {
-	u_int32_t newcost;
+	uint32_t newcost;
 	struct route_node *rn;
 
 	for (rn = route_top(IF_OIFS(ifp)); rn; rn = route_next(rn)) {
@@ -341,10 +341,10 @@ void ospf_if_free(struct ospf_interface *oi)
 	route_table_finish(oi->ls_upd_queue);
 
 	/* Free any lists that should be freed */
-	list_delete_and_null(&oi->nbr_nbma);
+	list_delete(&oi->nbr_nbma);
 
-	list_delete_and_null(&oi->ls_ack);
-	list_delete_and_null(&oi->ls_ack_direct.ls_ack);
+	list_delete(&oi->ls_ack);
+	list_delete(&oi->ls_ack_direct.ls_ack);
 
 	if (IS_DEBUG_OSPF_EVENT)
 		zlog_debug("%s: ospf interface %s vrf %s id %u deleted",
@@ -545,7 +545,7 @@ static struct ospf_if_params *ospf_new_if_params(void)
 
 void ospf_del_if_params(struct ospf_if_params *oip)
 {
-	list_delete_and_null(&oip->auth_crypt);
+	list_delete(&oip->auth_crypt);
 	bfd_info_free(&(oip->bfd_info));
 	XFREE(MTYPE_OSPF_IF_PARAMS, oip);
 }
@@ -826,7 +826,7 @@ void ospf_vl_data_free(struct ospf_vl_data *vl_data)
 	XFREE(MTYPE_OSPF_VL_DATA, vl_data);
 }
 
-u_int vlink_count = 0;
+unsigned int vlink_count = 0;
 
 struct ospf_interface *ospf_vl_new(struct ospf *ospf,
 				   struct ospf_vl_data *vl_data)
@@ -850,10 +850,11 @@ struct ospf_interface *ospf_vl_new(struct ospf *ospf,
 	}
 
 	if (IS_DEBUG_OSPF_EVENT)
-		zlog_debug("ospf_vl_new(): creating pseudo zebra interface vrf id %u",
-			   ospf->vrf_id);
+		zlog_debug(
+			"ospf_vl_new(): creating pseudo zebra interface vrf id %u",
+			ospf->vrf_id);
 
-	snprintf(ifname, sizeof(ifname), "VLINK%d", vlink_count);
+	snprintf(ifname, sizeof(ifname), "VLINK%u", vlink_count);
 	vi = if_create(ifname, ospf->vrf_id);
 	/*
 	 * if_create sets ZEBRA_INTERFACE_LINKDETECTION
@@ -917,6 +918,23 @@ static void ospf_vl_if_delete(struct ospf_vl_data *vl_data)
 	ospf_if_free(vl_data->vl_oi);
 	if_delete(ifp);
 	vlink_count--;
+}
+
+/* for a defined area, count the number of configured vl
+ */
+int ospf_vl_count(struct ospf *ospf, struct ospf_area *area)
+{
+	int count = 0;
+	struct ospf_vl_data *vl_data;
+	struct listnode *node;
+
+	for (ALL_LIST_ELEMENTS_RO(ospf->vlinks, node, vl_data)) {
+		if (area
+		    && !IPV4_ADDR_SAME(&vl_data->vl_area_id, &area->area_id))
+			continue;
+		count++;
+	}
+	return count;
 }
 
 /* Look up vl_data for given peer, optionally qualified to be in the
@@ -1164,7 +1182,7 @@ int ospf_vls_in_area(struct ospf_area *area)
 }
 
 
-struct crypt_key *ospf_crypt_key_new()
+struct crypt_key *ospf_crypt_key_new(void)
 {
 	return XCALLOC(MTYPE_OSPF_CRYPT_KEY, sizeof(struct crypt_key));
 }
@@ -1174,7 +1192,7 @@ void ospf_crypt_key_add(struct list *crypt, struct crypt_key *ck)
 	listnode_add(crypt, ck);
 }
 
-struct crypt_key *ospf_crypt_key_lookup(struct list *auth_crypt, u_char key_id)
+struct crypt_key *ospf_crypt_key_lookup(struct list *auth_crypt, uint8_t key_id)
 {
 	struct listnode *node;
 	struct crypt_key *ck;
@@ -1186,7 +1204,7 @@ struct crypt_key *ospf_crypt_key_lookup(struct list *auth_crypt, u_char key_id)
 	return NULL;
 }
 
-int ospf_crypt_key_delete(struct list *auth_crypt, u_char key_id)
+int ospf_crypt_key_delete(struct list *auth_crypt, uint8_t key_id)
 {
 	struct listnode *node, *nnode;
 	struct crypt_key *ck;
@@ -1202,7 +1220,7 @@ int ospf_crypt_key_delete(struct list *auth_crypt, u_char key_id)
 	return 0;
 }
 
-u_char ospf_default_iftype(struct interface *ifp)
+uint8_t ospf_default_iftype(struct interface *ifp)
 {
 	if (if_is_pointopoint(ifp))
 		return OSPF_IFTYPE_POINTOPOINT;
@@ -1212,7 +1230,7 @@ u_char ospf_default_iftype(struct interface *ifp)
 		return OSPF_IFTYPE_BROADCAST;
 }
 
-void ospf_if_init()
+void ospf_if_init(void)
 {
 	/* Initialize Zebra interface data structure. */
 	hook_register_prio(if_add, 0, ospf_if_new_hook);

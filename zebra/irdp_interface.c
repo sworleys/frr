@@ -45,7 +45,7 @@
 #include "zebra/interface.h"
 #include "zebra/rtadv.h"
 #include "zebra/rib.h"
-#include "zebra/zserv.h"
+#include "zebra/zebra_router.h"
 #include "zebra/redistribute.h"
 #include "zebra/irdp.h"
 #include "zebra/zebra_errors.h"
@@ -58,14 +58,14 @@ extern int irdp_sock;
 
 DEFINE_MTYPE_STATIC(ZEBRA, IRDP_IF, "IRDP interface data")
 
-#define IRDP_CONFIGED							\
-	do {								\
-		if (!irdp) {						\
-			vty_out(vty, "Please Configure IRDP before using this command\n"); \
-			return CMD_WARNING_CONFIG_FAILED;		\
-		}							\
-	}								\
-	while (0)
+#define IRDP_CONFIGED                                                                 \
+	do {                                                                          \
+		if (!irdp) {                                                          \
+			vty_out(vty,                                                  \
+				"Please Configure IRDP before using this command\n"); \
+			return CMD_WARNING_CONFIG_FAILED;                             \
+		}                                                                     \
+	} while (0)
 
 static struct irdp_interface *irdp_if_get(struct interface *ifp)
 {
@@ -92,7 +92,7 @@ static int irdp_if_delete(struct interface *ifp)
 	return 0;
 }
 
-static const char *inet_2a(u_int32_t a, char *b)
+static const char *inet_2a(uint32_t a, char *b)
 {
 	sprintf(b, "%u.%u.%u.%u", (a)&0xFF, (a >> 8) & 0xFF, (a >> 16) & 0xFF,
 		(a >> 24) & 0xFF);
@@ -113,7 +113,7 @@ static struct prefix *irdp_get_prefix(struct interface *ifp)
 }
 
 /* Join to the add/leave multicast group. */
-static int if_group(struct interface *ifp, int sock, u_int32_t group,
+static int if_group(struct interface *ifp, int sock, uint32_t group,
 		    int add_leave)
 {
 	struct ip_mreq m;
@@ -126,7 +126,7 @@ static int if_group(struct interface *ifp, int sock, u_int32_t group,
 	p = irdp_get_prefix(ifp);
 
 	if (!p) {
-		flog_warn(ZEBRA_ERR_NO_IFACE_ADDR,
+		flog_warn(EC_ZEBRA_NO_IFACE_ADDR,
 			  "IRDP: can't get address for %s", ifp->name);
 		return 1;
 	}
@@ -136,7 +136,7 @@ static int if_group(struct interface *ifp, int sock, u_int32_t group,
 	ret = setsockopt(sock, IPPROTO_IP, add_leave, (char *)&m,
 			 sizeof(struct ip_mreq));
 	if (ret < 0)
-		flog_err_sys(LIB_ERR_SOCKET, "IRDP: %s can't setsockopt %s: %s",
+		flog_err_sys(EC_LIB_SOCKET, "IRDP: %s can't setsockopt %s: %s",
 			     add_leave == IP_ADD_MEMBERSHIP ? "join group"
 							    : "leave group",
 			     inet_2a(group, b1), safe_strerror(errno));
@@ -212,7 +212,7 @@ static void irdp_if_start(struct interface *ifp, int multicast,
 	struct irdp_interface *irdp = zi->irdp;
 	struct listnode *node;
 	struct connected *ifc;
-	u_int32_t timer, seed;
+	uint32_t timer, seed;
 
 	assert(irdp);
 
@@ -222,7 +222,7 @@ static void irdp_if_start(struct interface *ifp, int multicast,
 		return;
 	}
 	if ((irdp_sock < 0) && ((irdp_sock = irdp_sock_init()) < 0)) {
-		flog_warn(ZEBRA_ERR_IRDP_CANNOT_ACTIVATE_IFACE,
+		flog_warn(EC_ZEBRA_IRDP_CANNOT_ACTIVATE_IFACE,
 			  "IRDP: Cannot activate interface %s (cannot create "
 			  "IRDP socket)",
 			  ifp->name);
@@ -236,7 +236,7 @@ static void irdp_if_start(struct interface *ifp, int multicast,
 	if_add_update(ifp);
 
 	if (!(ifp->flags & IFF_UP)) {
-		flog_warn(ZEBRA_ERR_IRDP_IFACE_DOWN,
+		flog_warn(EC_ZEBRA_IRDP_IFACE_DOWN,
 			  "IRDP: Interface is down %s", ifp->name);
 	}
 
@@ -246,7 +246,7 @@ static void irdp_if_start(struct interface *ifp, int multicast,
 		if_add_group(ifp);
 
 		if (!(ifp->flags & (IFF_MULTICAST | IFF_ALLMULTI))) {
-			flog_warn(ZEBRA_ERR_IRDP_IFACE_MCAST_DISABLED,
+			flog_warn(EC_ZEBRA_IRDP_IFACE_MCAST_DISABLED,
 				  "IRDP: Interface not multicast enabled %s",
 				  ifp->name);
 		}
@@ -285,7 +285,7 @@ static void irdp_if_start(struct interface *ifp, int multicast,
 			   timer);
 
 	irdp->t_advertise = NULL;
-	thread_add_timer(zebrad.master, irdp_send_thread, ifp, timer,
+	thread_add_timer(zrouter.master, irdp_send_thread, ifp, timer,
 			 &irdp->t_advertise);
 }
 
@@ -309,7 +309,7 @@ static void irdp_if_stop(struct interface *ifp)
 
 	irdp_advert_off(ifp);
 
-	list_delete_and_null(&irdp->AdvPrefList);
+	list_delete(&irdp->AdvPrefList);
 
 	irdp->flags = 0;
 }
@@ -706,7 +706,7 @@ DEFUN (ip_irdp_debug_disable,
 	return CMD_SUCCESS;
 }
 
-void irdp_if_init()
+void irdp_if_init(void)
 {
 	hook_register(zebra_if_config_wr, irdp_config_write);
 	hook_register(if_del, irdp_if_delete);

@@ -29,7 +29,7 @@
 #include "ospf6d/ospf6_lsdb.h"
 
 #include "tests/lib/cli/common_cli.h"
-#include "ospf6d/test_lsdb_clippy.c"
+#include "tests/ospf6d/test_lsdb_clippy.c"
 
 static struct ospf6_lsdb *lsdb;
 
@@ -38,9 +38,15 @@ static size_t lsa_count = 0;
 
 static void lsa_check_resize(size_t len)
 {
+	struct ospf6_lsa **templsas;
+
 	if (lsa_count >= len)
 		return;
-	lsas = realloc(lsas, len * sizeof(lsas[0]));
+	templsas = realloc(lsas, len * sizeof(lsas[0]));
+	if (templsas)
+		lsas = templsas;
+	else
+		return;
 	memset(lsas + lsa_count, 0, sizeof(lsas[0]) * (len - lsa_count));
 
 	lsa_count = len;

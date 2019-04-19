@@ -49,15 +49,15 @@
 #include "ospfd/ospf_lsdb.h"
 #include "ospfd/ospf_neighbor.h"
 #include "ospfd/ospf_dump.h"
+#include "ospfd/ospf_route.h"
 #include "ospfd/ospf_zebra.h"
 #include "ospfd/ospf_vty.h"
 #include "ospfd/ospf_bfd.h"
 #include "ospfd/ospf_errors.h"
 
 /* ospfd privileges */
-zebra_capabilities_t _caps_p[] = {
-	ZCAP_NET_RAW, ZCAP_BIND, ZCAP_NET_ADMIN,
-};
+zebra_capabilities_t _caps_p[] = {ZCAP_NET_RAW, ZCAP_BIND, ZCAP_NET_ADMIN,
+				  ZCAP_SYS_ADMIN};
 
 struct zebra_privs_t ospfd_privs = {
 #if defined(FRR_USER) && defined(FRR_GROUP)
@@ -123,18 +123,23 @@ struct quagga_signal_t ospf_signals[] = {
 	},
 };
 
+static const struct frr_yang_module_info *ospfd_yang_modules[] = {
+	&frr_interface_info,
+};
+
 FRR_DAEMON_INFO(ospfd, OSPF, .vty_port = OSPF_VTY_PORT,
 
 		.proghelp = "Implementation of the OSPFv2 routing protocol.",
 
 		.signals = ospf_signals, .n_signals = array_size(ospf_signals),
 
-		.privs = &ospfd_privs, )
+		.privs = &ospfd_privs, .yang_modules = ospfd_yang_modules,
+		.n_yang_modules = array_size(ospfd_yang_modules), )
 
 /* OSPFd main routine. */
 int main(int argc, char **argv)
 {
-	u_short instance = 0;
+	unsigned short instance = 0;
 
 #ifdef SUPPORT_OSPF_API
 	/* OSPF apiserver is disabled by default. */
@@ -187,7 +192,7 @@ int main(int argc, char **argv)
 	master = om->master;
 
 	/* Library inits. */
-	debug_init();
+	ospf_debug_init();
 	ospf_vrf_init();
 
 	access_list_init();
@@ -216,8 +221,8 @@ int main(int argc, char **argv)
 	   ospf',
 	   when quagga(ospfd) is restarted */
 	if (!ospf_get_instance(instance)) {
-		flog_err(OSPF_ERR_INIT_FAIL, "OSPF instance init failed: %s",
-			  strerror(errno));
+		flog_err(EC_OSPF_INIT_FAIL, "OSPF instance init failed: %s",
+			 strerror(errno));
 		exit(1);
 	}
 
