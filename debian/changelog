@@ -1,4 +1,4 @@
-frr (7.0+cl3u1) RELEASED; urgency=medium
+frr (7.0+cl4u1) RELEASED; urgency=medium
 
   * New Enabled: Version 7.0 of FRR Uplift
   * New Enabled: PIM-EVPM BUM Handling
