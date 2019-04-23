@@ -1,20 +1,230 @@
-frr (7.0+cl4u1) UNRELEASED; urgency=medium
+frr (7.0+cl3u1) RELEASED; urgency=medium
 
-  * backport to debian10 systems
+  * New Enabled: Version 7.0 of FRR Uplift
+  * New Enabled: PIM-EVPM BUM Handling
 
- --  <clbuilder@adoyle_debian-buildenv_1547846431>  Sat, 19 Jan 2019 00:09:55 +0000
+ -- dev-support <dev-support@cumulusnetworks.com>  Tue, 22 Apr 2019 09:18:19 -0400
 
-frr (6.1+cl4u1) RELEASED; urgency=medium
+frr (4.0+cl3u11) RELEASED; urgency=medium
 
-  * New Enabled: PIM draft Unnumbered
+  * New Enabled: bgpd: add support for MD5 auth on listen ranges
+  * Fixes: CM-24375 tools: fix vrrp autoconfigure reload
+  * Fixes: CM-24339 zebra: evpn dup detect handle ip state change
+  * Fixes: CM-24248 lib, bgpd: Do not register nexthop 0.0.0.0 to nht
 
- -- FRRouting-Dev <dev@lists.frrouting.org>  Wed, 18 Oct 2017 17:01:42 -0700
+ -- dev-support <dev-support@cumulusnetworks.com>  Tue, 16 Apr 2019 18:29:14 -0400
+
+frr (4.0+cl3u10) RELEASED; urgency=medium
+
+  * New Enabled: VRRP
+  * New Enabled: "show interface brief" command
+  * Fixes: CM-24301 vrrpd: tweak startup criteria for v6 VRRP router
+  * Fixes: CM-24224 bgpd: router mac same as self skip route install
+  * Fixes: CM-24277 zebra: don't protodown a NULL interface
+  * Fixes: CM-24230 vrrpd: allow centisecond precision for vrrpv2
+  * Fixes: CM-24253 vrrpd: include auth fields in v2 packet
+  * Fixes: CM-24061 vrrpd: allow OS to choose VRRP IPv6 src address
+  * Fixes: CM-24269 vrrpd: late bind to Tx address
+  * Fixes: CM-23017 vtysh: only show error codes once
+  * Fixes: CM-23649 zebra: fix dup addr detect remote macip add case
+  * Fixes: CM-23586 bgpd: Fix EVPN advertise route-map application
+  * Fixes: CM-19560 bgpd: improve peer-group remote-as definitions
+  * Fixes: CM-22380 ospfd: ospfd core if hello packet exceeds link mtu
+  * Fixes: CM-21218 bgpd: fix valgrind flagged errors
+  * Fixes: CM-18989 ospfd: address CVE-2017-3224
+  * Fixes: CM-22864 zebra: probe local inactive neigh
+  * Fixes: CM-19951 zebra, bgpd: Exchange L3 interface for VRF's VNI
+  * Fixes: CM-23050 bgpd: Leak EVPN-installed routes
+  * Fixes: CM-23063 bgpd: No nexthop tracking for EVPN-imported leak
+  * Fixes: CM-23051 bgpd: Allow EVPN-sourced routes to be leaked back
+  * Fixes: CM-23790 bgpd: fll the pmsi_tnl_type into the type-3 PMSI
+  * Fixes: CM-23782 lib: advertise svi ip as macip opcode
+  * Fixes: CM-23850 zebra: advertise evpn route upon l3vni svi mac chg
+  * Fixes: CM-23776 bgpd: vrl source-vrf route map filter
+  * Fixes: CM-23674 bgpd: reject bgp update to overwrite self mac
+  * Fixes: CM-23892 bgpd: Fix route change handling for EVPN-based routes
+  * Fixes: CM-24003 bgpd: fix evpn type-5 implicit withdraw processing
+  * Fixes: CM-23985 tools: keep exit-vrf to change context correctly between vrfs
+  * Fixes: CM-23986 tools: fix blackhole static changes in frr-reload.py
+  * Fixes: CM-24022 bgpd: prevent type-5 route creation if the bgp_vrf->l3vni is 0
+  * Fixes: CM-23902 bgpd: resolve more neighbor peer-group issues
+  * Fixes: CM-24203 zebra: properly select system routes sometimes
+  * Fixes: CM-24178 zebra: Skip permanent neigh entries for EVPN
+  * Fixes: CM-24149 bgpd: router-id change needs to reflect to vpn auto rd rt
+  * Fixes: CM-22813 bgpd: Handle l2vpn evpn afi safi for bgp clear soft
+  * Fixes: CM-22864 zebra: Revert probe local inactive neigh
+  * Fixes: CM-24177 bgpd: Allow collection of data for EVPN Route Leaking
+  * Fixes: CM-24231 bgpd: Fix redistribution into vrf when networking is restarted
+  * Fixes: CM-24281 zebra: Avoid crash during svi shutdown
+  * Fixes: CM-24320 bgpd: l3vni add-del handle non-default rd
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Wed, 20 Mar 2019 13:14:50 -0400
+
+frr (4.0+cl3u9) RELEASED; urgency=medium
+
+  * New Enabled: "show evpn vni detail" command
+  * New Enabled: "show evpn mac vni all detail" command
+  * New Enabled: "show evpn arp-cache vni all detail" command
+  * Fixes: CM-22932 zebra: Carry onlink if set from resolving nexthop
+  * Fixes: CM-22946 zebra: dup addr detect fix inherit dup for IPs
+  * Fixes: CM-22852 zebra: dup addr detect display count correctly
+  * Fixes: CM-22876 zebra: dup detect addr display per mac json fields
+  * Fixes: CM-22852 zebra: dup addr detect fix specific vni output
+  * Fixes: CM-22924 zebra: dup addr detect fix freeze action
+  * Fixes: CM-23033 zebra: dup addr detect json for show evpn
+  * Fixes: CM-22924 zebra: dup addr detect neigh consolidation
+  * Fixes: CM-22924 zebra: dup addr detect mac consolidation
+  * Fixes: CM-22665 ospf6d: abr summary advertise best route
+  * Fixes: CM-22992 zebra: handle neighbor delete from kernel for ipv4
+  * Fixes: CM-23122 zebra: dup addr detect clear cmd non-zero return
+  * Fixes: CM-23008 bgpd: set attribute change flag to evpn imported
+  * Fixes: CM-23018 zebra: propagate inactive neigh deletes to bgpd
+  * Fixes: CM-21482 bgpd: l3vni add-del handle non-default rt
+  * Fixes: CM-23923 tools: stop frr-reload.py from trying to delete the vrf
+  * Fixes: CM-23316 zebra: dup addr detect fix clear mac command
+  * Fixes: CM-23110 zebra: For rnh handling use actual resolved nexthop
+  * Fixes: CM-23263 bgpd: route-map fails to filter type-5 routes
+  * Fixes: CM-18950 bgpd: evpn command to restrict to default vrf
+  * Fixes: CM-23511 zebra: set connected route metric based on the devaddr metric
+  * Fixes: CM-23438 zebra: reinstate bgp route on local delete
+  * Fixes: CM-20026 ospfd: remove default origin max age lsa
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Fri, 4 Jan 2019 11:15:21 -0400
+
+frr (4.0+cl3u8) RELEASED; urgency=medium
+
+  * New Enabled: EVPN DAD
+  * New Enabled: EVPN local mac suppression
+  * New Enabled: EVPN Bum suppression
+  * New Enabled: rfc 5549 v6 GUA
+  * Fixes: CM-22878 bgpd: Late registration of extended nexthop for RA's
+  * Fixes: CM-22828 zebra: Install static routes when nexthop ifp comes up
+  * Fixes: CM-22835 zebra: Eliminate duplicated prefix in vrf static config
+  * Fixes: CM-22874 lib,zebra: Encode nexthop vrf in nht updates
+  * Fixes: CM-22647 zebra: Add json support to evpn command
+  * Fixes: CM-20318 zebra: Apply mask when displaying held statics
+  * Fixes: CM-21931 zebra: Ensure onlink is printed
+  * Fixes: CM-22748 pim, vtysh: Fix exit-vrf printing
+  * Fixes: CM-21931 zebra: Support onlink static routes
+  * Fixes: CM-22707 zebra: set remoteseq to 0 when remote mac is deleted
+  * Fixes: CM-22700 zebra: Make neigh active when it is moved local->remote
+  * Fixes: CM-22674 bgpd: Use ip address as tie breaker in some situations
+  * Fixes: CM-22685 bgpd: perform route selection again when local is deleted
+  * Fixes: CM-22687 zebra: send a local-mac del to bgp on mac modify
+  * Fixes: CM-22604 zebra: Force neighbor entry reinstallation
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Wed, 7 Nov 2018 18:10:00 -0400
+
+frr (4.0+cl3u7) RELEASED; urgency=medium
+
+  * Fixes: CM-20585 bgpd: enable aggregation in EVPN
+  * Fixes: CM-22509 bgpd: Solve issue entering aggregate twice
+  * Fixes: CM-19714 bgpd: Martian Nexthops not being updated appropriately
+  * Fixes: CM-22630 ospf6d: Fix crash in lsa processing
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Thu, 04 Oct 2018 09:35:45 -0400
+
+frr (4.0+cl3u6) RELEASED; urgency=medium
+
+  * New Enabled: Warning Messaging
+  * New Enabled: EVPN extended Mobility support
+  * Fixes: CM-22229 bgpd: Fix host support of v6 RMAC
+  * Fixes: CM-22130 zebra: Uninstall RMAC's from kernel appropriately
+  * Fixes: CM-21718 zebra: Check router_flag change for neigh update
+  * Fixes: CM-21566 bgpd: unregister VNI learning on default instance delete
+  * Fixes: CM-22170 ospfd: interface speed change during int add
+  * Fixes: CM-21598 pimd: Modify order of command output
+  * Fixes: CM-20259 bgpd: Add json output to route-leak show command
+  * Fixes: CM-21684 bgpd: issues with vrf imports with restart
+  * Fixes: CM-21996 tools: correct frr-reload.py handling of bgp vni/exit-vni
+  * Fixes: CM-21875 bgpd: cleanup evpn prefix debugging commands
+  * Fixes: CM-12769 bgpd: route detail output local pref display
+  * Fixes: CM-21895 bgpd: Intentionally stop some timers on instance removal
+  * Fixes: CM-20456 zebra: Display consistent mac count
+  * Fixes: CM-21644 pimd: RPT prunes do not need to be figured for a *,G prune
+  * Fixes: CM-14476 bgpd: Add evpn prefix to debug bgp updates
+  * Fixes: CM-21722 zebra: remove default vrf output for kernel vrf ipv6 blackhole
+  * Fixes: CM-21048 tools: handle exit-vrf as end of context block
+  * Fixes: CM-21712 bgpd: Support evpn nd ext community
+  * Fixes: CM-21791 bgpd: make name of default vrf/bgp instance consistent
+  * Fixes: CM-21040 bgpd/ospfd: Make json a bit more consistent
+  * Fixes: CM-22288 zebra: Fix neighbor update to bgp
+  * Fixes: CM-22388 zebra: Resolve link dependencies post nldump
+  * Fixes: CM-22092 bgpd: Fix missing afi/safi configuration
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Tue, 03 Sep 2018 15:14:40 -0400
+
+frr (4.0+cl3u5) RELEASED; urgency=medium
+
+  * New Enabled: Evpn code fix
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Thu, 25 Jul 2018 15:13:67 -0400
+
+frr (4.0+cl3u4) RELEASED; urgency=medium
+
+  * Fixes: CM-21895 bgpd: Intentionally stop timers on delete
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Wed, 1 Aug 2018 20:38:01 -0400
+
+frr (4.0+cl3u3) RELEASED; urgency=medium
+
+  * New Enabled: Error Messaging
+  * Fixes: CM-21319 debian: Rewrite frr.conf to support vrf static routes
+  * Fixes: CM-20204 bgpd: Accept vni rd_rt command for default vrf
+  * Fixes: CM-20206 bgpd: Fix default RD value in running-cfg
+  * Fixes: CM-20572 zebra: Hide default vrf instance of l3vni cmd
+  * Fixes: CM-21335 bgpd: Fix bgp crash in evpn vni route-map
+  * Fixes: CM-20043 bgpd: aggregate summarization duplicates updates
+  * Fixes: CM-16139 ospf6d: Fix ECMP for asbr external routes
+  * Fixes: CM-20849 lib: Reorder evpn prefix for ipv6
+  * Fixes: CM-20952 lib: Reorder evpn prefix for ipv6
+  * Fixes: CM-21014 bgpd: Check for L3VNI before sending RMAC/L3 RT's
+  * Fixes: CM-21443 bgpd: l3vni del to free ip prefix routes from vrf
+  * Fixes: CM-21429 zebra: duplicate nexthops for cross-vrf static routes
+  * Fixes: CM-21599 pimd: ECMP not recovering after neighbor drops
+  * Fixes: CM-21508 zebra: install EVPN gateway MAC as static/sticky
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Mon, 25 Jun 2018 18:10:00 -0400
+
+frr (4.0+cl3u2) RELEASED; urgency=medium
+
+  * Fixes: CM-20471 bgpd: Update parent's refcount for imported routes
+  * Fixes: CM-20776 bgpd: Set NEXT_HOP attribute for EVPN imported routes
+  * Fixes: CM-20664 Increase timeout for restart failure conditions
+  * Fixes: CM-20807 ospf6d: Fix area border router duplicate
+  * Fixes: CM-20841 Put back lost backwards compatibility guard in packaging
+  * Fixes: CM-20744 ospfd: Always create the fifo for the interface
+  * Fixes: CM-20086 lib: allow hostname to begin with a letter or number
+  * Fixes: CM-21019 bgpd: Fix crash on shutdown
+  * Fixes: CM-21013 watchfrr: Accept deprecated options
+  * Fixes: CM-20871 zebra: link/unlink l2vni with l3vni when svi state change
+  * Fixes: CM-20732 bgpd: Fix a typo in output cmd
+  * Fixes: CM-21068 bgpd: Fix crash on shutdown
+  * Fixes: CM-21114 vtysh: Fix bad path to conf file in -q mode
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Wed, 19 May 2018 12:30:41 -0400
+
+frr (4.0+cl3u1) RELEASED; urgency=medium
+
+  * New Enabled: PBR Policy Based Routing
+  * New Enabled: BGP VRF - VRF Route Leaking
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Mon, 9 Apr 2018 18:10:00 -0400
 
 frr (3.0-1) RELEASED; urgency=medium
 
-  * Added Debian 9 Backport
- 
- -- FRRouting-Dev <dev@lists.frrouting.org>  Mon, 16 Oct 2017 03:28:00 -0700
+  * Fixes: CM-17497 bgpd: Fixes too many open FD's
+  * Fixes: CM-17923 FRR: Add better cl-support for large routing tables
+  * Fixes: CM-18221 ospfd: Some lsa maxage issues
+  * Fixes: CM-18220 ospfd: Failed redistribution in some rare cases
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Thu, 5 Oct 2017 13:21:59 -0400
+
+frr (3.1+cl3u2) RELEASED; urgency=medium
+
+  * Fixes: CM-17867 Stale routes left behind when FRR stopped
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Wed, 27 Sep 2017 09:43:19 -0400
 
 frr (3.0-0) RELEASED; urgency=medium
 
