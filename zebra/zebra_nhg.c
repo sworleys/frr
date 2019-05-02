@@ -350,7 +350,14 @@ static void *zebra_nhg_alloc(void *arg)
 
 		ifp = if_lookup_by_index(nhe->nhg->nexthop->ifindex,
 					 nhe->vrf_id);
-		zebra_nhg_set_if(nhe, ifp);
+		if (ifp)
+			zebra_nhg_set_if(nhe, ifp);
+		else
+			flog_err(
+				EC_ZEBRA_IF_LOOKUP_FAILED,
+				"Zebra failed to lookup an interface with ifindex=%d in vrf=%u for NHE id=%u",
+				nhe->nhg->nexthop->ifindex, nhe->vrf_id,
+				nhe->id);
 	}
 
 	/* Add to id table as well */
@@ -384,14 +391,24 @@ bool zebra_nhg_hash_equal(const void *arg1, const void *arg2)
 	const struct nhg_hash_entry *nhe1 = arg1;
 	const struct nhg_hash_entry *nhe2 = arg2;
 
+	/* No matter what if they equal IDs, assume equal */
+	if (nhe1->id && nhe2->id && (nhe1->id == nhe2->id))
+		return true;
+
 	if (nhe1->vrf_id != nhe2->vrf_id)
 		return false;
 
 	if (nhe1->afi != nhe2->afi)
 		return false;
 
-	if (!nexthop_group_equal(nhe1->nhg, nhe2->nhg))
+	if (!nexthop_group_equal(nhe1->nhg, nhe2->nhg)) {
 		return false;
+	}
+
+	if (nexthop_group_active_nexthop_num_no_recurse(nhe1->nhg)
+	    != nexthop_group_active_nexthop_num_no_recurse(nhe2->nhg)) {
+		return false;
+	}
 
 	return true;
 }
@@ -458,18 +475,19 @@ static void zebra_nhg_process_grp(struct nexthop_group *nhg,
 }
 
 
-static struct nhg_hash_entry *
-zebra_nhg_find(uint32_t id, struct nexthop_group *nhg,
-	       struct nhg_connected_head *nhg_depends, vrf_id_t vrf_id,
-	       afi_t afi, bool is_kernel_nh)
+static bool zebra_nhg_find(struct nhg_hash_entry **nhe, uint32_t id,
+			   struct nexthop_group *nhg,
+			   struct nhg_connected_head *nhg_depends,
+			   vrf_id_t vrf_id, afi_t afi, bool is_kernel_nh)
 {
 	/* id counter to keep in sync with kernel */
 	static uint32_t id_counter = 0;
 
 	struct nhg_hash_entry lookup = {};
-	struct nhg_hash_entry *nhe = NULL;
 
 	uint32_t old_id_counter = id_counter;
+
+	bool created = false;
 
 	if (id > id_counter) {
 		/* Increase our counter so we don't try to create
@@ -489,31 +507,33 @@ zebra_nhg_find(uint32_t id, struct nexthop_group *nhg,
 		lookup.nhg_depends = *nhg_depends;
 
 	if (id)
-		nhe = zebra_nhg_lookup_id(id);
+		(*nhe) = zebra_nhg_lookup_id(id);
 	else
-		nhe = hash_lookup(zrouter.nhgs, &lookup);
+		(*nhe) = hash_lookup(zrouter.nhgs, &lookup);
 
 	/* If it found an nhe in our tables, this new ID is unused */
-	if (nhe)
+	if (*nhe)
 		id_counter = old_id_counter;
 
-	if (!nhe)
-		nhe = hash_get(zrouter.nhgs, &lookup, zebra_nhg_alloc);
+	if (!(*nhe)) {
+		(*nhe) = hash_get(zrouter.nhgs, &lookup, zebra_nhg_alloc);
+		created = true;
+	}
 
-	return nhe;
+	return created;
 }
 
 /* Find/create a single nexthop */
-static struct nhg_hash_entry *zebra_nhg_find_nexthop(uint32_t id,
-						     struct nexthop *nh,
-						     afi_t afi,
-						     bool is_kernel_nh)
+static bool zebra_nhg_find_nexthop(struct nhg_hash_entry **nhe, uint32_t id,
+				   struct nexthop *nh, afi_t afi,
+				   bool is_kernel_nh)
 {
 	struct nexthop_group nhg = {};
 
 	nexthop_group_add_sorted(&nhg, nh);
 
-	return zebra_nhg_find(id, &nhg, NULL, nh->vrf_id, afi, is_kernel_nh);
+	return zebra_nhg_find(nhe, id, &nhg, NULL, nh->vrf_id, afi,
+			      is_kernel_nh);
 }
 
 static struct nhg_ctx *nhg_ctx_new()
@@ -560,13 +580,15 @@ static int nhg_ctx_process_new(struct nhg_ctx *ctx)
 		nhg = nexthop_group_new();
 		zebra_nhg_process_grp(nhg, &nhg_depends, ctx->u.grp,
 				      ctx->count);
-		nhe = zebra_nhg_find(ctx->id, nhg, &nhg_depends, ctx->vrf_id,
-				     ctx->afi, true);
+		if (!zebra_nhg_find(&nhe, ctx->id, nhg, &nhg_depends,
+				    ctx->vrf_id, ctx->afi, true))
+			nhg_connected_head_free(&nhg_depends);
+
 		/* These got copied over in zebra_nhg_alloc() */
 		nexthop_group_free_delete(&nhg);
-	} else
-		nhe = zebra_nhg_find_nexthop(ctx->id, &ctx->u.nh, ctx->afi,
-					     ctx->is_kernel_nh);
+	} else if (!zebra_nhg_find_nexthop(&nhe, ctx->id, &ctx->u.nh, ctx->afi,
+					   ctx->is_kernel_nh))
+		nhg_connected_head_free(&nhg_depends);
 
 	if (nhe) {
 		if (ctx->id != nhe->id)
@@ -686,12 +708,15 @@ int zebra_nhg_kernel_find(uint32_t id, struct nexthop *nh, struct nh_grp *grp,
 static struct nhg_hash_entry *depends_find(struct nexthop *nh, afi_t afi)
 {
 	struct nexthop lookup = {0};
+	struct nhg_hash_entry *nhe = NULL;
 
 	lookup = *nh;
 	/* Clear it, in case its a group */
 	lookup.next = NULL;
 	lookup.prev = NULL;
-	return zebra_nhg_find_nexthop(0, &lookup, afi, false);
+	zebra_nhg_find_nexthop(&nhe, 0, &lookup, afi, false);
+
+	return nhe;
 }
 
 /* Rib-side, you get a nexthop group struct */
@@ -727,9 +752,21 @@ struct nhg_hash_entry *zebra_nhg_rib_find(uint32_t id,
 		/* change the afi/vrf_id since its a group */
 		nhg_afi = AFI_UNSPEC;
 		nhg_vrf_id = 0;
+	} else {
+		/*
+		 * If the vrf_id on the nexthop does not match
+		 * the route one, use it instead.
+		 */
+		vrf_id_t nh_vrf_id = nhg->nexthop->vrf_id;
+
+		if (nh_vrf_id && nh_vrf_id != rt_vrf_id)
+			nhg_vrf_id = nh_vrf_id;
 	}
 
-	nhe = zebra_nhg_find(id, nhg, &nhg_depends, nhg_vrf_id, nhg_afi, false);
+	if (!zebra_nhg_find(&nhe, id, nhg, &nhg_depends, nhg_vrf_id, nhg_afi,
+			    false))
+		nhg_connected_head_free(&nhg_depends);
+
 	return nhe;
 }
 
@@ -1101,7 +1138,6 @@ static int nexthop_active(afi_t afi, struct route_entry *re,
 				    || nexthop->type == NEXTHOP_TYPE_IPV6)
 					nexthop->ifindex = newhop->ifindex;
 			}
-			// TODO: hmmm return what here
 			return 1;
 		} else if (CHECK_FLAG(re->flags, ZEBRA_FLAG_ALLOW_RECURSION)) {
 			resolved = 0;
@@ -1427,17 +1463,7 @@ int nexthop_active_update(struct route_node *rn, struct route_entry *re)
 
 		new_nhe = zebra_nhg_rib_find(0, &new_grp, re->vrf_id, rt_afi);
 
-		if (new_nhe && (re->nhe_id != new_nhe->id)) {
-			struct nhg_hash_entry *old_nhe =
-				zebra_nhg_lookup_id(re->nhe_id);
-
-			re->ng = new_nhe->nhg;
-			re->nhe_id = new_nhe->id;
-
-			zebra_nhg_increment_ref(new_nhe);
-			if (old_nhe)
-				zebra_nhg_decrement_ref(old_nhe);
-		}
+		zebra_nhg_re_update_ref(re, new_nhe);
 	}
 
 	if (curr_active) {
@@ -1464,6 +1490,27 @@ int nexthop_active_update(struct route_node *rn, struct route_entry *re)
 	 */
 	nexthops_free(new_grp.nexthop);
 	return curr_active;
+}
+
+int zebra_nhg_re_update_ref(struct route_entry *re, struct nhg_hash_entry *new)
+{
+	struct nhg_hash_entry *old = NULL;
+
+	if (!new)
+		return -1;
+
+	if (re->nhe_id != new->id) {
+		old = zebra_nhg_lookup_id(re->nhe_id);
+
+		re->ng = new->nhg;
+		re->nhe_id = new->id;
+
+		zebra_nhg_increment_ref(new);
+		if (old)
+			zebra_nhg_decrement_ref(old);
+	}
+
+	return 0;
 }
 
 /* Convert a nhe into a group array */

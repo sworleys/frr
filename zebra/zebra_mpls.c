@@ -2340,11 +2340,13 @@ int mpls_ftn_update(int add, struct zebra_vrf *zvrf, enum lsp_types_t type,
 	struct route_node *rn;
 	struct route_entry *re;
 	struct nexthop *nexthop;
+	struct nexthop_group new_grp = {};
+	struct nhg_hash_entry *nhe = NULL;
 	bool found;
+	afi_t afi = family2afi(prefix->family);
 
 	/* Lookup table.  */
-	table = zebra_vrf_table(family2afi(prefix->family), SAFI_UNICAST,
-				zvrf_id(zvrf));
+	table = zebra_vrf_table(afi, SAFI_UNICAST, zvrf_id(zvrf));
 	if (!table)
 		return -1;
 
@@ -2360,8 +2362,15 @@ int mpls_ftn_update(int add, struct zebra_vrf *zvrf, enum lsp_types_t type,
 	if (re == NULL)
 		return -1;
 
+	/*
+	 * Copy over current nexthops into a temporary group.
+	 * We can't just change the values here since we are hashing
+	 * on labels. We need to create a whole new group
+	 */
+	nexthop_group_copy(&new_grp, re->ng);
+
 	found = false;
-	for (nexthop = re->ng->nexthop; nexthop; nexthop = nexthop->next) {
+	for (nexthop = new_grp.nexthop; nexthop; nexthop = nexthop->next) {
 		switch (nexthop->type) {
 		case NEXTHOP_TYPE_IPV4:
 		case NEXTHOP_TYPE_IPV4_IFINDEX:
@@ -2375,7 +2384,7 @@ int mpls_ftn_update(int add, struct zebra_vrf *zvrf, enum lsp_types_t type,
 				continue;
 			if (!mpls_ftn_update_nexthop(add, nexthop, type,
 						     out_label))
-				return 0;
+				break;
 			found = true;
 			break;
 		case NEXTHOP_TYPE_IPV6:
@@ -2390,7 +2399,7 @@ int mpls_ftn_update(int add, struct zebra_vrf *zvrf, enum lsp_types_t type,
 				continue;
 			if (!mpls_ftn_update_nexthop(add, nexthop, type,
 						     out_label))
-				return 0;
+				break;
 			found = true;
 			break;
 		default:
@@ -2398,14 +2407,19 @@ int mpls_ftn_update(int add, struct zebra_vrf *zvrf, enum lsp_types_t type,
 		}
 	}
 
-	if (!found)
-		return -1;
+	if (found) {
+		nhe = zebra_nhg_rib_find(0, &new_grp, re->vrf_id, afi);
 
-	SET_FLAG(re->status, ROUTE_ENTRY_CHANGED);
-	SET_FLAG(re->status, ROUTE_ENTRY_LABELS_CHANGED);
-	rib_queue_add(rn);
+		zebra_nhg_re_update_ref(re, nhe);
 
-	return 0;
+		SET_FLAG(re->status, ROUTE_ENTRY_CHANGED);
+		SET_FLAG(re->status, ROUTE_ENTRY_LABELS_CHANGED);
+		rib_queue_add(rn);
+	}
+
+	nexthops_free(new_grp.nexthop);
+
+	return (found ? 0 : -1);
 }
 
 /*
