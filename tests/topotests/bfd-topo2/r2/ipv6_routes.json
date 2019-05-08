@@ -11,7 +11,8 @@
         {
           "active": true,
           "directlyConnected": true,
-          "flags": 1,
+          "flags": 3,
+          "fib": true,
           "interfaceIndex": 4,
           "interfaceName": "r2-eth2"
         }
