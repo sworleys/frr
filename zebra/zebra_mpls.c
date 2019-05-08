@@ -2593,7 +2593,12 @@ void mpls_ldp_ftn_uninstall_all(struct zebra_vrf *zvrf, int afi)
 	for (rn = route_top(table); rn; rn = route_next(rn)) {
 		update = 0;
 		RNODE_FOREACH_RE (rn, re) {
-			for (nexthop = re->ng->nexthop; nexthop;
+			struct nexthop_group new_grp = {};
+			struct nhg_hash_entry *nhe = NULL;
+
+			nexthop_group_copy(&new_grp, re->ng);
+
+			for (nexthop = new_grp.nexthop; nexthop;
 			     nexthop = nexthop->next) {
 				if (nexthop->nh_label_type != ZEBRA_LSP_LDP)
 					continue;
@@ -2604,6 +2609,15 @@ void mpls_ldp_ftn_uninstall_all(struct zebra_vrf *zvrf, int afi)
 					 ROUTE_ENTRY_LABELS_CHANGED);
 				update = 1;
 			}
+
+			if (CHECK_FLAG(re->status,
+				       ROUTE_ENTRY_LABELS_CHANGED)) {
+				nhe = zebra_nhg_rib_find(0, &new_grp,
+							 re->vrf_id, afi);
+				zebra_nhg_re_update_ref(re, nhe);
+			}
+
+			nexthops_free(new_grp.nexthop);
 		}
 
 		if (update)
