@@ -866,32 +866,25 @@ void zebra_nhg_increment_ref(struct nhg_hash_entry *nhe)
 	}
 }
 
-static bool zebra_nhg_is_valid(struct nhg_hash_entry *nhe)
-{
-	if (nhe->flags & NEXTHOP_GROUP_VALID)
-		return true;
-
-	return false;
-}
-
-bool zebra_nhg_id_is_valid(uint32_t id)
-{
-	struct nhg_hash_entry *nhe = NULL;
-	bool is_valid = false;
-
-	nhe = zebra_nhg_lookup_id(id);
-
-	if (nhe)
-		is_valid = zebra_nhg_is_valid(nhe);
-
-	return is_valid;
-}
-
 void zebra_nhg_set_invalid(struct nhg_hash_entry *nhe)
 {
+	if (!zebra_nhg_depends_is_empty(nhe)
+	    && !CHECK_FLAG(nhe->flags, NEXTHOP_GROUP_RECURSIVE)) {
+		struct nhg_connected *rb_node_dep = NULL;
+
+		/* If anthing else in the group is valid, the group is valid */
+		RB_FOREACH (rb_node_dep, nhg_connected_head,
+			    &nhe->nhg_dependents) {
+			if (CHECK_FLAG(rb_node_dep->nhe->flags,
+				       NEXTHOP_GROUP_VALID))
+				return;
+		}
+	}
+
 	UNSET_FLAG(nhe->flags, NEXTHOP_GROUP_VALID);
 	/* Assuming uninstalled as well here */
 	UNSET_FLAG(nhe->flags, NEXTHOP_GROUP_INSTALLED);
+
 
 	if (!zebra_nhg_dependents_is_empty(nhe)) {
 		struct nhg_connected *rb_node_dep = NULL;
@@ -1640,6 +1633,9 @@ static void zebra_nhg_uninstall_created(struct hash_bucket *bucket, void *arg)
  */
 void zebra_nhg_cleanup_tables(void)
 {
+	// TODO: These should only be uninstalled via route cleanup
+	// path?
+	return;
 	hash_iterate(zrouter.nhgs, zebra_nhg_uninstall_created, NULL);
 }
 
