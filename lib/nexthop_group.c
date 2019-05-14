@@ -190,7 +190,7 @@ void nexthop_group_add_sorted(struct nexthop_group *nhg,
 
 	for (position = nhg->nexthop, prev = NULL; position;
 	     prev = position, position = position->next) {
-		if (nexthop_cmp(position, nexthop) < 0) {
+		if (nexthop_cmp(position, nexthop) > 0) {
 			nexthop->next = position;
 			nexthop->prev = prev;
 
