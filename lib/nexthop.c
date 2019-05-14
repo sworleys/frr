@@ -418,5 +418,6 @@ uint32_t nexthop_hash(const struct nexthop *nexthop)
 	case NEXTHOP_TYPE_IPV6:
 		break;
 	}
+
 	return key;
 }
