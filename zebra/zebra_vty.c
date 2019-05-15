@@ -1118,6 +1118,7 @@ DEFPY (show_nexthop_group,
 {
 
 	afi_t afi = 0;
+
 	if (v4)
 		afi = AFI_IP;
 	else if (v6)
