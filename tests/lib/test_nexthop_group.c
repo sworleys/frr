@@ -106,9 +106,7 @@ int main(int argc, char **argv)
 
 	array_size = sizeof(nhop_array)/sizeof(struct nexthop);
 	for (i = 0; i < array_size; i++)
-	{
 		nexthop_group_add_sorted(&nhg, &nhop_array[i]);
-	}
 
 	dump_nhg(vty, &nhg);
 }
