@@ -1,3 +1,9 @@
+frr (4.0+cl3u12) RELEASED; urgency=medium
+
+  * Fixes: CM-24606 tools: frr-reload.py stop bouncing peers on bfd timer change
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Mon, 20 May 2019 13:42:34 -0400
+
 frr (4.0+cl3u11) RELEASED; urgency=medium
 
   * New Enabled: bgpd: add support for MD5 auth on listen ranges
