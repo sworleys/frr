@@ -37,6 +37,13 @@ extern "C" {
 DECLARE_HOOK(zebra_ext_log, (int priority, const char *format, va_list args),
 	     (priority, format, args));
 
+#define RING_LOG_MAX_SIZE 100
+
+/* Ringbuf log message structure */
+struct ring_logmsg {
+	char *message;
+}
+
 /* Here is some guidance on logging levels to use:
  *
  * LOG_DEBUG	- For all messages that are enabled by optional debugging

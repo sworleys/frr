@@ -46,6 +46,7 @@
 #endif
 
 DEFINE_MTYPE_STATIC(LIB, ZLOG, "Logging")
+DEFINE_MTYPE_STATIC(LIB, RING_MSG, "Ring Log Message")
 
 /* hook for external logging */
 DEFINE_HOOK(zebra_ext_log, (int priority, const char *format, va_list args),
@@ -63,6 +64,16 @@ const char *zlog_priority[] = {
 	"emergencies",   "alerts",	"critical",  "errors", "warnings",
 	"notifications", "informational", "debugging", NULL,
 };
+
+static char *ring_message_new(size_t size)
+{
+	return XCALLOC(MTYPE_RING_MSG, size);
+}
+
+static void ring_message_free(char *message)
+{
+	XFREE(MTYPE_RING_MSG, message);
+}
 
 /*
  * write_wrapper
@@ -177,17 +188,32 @@ size_t quagga_timestamp(int timestamp_precision, char *buf, size_t buflen)
 	return 0;
 }
 
-/* Utility routine for current time printing. */
-static void time_print(FILE *fp, struct timestamp_control *ctl)
+static void timestamp_control_render(struct timestamp_control *ctl)
 {
 	if (!ctl->already_rendered) {
 		ctl->len = quagga_timestamp(ctl->precision, ctl->buf,
 					    sizeof(ctl->buf));
 		ctl->already_rendered = 1;
 	}
+}
+
+/* Utility routine for current time printing. */
+static void time_print(FILE *fp, struct timestamp_control *ctl)
+{
+	timestamp_control_render(ctl);
 	fprintf(fp, "%s ", ctl->buf);
 }
 
+static int time_print_ring(char *buf, int len, int max_size,
+			   struct timestamp_control *ctl)
+{
+	timestamp_control_render(ctl);
+
+	if (ctl->len + 1 >= max_size)
+		return -1;
+
+	return snprintf(buf + len, max_size - len, "%s ", ctl->buf);
+}
 
 static void vzlog_file(struct zlog *zl, struct timestamp_control *tsctl,
 		       const char *proto_str, int record_priority, int priority,
@@ -207,6 +233,59 @@ static void vzlog_file(struct zlog *zl, struct timestamp_control *tsctl,
 	fflush(fp);
 }
 
+static void vzlog_ring(struct timestamp_control *tsctl, const char *proto_str,
+		       int record_priority, int priority, const char *format,
+		       va_list args)
+{
+	/* Ring buffer of recent logs */
+	static ringbuf *ring_log =
+		ringbuf_new(sizeof(struct logmsg) * RING_LOG_MAX_SIZE);
+
+	struct ring_logmsg log = {};
+
+	int len = 0;
+	int ret = 0;
+	char buf[1024] = "";
+	va_list ac;
+
+	ret = time_print_ring(buf, len, sizeof(buf), tsctl);
+
+	len += ret;
+	if ((ret < 0) || ((size_t)len >= sizeof(buf)))
+		return -1;
+
+	if (record_priority)
+		ret = snprintf(buf + len, sizeof(buf) - len,
+			       "%s: %s: ", zlog_priority[priority], proto_str);
+	else
+		ret = snprintf(buf + len, sizeof(buf) - len, "%s: ", proto_str);
+
+	len += ret;
+	if ((ret < 0) || ((size_t)len >= sizeof(buf)))
+		return -1;
+
+	va_copy(ac, args);
+	ret = vsnprintf(buf + len, sizeof(buf) - len, format, va);
+	va_end(ac);
+
+	len += ret;
+	if ((ret < 0) || ((size_t)len >= sizeof(buf)))
+		return -1;
+
+	if ((size_t)(len + 1) >= sizeof(buf))
+		return -1;
+
+	buf[len++] = '\n';
+
+	/* Now store the buffer in memory */
+	log.message = ring_message_new(len);
+	strncpy(log.message, buf, len);
+
+	ringbuf_put(ring_log, &log, sizeof(log));
+
+	// TODO: debug this
+}
+
 /* va_list version of zlog. */
 void vzlog(int priority, const char *format, va_list args)
 {
@@ -220,6 +299,10 @@ void vzlog(int priority, const char *format, va_list args)
 
 	/* call external hook */
 	hook_call(zebra_ext_log, priority, format, args);
+
+	/* Record to ring log */
+	vzlog_ring(&tsctl, proto_str, zl->record_priority, priority, format,
+		   args);
 
 	/* When zlog_default is also NULL, use stderr for logging. */
 	if (zl == NULL) {
