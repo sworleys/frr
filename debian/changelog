@@ -4,6 +4,7 @@ frr (4.0+cl3u12) RELEASED; urgency=medium
   * Fixes: CM-24968 zebra: unset sticky mac upon local deletion
   * Fixes: CM-25129 bgpd: fix debug to have proper nhop display
   * Fixes: CM-25117 zebra: redistribution stopped working after 128 vrfs
+  * Fixes: CM-23948 bgpd: disable deleting default instance if vrf instances exist
 
  -- dev-support <dev-support@cumulusnetworks.com>  Mon, 20 May 2019 13:42:34 -0400
 
