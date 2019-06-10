@@ -2,7 +2,6 @@
 Description=FRRouting
 Documentation=https://frrouting.readthedocs.io/en/latest/setup.html
 After=networking.service
-OnFailure=heartbeat-failed@%n.service
 
 [Service]
 Nice=-5
@@ -17,6 +16,7 @@ Restart=on-abnormal
 LimitNOFILE=1024
 ExecStart=/usr/lib/frr/frr start
 ExecStop=/usr/lib/frr/frr stop
+ExecStopPost=/usr/lib/cumulus/on-failure-run-support %N
 ExecReload=/usr/lib/frr/frr reload
 
 [Install]
