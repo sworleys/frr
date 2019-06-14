@@ -741,7 +741,7 @@ static void igmp_group_free(struct igmp_group *group)
 	XFREE(MTYPE_PIM_IGMP_GROUP, group);
 }
 
-static void igmp_group_delete(struct igmp_group *group)
+void igmp_group_delete(struct igmp_group *group)
 {
 	struct listnode *src_node;
 	struct listnode *src_nextnode;
@@ -829,9 +829,9 @@ void igmp_sock_delete_all(struct interface *ifp)
 	}
 }
 
-static unsigned int igmp_group_hash_key(void *arg)
+static unsigned int igmp_group_hash_key(const void *arg)
 {
-	struct igmp_group *group = (struct igmp_group *)arg;
+	const struct igmp_group *group = arg;
 
 	return jhash_1word(group->group_addr.s_addr, 0);
 }

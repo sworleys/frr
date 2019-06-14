@@ -117,8 +117,7 @@ void rip_zebra_ipv4_delete(struct route_node *rp)
 }
 
 /* Zebra route add and delete treatment. */
-static int rip_zebra_read_route(int command, struct zclient *zclient,
-				zebra_size_t length, vrf_id_t vrf_id)
+static int rip_zebra_read_route(ZAPI_CALLBACK_ARGS)
 {
 	struct zapi_route api;
 	struct nexthop nh;
@@ -135,11 +134,11 @@ static int rip_zebra_read_route(int command, struct zclient *zclient,
 	nh.ifindex = api.nexthops[0].ifindex;
 
 	/* Then fetch IPv4 prefixes. */
-	if (command == ZEBRA_REDISTRIBUTE_ROUTE_ADD)
+	if (cmd == ZEBRA_REDISTRIBUTE_ROUTE_ADD)
 		rip_redistribute_add(api.type, RIP_ROUTE_REDISTRIBUTE,
 				     (struct prefix_ipv4 *)&api.prefix, &nh,
 				     api.metric, api.distance, api.tag);
-	else if (command == ZEBRA_REDISTRIBUTE_ROUTE_DEL)
+	else if (cmd == ZEBRA_REDISTRIBUTE_ROUTE_DEL)
 		rip_redistribute_delete(api.type, RIP_ROUTE_REDISTRIBUTE,
 					(struct prefix_ipv4 *)&api.prefix,
 					nh.ifindex);

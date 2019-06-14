@@ -108,6 +108,15 @@ struct pim_ifchannel {
 
 	/* Upstream (S,G) state */
 	struct pim_upstream *upstream;
+	/* MLAG Related data */
+	uint32_t mlag_am_i_df : 1;
+	uint32_t mlag_am_i_dr : 1;
+	uint32_t mlag_am_i_dual_active : 1;
+	uint32_t mlag_peer_is_dr : 1;
+	uint32_t mlag_peer_is_dual_active : 1;
+	uint32_t mlag_dummy : 27;
+	uint32_t mlag_local_cost_to_rp;
+	uint32_t mlag_peer_cost_to_rp;
 };
 
 RB_HEAD(pim_ifchannel_rb, pim_ifchannel);
@@ -155,5 +164,5 @@ void pim_ifchannel_set_star_g_join_state(struct pim_ifchannel *ch, int eom,
 int pim_ifchannel_compare(const struct pim_ifchannel *ch1,
 			  const struct pim_ifchannel *ch2);
 
-unsigned int pim_ifchannel_hash_key(void *arg);
+unsigned int pim_ifchannel_hash_key(const void *arg);
 #endif /* PIM_IFCHANNEL_H */

@@ -474,8 +474,7 @@ void bgp_parse_nexthop_update(int command, vrf_id_t vrf_id)
 				continue;
 
 			for (oldnh = bnc->nexthop; oldnh; oldnh = oldnh->next)
-				if (nexthop_same_no_recurse(oldnh, nexthop) &&
-				    nexthop_labels_match(oldnh, nexthop))
+				if (nexthop_same(oldnh, nexthop))
 					break;
 
 			if (!oldnh)
@@ -793,7 +792,7 @@ static void evaluate_paths(struct bgp_nexthop_cache *bnc)
 		if (BGP_DEBUG(nht, NHT))
 			zlog_debug("%s: Updating peer (%s) status with NHT",
 				   __FUNCTION__, peer->host);
-		bgp_fsm_nht_update(peer, bgp_isvalid_nexthop(bnc));
+		bgp_fsm_event_update(peer, bgp_isvalid_nexthop(bnc));
 		SET_FLAG(bnc->flags, BGP_NEXTHOP_PEER_NOTIFIED);
 	}
 

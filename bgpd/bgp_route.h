@@ -73,6 +73,24 @@ enum bgp_show_adj_route_type {
  */
 #define BGP_MAX_LABELS 2
 
+/* Error codes for handling NLRI */
+#define BGP_NLRI_PARSE_OK 0
+#define BGP_NLRI_PARSE_ERROR_PREFIX_OVERFLOW -1
+#define BGP_NLRI_PARSE_ERROR_PACKET_OVERFLOW -2
+#define BGP_NLRI_PARSE_ERROR_PREFIX_LENGTH -3
+#define BGP_NLRI_PARSE_ERROR_PACKET_LENGTH -4
+#define BGP_NLRI_PARSE_ERROR_LABEL_LENGTH -5
+#define BGP_NLRI_PARSE_ERROR_EVPN_MISSING_TYPE -6
+#define BGP_NLRI_PARSE_ERROR_EVPN_TYPE2_SIZE -7
+#define BGP_NLRI_PARSE_ERROR_EVPN_TYPE3_SIZE -8
+#define BGP_NLRI_PARSE_ERROR_EVPN_TYPE4_SIZE -9
+#define BGP_NLRI_PARSE_ERROR_EVPN_TYPE5_SIZE -10
+#define BGP_NLRI_PARSE_ERROR_FLOWSPEC_IPV6_NOT_SUPPORTED -11
+#define BGP_NLRI_PARSE_ERROR_FLOWSPEC_NLRI_SIZELIMIT -12
+#define BGP_NLRI_PARSE_ERROR_FLOWSPEC_BAD_FORMAT -13
+#define BGP_NLRI_PARSE_ERROR_ADDRESS_FAMILY -14
+#define BGP_NLRI_PARSE_ERROR -32
+
 /* Ancillary information to struct bgp_path_info,
  * used for uncommonly used data (aggregation, MPLS, etc.)
  * and lazily allocated to save memory.
@@ -501,7 +519,8 @@ extern void bgp_path_info_restore(struct bgp_node *rn,
 extern int bgp_path_info_cmp_compatible(struct bgp *bgp,
 					struct bgp_path_info *new,
 					struct bgp_path_info *exist,
-					char *pfx_buf, afi_t afi, safi_t safi);
+					char *pfx_buf, afi_t afi, safi_t safi,
+					enum bgp_path_selection_reason *reason);
 extern void bgp_attr_add_gshut_community(struct attr *attr);
 
 extern void bgp_best_selection(struct bgp *bgp, struct bgp_node *rn,
@@ -517,7 +536,8 @@ extern void route_vty_out_detail_header(struct vty *vty, struct bgp *bgp,
 					struct prefix_rd *prd, afi_t afi,
 					safi_t safi, json_object *json);
 extern void route_vty_out_detail(struct vty *vty, struct bgp *bgp,
-				 struct prefix *p, struct bgp_path_info *path,
+				 struct bgp_node *bn,
+				 struct bgp_path_info *path,
 				 afi_t afi, safi_t safi,
 				 json_object *json_paths);
 extern int bgp_show_table_rd(struct vty *vty, struct bgp *bgp, safi_t safi,

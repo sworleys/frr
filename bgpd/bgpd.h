@@ -131,10 +131,8 @@ struct bgp_master {
 	/* Various BGP global configuration.  */
 	uint8_t options;
 #define BGP_OPT_NO_FIB                   (1 << 0)
-#define BGP_OPT_MULTIPLE_INSTANCE        (1 << 1)
-#define BGP_OPT_CONFIG_CISCO             (1 << 2)
-#define BGP_OPT_NO_LISTEN                (1 << 3)
-#define BGP_OPT_NO_ZEBRA                 (1 << 4)
+#define BGP_OPT_NO_LISTEN                (1 << 1)
+#define BGP_OPT_NO_ZEBRA                 (1 << 2)
 
 	uint64_t updgrp_idspace;
 	uint64_t subgrp_idspace;
@@ -345,7 +343,6 @@ struct bgp {
 #define BGP_FLAG_MED_CONFED               (1 << 3)
 #define BGP_FLAG_NO_DEFAULT_IPV4          (1 << 4)
 #define BGP_FLAG_NO_CLIENT_TO_CLIENT      (1 << 5)
-#define BGP_FLAG_ENFORCE_FIRST_AS         (1 << 6)
 #define BGP_FLAG_COMPARE_ROUTER_ID        (1 << 7)
 #define BGP_FLAG_ASPATH_IGNORE            (1 << 8)
 #define BGP_FLAG_IMPORT_CHECK             (1 << 9)

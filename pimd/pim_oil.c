@@ -32,24 +32,25 @@
 #include "pim_iface.h"
 #include "pim_time.h"
 
-// struct list *pim_channel_oil_list = NULL;
-// struct hash *pim_channel_oil_hash = NULL;
-
 char *pim_channel_oil_dump(struct channel_oil *c_oil, char *buf, size_t size)
 {
+	struct interface *ifp;
 	char *out;
 	struct prefix_sg sg;
 	int i;
 
 	sg.src = c_oil->oil.mfcc_origin;
 	sg.grp = c_oil->oil.mfcc_mcastgrp;
-	snprintf(buf, size, "%s IIF: %d, OIFS: ", pim_str_sg_dump(&sg),
-		 c_oil->oil.mfcc_parent);
+	ifp = pim_if_find_by_vif_index(c_oil->pim, c_oil->oil.mfcc_parent);
+	snprintf(buf, size, "%s IIF: %s, OIFS: ", pim_str_sg_dump(&sg),
+		 ifp ? ifp->name : "(?)");
 
 	out = buf + strlen(buf);
 	for (i = 0; i < MAXVIFS; i++) {
 		if (c_oil->oil.mfcc_ttls[i] != 0) {
-			snprintf(out, buf + size - out, "%d ", i);
+			ifp = pim_if_find_by_vif_index(c_oil->pim, i);
+			snprintf(out, buf + size - out, "%s ",
+				 ifp ? ifp->name : "(?)");
 			out += strlen(out);
 		}
 	}
@@ -91,9 +92,9 @@ static bool pim_oil_equal(const void *arg1, const void *arg2)
 	return false;
 }
 
-static unsigned int pim_oil_hash_key(void *arg)
+static unsigned int pim_oil_hash_key(const void *arg)
 {
-	struct channel_oil *oil = (struct channel_oil *)arg;
+	const struct channel_oil *oil = arg;
 
 	return jhash_2words(oil->oil.mfcc_mcastgrp.s_addr,
 			    oil->oil.mfcc_origin.s_addr, 0);

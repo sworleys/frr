@@ -32,7 +32,7 @@
 
 #define VRRP_LOGPFX "[ZEBRA] "
 
-static struct zclient *zclient = NULL;
+static struct zclient *zclient;
 
 static void vrrp_zebra_debug_if_state(struct interface *ifp, vrf_id_t vrf_id,
 				      const char *func)
@@ -246,7 +246,7 @@ void vrrp_zebra_init(void)
 	zclient->interface_address_add = vrrp_zebra_if_address_add;
 	zclient->interface_address_delete = vrrp_zebra_if_address_del;
 
-	zclient_init(zclient, 0, 0, &vrrp_privs);
+	zclient_init(zclient, ZEBRA_ROUTE_VRRP, 0, &vrrp_privs);
 
 	zlog_notice("%s: zclient socket initialized", __PRETTY_FUNCTION__);
 }

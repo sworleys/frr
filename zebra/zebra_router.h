@@ -46,6 +46,17 @@ RB_HEAD(zebra_router_table_head, zebra_router_table);
 RB_PROTOTYPE(zebra_router_table_head, zebra_router_table,
 	     zebra_router_table_entry, zebra_router_table_entry_compare)
 
+/* RPF lookup behaviour */
+enum multicast_mode {
+	MCAST_NO_CONFIG = 0,  /* MIX_MRIB_FIRST, but no show in config write */
+	MCAST_MRIB_ONLY,      /* MRIB only */
+	MCAST_URIB_ONLY,      /* URIB only */
+	MCAST_MIX_MRIB_FIRST, /* MRIB, if nothing at all then URIB */
+	MCAST_MIX_DISTANCE,   /* MRIB & URIB, lower distance wins */
+	MCAST_MIX_PFXLEN,     /* MRIB & URIB, longer prefix wins */
+			      /* on equal value, MRIB wins for last 2 */
+};
+
 struct zebra_mlag_info {
 	/* Role this zebra router is playing */
 	enum mlag_role role;
@@ -56,6 +67,35 @@ struct zebra_mlag_info {
 
 	/* The system mac being used */
 	struct ethaddr mac;
+	/*
+	 * Zebra will open the communication channel with MLAGD only if any
+	 * clients are interested and it is controlled dynamically based on
+	 * client registers & un-registers.
+	 */
+	uint32_t clients_interested_cnt;
+
+	/* coomunication channel with MLAGD is established */
+	bool connected;
+
+	/* connection retry timer is running */
+	bool timer_running;
+
+	/* Holds the client data(unencoded) that need to be pushed to MCLAGD*/
+	struct stream_fifo *mlag_fifo;
+
+	/*
+	 * A new Kernel thread will be created to post the data to MCLAGD.
+	 * where as, read will be performed from the zebra main thread, because
+	 * read involves accessing client registartion data structures.
+	 */
+	struct frr_pthread *zebra_pth_mlag;
+
+	/* MLAG Thread context 'master' */
+	struct thread_master *th_master;
+
+	/* Threads for read/write. */
+	struct thread *t_read;
+	struct thread *t_write;
 };
 
 struct zebra_router {
@@ -85,9 +125,6 @@ struct zebra_router {
 	/* A sequence number used for tracking routes */
 	_Atomic uint32_t sequence_num;
 
-	/* The default table used for this router */
-	uint32_t rtm_table_default;
-
 	/* rib work queue */
 #define ZEBRA_RIB_PROCESS_HOLD_TIME 10
 #define ZEBRA_RIB_PROCESS_RETRY_TIME 1
@@ -109,7 +146,19 @@ struct zebra_router {
 	 * The EVPN instance, if any
 	 */
 	struct zebra_vrf *evpn_vrf;
+
+	uint32_t multipath_num;
+
+	/* RPF Lookup behavior */
+	enum multicast_mode ipv4_multicast_mode;
+
+	/*
+	 * Time for when we sweep the rib from old routes
+	 */
+	time_t startup_time;
 };
+
+#define GRACEFUL_RESTART_TIME 60
 
 extern struct zebra_router zrouter;
 
@@ -127,8 +176,6 @@ extern void zebra_router_release_table(struct zebra_vrf *zvrf, uint32_t tableid,
 
 extern int zebra_router_config_write(struct vty *vty);
 
-extern unsigned long zebra_router_score_proto(uint8_t proto,
-					      unsigned short instance);
 extern void zebra_router_sweep_route(void);
 
 extern uint32_t zebra_router_get_next_sequence(void);
@@ -142,4 +189,9 @@ static inline struct zebra_vrf *zebra_vrf_get_evpn(void)
 	return zrouter.evpn_vrf ? zrouter.evpn_vrf
 			        : zebra_vrf_lookup_by_id(VRF_DEFAULT);
 }
+
+extern void multicast_mode_ipv4_set(enum multicast_mode mode);
+
+extern enum multicast_mode multicast_mode_ipv4_get(void);
+
 #endif

@@ -1112,7 +1112,7 @@ DEFPY (rpki_cache,
 		vty_out(vty,
 			"ssh sockets are not supported. "
 			"Please recompile rtrlib and frr with ssh support. "
-			"If you want to use it");
+			"If you want to use it\n");
 #endif
 	} else { // use tcp connection
 		return_value = add_tcp_cache(cache, tcpport, preference);
@@ -1402,7 +1402,8 @@ DEFUN (match_rpki,
 	VTY_DECLVAR_CONTEXT(route_map_index, index);
 	int ret;
 
-	ret = route_map_add_match(index, "rpki", argv[2]->arg);
+	ret = route_map_add_match(index, "rpki", argv[2]->arg,
+				  RMAP_EVENT_MATCH_ADDED);
 	if (ret) {
 		switch (ret) {
 		case RMAP_RULE_MISSING:

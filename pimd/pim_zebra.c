@@ -46,16 +46,16 @@
 #include "pim_nht.h"
 #include "pim_ssm.h"
 #include "pim_vxlan.h"
+#include "pim_mlag.h"
 
 #undef PIM_DEBUG_IFADDR_DUMP
 #define PIM_DEBUG_IFADDR_DUMP
 
-static struct zclient *zclient = NULL;
+struct zclient *zclient = NULL;
 
 
 /* Router-id update message from zebra. */
-static int pim_router_id_update_zebra(int command, struct zclient *zclient,
-				      zebra_size_t length, vrf_id_t vrf_id)
+static int pim_router_id_update_zebra(ZAPI_CALLBACK_ARGS)
 {
 	struct prefix router_id;
 
@@ -64,8 +64,7 @@ static int pim_router_id_update_zebra(int command, struct zclient *zclient,
 	return 0;
 }
 
-static int pim_zebra_if_add(int command, struct zclient *zclient,
-			    zebra_size_t length, vrf_id_t vrf_id)
+static int pim_zebra_if_add(ZAPI_CALLBACK_ARGS)
 {
 	struct interface *ifp;
 	struct pim_instance *pim;
@@ -126,8 +125,7 @@ static int pim_zebra_if_add(int command, struct zclient *zclient,
 	return 0;
 }
 
-static int pim_zebra_if_del(int command, struct zclient *zclient,
-			    zebra_size_t length, vrf_id_t vrf_id)
+static int pim_zebra_if_del(ZAPI_CALLBACK_ARGS)
 {
 	struct interface *ifp;
 	struct pim_instance *pim;
@@ -166,8 +164,7 @@ static int pim_zebra_if_del(int command, struct zclient *zclient,
 	return 0;
 }
 
-static int pim_zebra_if_state_up(int command, struct zclient *zclient,
-				 zebra_size_t length, vrf_id_t vrf_id)
+static int pim_zebra_if_state_up(ZAPI_CALLBACK_ARGS)
 {
 	struct pim_instance *pim;
 	struct interface *ifp;
@@ -235,8 +232,7 @@ static int pim_zebra_if_state_up(int command, struct zclient *zclient,
 	return 0;
 }
 
-static int pim_zebra_if_state_down(int command, struct zclient *zclient,
-				   zebra_size_t length, vrf_id_t vrf_id)
+static int pim_zebra_if_state_down(ZAPI_CALLBACK_ARGS)
 {
 	struct interface *ifp;
 
@@ -280,8 +276,7 @@ static int pim_zebra_if_state_down(int command, struct zclient *zclient,
 	return 0;
 }
 
-static int pim_zebra_interface_vrf_update(int command, struct zclient *zclient,
-					  zebra_size_t length, vrf_id_t vrf_id)
+static int pim_zebra_interface_vrf_update(ZAPI_CALLBACK_ARGS)
 {
 	struct interface *ifp;
 	vrf_id_t new_vrf_id;
@@ -326,8 +321,7 @@ static void dump_if_address(struct interface *ifp)
 }
 #endif
 
-static int pim_zebra_if_address_add(int command, struct zclient *zclient,
-				    zebra_size_t length, vrf_id_t vrf_id)
+static int pim_zebra_if_address_add(ZAPI_CALLBACK_ARGS)
 {
 	struct connected *c;
 	struct prefix *p;
@@ -342,7 +336,7 @@ static int pim_zebra_if_address_add(int command, struct zclient *zclient,
 	  will add address to interface list by calling
 	  connected_add_by_prefix()
 	*/
-	c = zebra_interface_address_read(command, zclient->ibuf, vrf_id);
+	c = zebra_interface_address_read(cmd, zclient->ibuf, vrf_id);
 	if (!c)
 		return 0;
 
@@ -406,8 +400,7 @@ static int pim_zebra_if_address_add(int command, struct zclient *zclient,
 	return 0;
 }
 
-static int pim_zebra_if_address_del(int command, struct zclient *client,
-				    zebra_size_t length, vrf_id_t vrf_id)
+static int pim_zebra_if_address_del(ZAPI_CALLBACK_ARGS)
 {
 	struct connected *c;
 	struct prefix *p;
@@ -426,7 +419,7 @@ static int pim_zebra_if_address_del(int command, struct zclient *client,
 	  will remove address from interface list by calling
 	  connected_delete_by_prefix()
 	*/
-	c = zebra_interface_address_read(command, client->ibuf, vrf_id);
+	c = zebra_interface_address_read(cmd, zclient->ibuf, vrf_id);
 	if (!c)
 		return 0;
 
@@ -554,8 +547,7 @@ void pim_zebra_upstream_rpf_changed(struct pim_instance *pim,
 	pim_upstream_update_join_desired(pim, up);
 }
 
-static int pim_zebra_vxlan_sg_proc(int command, struct zclient *zclient,
-		zebra_size_t length, vrf_id_t vrf_id)
+static int pim_zebra_vxlan_sg_proc(ZAPI_CALLBACK_ARGS)
 {
 	struct stream *s;
 	struct pim_instance *pim;
@@ -577,11 +569,11 @@ static int pim_zebra_vxlan_sg_proc(int command, struct zclient *zclient,
 
 		pim_str_sg_set(&sg, sg_str);
 		zlog_debug("%u:recv SG %s %s", vrf_id,
-			(command == ZEBRA_VXLAN_SG_ADD)?"add":"del",
+			(cmd == ZEBRA_VXLAN_SG_ADD)?"add":"del",
 			sg_str);
 	}
 
-	if (command == ZEBRA_VXLAN_SG_ADD)
+	if (cmd == ZEBRA_VXLAN_SG_ADD)
 		pim_vxlan_sg_add(pim, &sg);
 	else
 		pim_vxlan_sg_del(pim, &sg);
@@ -796,7 +788,7 @@ static void pim_zebra_connected(struct zclient *zclient)
 
 static void pim_zebra_capabilities(struct zclient_capabilities *cap)
 {
-	router->role = cap->role;
+	router->mlag_role = cap->role;
 }
 
 void pim_zebra_init(void)
@@ -817,6 +809,9 @@ void pim_zebra_init(void)
 	zclient->nexthop_update = pim_parse_nexthop_update;
 	zclient->vxlan_sg_add = pim_zebra_vxlan_sg_proc;
 	zclient->vxlan_sg_del = pim_zebra_vxlan_sg_proc;
+	zclient->mlag_process_up = pim_zebra_mlag_process_up;
+	zclient->mlag_process_down = pim_zebra_mlag_process_down;
+	zclient->mlag_handle_msg = pim_zebra_mlag_handle_msg;
 
 	zclient_init(zclient, ZEBRA_ROUTE_PIM, 0, &pimd_privs);
 	if (PIM_DEBUG_PIM_TRACE) {
@@ -1101,12 +1096,13 @@ void igmp_source_forward_start(struct pim_instance *pim,
 		return;
 	}
 
-	if (!(PIM_I_am_DR(pim_oif))) {
+	if (!(PIM_I_am_DR(pim_oif)) && !PIM_I_am_DualActive(pim_oif)) {
 		if (PIM_DEBUG_IGMP_TRACE)
-			zlog_debug("%s: %s was received on %s interface but we are not DR for that interface",
-				   __PRETTY_FUNCTION__,
-				   pim_str_sg_dump(&sg),
-				   group->group_igmp_sock->interface->name);
+			zlog_debug(
+				"%s: %s was received on %s interface but we are not DR (or)"
+				"Dual-active for that interface",
+				__PRETTY_FUNCTION__, pim_str_sg_dump(&sg),
+				group->group_igmp_sock->interface->name);
 
 		pim_channel_del_oif(source->source_channel_oil,
 				    group->group_igmp_sock->interface,

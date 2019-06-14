@@ -361,9 +361,9 @@ struct vrf_bit_set {
 	bool set;
 };
 
-static unsigned int vrf_hash_bitmap_key(void *data)
+static unsigned int vrf_hash_bitmap_key(const void *data)
 {
-	struct vrf_bit_set *bit = data;
+	const struct vrf_bit_set *bit = data;
 
 	return bit->vrf_id;
 }
@@ -471,7 +471,7 @@ static const struct cmd_variable_handler vrf_var_handlers[] = {
 
 /* Initialize VRF module. */
 void vrf_init(int (*create)(struct vrf *), int (*enable)(struct vrf *),
-	      int (*disable)(struct vrf *), int (*delete)(struct vrf *),
+	      int (*disable)(struct vrf *), int (*destroy)(struct vrf *),
 	      int ((*update)(struct vrf *)))
 {
 	struct vrf *default_vrf;
@@ -485,7 +485,7 @@ void vrf_init(int (*create)(struct vrf *), int (*enable)(struct vrf *),
 	vrf_master.vrf_new_hook = create;
 	vrf_master.vrf_enable_hook = enable;
 	vrf_master.vrf_disable_hook = disable;
-	vrf_master.vrf_delete_hook = delete;
+	vrf_master.vrf_delete_hook = destroy;
 	vrf_master.vrf_update_name_hook = update;
 
 	/* The default VRF always exists. */
@@ -856,7 +856,6 @@ void vrf_cmd_init(int (*writefunc)(struct vty *vty),
 void vrf_set_default_name(const char *default_name, bool force)
 {
 	struct vrf *def_vrf;
-	struct vrf *vrf_with_default_name = NULL;
 	static bool def_vrf_forced;
 
 	def_vrf = vrf_lookup_by_id(VRF_DEFAULT);
@@ -867,13 +866,7 @@ void vrf_set_default_name(const char *default_name, bool force)
 			   def_vrf->vrf_id);
 		return;
 	}
-	if (vrf_with_default_name && vrf_with_default_name != def_vrf) {
-		/* vrf name already used by an other VRF */
-		zlog_debug("VRF: %s, avoid changing name to %s, same name exists (%u)",
-			   vrf_with_default_name->name, default_name,
-			   vrf_with_default_name->vrf_id);
-		return;
-	}
+
 	snprintf(vrf_default_name, VRF_NAMSIZ, "%s", default_name);
 	if (def_vrf) {
 		if (force)

@@ -308,7 +308,7 @@ int bgp_nlri_parse(struct peer *peer, struct attr *attr,
 	case SAFI_FLOWSPEC:
 		return bgp_nlri_parse_flowspec(peer, attr, packet, mp_withdraw);
 	}
-	return -1;
+	return BGP_NLRI_PARSE_ERROR;
 }
 
 /*
@@ -709,12 +709,15 @@ void bgp_notify_send_with_data(struct peer *peer, uint8_t code,
 				XMALLOC(MTYPE_TMP, bgp_notify.length * 3);
 			for (i = 0; i < bgp_notify.length; i++)
 				if (first) {
-					sprintf(c, " %02x", data[i]);
-					strcat(bgp_notify.data, c);
+					snprintf(c, sizeof(c), " %02x",
+						 data[i]);
+					strlcat(bgp_notify.data, c,
+						bgp_notify.length);
 				} else {
 					first = 1;
-					sprintf(c, "%02x", data[i]);
-					strcpy(bgp_notify.data, c);
+					snprintf(c, sizeof(c), "%02x", data[i]);
+					strlcpy(bgp_notify.data, c,
+						bgp_notify.length);
 				}
 		}
 		bgp_notify_print(peer, &bgp_notify, "sending");
@@ -1533,6 +1536,17 @@ static int bgp_update_receive(struct peer *peer, bgp_size_t size)
 		nlris[NLRI_UPDATE].nlri = stream_pnt(s);
 		nlris[NLRI_UPDATE].length = update_len;
 		stream_forward_getp(s, update_len);
+
+		if (CHECK_FLAG(attr.flag, ATTR_FLAG_BIT(BGP_ATTR_MP_REACH_NLRI))) {
+			/*
+			 * We skipped nexthop attribute validation earlier so
+			 * validate the nexthop now.
+			 */
+			if (bgp_attr_nexthop_valid(peer, &attr) < 0) {
+				bgp_attr_unintern_sub(&attr);
+				return BGP_Stop;
+			}
+		}
 	}
 
 	if (BGP_DEBUG(update, UPDATE_IN))
@@ -1568,10 +1582,11 @@ static int bgp_update_receive(struct peer *peer, bgp_size_t size)
 			nlri_ret = bgp_nlri_parse(peer, &attr, &nlris[i], 1);
 			break;
 		default:
-			nlri_ret = -1;
+			nlri_ret = BGP_NLRI_PARSE_ERROR;
 		}
 
-		if (nlri_ret < 0) {
+		if (nlri_ret < BGP_NLRI_PARSE_OK
+		    && nlri_ret != BGP_NLRI_PARSE_ERROR_PREFIX_OVERFLOW) {
 			flog_err(EC_BGP_UPDATE_RCV,
 				 "%s [Error] Error parsing NLRI", peer->host);
 			if (peer->status == Established)
@@ -1688,14 +1703,16 @@ static int bgp_notify_receive(struct peer *peer, bgp_size_t size)
 				XMALLOC(MTYPE_TMP, bgp_notify.length * 3);
 			for (i = 0; i < bgp_notify.length; i++)
 				if (first) {
-					sprintf(c, " %02x",
+					snprintf(c, sizeof(c), " %02x",
 						stream_getc(peer->curr));
-					strcat(bgp_notify.data, c);
+					strlcat(bgp_notify.data, c,
+						bgp_notify.length);
 				} else {
 					first = 1;
-					sprintf(c, "%02x",
-						stream_getc(peer->curr));
-					strcpy(bgp_notify.data, c);
+					snprintf(c, sizeof(c), "%02x",
+						 stream_getc(peer->curr));
+					strlcpy(bgp_notify.data, c,
+						bgp_notify.length);
 				}
 			bgp_notify.raw_data = (uint8_t *)peer->notify.data;
 		}
@@ -2287,6 +2304,9 @@ int bgp_process_packet(struct thread *thread)
 					__FUNCTION__, peer->host);
 			break;
 		default:
+			/* Suppress uninitialized variable warning */
+			mprc = 0;
+			(void)mprc;
 			/*
 			 * The message type should have been sanitized before
 			 * we ever got here. Receipt of a message with an

@@ -310,12 +310,12 @@ union prefixconstptr {
 
 /*
  * Longest possible length of a (S,G) string is 36 bytes
- * 123.123.123.123 = 16 * 2
+ * 123.123.123.123 = 15 * 2
  * (,) = 3
  * NULL Character at end = 1
  * (123.123.123.123,123.123.123.123)
  */
-#define PREFIX_SG_STR_LEN 36
+#define PREFIX_SG_STR_LEN 34
 
 /* Max bit/byte length of IPv4 address. */
 #define IPV4_MAX_BYTELEN    4
@@ -453,7 +453,7 @@ extern int is_zero_mac(struct ethaddr *mac);
 extern int prefix_str2mac(const char *str, struct ethaddr *mac);
 extern char *prefix_mac2str(const struct ethaddr *mac, char *buf, int size);
 
-extern unsigned prefix_hash_key(void *pp);
+extern unsigned prefix_hash_key(const void *pp);
 
 extern int str_to_esi(const char *str, esi_t *esi);
 extern char *esi_to_str(const esi_t *esi, char *buf, int size);

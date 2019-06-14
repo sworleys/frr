@@ -52,7 +52,7 @@
 				(unsigned int)_vrid);                          \
 			return CMD_WARNING_CONFIG_FAILED;                      \
 		}                                                              \
-	} while (0);
+	} while (0)
 
 /* clang-format off */
 
@@ -144,8 +144,8 @@ DEFPY(vrrp_advertisement_interval,
 	VTY_DECLVAR_CONTEXT(interface, ifp);
 
 	struct vrrp_vrouter *vr;
-	uint16_t newadvint = no ? vd.advertisement_interval :
-				  advertisement_interval;
+	uint16_t newadvint =
+		no ? vd.advertisement_interval * 10 : advertisement_interval;
 
 	if (newadvint % 10 != 0) {
 		vty_out(vty, "%% Value must be a multiple of 10\n");
@@ -177,19 +177,20 @@ DEFPY(vrrp_ip,
 	bool activated = false;
 	bool failed = false;
 	int ret = CMD_SUCCESS;
+	int oldstate;
 
 	VROUTER_GET_VTY(vty, ifp, vrid, vr);
 
 	bool will_activate = (vr->v4->fsm.state == VRRP_STATE_INITIALIZE);
 
 	if (no) {
-		int oldstate = vr->v4->fsm.state;
+		oldstate = vr->v4->fsm.state;
 		failed = vrrp_del_ipv4(vr, ip);
 		vrrp_check_start(vr);
 		deactivated = (vr->v4->fsm.state == VRRP_STATE_INITIALIZE
 			       && oldstate != VRRP_STATE_INITIALIZE);
 	} else {
-		int oldstate = vr->v4->fsm.state;
+		oldstate = vr->v4->fsm.state;
 		failed = vrrp_add_ipv4(vr, ip);
 		vrrp_check_start(vr);
 		activated = (vr->v4->fsm.state != VRRP_STATE_INITIALIZE
@@ -230,6 +231,7 @@ DEFPY(vrrp_ip6,
 	bool activated = false;
 	bool failed = false;
 	int ret = CMD_SUCCESS;
+	int oldstate;
 
 	VROUTER_GET_VTY(vty, ifp, vrid, vr);
 
@@ -242,13 +244,13 @@ DEFPY(vrrp_ip6,
 	bool will_activate = (vr->v6->fsm.state == VRRP_STATE_INITIALIZE);
 
 	if (no) {
-		int oldstate = vr->v6->fsm.state;
+		oldstate = vr->v6->fsm.state;
 		failed = vrrp_del_ipv6(vr, ipv6);
 		vrrp_check_start(vr);
 		deactivated = (vr->v6->fsm.state == VRRP_STATE_INITIALIZE
 			       && oldstate != VRRP_STATE_INITIALIZE);
 	} else {
-		int oldstate = vr->v6->fsm.state;
+		oldstate = vr->v6->fsm.state;
 		failed = vrrp_add_ipv6(vr, ipv6);
 		vrrp_check_start(vr);
 		activated = (vr->v6->fsm.state != VRRP_STATE_INITIALIZE
@@ -313,19 +315,26 @@ DEFPY(vrrp_autoconfigure,
 
 DEFPY(vrrp_default,
       vrrp_default_cmd,
-      "[no] vrrp default <advertisement-interval$adv (1-4096)$advint|preempt$p|priority$prio (1-254)$prioval|shutdown$s>",
+      "[no] vrrp default <advertisement-interval$adv (10-40950)$advint|preempt$p|priority$prio (1-254)$prioval|shutdown$s>",
       NO_STR
       VRRP_STR
       "Configure defaults for new VRRP instances\n"
       VRRP_ADVINT_STR
-      "Advertisement interval in centiseconds\n"
+      "Advertisement interval in milliseconds\n"
       "Preempt mode\n"
       VRRP_PRIORITY_STR
       "Priority value\n"
       "Force VRRP router into administrative shutdown\n")
 {
-	if (adv)
+	if (adv) {
+		if (advint % 10 != 0) {
+			vty_out(vty, "%% Value must be a multiple of 10\n");
+			return CMD_WARNING_CONFIG_FAILED;
+		}
+		/* all internal computations are in centiseconds */
+		advint /= CS2MS;
 		vd.advertisement_interval = no ? VRRP_DEFAULT_ADVINT : advint;
+	}
 	if (p)
 		vd.preempt_mode = !no;
 	if (prio)
@@ -535,6 +544,7 @@ static void vrrp_show(struct vty *vty, struct vrrp_vrouter *vr)
 	ttable_add_row(tt, "%s|%u", "IPv4 Addresses", vr->v4->addrs->count);
 
 	char fill[35];
+
 	memset(fill, '.', sizeof(fill));
 	fill[sizeof(fill) - 1] = 0x00;
 	if (vr->v4->addrs->count) {
@@ -556,9 +566,27 @@ static void vrrp_show(struct vty *vty, struct vrrp_vrouter *vr)
 	}
 
 	char *table = ttable_dump(tt, "\n");
+
 	vty_out(vty, "\n%s\n", table);
 	XFREE(MTYPE_TMP, table);
 	ttable_del(tt);
+}
+
+/*
+ * Sort comparator, used when sorting VRRP instances for display purposes.
+ *
+ * Sorts by interface name first, then by VRID ascending.
+ */
+static int vrrp_instance_display_sort_cmp(const void **d1, const void **d2)
+{
+	const struct vrrp_vrouter *vr1 = *d1;
+	const struct vrrp_vrouter *vr2 = *d2;
+	int result;
+
+	result = strcmp(vr1->ifp->name, vr2->ifp->name);
+	result += !result * (vr1->vrid - vr2->vrid);
+
+	return result;
 }
 
 /* clang-format off */
@@ -578,6 +606,8 @@ DEFPY(vrrp_vrid_show,
 	struct list *ll = hash_to_list(vrrp_vrouters_hash);
 	struct json_object *j = json_object_new_array();
 
+	list_sort(ll, vrrp_instance_display_sort_cmp);
+
 	for (ALL_LIST_ELEMENTS_RO(ll, ln, vr)) {
 		if (ifn && !strmatch(ifn, vr->ifp->name))
 			continue;
@@ -596,6 +626,55 @@ DEFPY(vrrp_vrid_show,
 				j, JSON_C_TO_STRING_PRETTY));
 
 	json_object_free(j);
+
+	list_delete(&ll);
+
+	return CMD_SUCCESS;
+}
+
+DEFPY(vrrp_vrid_show_summary,
+      vrrp_vrid_show_summary_cmd,
+      "show vrrp [interface INTERFACE$ifn] [(1-255)$vrid] summary",
+      SHOW_STR
+      VRRP_STR
+      INTERFACE_STR
+      "Only show VRRP instances on this interface\n"
+      VRRP_VRID_STR
+      "Summarize all VRRP instances\n")
+{
+	struct vrrp_vrouter *vr;
+	struct listnode *ln;
+	struct list *ll = hash_to_list(vrrp_vrouters_hash);
+
+	list_sort(ll, vrrp_instance_display_sort_cmp);
+
+	struct ttable *tt = ttable_new(&ttable_styles[TTSTYLE_BLANK]);
+
+	ttable_add_row(
+		tt, "Interface|VRID|Priority|IPv4|IPv6|State (v4)|State (v6)");
+	ttable_rowseps(tt, 0, BOTTOM, true, '-');
+
+	for (ALL_LIST_ELEMENTS_RO(ll, ln, vr)) {
+		if (ifn && !strmatch(ifn, vr->ifp->name))
+			continue;
+		if (vrid && ((uint8_t)vrid) != vr->vrid)
+			continue;
+
+		ttable_add_row(
+			tt, "%s|%" PRIu8 "|%" PRIu8 "|%d|%d|%s|%s",
+			vr->ifp->name, vr->vrid, vr->priority,
+			vr->v4->addrs->count, vr->v6->addrs->count,
+			vr->v4->fsm.state == VRRP_STATE_MASTER ? "Master"
+							       : "Backup",
+			vr->v6->fsm.state == VRRP_STATE_MASTER ? "Master"
+							       : "Backup");
+	}
+
+	char *table = ttable_dump(tt, "\n");
+
+	vty_out(vty, "\n%s\n", table);
+	XFREE(MTYPE_TMP, table);
+	ttable_del(tt);
 
 	list_delete(&ll);
 
@@ -656,6 +735,7 @@ void vrrp_vty_init(void)
 	if_cmd_init();
 
 	install_element(VIEW_NODE, &vrrp_vrid_show_cmd);
+	install_element(VIEW_NODE, &vrrp_vrid_show_summary_cmd);
 	install_element(VIEW_NODE, &show_debugging_vrrp_cmd);
 	install_element(VIEW_NODE, &debug_vrrp_cmd);
 	install_element(CONFIG_NODE, &debug_vrrp_cmd);

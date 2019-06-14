@@ -234,8 +234,7 @@ static void bgp_bfd_update_type(struct peer *peer)
  * bgp_bfd_dest_replay - Replay all the peers that have BFD enabled
  *                       to zebra
  */
-static int bgp_bfd_dest_replay(int command, struct zclient *client,
-			       zebra_size_t length, vrf_id_t vrf_id)
+static int bgp_bfd_dest_replay(ZAPI_CALLBACK_ARGS)
 {
 	struct listnode *mnode, *node, *nnode;
 	struct bgp *bgp;
@@ -280,6 +279,13 @@ static void bgp_bfd_peer_status_update(struct peer *peer, int status)
 		peer->last_reset = PEER_DOWN_BFD_DOWN;
 		BGP_EVENT_ADD(peer, BGP_Stop);
 	}
+	if ((status == BFD_STATUS_UP) && (old_status == BFD_STATUS_DOWN)
+	    && peer->status != Established) {
+		if (!BGP_PEER_START_SUPPRESSED(peer)) {
+			bgp_fsm_event_update(peer, 1);
+			BGP_EVENT_ADD(peer, BGP_Start);
+		}
+	}
 }
 
 /*
@@ -287,8 +293,7 @@ static void bgp_bfd_peer_status_update(struct peer *peer, int status)
  *                       has changed and bring down the peer
  *                       connectivity if the BFD session went down.
  */
-static int bgp_bfd_dest_update(int command, struct zclient *zclient,
-			       zebra_size_t length, vrf_id_t vrf_id)
+static int bgp_bfd_dest_update(ZAPI_CALLBACK_ARGS)
 {
 	struct interface *ifp;
 	struct prefix dp;

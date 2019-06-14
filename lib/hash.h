@@ -75,7 +75,7 @@ struct hash {
 	unsigned int max_size;
 
 	/* Key make function. */
-	unsigned int (*hash_key)(void *);
+	unsigned int (*hash_key)(const void *);
 
 	/* Data compare function. */
 	bool (*hash_cmp)(const void *, const void *);
@@ -119,7 +119,7 @@ struct hash {
  * Returns:
  *    a new hash table
  */
-extern struct hash *hash_create(unsigned int (*hash_key)(void *),
+extern struct hash *hash_create(unsigned int (*hash_key)(const void *),
 				bool (*hash_cmp)(const void *, const void *),
 				const char *name);
 
@@ -154,7 +154,7 @@ extern struct hash *hash_create(unsigned int (*hash_key)(void *),
  *    a new hash table
  */
 extern struct hash *
-hash_create_size(unsigned int size, unsigned int (*hash_key)(void *),
+hash_create_size(unsigned int size, unsigned int (*hash_key)(const void *),
 		 bool (*hash_cmp)(const void *, const void *),
 		 const char *name);
 

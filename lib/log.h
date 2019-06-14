@@ -87,11 +87,11 @@ extern void zlog_debug(const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
 
 /* For logs which have error codes associated with them */
 #define flog_err(ferr_id, format, ...)                                        \
-	zlog_err("[EC %"PRIu32"] " format, ferr_id, ##__VA_ARGS__)
+	zlog_err("[EC %" PRIu32 "] " format, ferr_id, ##__VA_ARGS__)
 #define flog_err_sys(ferr_id, format, ...)                                     \
 	flog_err(ferr_id, format, ##__VA_ARGS__)
 #define flog_warn(ferr_id, format, ...)                                        \
-	zlog_warn("[EC %"PRIu32"] " format, ferr_id, ##__VA_ARGS__)
+	zlog_warn("[EC %" PRIu32 "] " format, ferr_id, ##__VA_ARGS__)
 
 
 extern void zlog_thread_info(int log_level);
@@ -116,12 +116,8 @@ const char *lookup_msg(const struct message *mz, int kz, const char *nf);
 extern const char *safe_strerror(int errnum);
 
 /* To be called when a fatal signal is caught. */
-extern void zlog_signal(int signo, const char *action
-#ifdef SA_SIGINFO
-			,
-			siginfo_t *siginfo, void *program_counter
-#endif
-			);
+extern void zlog_signal(int signo, const char *action, void *siginfo,
+			void *program_counter);
 
 /* Log a backtrace. */
 extern void zlog_backtrace(int priority);
@@ -145,6 +141,25 @@ extern size_t quagga_timestamp(int timestamp_precision /* # subsecond digits */,
 extern void zlog_hexdump(const void *mem, unsigned int len);
 extern const char *zlog_sanitize(char *buf, size_t bufsz, const void *in,
 				 size_t inlen);
+
+/* Note: whenever a new route-type or zserv-command is added the
+ * corresponding {command,route}_types[] table in lib/log.c MUST be
+ * updated! */
+
+/* Map a route type to a string.  For example, ZEBRA_ROUTE_RIPNG -> "ripng". */
+extern const char *zebra_route_string(unsigned int route_type);
+/* Map a route type to a char.  For example, ZEBRA_ROUTE_RIPNG -> 'R'. */
+extern char zebra_route_char(unsigned int route_type);
+/* Map a zserv command type to the same string,
+ * e.g. ZEBRA_INTERFACE_ADD -> "ZEBRA_INTERFACE_ADD" */
+/* Map a protocol name to its number. e.g. ZEBRA_ROUTE_BGP->9*/
+extern int proto_name2num(const char *s);
+/* Map redistribute X argument to protocol number.
+ * unlike proto_name2num, this accepts shorthands and takes
+ * an AFI value to restrict input */
+extern int proto_redistnum(int afi, const char *s);
+
+extern const char *zserv_command_string(unsigned int command);
 
 
 extern int vzlog_test(int priority);

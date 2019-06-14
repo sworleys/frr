@@ -40,6 +40,7 @@
 #include "pim_join.h"
 #include "pim_jp_agg.h"
 #include "pim_bfd.h"
+#include "pim_mlag.h"
 
 static void dr_election_by_addr(struct interface *ifp)
 {
@@ -143,6 +144,15 @@ int pim_if_dr_election(struct interface *ifp)
 		pim_if_update_join_desired(pim_ifp);
 		pim_if_update_could_assert(ifp);
 		pim_if_update_assert_tracking_desired(ifp);
+		/* DR is modified update to peer */
+		if (PIM_I_am_DualActive(pim_ifp)) {
+			if (PIM_DEBUG_MLAG)
+				zlog_debug(
+					"%s: DR is modified on a dual-active"
+					" interface-%s",
+					__func__, ifp->name);
+			pim_mlag_update_dr_state_to_peer(ifp);
+		}
 		return 1;
 	}
 

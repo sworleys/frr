@@ -949,9 +949,15 @@ void bgp_fsm_change_status(struct peer *peer, int status)
 	else if ((peer->status == Established) && (status != Established))
 		bgp->established_peers--;
 
-	if (BGP_DEBUG(neighbor_events, NEIGHBOR_EVENTS))
-		zlog_debug("%s : vrf %u, established_peers %u", __func__,
-				bgp->vrf_id, bgp->established_peers);
+	if (bgp_debug_neighbor_events(peer)) {
+		struct vrf *vrf = vrf_lookup_by_id(bgp->vrf_id);
+
+		zlog_debug("%s : vrf %s(%u), Status: %s established_peers %u", __func__,
+			   vrf ? vrf->name : "Unknown", bgp->vrf_id,
+			   lookup_msg(bgp_status_msg, status, NULL),
+			   bgp->established_peers);
+	}
+
 	/* Set to router ID to the value provided by RIB if there are no peers
 	 * in the established state and peer count did not change
 	 */
@@ -1754,7 +1760,7 @@ static int bgp_fsm_exeption(struct peer *peer)
 	return (bgp_stop(peer));
 }
 
-void bgp_fsm_nht_update(struct peer *peer, int valid)
+void bgp_fsm_event_update(struct peer *peer, int valid)
 {
 	if (!peer)
 		return;
@@ -1787,7 +1793,6 @@ void bgp_fsm_nht_update(struct peer *peer, int valid)
 		break;
 	}
 }
-
 
 /* Finite State Machine structure */
 static const struct {

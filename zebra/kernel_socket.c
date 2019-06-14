@@ -303,12 +303,13 @@ size_t rta_getattr(caddr_t sap, void *destp, size_t destlen)
 size_t rta_getsdlname(caddr_t sap, void *destp, short *destlen)
 {
 	struct sockaddr_dl *sdl = (struct sockaddr_dl *)sap;
-	struct sockaddr *sa = (struct sockaddr *)sap;
 	uint8_t *dest = destp;
 	size_t tlen, copylen;
 
 	copylen = sdl->sdl_nlen;
 #ifdef HAVE_STRUCT_SOCKADDR_SA_LEN
+	struct sockaddr *sa = (struct sockaddr *)sap;
+
 	tlen = (sa->sa_len == 0) ? sizeof(ROUNDUP_TYPE) : ROUNDUP(sa->sa_len);
 #else  /* !HAVE_STRUCT_SOCKADDR_SA_LEN */
 	tlen = SAROUNDUP(sap);
@@ -442,7 +443,7 @@ static enum zebra_link_type sdl_to_zebra_link_type(unsigned int sdlt)
 int ifm_read(struct if_msghdr *ifm)
 {
 	struct interface *ifp = NULL;
-	struct sockaddr_dl *sdl;
+	struct sockaddr_dl *sdl = NULL;
 	char ifname[IFNAMSIZ];
 	short ifnlen = 0;
 	int maskbit;
@@ -1051,14 +1052,16 @@ void rtm_read(struct rt_msghdr *rtm)
 	 */
 	if (rtm->rtm_type == RTM_CHANGE)
 		rib_delete(afi, SAFI_UNICAST, VRF_DEFAULT, ZEBRA_ROUTE_KERNEL,
-			   0, zebra_flags, &p, NULL, NULL, 0, 0, 0, true);
+			   0, zebra_flags, &p, NULL, NULL, RT_TABLE_MAIN,
+			   0, 0, true);
 	if (rtm->rtm_type == RTM_GET || rtm->rtm_type == RTM_ADD
 	    || rtm->rtm_type == RTM_CHANGE)
 		rib_add(afi, SAFI_UNICAST, VRF_DEFAULT, ZEBRA_ROUTE_KERNEL, 0,
-			zebra_flags, &p, NULL, &nh, 0, 0, 0, 0, 0);
+			zebra_flags, &p, NULL, &nh, RT_TABLE_MAIN, 0, 0, 0, 0);
 	else
 		rib_delete(afi, SAFI_UNICAST, VRF_DEFAULT, ZEBRA_ROUTE_KERNEL,
-			   0, zebra_flags, &p, NULL, &nh, 0, 0, 0, true);
+			   0, zebra_flags, &p, NULL, &nh, RT_TABLE_MAIN,
+			   0, 0, true);
 }
 
 /* Interface function for the kernel routing table updates.  Support

@@ -206,7 +206,7 @@ void listnode_move_to_tail(struct list *l, struct listnode *n)
 	LISTNODE_ATTACH(l, n);
 }
 
-void listnode_delete(struct list *list, void *val)
+void listnode_delete(struct list *list, const void *val)
 {
 	struct listnode *node = listnode_lookup(list, val);
 
@@ -250,7 +250,7 @@ void list_delete(struct list **list)
 	*list = NULL;
 }
 
-struct listnode *listnode_lookup(struct list *list, void *data)
+struct listnode *listnode_lookup(struct list *list, const void *data)
 {
 	struct listnode *node;
 

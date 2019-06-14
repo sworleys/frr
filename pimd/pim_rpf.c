@@ -36,6 +36,7 @@
 #include "pim_time.h"
 #include "pim_nht.h"
 #include "pim_oil.h"
+#include "pim_mlag.h"
 
 static struct in_addr pim_rpf_find_rpf_addr(struct pim_upstream *up);
 
@@ -194,15 +195,40 @@ static int nexthop_mismatch(const struct pim_nexthop *nh1,
 	       || (nh1->mrib_route_metric != nh2->mrib_route_metric);
 }
 
+static void pim_rpf_cost_change(struct pim_instance *pim,
+		struct pim_upstream *up, uint32_t old_cost)
+{
+	struct pim_rpf *rpf = &up->rpf;
+	uint32_t new_cost;
+
+	new_cost = pim_up_mlag_local_cost(pim, up);
+	if (old_cost == new_cost) {
+		return;
+	}
+	/* Cost changed, it might Impact MLAG DF election, update */
+	if (PIM_DEBUG_MLAG)
+		zlog_debug(
+			"%s: Cost_to_rp of upstream-%s changed to:%u, dual_ifp_count:%u",
+			__func__, up->sg_str,
+			rpf->source_nexthop.mrib_route_metric,
+			up->dualactive_ifchannel_count);
+
+	if (up->dualactive_ifchannel_count)
+		pim_mlag_update_cost_to_rp_to_peer(up);
+
+	if (pim_up_mlag_is_local(up))
+		pim_mlag_up_local_add(pim, up);
+}
+
 enum pim_rpf_result pim_rpf_update(struct pim_instance *pim,
-				   struct pim_upstream *up, struct pim_rpf *old,
-				   uint8_t is_new)
+				   struct pim_upstream *up, struct pim_rpf *old)
 {
 	struct pim_rpf *rpf = &up->rpf;
 	struct pim_rpf saved;
 	struct prefix nht_p;
 	struct prefix src, grp;
 	bool neigh_needed = true;
+	uint32_t saved_mrib_route_metric;
 
 	if (PIM_UPSTREAM_FLAG_TEST_STATIC_IIF(up->flags))
 		return PIM_RPF_OK;
@@ -215,15 +241,8 @@ enum pim_rpf_result pim_rpf_update(struct pim_instance *pim,
 
 	saved.source_nexthop = rpf->source_nexthop;
 	saved.rpf_addr = rpf->rpf_addr;
+	saved_mrib_route_metric = pim_up_mlag_local_cost(pim, up);
 
-	if (is_new && PIM_DEBUG_ZEBRA) {
-		char source_str[INET_ADDRSTRLEN];
-		pim_inet4_dump("<source?>", up->upstream_addr, source_str,
-			       sizeof(source_str));
-		zlog_debug("%s: NHT Register upstream %s addr %s with Zebra.",
-			   __PRETTY_FUNCTION__, up->sg_str, source_str);
-	}
-	/* Register addr with Zebra NHT */
 	nht_p.family = AF_INET;
 	nht_p.prefixlen = IPV4_MAX_BITLEN;
 	nht_p.u.prefix4.s_addr = up->upstream_addr.s_addr;
@@ -240,8 +259,10 @@ enum pim_rpf_result pim_rpf_update(struct pim_instance *pim,
 		neigh_needed = FALSE;
 	pim_find_or_track_nexthop(pim, &nht_p, up, NULL, NULL);
 	if (!pim_ecmp_nexthop_lookup(pim, &rpf->source_nexthop, &src, &grp,
-				     neigh_needed))
+				neigh_needed)) {
+		pim_rpf_cost_change(pim, up, saved_mrib_route_metric);
 		return PIM_RPF_FAILURE;
+	}
 
 	rpf->rpf_addr.family = AF_INET;
 	rpf->rpf_addr.u.prefix4 = pim_rpf_find_rpf_addr(up);
@@ -300,8 +321,19 @@ enum pim_rpf_result pim_rpf_update(struct pim_instance *pim,
 			old->source_nexthop = saved.source_nexthop;
 			old->rpf_addr = saved.rpf_addr;
 		}
+		pim_rpf_cost_change(pim, up, saved_mrib_route_metric);
 		return PIM_RPF_CHANGED;
 	}
+
+	if (PIM_DEBUG_MLAG)
+		zlog_debug(
+			"%s: Cost_to_rp of upstream-%s changed to:%u,"
+			" dual_ifp_count:%u",
+			__func__, up->sg_str,
+			rpf->source_nexthop.mrib_route_metric,
+			up->dualactive_ifchannel_count);
+
+	pim_rpf_cost_change(pim, up, saved_mrib_route_metric);
 
 	return PIM_RPF_OK;
 }
@@ -426,9 +458,9 @@ int pim_rpf_is_same(struct pim_rpf *rpf1, struct pim_rpf *rpf2)
 	return 0;
 }
 
-unsigned int pim_rpf_hash_key(void *arg)
+unsigned int pim_rpf_hash_key(const void *arg)
 {
-	struct pim_nexthop_cache *r = (struct pim_nexthop_cache *)arg;
+	const struct pim_nexthop_cache *r = arg;
 
 	return jhash_1word(r->rpf.rpf_addr.u.prefix4.s_addr, 0);
 }

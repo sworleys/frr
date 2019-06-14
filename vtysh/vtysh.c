@@ -503,7 +503,7 @@ static int vtysh_execute_func(const char *line, int pager)
 			vtysh_execute("exit");
 		} else if (tried) {
 			vtysh_execute("end");
-			vtysh_execute("configure terminal");
+			vtysh_execute("configure");
 		}
 	}
 	/*
@@ -541,7 +541,7 @@ static int vtysh_execute_func(const char *line, int pager)
 		if (pager && strncmp(line, "exit", 4))
 			vty_open_pager(vty);
 
-		if (!strcmp(cmd->string, "configure terminal")) {
+		if (!strcmp(cmd->string, "configure")) {
 			for (i = 0; i < array_size(vtysh_client); i++) {
 				cmd_stat = vtysh_client_execute(
 					&vtysh_client[i], line);
@@ -675,13 +675,13 @@ int vtysh_mark_file(const char *filename)
 	vty->node = CONFIG_NODE;
 
 	vtysh_execute_no_pager("enable");
-	vtysh_execute_no_pager("configure terminal");
+	vtysh_execute_no_pager("configure");
 	vty_buf_copy = XCALLOC(MTYPE_VTYSH_CMD, VTY_BUFSIZ);
 
 	while (fgets(vty->buf, VTY_BUFSIZ, confp)) {
 		lineno++;
 		tried = 0;
-		strcpy(vty_buf_copy, vty->buf);
+		strlcpy(vty_buf_copy, vty->buf, VTY_BUFSIZ);
 		vty_buf_trimmed = trim(vty_buf_copy);
 
 		switch (vty->node) {
@@ -1678,7 +1678,7 @@ DEFUNSH(VTYSH_RMAP, vtysh_route_map, vtysh_route_map_cmd,
 }
 
 DEFUNSH(VTYSH_PBRD, vtysh_pbr_map, vtysh_pbr_map_cmd,
-	"pbr-map NAME seq (1-700)",
+	"pbr-map PBRMAP seq (1-700)",
 	"Create pbr-map or enter pbr-map command mode\n"
 	"The name of the PBR MAP\n"
 	"Sequence to insert to/delete from existing pbr-map entry\n"
@@ -1714,7 +1714,7 @@ DEFUNSH(VTYSH_BFDD, bfd_peer_enter, bfd_peer_enter_cmd,
 }
 #endif /* HAVE_BFDD */
 
-DEFSH(VTYSH_PBRD, vtysh_no_pbr_map_cmd, "no pbr-map WORD [seq (1-700)]",
+DEFSH(VTYSH_PBRD, vtysh_no_pbr_map_cmd, "no pbr-map PBRMAP [seq (1-700)]",
 	NO_STR
 	"Delete pbr-map\n"
 	"The name of  the PBR MAP\n"
@@ -1745,7 +1745,7 @@ DEFUNSH(VTYSH_REALLYALL, vtysh_disable, vtysh_disable_cmd, "disable",
 }
 
 DEFUNSH(VTYSH_REALLYALL, vtysh_config_terminal, vtysh_config_terminal_cmd,
-	"configure terminal",
+	"configure [terminal]",
 	"Configuration from vty interface\n"
 	"Configuration terminal\n")
 {
@@ -1787,7 +1787,7 @@ static int vtysh_exit(struct vty *vty)
 	case BFD_NODE:
 	case RPKI_NODE:
 		vtysh_execute("end");
-		vtysh_execute("configure terminal");
+		vtysh_execute("configure");
 		vty->node = CONFIG_NODE;
 		break;
 	case BGP_VPNV4_NODE:
@@ -2114,7 +2114,7 @@ DEFSH(VTYSH_ZEBRA, vtysh_no_logicalrouter_cmd,
       "The file name in " NS_RUN_DIR ", or a full pathname\n")
 
 DEFUNSH(VTYSH_PBRD | VTYSH_SHARPD, vtysh_nexthop_group, vtysh_nexthop_group_cmd,
-	"nexthop-group NAME",
+	"nexthop-group NHGNAME",
 	"Nexthop Group configuration\n"
 	"Name of the Nexthop Group\n")
 {
@@ -2123,7 +2123,7 @@ DEFUNSH(VTYSH_PBRD | VTYSH_SHARPD, vtysh_nexthop_group, vtysh_nexthop_group_cmd,
 }
 
 DEFSH(VTYSH_PBRD | VTYSH_SHARPD, vtysh_no_nexthop_group_cmd,
-      "no nexthop-group NAME",
+      "no nexthop-group NHGNAME",
       NO_STR
       "Nexthop Group Configuration\n"
       "Name of the Nexthop Group\n")
@@ -2173,7 +2173,7 @@ DEFUNSH(VTYSH_VRF, vtysh_quit_vrf, vtysh_quit_vrf_cmd, "quit",
 	return vtysh_exit_vrf(self, vty, argc, argv);
 }
 
-DEFUNSH(VTYSH_PBRD, vtysh_exit_nexthop_group, vtysh_exit_nexthop_group_cmd,
+DEFUNSH(VTYSH_PBRD | VTYSH_SHARPD, vtysh_exit_nexthop_group, vtysh_exit_nexthop_group_cmd,
 	"exit", "Exit current mode and down to previous mode\n")
 {
 	return vtysh_exit(vty);
@@ -2553,6 +2553,15 @@ DEFUNSH(VTYSH_ALL, vtysh_log_timestamp_precision,
 	return CMD_SUCCESS;
 }
 
+DEFUNSH(VTYSH_ALL, vtysh_debug_memstats,
+	vtysh_debug_memstats_cmd, "[no] debug memstats-at-exit",
+	NO_STR
+	"Debug\n"
+	"Print memory statistics at exit\n")
+{
+	return CMD_SUCCESS;
+}
+
 DEFUNSH(VTYSH_ALL, no_vtysh_log_timestamp_precision,
 	no_vtysh_log_timestamp_precision_cmd, "no log timestamp precision",
 	NO_STR
@@ -2702,9 +2711,10 @@ static void backup_config_file(const char *fbackup)
 {
 	char *integrate_sav = NULL;
 
-	integrate_sav = malloc(strlen(fbackup) + strlen(CONF_BACKUP_EXT) + 1);
-	strcpy(integrate_sav, fbackup);
-	strcat(integrate_sav, CONF_BACKUP_EXT);
+	size_t integrate_sav_sz = strlen(fbackup) + strlen(CONF_BACKUP_EXT) + 1;
+	integrate_sav = malloc(integrate_sav_sz);
+	strlcpy(integrate_sav, fbackup, integrate_sav_sz);
+	strlcat(integrate_sav, CONF_BACKUP_EXT, integrate_sav_sz);
 
 	/* Move current configuration file to backup config file. */
 	if (unlink(integrate_sav) != 0) {
@@ -3347,7 +3357,7 @@ static void vtysh_update_all_insances(struct vtysh_client *head_client)
 	dir = opendir(vtydir);
 	if (dir) {
 		while ((file = readdir(dir)) != NULL) {
-			if (begins_with(file->d_name, "ospfd-")
+			if (frrstr_startswith(file->d_name, "ospfd-")
 			    && ends_with(file->d_name, ".vty")) {
 				if (n == MAXIMUM_INSTANCES) {
 					fprintf(stderr,
@@ -3428,7 +3438,7 @@ void vtysh_readline_init(void)
 
 char *vtysh_prompt(void)
 {
-	static char buf[100];
+	static char buf[512];
 
 	snprintf(buf, sizeof buf, cmd_prompt(vty->node), cmd_hostname_get());
 	return buf;
@@ -3846,6 +3856,8 @@ void vtysh_init_vty(void)
 	install_element(VIEW_NODE, &vtysh_show_debugging_hashtable_cmd);
 	install_element(ENABLE_NODE, &vtysh_debug_all_cmd);
 	install_element(CONFIG_NODE, &vtysh_debug_all_cmd);
+	install_element(ENABLE_NODE, &vtysh_debug_memstats_cmd);
+	install_element(CONFIG_NODE, &vtysh_debug_memstats_cmd);
 
 	/* misc lib show commands */
 	install_element(VIEW_NODE, &vtysh_show_memory_cmd);

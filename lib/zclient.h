@@ -38,8 +38,17 @@
 
 #include "mlag.h"
 
+/* Zebra types. Used in Zserv message header. */
+typedef uint16_t zebra_size_t;
+
+/* Marker value used in new Zserv, in the byte location corresponding
+ * the command value in the old zserv header. To allow old and new
+ * Zserv headers to be distinguished from each other.
+ */
+#define ZEBRA_HEADER_MARKER              254
+
 /* For input/output buffer to zebra. */
-#define ZEBRA_MAX_PACKET_SIZ          16384
+#define ZEBRA_MAX_PACKET_SIZ          16384U
 
 /* Zebra header size. */
 #define ZEBRA_HEADER_SIZE             10
@@ -167,6 +176,11 @@ typedef enum {
 	ZEBRA_VXLAN_FLOOD_CONTROL,
 	ZEBRA_VXLAN_SG_ADD,
 	ZEBRA_VXLAN_SG_DEL,
+	ZEBRA_MLAG_PROCESS_UP,
+	ZEBRA_MLAG_PROCESS_DOWN,
+	ZEBRA_MLAG_CLIENT_REGISTER,
+	ZEBRA_MLAG_CLIENT_UNREGISTER,
+	ZEBRA_MLAG_FORWARD_MSG,
 } zebra_message_types_t;
 
 struct redist_proto {
@@ -222,66 +236,52 @@ struct zclient {
 	/* Redistribute defauilt. */
 	vrf_bitmap_t default_information[AFI_MAX];
 
+#define ZAPI_CALLBACK_ARGS                                                     \
+	int cmd, struct zclient *zclient, uint16_t length, vrf_id_t vrf_id
+
 	/* Pointer to the callback functions. */
 	void (*zebra_connected)(struct zclient *);
 	void (*zebra_capabilities)(struct zclient_capabilities *cap);
-	int (*router_id_update)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*interface_add)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*interface_delete)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*interface_up)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*interface_down)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*interface_address_add)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*interface_address_delete)(int, struct zclient *, uint16_t,
-					vrf_id_t);
-	int (*interface_link_params)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*interface_bfd_dest_update)(int, struct zclient *, uint16_t,
-					 vrf_id_t);
-	int (*interface_nbr_address_add)(int, struct zclient *, uint16_t,
-					 vrf_id_t);
-	int (*interface_nbr_address_delete)(int, struct zclient *, uint16_t,
-					    vrf_id_t);
-	int (*interface_vrf_update)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*nexthop_update)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*import_check_update)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*bfd_dest_replay)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*redistribute_route_add)(int, struct zclient *, uint16_t,
-				      vrf_id_t);
-	int (*redistribute_route_del)(int, struct zclient *, uint16_t,
-				      vrf_id_t);
+	int (*router_id_update)(ZAPI_CALLBACK_ARGS);
+	int (*interface_add)(ZAPI_CALLBACK_ARGS);
+	int (*interface_delete)(ZAPI_CALLBACK_ARGS);
+	int (*interface_up)(ZAPI_CALLBACK_ARGS);
+	int (*interface_down)(ZAPI_CALLBACK_ARGS);
+	int (*interface_address_add)(ZAPI_CALLBACK_ARGS);
+	int (*interface_address_delete)(ZAPI_CALLBACK_ARGS);
+	int (*interface_link_params)(ZAPI_CALLBACK_ARGS);
+	int (*interface_bfd_dest_update)(ZAPI_CALLBACK_ARGS);
+	int (*interface_nbr_address_add)(ZAPI_CALLBACK_ARGS);
+	int (*interface_nbr_address_delete)(ZAPI_CALLBACK_ARGS);
+	int (*interface_vrf_update)(ZAPI_CALLBACK_ARGS);
+	int (*nexthop_update)(ZAPI_CALLBACK_ARGS);
+	int (*import_check_update)(ZAPI_CALLBACK_ARGS);
+	int (*bfd_dest_replay)(ZAPI_CALLBACK_ARGS);
+	int (*redistribute_route_add)(ZAPI_CALLBACK_ARGS);
+	int (*redistribute_route_del)(ZAPI_CALLBACK_ARGS);
 	int (*fec_update)(int, struct zclient *, uint16_t);
-	int (*local_es_add)(int command, struct zclient *zclient,
-			    uint16_t length, vrf_id_t vrf_id);
-	int (*local_es_del)(int command, struct zclient *zclient,
-			    uint16_t length, vrf_id_t vrf_id);
-	int (*local_vni_add)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*local_vni_del)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*local_l3vni_add)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*local_l3vni_del)(int, struct zclient *, uint16_t, vrf_id_t);
-	void (*local_ip_prefix_add)(int, struct zclient *, uint16_t, vrf_id_t);
-	void (*local_ip_prefix_del)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*local_macip_add)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*local_macip_del)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*pw_status_update)(int, struct zclient *, uint16_t, vrf_id_t);
-	int (*route_notify_owner)(int command, struct zclient *zclient,
-				  uint16_t length, vrf_id_t vrf_id);
-	int (*rule_notify_owner)(int command, struct zclient *zclient,
-				 uint16_t length, vrf_id_t vrf_id);
-	void (*label_chunk)(int command, struct zclient *zclient,
-				uint16_t length, vrf_id_t vrf_id);
-	int (*ipset_notify_owner)(int command, struct zclient *zclient,
-				 uint16_t length, vrf_id_t vrf_id);
-	int (*ipset_entry_notify_owner)(int command,
-				       struct zclient *zclient,
-				       uint16_t length,
-				       vrf_id_t vrf_id);
-	int (*iptable_notify_owner)(int command,
-				    struct zclient *zclient,
-				    uint16_t length,
-				    vrf_id_t vrf_id);
-	int (*vxlan_sg_add)(int command, struct zclient *client,
-			uint16_t length, vrf_id_t vrf_id);
-	int (*vxlan_sg_del)(int command, struct zclient *client,
-			uint16_t length, vrf_id_t vrf_id_t);
+	int (*local_es_add)(ZAPI_CALLBACK_ARGS);
+	int (*local_es_del)(ZAPI_CALLBACK_ARGS);
+	int (*local_vni_add)(ZAPI_CALLBACK_ARGS);
+	int (*local_vni_del)(ZAPI_CALLBACK_ARGS);
+	int (*local_l3vni_add)(ZAPI_CALLBACK_ARGS);
+	int (*local_l3vni_del)(ZAPI_CALLBACK_ARGS);
+	void (*local_ip_prefix_add)(ZAPI_CALLBACK_ARGS);
+	void (*local_ip_prefix_del)(ZAPI_CALLBACK_ARGS);
+	int (*local_macip_add)(ZAPI_CALLBACK_ARGS);
+	int (*local_macip_del)(ZAPI_CALLBACK_ARGS);
+	int (*pw_status_update)(ZAPI_CALLBACK_ARGS);
+	int (*route_notify_owner)(ZAPI_CALLBACK_ARGS);
+	int (*rule_notify_owner)(ZAPI_CALLBACK_ARGS);
+	void (*label_chunk)(ZAPI_CALLBACK_ARGS);
+	int (*ipset_notify_owner)(ZAPI_CALLBACK_ARGS);
+	int (*ipset_entry_notify_owner)(ZAPI_CALLBACK_ARGS);
+	int (*iptable_notify_owner)(ZAPI_CALLBACK_ARGS);
+	int (*vxlan_sg_add)(ZAPI_CALLBACK_ARGS);
+	int (*vxlan_sg_del)(ZAPI_CALLBACK_ARGS);
+	int (*mlag_process_up)(void);
+	int (*mlag_process_down)(void);
+	int (*mlag_handle_msg)(struct stream *msg, int len);
 };
 
 /* Zebra API message flag. */
@@ -339,6 +339,41 @@ struct zapi_route {
 	unsigned short instance;
 
 	uint32_t flags;
+/*
+ * Cause Zebra to consider this routes nexthops recursively
+ */
+#define ZEBRA_FLAG_ALLOW_RECURSION    0x01
+/*
+ * This is a route that is read in on startup that was left around
+ * from a previous run of FRR
+ */
+#define ZEBRA_FLAG_SELFROUTE          0x02
+/*
+ * This flag is used to tell Zebra that the BGP route being passed
+ * down is a IBGP route
+ */
+#define ZEBRA_FLAG_IBGP               0x04
+/*
+ * This is a route that has been selected for FIB installation.
+ * This flag is set in zebra and can be passed up to routing daemons
+ */
+#define ZEBRA_FLAG_SELECTED           0x08
+/*
+ * This is a route that we are telling Zebra that this route *must*
+ * win and will be installed even over ZEBRA_FLAG_SELECTED
+ */
+#define ZEBRA_FLAG_FIB_OVERRIDE       0x10
+/*
+ * This flag tells Zebra that the route is a EVPN route and should
+ * be treated specially
+ */
+#define ZEBRA_FLAG_EVPN_ROUTE         0x20
+/*
+ * This flag tells Zebra that it should treat the distance passed
+ * down as an additional discriminator for route selection of the
+ * route entry.  This mainly is used for backup static routes.
+ */
+#define ZEBRA_FLAG_RR_USE_DISTANCE    0x40
 
 	uint8_t message;
 
@@ -601,9 +636,7 @@ extern int tm_release_table_chunk(struct zclient *zclient, uint32_t start,
 
 extern int zebra_send_pw(struct zclient *zclient, int command,
 			 struct zapi_pw *pw);
-extern void zebra_read_pw_status_update(int command, struct zclient *zclient,
-					zebra_size_t length, vrf_id_t vrf_id,
-					struct zapi_pw_status *pw);
+extern void zebra_read_pw_status_update(ZAPI_CALLBACK_ARGS, struct zapi_pw_status *pw);
 
 extern int zclient_route_send(uint8_t, struct zclient *, struct zapi_route *);
 extern int zclient_send_rnh(struct zclient *zclient, int command,
@@ -646,5 +679,10 @@ static inline void zapi_route_set_blackhole(struct zapi_route *api,
 	SET_FLAG(api->message, ZAPI_MESSAGE_NEXTHOP);
 };
 
+extern void zclient_send_mlag_register(struct zclient *client,
+				       uint32_t bit_map);
+extern void zclient_send_mlag_deregister(struct zclient *client);
 
+extern void zclient_send_mlag_data(struct zclient *client,
+				   struct stream *client_s);
 #endif /* _ZEBRA_ZCLIENT_H */

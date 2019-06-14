@@ -79,9 +79,9 @@ struct isis_vertex_queue {
 };
 
 __attribute__((__unused__))
-static unsigned isis_vertex_queue_hash_key(void *vp)
+static unsigned isis_vertex_queue_hash_key(const void *vp)
 {
-	struct isis_vertex *vertex = vp;
+	const struct isis_vertex *vertex = vp;
 
 	if (VTYPE_IP(vertex->type)) {
 		uint32_t key;
@@ -347,8 +347,8 @@ static struct isis_lsp *lsp_for_vertex(struct isis_spftree *spftree,
 	memcpy(lsp_id, vertex->N.id, ISIS_SYS_ID_LEN + 1);
 	LSP_FRAGMENT(lsp_id) = 0;
 
-	dict_t *lspdb = spftree->area->lspdb[spftree->level - 1];
-	struct isis_lsp *lsp = lsp_search(lsp_id, lspdb);
+	struct lspdb_head *lspdb = &spftree->area->lspdb[spftree->level - 1];
+	struct isis_lsp *lsp = lsp_search(lspdb, lsp_id);
 
 	if (lsp && lsp->hdr.rem_lifetime != 0)
 		return lsp;

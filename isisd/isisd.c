@@ -38,7 +38,6 @@
 #include "spf_backoff.h"
 #include "lib/northbound_cli.h"
 
-#include "isisd/dict.h"
 #include "isisd/isis_constants.h"
 #include "isisd/isis_common.h"
 #include "isisd/isis_flags.h"
@@ -122,12 +121,10 @@ struct isis_area *isis_area_create(const char *area_tag)
 	/*
 	 * intialize the databases
 	 */
-	if (area->is_type & IS_LEVEL_1) {
-		area->lspdb[0] = lsp_db_init();
-	}
-	if (area->is_type & IS_LEVEL_2) {
-		area->lspdb[1] = lsp_db_init();
-	}
+	if (area->is_type & IS_LEVEL_1)
+		lsp_db_init(&area->lspdb[0]);
+	if (area->is_type & IS_LEVEL_2)
+		lsp_db_init(&area->lspdb[1]);
 
 	spftree_area_init(area);
 
@@ -268,17 +265,11 @@ int isis_area_destroy(const char *area_tag)
 		list_delete(&area->circuit_list);
 	}
 
-	if (area->lspdb[0] != NULL) {
-		lsp_db_destroy(area->lspdb[0]);
-		area->lspdb[0] = NULL;
-	}
-	if (area->lspdb[1] != NULL) {
-		lsp_db_destroy(area->lspdb[1]);
-		area->lspdb[1] = NULL;
-	}
+	lsp_db_fini(&area->lspdb[0]);
+	lsp_db_fini(&area->lspdb[1]);
 
 	/* invalidate and verify to delete all routes from zebra */
-	isis_area_invalidate_routes(area, ISIS_LEVEL1 & ISIS_LEVEL2);
+	isis_area_invalidate_routes(area, area->is_type);
 	isis_area_verify_routes(area);
 
 	spftree_area_del(area);
@@ -744,11 +735,7 @@ DEFUN (clear_isis_neighbor_arg,
  */
 void print_debug(struct vty *vty, int flags, int onoff)
 {
-	char onoffs[4];
-	if (onoff)
-		strcpy(onoffs, "on");
-	else
-		strcpy(onoffs, "off");
+	const char *onoffs = onoff ? "on" : "off";
 
 	if (flags & DEBUG_ADJ_PACKETS)
 		vty_out(vty,
@@ -1341,7 +1328,7 @@ DEFUN (show_isis_summary,
 	return CMD_SUCCESS;
 }
 
-struct isis_lsp *lsp_for_arg(const char *argv, dict_t *lspdb)
+struct isis_lsp *lsp_for_arg(struct lspdb_head *head, const char *argv)
 {
 	char sysid[255] = {0};
 	uint8_t number[3];
@@ -1389,13 +1376,13 @@ struct isis_lsp *lsp_for_arg(const char *argv, dict_t *lspdb)
 	 * hostname.<pseudo-id>-<fragment>
 	 */
 	if (sysid2buff(lspid, sysid)) {
-		lsp = lsp_search(lspid, lspdb);
+		lsp = lsp_search(head, lspid);
 	} else if ((dynhn = dynhn_find_by_name(sysid))) {
 		memcpy(lspid, dynhn->id, ISIS_SYS_ID_LEN);
-		lsp = lsp_search(lspid, lspdb);
+		lsp = lsp_search(head, lspid);
 	} else if (strncmp(cmd_hostname_get(), sysid, 15) == 0) {
 		memcpy(lspid, isis->sysid, ISIS_SYS_ID_LEN);
-		lsp = lsp_search(lspid, lspdb);
+		lsp = lsp_search(head, lspid);
 	}
 
 	return lsp;
@@ -1432,9 +1419,8 @@ static int show_isis_database(struct vty *vty, const char *argv, int ui_level)
 			area->area_tag ? area->area_tag : "null");
 
 		for (level = 0; level < ISIS_LEVELS; level++) {
-			if (area->lspdb[level]
-			    && dict_count(area->lspdb[level]) > 0) {
-				lsp = lsp_for_arg(argv, area->lspdb[level]);
+			if (lspdb_count(&area->lspdb[level]) > 0) {
+				lsp = lsp_for_arg(&area->lspdb[level], argv);
 
 				if (lsp != NULL || argv == NULL) {
 					vty_out(vty,
@@ -1456,7 +1442,7 @@ static int show_isis_database(struct vty *vty, const char *argv, int ui_level)
 							  area->dynhostname);
 				} else if (argv == NULL) {
 					lsp_count = lsp_print_all(
-						vty, area->lspdb[level],
+						vty, &area->lspdb[level],
 						ui_level, area->dynhostname);
 
 					vty_out(vty, "    %u LSPs\n\n",
@@ -1696,10 +1682,7 @@ static void area_resign_level(struct isis_area *area, int level)
 	isis_area_invalidate_routes(area, level);
 	isis_area_verify_routes(area);
 
-	if (area->lspdb[level - 1]) {
-		lsp_db_destroy(area->lspdb[level - 1]);
-		area->lspdb[level - 1] = NULL;
-	}
+	lsp_db_fini(&area->lspdb[level - 1]);
 
 	for (int tree = SPFTREE_IPV4; tree < SPFTREE_COUNT; tree++) {
 		if (area->spftree[tree][level - 1]) {
@@ -1735,8 +1718,7 @@ void isis_area_is_type_set(struct isis_area *area, int is_type)
 		if (is_type == IS_LEVEL_2)
 			area_resign_level(area, IS_LEVEL_1);
 
-		if (area->lspdb[1] == NULL)
-			area->lspdb[1] = lsp_db_init();
+		lsp_db_init(&area->lspdb[1]);
 		break;
 
 	case IS_LEVEL_1_AND_2:
@@ -1750,8 +1732,7 @@ void isis_area_is_type_set(struct isis_area *area, int is_type)
 		if (is_type == IS_LEVEL_1)
 			area_resign_level(area, IS_LEVEL_2);
 
-		if (area->lspdb[0] == NULL)
-			area->lspdb[0] = lsp_db_init();
+		lsp_db_init(&area->lspdb[0]);
 		break;
 
 	default:

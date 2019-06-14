@@ -56,6 +56,7 @@
 
 #define PEER_UPDGRP_AF_FLAGS                                                   \
 	(PEER_FLAG_SEND_COMMUNITY | PEER_FLAG_SEND_EXT_COMMUNITY               \
+	 | PEER_FLAG_SEND_LARGE_COMMUNITY                                      \
 	 | PEER_FLAG_DEFAULT_ORIGINATE | PEER_FLAG_REFLECTOR_CLIENT            \
 	 | PEER_FLAG_RSERVER_CLIENT | PEER_FLAG_NEXTHOP_SELF                   \
 	 | PEER_FLAG_NEXTHOP_UNCHANGED | PEER_FLAG_FORCE_NEXTHOP_SELF          \
@@ -590,9 +591,9 @@ static inline void bgp_announce_peer(struct peer *peer)
  */
 static inline int advertise_list_is_empty(struct update_subgroup *subgrp)
 {
-	if (!BGP_ADV_FIFO_EMPTY(&subgrp->sync->update)
-	    || !BGP_ADV_FIFO_EMPTY(&subgrp->sync->withdraw)
-	    || !BGP_ADV_FIFO_EMPTY(&subgrp->sync->withdraw_low)) {
+	if (bgp_adv_fifo_count(&subgrp->sync->update)
+	    || bgp_adv_fifo_count(&subgrp->sync->withdraw)
+	    || bgp_adv_fifo_count(&subgrp->sync->withdraw_low)) {
 		return 0;
 	}
 

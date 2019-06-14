@@ -43,6 +43,7 @@
 #include "pim_upstream.h"
 #include "pim_ssm.h"
 #include "pim_rp.h"
+#include "pim_mlag.h"
 
 RB_GENERATE(pim_ifchannel_rb, pim_ifchannel, pim_ifp_rb, pim_ifchannel_compare);
 
@@ -130,10 +131,20 @@ void pim_ifchannel_delete(struct pim_ifchannel *ch)
 
 	pim_ifp = ch->interface->info;
 
+	if (PIM_I_am_DualActive(pim_ifp)) {
+		if (PIM_DEBUG_MLAG)
+			zlog_debug(
+				"%s: if-chnanel-%s is deleted from a Dual "
+				"active Interface",
+				__func__, ch->sg_str);
+		pim_mlag_del_entry_to_peer(ch);
+		ch->upstream->dualactive_ifchannel_count--;
+	}
+
 	if (ch->upstream->channel_oil) {
 		uint32_t mask = PIM_OIF_FLAG_PROTO_PIM;
 		if (ch->upstream->flags & PIM_UPSTREAM_FLAG_MASK_SRC_IGMP)
-			mask = PIM_OIF_FLAG_PROTO_IGMP;
+			mask |= PIM_OIF_FLAG_PROTO_IGMP;
 
 		/*
 		 * A S,G RPT channel can have an empty oil, we also
@@ -142,13 +153,15 @@ void pim_ifchannel_delete(struct pim_ifchannel *ch)
 		 * being inherited.  So let's figure out what
 		 * needs to be done here
 		 */
-		if (pim_upstream_evaluate_join_desired_interface(
-			    ch->upstream, ch, ch->parent))
+		if ((ch->sg.src.s_addr != INADDR_ANY) &&
+				pim_upstream_evaluate_join_desired_interface(
+					ch->upstream, ch, ch->parent))
 			pim_channel_add_oif(ch->upstream->channel_oil,
-					    ch->interface, mask);
-		else
-			pim_channel_del_oif(ch->upstream->channel_oil,
-					    ch->interface, mask);
+					ch->interface,
+					PIM_OIF_FLAG_PROTO_STAR);
+
+		pim_channel_del_oif(ch->upstream->channel_oil,
+					ch->interface, mask);
 		/*
 		 * Do we have any S,G's that are inheriting?
 		 * Nuke from on high too.
@@ -227,6 +240,8 @@ void pim_ifchannel_delete_all(struct interface *ifp)
 	while (!RB_EMPTY(pim_ifchannel_rb, &pim_ifp->ifchannel_rb)) {
 		ch = RB_ROOT(pim_ifchannel_rb, &pim_ifp->ifchannel_rb);
 
+		pim_ifchannel_ifjoin_switch(__PRETTY_FUNCTION__,
+				ch, PIM_IFJOIN_NOINFO);
 		pim_ifchannel_delete(ch);
 	}
 }
@@ -592,6 +607,26 @@ struct pim_ifchannel *pim_ifchannel_add(struct interface *ifp,
 	else
 		PIM_IF_FLAG_UNSET_ASSERT_TRACKING_DESIRED(ch->flags);
 
+	/*
+	 * Intialiaze MLAG Data
+	 */
+	ch->mlag_am_i_df = false;
+	ch->mlag_am_i_dr = PIM_I_am_DR(pim_ifp);
+	ch->mlag_am_i_dual_active = PIM_I_am_DualActive(pim_ifp);
+	ch->mlag_peer_is_dr = false;
+	ch->mlag_peer_is_dual_active = false;
+	ch->mlag_local_cost_to_rp = up->rpf.source_nexthop.mrib_route_metric;
+	ch->mlag_peer_cost_to_rp = PIM_ASSERT_ROUTE_METRIC_MAX;
+	if (PIM_I_am_DualActive(pim_ifp)) {
+		if (PIM_DEBUG_MLAG)
+			zlog_debug(
+				"%s: New if-chnanel-%s is added on a Dual "
+				"active Interface",
+				__func__, ch->sg_str);
+		pim_mlag_add_entry_to_peer(ch);
+		ch->upstream->dualactive_ifchannel_count++;
+	}
+
 	if (PIM_DEBUG_PIM_TRACE)
 		zlog_debug("%s: ifchannel %s is created ", __PRETTY_FUNCTION__,
 			   ch->sg_str);
@@ -836,7 +871,7 @@ void pim_ifchannel_join_add(struct interface *ifp, struct in_addr neigh_addr,
 					     & PIM_UPSTREAM_FLAG_MASK_SRC_IGMP)
 		    && !(ch->upstream->flags
 			 & PIM_UPSTREAM_FLAG_MASK_SRC_LHR)) {
-			pim_upstream_ref(ch->upstream,
+			pim_upstream_ref(pim_ifp->pim, ch->upstream,
 					 PIM_UPSTREAM_FLAG_MASK_SRC_LHR,
 					 __PRETTY_FUNCTION__);
 			pim_upstream_keep_alive_timer_start(
@@ -1404,7 +1439,9 @@ void pim_ifchannel_set_star_g_join_state(struct pim_ifchannel *ch, int eom,
 			PIM_IF_FLAG_UNSET_S_G_RPT(child->flags);
 			child->ifjoin_state = PIM_IFJOIN_NOINFO;
 
-			if (I_am_RP(pim, child->sg.grp)) {
+			if ((I_am_RP(pim, child->sg.grp)) &&
+			    (!pim_upstream_empty_inherited_olist(
+				child->upstream))) {
 				pim_channel_add_oif(
 					child->upstream->channel_oil,
 					ch->interface, PIM_OIF_FLAG_PROTO_STAR);
@@ -1425,9 +1462,9 @@ void pim_ifchannel_set_star_g_join_state(struct pim_ifchannel *ch, int eom,
 		pim_jp_agg_single_upstream_send(&starup->rpf, starup, true);
 }
 
-unsigned int pim_ifchannel_hash_key(void *arg)
+unsigned int pim_ifchannel_hash_key(const void *arg)
 {
-	struct pim_ifchannel *ch = (struct pim_ifchannel *)arg;
+	const struct pim_ifchannel *ch = arg;
 
 	return jhash_2words(ch->sg.src.s_addr, ch->sg.grp.s_addr, 0);
 }

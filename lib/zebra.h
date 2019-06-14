@@ -202,17 +202,11 @@ typedef unsigned char uint8_t;
 /* Some systems do not define UINT32_MAX, etc.. from inttypes.h
  * e.g. this makes life easier for FBSD 4.11 users.
  */
-#ifndef INT8_MAX
-#define INT8_MAX	(127)
-#endif
 #ifndef INT16_MAX
 #define INT16_MAX	(32767)
 #endif
 #ifndef INT32_MAX
 #define INT32_MAX	(2147483647)
-#endif
-#ifndef UINT8_MAX
-#define UINT8_MAX	(255U)
 #endif
 #ifndef UINT16_MAX
 #define UINT16_MAX	(65535U)
@@ -326,45 +320,6 @@ struct in_pktinfo {
 
 #endif /* ndef BYTE_ORDER */
 
-/* MAX / MIN are not commonly defined, but useful */
-/* note: glibc sys/param.h has #define MIN(a,b) (((a)<(b))?(a):(b)) */
-#ifdef MAX
-#undef MAX
-#endif
-#define MAX(a, b)                                                              \
-	({                                                                     \
-		typeof(a) _max_a = (a);                                        \
-		typeof(b) _max_b = (b);                                        \
-		_max_a > _max_b ? _max_a : _max_b;                             \
-	})
-#ifdef MIN
-#undef MIN
-#endif
-#define MIN(a, b)                                                              \
-	({                                                                     \
-		typeof(a) _min_a = (a);                                        \
-		typeof(b) _min_b = (b);                                        \
-		_min_a < _min_b ? _min_a : _min_b;                             \
-	})
-
-#ifndef offsetof
-#ifdef __compiler_offsetof
-#define offsetof(TYPE,MEMBER) __compiler_offsetof(TYPE,MEMBER)
-#else
-#define offsetof(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
-#endif
-#endif
-
-#ifndef container_of
-#define container_of(ptr, type, member)                                        \
-	({                                                                     \
-		const typeof(((type *)0)->member) *__mptr = (ptr);             \
-		(type *)((char *)__mptr - offsetof(type, member));             \
-	})
-#endif
-
-#define ZEBRA_NUM_OF(x) (sizeof (x) / sizeof (x[0]))
-
 /* For old definition. */
 #ifndef IN6_ARE_ADDR_EQUAL
 #define IN6_ARE_ADDR_EQUAL IN6_IS_ADDR_EQUAL
@@ -372,12 +327,6 @@ struct in_pktinfo {
 
 /* default zebra TCP port for zclient */
 #define ZEBRA_PORT			2600
-
-/* Marker value used in new Zserv, in the byte location corresponding
- * the command value in the old zserv header. To allow old and new
- * Zserv headers to be distinguished from each other.
- */
-#define ZEBRA_HEADER_MARKER              254
 
 /*
  * The compiler.h header is used for anyone using the CPP_NOTICE
@@ -388,71 +337,20 @@ struct in_pktinfo {
 /* Zebra route's types are defined in route_types.h */
 #include "route_types.h"
 
-/* Note: whenever a new route-type or zserv-command is added the
- * corresponding {command,route}_types[] table in lib/log.c MUST be
- * updated! */
-
-/* Map a route type to a string.  For example, ZEBRA_ROUTE_RIPNG -> "ripng". */
-extern const char *zebra_route_string(unsigned int route_type);
-/* Map a route type to a char.  For example, ZEBRA_ROUTE_RIPNG -> 'R'. */
-extern char zebra_route_char(unsigned int route_type);
-/* Map a zserv command type to the same string,
- * e.g. ZEBRA_INTERFACE_ADD -> "ZEBRA_INTERFACE_ADD" */
-/* Map a protocol name to its number. e.g. ZEBRA_ROUTE_BGP->9*/
-extern int proto_name2num(const char *s);
-/* Map redistribute X argument to protocol number.
- * unlike proto_name2num, this accepts shorthands and takes
- * an AFI value to restrict input */
-extern int proto_redistnum(int afi, const char *s);
-
-extern const char *zserv_command_string(unsigned int command);
-
 #define strmatch(a,b) (!strcmp((a), (b)))
-
-/* Zebra message flags */
-
-/*
- * Cause Zebra to consider this routes nexthops recursively
- */
-#define ZEBRA_FLAG_ALLOW_RECURSION    0x01
-/*
- * This is a route that is read in on startup that was left around
- * from a previous run of FRR
- */
-#define ZEBRA_FLAG_SELFROUTE          0x02
-/*
- * This flag is used to tell Zebra that the BGP route being passed
- * down is a IBGP route
- */
-#define ZEBRA_FLAG_IBGP               0x04
-/*
- * This is a route that has been selected for FIB installation.
- * This flag is set in zebra and can be passed up to routing daemons
- */
-#define ZEBRA_FLAG_SELECTED           0x08
-/*
- * This is a route that we are telling Zebra that this route *must*
- * win and will be installed even over ZEBRA_FLAG_SELECTED
- */
-#define ZEBRA_FLAG_FIB_OVERRIDE       0x10
-/*
- * This flag tells Zebra that the route is a EVPN route and should
- * be treated specially
- */
-#define ZEBRA_FLAG_EVPN_ROUTE         0x20
-/*
- * This flag tells Zebra that it should treat the distance passed
- * down as an additional discriminator for route selection of the
- * route entry.  This mainly is used for backup static routes.
- */
-#define ZEBRA_FLAG_RR_USE_DISTANCE    0x40
 
 #ifndef INADDR_LOOPBACK
 #define	INADDR_LOOPBACK	0x7f000001	/* Internet address 127.0.0.1.  */
 #endif
 
 /* Address family numbers from RFC1700. */
-typedef enum { AFI_IP = 1, AFI_IP6 = 2, AFI_L2VPN = 3, AFI_MAX = 4 } afi_t;
+typedef enum {
+	AFI_UNSPEC = 0,
+	AFI_IP = 1,
+	AFI_IP6 = 2,
+	AFI_L2VPN = 3,
+	AFI_MAX = 4
+} afi_t;
 
 /* Subsequent Address Family Identifier. */
 typedef enum {
@@ -524,10 +422,6 @@ typedef enum {
 	((atomic_fetch_and_explicit(PV, ~(F), memory_order_seq_cst)))
 #define RESET_FLAG_ATOMIC(PV)                                                  \
 	((atomic_store_explicit(PV, 0, memory_order_seq_cst)))
-
-/* Zebra types. Used in Zserv message header. */
-typedef uint16_t zebra_size_t;
-typedef uint16_t zebra_command_t;
 
 /* VRF ID type. */
 typedef uint32_t vrf_id_t;

@@ -55,6 +55,7 @@
 #define PIM_IF_DONT_PIM_CAN_DISABLE_JOIN_SUPRESSION(options) ((options) &= ~PIM_IF_MASK_PIM_CAN_DISABLE_JOIN_SUPRESSION)
 
 #define PIM_I_am_DR(pim_ifp) (pim_ifp)->pim_dr_addr.s_addr == (pim_ifp)->primary_address.s_addr
+#define PIM_I_am_DualActive(pim_ifp) (pim_ifp)->activeactive == true
 
 struct pim_iface_upstream_switch {
 	struct in_addr address;
@@ -88,8 +89,14 @@ struct pim_interface {
 	int igmp_query_max_response_time_dsec; /* IGMPv3 Max Response Time in
 						  dsecs for general queries */
 	int igmp_specific_query_max_response_time_dsec; /* IGMPv3 Max Response
-							   Time in dsecs for
-							   specific queries */
+							   Time in dsecs called
+							   as last member query
+							   interval, defines the
+							   maximum response time
+							   advertised in IGMP
+							   group-specific
+							   queries */
+	int igmp_last_member_query_count; /* IGMP last member query count */
 	struct list *igmp_socket_list; /* list of struct igmp_sock */
 	struct list *igmp_join_list;   /* list of struct igmp_join */
 

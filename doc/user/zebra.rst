@@ -23,9 +23,12 @@ Besides the common invocation options (:ref:`common-invocation-options`), the
    Runs in batch mode. *zebra* parses configuration file and terminates
    immediately.
 
-.. option:: -k, --keep_kernel
+.. option:: -K TIME, --graceful_restart TIME
 
-   When zebra starts up, don't delete old self inserted routes.
+   If this option is specified, the graceful restart time is TIME seconds.
+   Zebra, when started, will read in routes.  Those routes that Zebra
+   identifies that it was the originator of will be swept in TIME seconds.
+   If no time is specified then we will sweep those routes immediately.
 
 .. option:: -r, --retain
 
@@ -267,14 +270,6 @@ Link Parameters Commands
    Specifies the remote ASBR IP address and Autonomous System (AS) number
    for InterASv2 link in OSPF (RFC5392).  Note that this option is not yet
    supported for ISIS (RFC5316).
-
-.. index:: table TABLENO
-.. clicmd:: table TABLENO
-
-   Select the primary kernel routing table to be used. This only works for
-   kernels supporting multiple routing tables (like GNU/Linux 2.2.x and later).
-   After setting TABLENO with this command, static routes defined after this
-   are added to the specified table.
 
 .. index:: ip nht resolve-via-default
 .. clicmd:: ip nht resolve-via-default

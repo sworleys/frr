@@ -85,5 +85,6 @@ GSYMS
 GRTAGS
 GPATH
 compile_commands.json
+.ccls-cache
 .dirstamp
 refix

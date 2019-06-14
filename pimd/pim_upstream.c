@@ -52,6 +52,7 @@
 #include "pim_nht.h"
 #include "pim_ssm.h"
 #include "pim_vxlan.h"
+#include "pim_mlag.h"
 
 static void join_timer_stop(struct pim_upstream *up);
 static void
@@ -172,6 +173,9 @@ struct pim_upstream *pim_upstream_del(struct pim_instance *pim,
 
 	if (up->ref_count >= 1)
 		return up;
+
+	if (pim_up_mlag_is_local(up))
+		pim_mlag_up_local_del(pim, up);
 
 	THREAD_OFF(up->t_ka_timer);
 	THREAD_OFF(up->t_rs_timer);
@@ -749,7 +753,7 @@ static struct pim_upstream *pim_upstream_new(struct pim_instance *pim,
 		up->channel_oil = pim_channel_oil_add(pim, &up->sg, MAXVIFS);
 
 	} else {
-		rpf_result = pim_rpf_update(pim, up, NULL, 1);
+		rpf_result = pim_rpf_update(pim, up, NULL);
 		if (rpf_result == PIM_RPF_FAILURE) {
 			if (PIM_DEBUG_TRACE)
 				zlog_debug(
@@ -772,6 +776,26 @@ static struct pim_upstream *pim_upstream_new(struct pim_instance *pim,
 
 	listnode_add_sort(pim->upstream_list, up);
 
+	/* If (S, G) inherit the MLAG_VXLAN from the parent
+	 * (*, G) entry.
+	 */
+	if ((up->sg.src.s_addr != INADDR_ANY) &&
+		up->parent &&
+		PIM_UPSTREAM_FLAG_TEST_MLAG_VXLAN(up->parent->flags) &&
+		!PIM_UPSTREAM_FLAG_TEST_SRC_VXLAN_ORIG(up->flags)) {
+		PIM_UPSTREAM_FLAG_SET_MLAG_VXLAN(up->flags);
+		if (PIM_DEBUG_VXLAN)
+			zlog_debug("upstream %s inherited mlag vxlan flag from parent",
+					up->sg_str);
+	}
+
+	/* send the entry to the MLAG peer */
+	/* XXX - duplicate send is possible here if pim_rpf_update
+	 * successfully resolved the nexthop
+	 */
+	if (pim_up_mlag_is_local(up))
+		pim_mlag_up_local_add(pim, up);
+
 	if (PIM_DEBUG_TRACE) {
 		zlog_debug(
 			"%s: Created Upstream %s upstream_addr %s ref count %d increment",
@@ -780,6 +804,30 @@ static struct pim_upstream *pim_upstream_new(struct pim_instance *pim,
 	}
 
 	return up;
+}
+
+uint32_t pim_up_mlag_local_cost(struct pim_instance *pim,
+		struct pim_upstream *up)
+{
+	if (!(pim_up_mlag_is_local(up)))
+		return router->infinite_assert_metric.route_metric;
+
+	if ((up->rpf.source_nexthop.interface == pim->vxlan.peerlink_rif) &&
+			(up->rpf.source_nexthop.mrib_route_metric <
+			 (router->infinite_assert_metric.route_metric -
+			  PIM_UPSTREAM_MLAG_PEERLINK_PLUS_METRIC)))
+		return up->rpf.source_nexthop.mrib_route_metric +
+			PIM_UPSTREAM_MLAG_PEERLINK_PLUS_METRIC;
+
+	return up->rpf.source_nexthop.mrib_route_metric;
+}
+
+uint32_t pim_up_mlag_peer_cost(struct pim_upstream *up)
+{
+	if (!(up->flags & PIM_UPSTREAM_FLAG_MASK_MLAG_PEER))
+		return router->infinite_assert_metric.route_metric;
+
+	return up->mlag.peer_mrib_metric;
 }
 
 struct pim_upstream *pim_upstream_find(struct pim_instance *pim,
@@ -821,8 +869,18 @@ struct pim_upstream *pim_upstream_find_or_add(struct prefix_sg *sg,
 	return up;
 }
 
-void pim_upstream_ref(struct pim_upstream *up, int flags, const char *name)
+void pim_upstream_ref(struct pim_instance *pim, struct pim_upstream *up,
+		int flags, const char *name)
 {
+	/* if a local MLAG reference is being created we need to send the mroute
+	 * to the peer
+	 */
+	if (!PIM_UPSTREAM_FLAG_TEST_MLAG_VXLAN(up->flags) &&
+			PIM_UPSTREAM_FLAG_TEST_MLAG_VXLAN(flags)) {
+		PIM_UPSTREAM_FLAG_SET_MLAG_VXLAN(up->flags);
+		pim_mlag_up_local_add(pim, up);
+	}
+
 	up->flags |= flags;
 	++up->ref_count;
 	if (PIM_DEBUG_TRACE)
@@ -842,7 +900,7 @@ struct pim_upstream *pim_upstream_add(struct pim_instance *pim,
 
 	up = pim_upstream_find(pim, sg);
 	if (up) {
-		pim_upstream_ref(up, flags, name);
+		pim_upstream_ref(pim, up, flags, name);
 		found = 1;
 	} else {
 		up = pim_upstream_new(pim, sg, incoming, flags, ch);
@@ -1181,8 +1239,16 @@ struct pim_upstream *pim_upstream_keep_alive_timer_proc(
 				"kat expired on %s[%s]; remove stream reference",
 				up->sg_str, pim->vrf->name);
 		PIM_UPSTREAM_FLAG_UNSET_SRC_STREAM(up->flags);
-		up = pim_upstream_del(pim, up, __PRETTY_FUNCTION__);
-	} else if (PIM_UPSTREAM_FLAG_TEST_SRC_LHR(up->flags)) {
+
+		/* Return if upstream entry got deleted.*/
+		if (!pim_upstream_del(pim, up, __PRETTY_FUNCTION__))
+			return NULL;
+	}
+	/* upstream reference would have been added to track the local
+	 * membership if it is LHR. We have to clear it when KAT expires.
+	 * Otherwise would result in stale entry with uncleared ref count.
+	 */
+	if (PIM_UPSTREAM_FLAG_TEST_SRC_LHR(up->flags)) {
 		struct pim_upstream *parent = up->parent;
 
 		PIM_UPSTREAM_FLAG_UNSET_SRC_LHR(up->flags);
@@ -1391,23 +1457,24 @@ const char *pim_upstream_state2str(enum pim_upstream_state join_state)
 	return "Unknown";
 }
 
-const char *pim_reg_state2str(enum pim_reg_state reg_state, char *state_str)
+const char *pim_reg_state2str(enum pim_reg_state reg_state, char *state_str,
+			      size_t state_str_len)
 {
 	switch (reg_state) {
 	case PIM_REG_NOINFO:
-		strcpy(state_str, "RegNoInfo");
+		strlcpy(state_str, "RegNoInfo", state_str_len);
 		break;
 	case PIM_REG_JOIN:
-		strcpy(state_str, "RegJoined");
+		strlcpy(state_str, "RegJoined", state_str_len);
 		break;
 	case PIM_REG_JOIN_PENDING:
-		strcpy(state_str, "RegJoinPend");
+		strlcpy(state_str, "RegJoinPend", state_str_len);
 		break;
 	case PIM_REG_PRUNE:
-		strcpy(state_str, "RegPrune");
+		strlcpy(state_str, "RegPrune", state_str_len);
 		break;
 	default:
-		strcpy(state_str, "RegUnknown");
+		strlcpy(state_str, "RegUnknown", state_str_len);
 	}
 	return state_str;
 }
@@ -1424,7 +1491,7 @@ static int pim_upstream_register_stop_timer(struct thread *t)
 		char state_str[PIM_REG_STATE_STR_LEN];
 		zlog_debug("%s: (S,G)=%s[%s] upstream register stop timer %s",
 			   __PRETTY_FUNCTION__, up->sg_str, pim->vrf->name,
-			   pim_reg_state2str(up->reg_state, state_str));
+			   pim_reg_state2str(up->reg_state, state_str, sizeof(state_str)));
 	}
 
 	switch (up->reg_state) {
@@ -1616,14 +1683,14 @@ void pim_upstream_find_new_rpf(struct pim_instance *pim)
 				zlog_debug(
 					"%s: Upstream %s without a path to send join, checking",
 					__PRETTY_FUNCTION__, up->sg_str);
-			pim_rpf_update(pim, up, NULL, 1);
+			pim_rpf_update(pim, up, NULL);
 		}
 	}
 }
 
-unsigned int pim_upstream_hash_key(void *arg)
+unsigned int pim_upstream_hash_key(const void *arg)
 {
-	struct pim_upstream *up = (struct pim_upstream *)arg;
+	const struct pim_upstream *up = arg;
 
 	return jhash_2words(up->sg.src.s_addr, up->sg.grp.s_addr, 0);
 }
@@ -1767,8 +1834,9 @@ static void pim_upstream_sg_running(void *arg)
 					"source reference created on kat restart %s[%s]",
 					up->sg_str, pim->vrf->name);
 
-			pim_upstream_ref(up, PIM_UPSTREAM_FLAG_MASK_SRC_STREAM,
-					 __PRETTY_FUNCTION__);
+			pim_upstream_ref(pim, up,
+					PIM_UPSTREAM_FLAG_MASK_SRC_STREAM,
+					__PRETTY_FUNCTION__);
 			PIM_UPSTREAM_FLAG_SET_SRC_STREAM(up->flags);
 			pim_upstream_fhr_kat_start(up);
 		}

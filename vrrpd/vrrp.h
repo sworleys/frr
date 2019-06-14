@@ -265,6 +265,14 @@ struct vrrp_vrouter {
  */
 void vrrp_init(void);
 
+/*
+ * Destroy all VRRP instances and gracefully shutdown.
+ *
+ * For instances in Master state, VRRP advertisements with 0 priority will be
+ * sent if possible to notify Backup routers that we are going away.
+ */
+void vrrp_fini(void);
+
 
 /* Creation and destruction ------------------------------------------------ */
 
@@ -464,7 +472,7 @@ extern const char *vrrp_event_names[2];
  * Use this if you need to react to state changes to perform non-critical
  * tasks. Critical tasks should go in the internal state change handlers.
  */
-DECLARE_HOOK(vrrp_change_state_hook, (struct vrrp_router * r, int to), (r, to));
+DECLARE_HOOK(vrrp_change_state_hook, (struct vrrp_router *r, int to), (r, to));
 
 /*
  * Trigger a VRRP event on a given Virtual Router..

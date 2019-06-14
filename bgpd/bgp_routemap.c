@@ -28,7 +28,7 @@
 #include "plist.h"
 #include "memory.h"
 #include "log.h"
-#include "lua.h"
+#include "frrlua.h"
 #ifdef HAVE_LIBPCREPOSIX
 #include <pcreposix.h>
 #else
@@ -3013,7 +3013,7 @@ static int bgp_route_match_add(struct vty *vty, const char *command,
 	int retval = CMD_SUCCESS;
 	int ret;
 
-	ret = route_map_add_match(index, command, arg);
+	ret = route_map_add_match(index, command, arg, type);
 	switch (ret) {
 	case RMAP_RULE_MISSING:
 		vty_out(vty, "%% BGP Can't find rule.\n");
@@ -3087,8 +3087,6 @@ static void bgp_route_map_process_peer(const char *rmap_name,
 				       struct route_map *map, struct peer *peer,
 				       int afi, int safi, int route_update)
 {
-
-	int update;
 	struct bgp_filter *filter;
 
 	if (!peer || !rmap_name)
@@ -3099,52 +3097,16 @@ static void bgp_route_map_process_peer(const char *rmap_name,
 	 * in is for non-route-server clients,
 	 * out is for all peers
 	 */
-	if (!CHECK_FLAG(peer->flags, PEER_FLAG_RSERVER_CLIENT)) {
-		if (filter->map[RMAP_IN].name
-		    && (strcmp(rmap_name, filter->map[RMAP_IN].name) == 0)) {
-			filter->map[RMAP_IN].map = map;
+	if (filter->map[RMAP_IN].name
+	    && (strcmp(rmap_name, filter->map[RMAP_IN].name) == 0)) {
+		filter->map[RMAP_IN].map = map;
 
-			if (route_update && peer->status == Established) {
-				if (CHECK_FLAG(peer->af_flags[afi][safi],
-					       PEER_FLAG_SOFT_RECONFIG)) {
-					if (bgp_debug_update(peer, NULL, NULL,
-							     1))
-						zlog_debug(
-							"Processing route_map %s update on "
-							"peer %s (inbound, soft-reconfig)",
-							rmap_name, peer->host);
-
-					bgp_soft_reconfig_in(peer, afi, safi);
-				} else if (
-					CHECK_FLAG(peer->cap,
-						   PEER_CAP_REFRESH_OLD_RCV)
-					|| CHECK_FLAG(
-						   peer->cap,
-						   PEER_CAP_REFRESH_NEW_RCV)) {
-
-					if (bgp_debug_update(peer, NULL, NULL,
-							     1))
-						zlog_debug(
-							"Processing route_map %s update on "
-							"peer %s (inbound, route-refresh)",
-							rmap_name, peer->host);
-					bgp_route_refresh_send(peer, afi, safi,
-							       0, 0, 0);
-				}
-			}
-		}
-	}
-
-	if (CHECK_FLAG(peer->flags, PEER_FLAG_RSERVER_CLIENT)) {
-		update = 0;
-
-		if (update && route_update && peer->status == Established) {
+		if (route_update && peer->status == Established) {
 			if (CHECK_FLAG(peer->af_flags[afi][safi],
 				       PEER_FLAG_SOFT_RECONFIG)) {
 				if (bgp_debug_update(peer, NULL, NULL, 1))
 					zlog_debug(
-						"Processing route_map %s update on "
-						"peer %s (import, soft-reconfig)",
+						"Processing route_map %s update on peer %s (inbound, soft-reconfig)",
 						rmap_name, peer->host);
 
 				bgp_soft_reconfig_in(peer, afi, safi);
@@ -3154,13 +3116,11 @@ static void bgp_route_map_process_peer(const char *rmap_name,
 						 PEER_CAP_REFRESH_NEW_RCV)) {
 				if (bgp_debug_update(peer, NULL, NULL, 1))
 					zlog_debug(
-						"Processing route_map %s update on "
-						"peer %s (import, route-refresh)",
+						"Processing route_map %s update on peer %s (inbound, route-refresh)",
 						rmap_name, peer->host);
 				bgp_route_refresh_send(peer, afi, safi, 0, 0,
 						       0);
 			}
-			/* DD: Else, what else do we do ? Reset peer ? */
 		}
 	}
 
@@ -3429,7 +3389,7 @@ static void bgp_route_map_delete(const char *rmap_name)
 	route_map_notify_dependencies(rmap_name, RMAP_EVENT_MATCH_DELETED);
 }
 
-static void bgp_route_map_event(route_map_event_t event, const char *rmap_name)
+static void bgp_route_map_event(const char *rmap_name)
 {
 	if (route_map_mark_updated(rmap_name) == 0)
 		bgp_route_map_mark_update(rmap_name);
@@ -4244,10 +4204,10 @@ DEFUN (set_community,
 	str = community_str(com, false);
 
 	if (additive) {
-		argstr = XCALLOC(MTYPE_TMP,
-				 strlen(str) + strlen(" additive") + 1);
-		strcpy(argstr, str);
-		strcpy(argstr + strlen(str), " additive");
+		size_t argstr_sz = strlen(str) + strlen(" additive") + 1;
+		argstr = XCALLOC(MTYPE_TMP, argstr_sz);
+		strlcpy(argstr, str, argstr_sz);
+		strlcat(argstr, " additive", argstr_sz);
 		ret = generic_set_add(vty, VTY_GET_CONTEXT(route_map_index),
 				      "community", argstr);
 		XFREE(MTYPE_TMP, argstr);

@@ -191,8 +191,7 @@ static int ripng_if_down(struct interface *ifp)
 }
 
 /* Inteface link up message processing. */
-int ripng_interface_up(int command, struct zclient *zclient,
-		       zebra_size_t length, vrf_id_t vrf_id)
+int ripng_interface_up(ZAPI_CALLBACK_ARGS)
 {
 	struct stream *s;
 	struct interface *ifp;
@@ -224,8 +223,7 @@ int ripng_interface_up(int command, struct zclient *zclient,
 }
 
 /* Inteface link down message processing. */
-int ripng_interface_down(int command, struct zclient *zclient,
-			 zebra_size_t length, vrf_id_t vrf_id)
+int ripng_interface_down(ZAPI_CALLBACK_ARGS)
 {
 	struct stream *s;
 	struct interface *ifp;
@@ -250,8 +248,7 @@ int ripng_interface_down(int command, struct zclient *zclient,
 }
 
 /* Inteface addition message from zebra. */
-int ripng_interface_add(int command, struct zclient *zclient,
-			zebra_size_t length, vrf_id_t vrf_id)
+int ripng_interface_add(ZAPI_CALLBACK_ARGS)
 {
 	struct interface *ifp;
 
@@ -275,8 +272,7 @@ int ripng_interface_add(int command, struct zclient *zclient,
 	return 0;
 }
 
-int ripng_interface_delete(int command, struct zclient *zclient,
-			   zebra_size_t length, vrf_id_t vrf_id)
+int ripng_interface_delete(ZAPI_CALLBACK_ARGS)
 {
 	struct interface *ifp;
 	struct stream *s;
@@ -352,8 +348,7 @@ static void ripng_apply_address_add(struct connected *ifc)
 				       ifc->ifp->ifindex, NULL, 0);
 }
 
-int ripng_interface_address_add(int command, struct zclient *zclient,
-				zebra_size_t length, vrf_id_t vrf_id)
+int ripng_interface_address_add(ZAPI_CALLBACK_ARGS)
 {
 	struct connected *c;
 	struct prefix *p;
@@ -416,8 +411,7 @@ static void ripng_apply_address_del(struct connected *ifc)
 				  &address, ifc->ifp->ifindex);
 }
 
-int ripng_interface_address_delete(int command, struct zclient *zclient,
-				   zebra_size_t length, vrf_id_t vrf_id)
+int ripng_interface_address_delete(ZAPI_CALLBACK_ARGS)
 {
 	struct connected *ifc;
 	struct prefix *p;

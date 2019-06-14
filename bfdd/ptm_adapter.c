@@ -526,9 +526,9 @@ stream_failure:
 	log_error("ptm-del-client: failed to deregister client");
 }
 
-static int bfdd_replay(int cmd, struct zclient *zc, uint16_t len, vrf_id_t vid)
+static int bfdd_replay(ZAPI_CALLBACK_ARGS)
 {
-	struct stream *msg = zc->ibuf;
+	struct stream *msg = zclient->ibuf;
 	uint32_t rcmd;
 
 	STREAM_GETL(msg, rcmd);

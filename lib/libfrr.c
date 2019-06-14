@@ -59,7 +59,7 @@ static char pidfile_default[512];
 #ifdef HAVE_SQLITE3
 static char dbfile_default[512];
 #endif
-static char vtypath_default[256];
+static char vtypath_default[512];
 
 bool debug_memstats_at_exit = false;
 static bool nodetach_term, nodetach_daemon;
@@ -79,8 +79,8 @@ static void opt_extend(const struct optspec *os)
 {
 	const struct option *lo;
 
-	strcat(comb_optstr, os->optstr);
-	strcat(comb_helpstr, os->helpstr);
+	strlcat(comb_optstr, os->optstr, sizeof(comb_optstr));
+	strlcat(comb_helpstr, os->helpstr, sizeof(comb_helpstr));
 	for (lo = os->longopts; lo->name; lo++)
 		memcpy(comb_next_lo++, lo, sizeof(*lo));
 }

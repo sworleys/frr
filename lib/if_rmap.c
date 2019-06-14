@@ -105,7 +105,7 @@ static struct if_rmap *if_rmap_get(const char *ifname)
 	return ret;
 }
 
-static unsigned int if_rmap_hash_make(void *data)
+static unsigned int if_rmap_hash_make(const void *data)
 {
 	const struct if_rmap *if_rmap = data;
 

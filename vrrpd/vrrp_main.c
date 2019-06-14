@@ -57,7 +57,7 @@ struct zebra_privs_t vrrp_privs = {
 	.cap_num_p = array_size(_caps_p),
 	.cap_num_i = 0};
 
-struct option longopts[] = {{0}};
+struct option longopts[] = { {0} };
 
 /* Master of threads. */
 struct thread_master *master;
@@ -69,9 +69,11 @@ static void sighup(void)
 }
 
 /* SIGINT / SIGTERM handler. */
-static void sigint(void)
+static void __attribute__((noreturn)) sigint(void)
 {
 	zlog_notice("Terminating on signal");
+
+	vrrp_fini();
 
 	exit(0);
 }

@@ -583,7 +583,7 @@ static int netlink_route_change_read_unicast(struct nlmsghdr *h, ns_id_t ns_id,
 			re->vrf_id = vrf_id;
 			re->table = table;
 			re->nexthop_num = 0;
-			re->uptime = time(NULL);
+			re->uptime = monotime(NULL);
 			re->tag = tag;
 
 			for (;;) {
@@ -813,7 +813,7 @@ static int netlink_route_change_read_multicast(struct nlmsghdr *h,
 
 			sprintf(temp, "%s(%d) ", ifp ? ifp->name : "Unknown",
 				oif[count]);
-			strcat(oif_list, temp);
+			strlcat(oif_list, temp, sizeof(oif_list));
 		}
 		struct zebra_vrf *zvrf = zebra_vrf_lookup_by_id(vrf);
 		ifp = if_lookup_by_index(iif, vrf);

@@ -83,9 +83,9 @@ static int evpn_vtep_ip_cmp(void *p1, void *p2)
 /*
  * Make hash key for ESI.
  */
-static unsigned int esi_hash_keymake(void *p)
+static unsigned int esi_hash_keymake(const void *p)
 {
-	struct evpnes *pes = p;
+	const struct evpnes *pes = p;
 	const void *pnt = (void *)pes->esi.val;
 
 	return jhash(pnt, ESI_BYTES, 0xa5a5a55a);
@@ -111,9 +111,9 @@ static bool esi_cmp(const void *p1, const void *p2)
 /*
  * Make vni hash key.
  */
-static unsigned int vni_hash_key_make(void *p)
+static unsigned int vni_hash_key_make(const void *p)
 {
-	struct bgpevpn *vpn = p;
+	const struct bgpevpn *vpn = p;
 	return (jhash_1word(vpn->vni, 0));
 }
 
@@ -143,10 +143,10 @@ static int vni_list_cmp(void *p1, void *p2)
 /*
  * Make vrf import route target hash key.
  */
-static unsigned int vrf_import_rt_hash_key_make(void *p)
+static unsigned int vrf_import_rt_hash_key_make(const void *p)
 {
-	struct vrf_irt_node *irt = p;
-	char *pnt = irt->rt.val;
+	const struct vrf_irt_node *irt = p;
+	const char *pnt = irt->rt.val;
 
 	return jhash(pnt, 8, 0x5abc1234);
 }
@@ -259,10 +259,10 @@ static int is_vrf_present_in_irt_vrfs(struct list *vrfs, struct bgp *bgp_vrf)
 /*
  * Make import route target hash key.
  */
-static unsigned int import_rt_hash_key_make(void *p)
+static unsigned int import_rt_hash_key_make(const void *p)
 {
-	struct irt_node *irt = p;
-	char *pnt = irt->rt.val;
+	const struct irt_node *irt = p;
+	const char *pnt = irt->rt.val;
 
 	return jhash(pnt, 8, 0xdeadbeef);
 }
@@ -2472,7 +2472,7 @@ static int install_evpn_route_entry_in_vrf(struct bgp *bgp_vrf,
 
 	if (bgp_debug_zebra(NULL)) {
 		zlog_debug(
-			"installing evpn prefix %s as ip prefix %s in vrf %s",
+			"import evpn prefix %s as ip prefix %s in vrf %s",
 			prefix2str(evp, buf, sizeof(buf)),
 			prefix2str(pp, buf1, sizeof(buf)),
 			vrf_id_to_name(bgp_vrf->vrf_id));
@@ -4921,7 +4921,7 @@ int bgp_nlri_parse_evpn(struct peer *peer, struct attr *attr,
 		if (addpath_encoded) {
 			/* When packet overflow occurs return immediately. */
 			if (pnt + BGP_ADDPATH_ID_LEN > lim)
-				return -1;
+				return BGP_NLRI_PARSE_ERROR_PACKET_OVERFLOW;
 
 			addpath_id = ntohl(*((uint32_t *)pnt));
 			pnt += BGP_ADDPATH_ID_LEN;
@@ -4929,14 +4929,14 @@ int bgp_nlri_parse_evpn(struct peer *peer, struct attr *attr,
 
 		/* All EVPN NLRI types start with type and length. */
 		if (pnt + 2 > lim)
-			return -1;
+			return BGP_NLRI_PARSE_ERROR_EVPN_MISSING_TYPE;
 
 		rtype = *pnt++;
 		psize = *pnt++;
 
 		/* When packet overflow occur return immediately. */
 		if (pnt + psize > lim)
-			return -1;
+			return BGP_NLRI_PARSE_ERROR_PACKET_OVERFLOW;
 
 		switch (rtype) {
 		case BGP_EVPN_MAC_IP_ROUTE:
@@ -4947,7 +4947,7 @@ int bgp_nlri_parse_evpn(struct peer *peer, struct attr *attr,
 					EC_BGP_EVPN_FAIL,
 					"%u:%s - Error in processing EVPN type-2 NLRI size %d",
 					peer->bgp->vrf_id, peer->host, psize);
-				return -1;
+				return BGP_NLRI_PARSE_ERROR_EVPN_TYPE2_SIZE;
 			}
 			break;
 
@@ -4959,7 +4959,7 @@ int bgp_nlri_parse_evpn(struct peer *peer, struct attr *attr,
 					EC_BGP_PKT_PROCESS,
 					"%u:%s - Error in processing EVPN type-3 NLRI size %d",
 					peer->bgp->vrf_id, peer->host, psize);
-				return -1;
+				return BGP_NLRI_PARSE_ERROR_EVPN_TYPE3_SIZE;
 			}
 			break;
 
@@ -4971,7 +4971,7 @@ int bgp_nlri_parse_evpn(struct peer *peer, struct attr *attr,
 					EC_BGP_PKT_PROCESS,
 					"%u:%s - Error in processing EVPN type-4 NLRI size %d",
 					peer->bgp->vrf_id, peer->host, psize);
-				return -1;
+				return BGP_NLRI_PARSE_ERROR_EVPN_TYPE4_SIZE;
 			}
 			break;
 
@@ -4983,7 +4983,7 @@ int bgp_nlri_parse_evpn(struct peer *peer, struct attr *attr,
 					EC_BGP_PKT_PROCESS,
 					"%u:%s - Error in processing EVPN type-5 NLRI size %d",
 					peer->bgp->vrf_id, peer->host, psize);
-				return -1;
+				return BGP_NLRI_PARSE_ERROR_EVPN_TYPE5_SIZE;
 			}
 			break;
 
@@ -4994,9 +4994,9 @@ int bgp_nlri_parse_evpn(struct peer *peer, struct attr *attr,
 
 	/* Packet length consistency check. */
 	if (pnt != lim)
-		return -1;
+		return BGP_NLRI_PARSE_ERROR_PACKET_LENGTH;
 
-	return 0;
+	return BGP_NLRI_PARSE_OK;
 }
 
 /*

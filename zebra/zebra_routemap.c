@@ -67,7 +67,7 @@ static int zebra_route_match_add(struct vty *vty, const char *command,
 	int ret;
 	int retval = CMD_SUCCESS;
 
-	ret = route_map_add_match(index, command, arg);
+	ret = route_map_add_match(index, command, arg, type);
 	switch (ret) {
 	case RMAP_RULE_MISSING:
 		vty_out(vty, "%% Zebra Can't find rule.\n");
@@ -700,6 +700,9 @@ DEFPY (ip_protocol,
 {
 	int ret, rtype;
 
+	assert(proto);
+	assert(rmap);
+
 	ZEBRA_DECLVAR_CONTEXT(vrf, zvrf);
 
 	if (!zvrf)
@@ -731,6 +734,8 @@ DEFPY (no_ip_protocol,
        "Route map name\n")
 {
 	int ret, rtype;
+
+	assert(proto);
 
 	ZEBRA_DECLVAR_CONTEXT(vrf, zvrf);
 
@@ -776,6 +781,9 @@ DEFPY (ipv6_protocol,
 {
 	int ret, rtype;
 
+	assert(rmap);
+	assert(proto);
+
 	ZEBRA_DECLVAR_CONTEXT(vrf, zvrf);
 
 	if (!zvrf)
@@ -807,6 +815,8 @@ DEFPY (no_ipv6_protocol,
        "Route map name\n")
 {
 	int ret, rtype;
+
+	assert(proto);
 
 	ZEBRA_DECLVAR_CONTEXT(vrf, zvrf);
 
@@ -853,6 +863,9 @@ DEFPY (ip_protocol_nht_rmap,
 
 	int ret, rtype;
 
+	assert(proto);
+	assert(rmap);
+
 	ZEBRA_DECLVAR_CONTEXT(vrf, zvrf);
 
 	if (!zvrf)
@@ -884,6 +897,8 @@ DEFPY (no_ip_protocol_nht_rmap,
        "Route map name\n")
 {
 	int ret, rtype;
+
+	assert(proto);
 
 	ZEBRA_DECLVAR_CONTEXT(vrf, zvrf);
 
@@ -930,6 +945,9 @@ DEFPY (ipv6_protocol_nht_rmap,
 {
 	int ret, rtype;
 
+	assert(rmap);
+	assert(proto);
+
 	ZEBRA_DECLVAR_CONTEXT(vrf, zvrf);
 
 	if (!zvrf)
@@ -961,6 +979,8 @@ DEFPY (no_ipv6_protocol_nht_rmap,
        "Route map name\n")
 {
 	int ret, rtype;
+
+	assert(proto);
 
 	ZEBRA_DECLVAR_CONTEXT(vrf, zvrf);
 
@@ -1765,8 +1785,7 @@ static void zebra_route_map_delete(const char *rmap_name)
 	route_map_notify_dependencies(rmap_name, RMAP_EVENT_MATCH_DELETED);
 }
 
-static void zebra_route_map_event(route_map_event_t event,
-				  const char *rmap_name)
+static void zebra_route_map_event(const char *rmap_name)
 {
 	if (route_map_mark_updated(rmap_name) == 0)
 		zebra_route_map_mark_update(rmap_name);

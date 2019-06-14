@@ -59,6 +59,30 @@ nexthop_group_cmd_compare(const struct nexthop_group_cmd *nhgc1,
 	return strcmp(nhgc1->name, nhgc2->name);
 }
 
+uint8_t nexthop_group_nexthop_num(const struct nexthop_group *nhg)
+{
+	struct nexthop *nhop;
+	uint8_t num = 0;
+
+	for (ALL_NEXTHOPS_PTR(nhg, nhop))
+		num++;
+
+	return num;
+}
+
+uint8_t nexthop_group_active_nexthop_num(const struct nexthop_group *nhg)
+{
+	struct nexthop *nhop;
+	uint8_t num = 0;
+
+	for (ALL_NEXTHOPS_PTR(nhg, nhop)) {
+		if (CHECK_FLAG(nhop->flags, NEXTHOP_FLAG_ACTIVE))
+			num++;
+	}
+
+	return num;
+}
+
 struct nexthop *nexthop_exists(struct nexthop_group *nhg, struct nexthop *nh)
 {
 	struct nexthop *nexthop;
@@ -284,7 +308,7 @@ static void nhgc_delete(struct nexthop_group_cmd *nhgc)
 
 DEFINE_QOBJ_TYPE(nexthop_group_cmd)
 
-DEFUN_NOSH(nexthop_group, nexthop_group_cmd, "nexthop-group NAME",
+DEFUN_NOSH(nexthop_group, nexthop_group_cmd, "nexthop-group NHGNAME",
 	   "Enter into the nexthop-group submode\n"
 	   "Specify the NAME of the nexthop-group\n")
 {
@@ -297,7 +321,7 @@ DEFUN_NOSH(nexthop_group, nexthop_group_cmd, "nexthop-group NAME",
 	return CMD_SUCCESS;
 }
 
-DEFUN_NOSH(no_nexthop_group, no_nexthop_group_cmd, "no nexthop-group NAME",
+DEFUN_NOSH(no_nexthop_group, no_nexthop_group_cmd, "no nexthop-group NHGNAME",
 	   NO_STR
 	   "Delete the nexthop-group\n"
 	   "Specify the NAME of the nexthop-group\n")
@@ -690,6 +714,19 @@ void nexthop_group_interface_state_change(struct interface *ifp,
 	}
 }
 
+static void nhg_name_autocomplete(vector comps, struct cmd_token *token)
+{
+	struct nexthop_group_cmd *nhgc;
+
+	RB_FOREACH (nhgc, nhgc_entry_head, &nhgc_entries) {
+		vector_set(comps, XSTRDUP(MTYPE_COMPLETION, nhgc->name));
+	}
+}
+
+static const struct cmd_variable_handler nhg_name_handlers[] = {
+	{.tokenname = "NHGNAME", .completions = nhg_name_autocomplete},
+	{.completions = NULL}};
+
 void nexthop_group_init(void (*new)(const char *name),
 			void (*add_nexthop)(const struct nexthop_group_cmd *nhg,
 					    const struct nexthop *nhop),
@@ -698,6 +735,8 @@ void nexthop_group_init(void (*new)(const char *name),
 			void (*delete)(const char *name))
 {
 	RB_INIT(nhgc_entry_head, &nhgc_entries);
+
+	cmd_variable_handler_register(nhg_name_handlers);
 
 	install_node(&nexthop_group_node, nexthop_group_write);
 	install_element(CONFIG_NODE, &nexthop_group_cmd);

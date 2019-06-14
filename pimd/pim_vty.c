@@ -120,6 +120,11 @@ int pim_debug_config_write(struct vty *vty)
 		++writes;
 	}
 
+	if (PIM_DEBUG_MLAG) {
+		vty_out(vty, "debug pim mlag\n");
+		++writes;
+	}
+
 	if (PIM_DEBUG_VXLAN) {
 		vty_out(vty, "debug pim vxlan\n");
 		++writes;
@@ -240,8 +245,6 @@ int pim_global_config_write_worker(struct pim_instance *pim, struct vty *vty)
 		}
 	}
 
-	pim_vxlan_config_write(vty, spaces, &writes);
-
 	return writes;
 }
 
@@ -342,6 +345,24 @@ int pim_interface_config_write(struct vty *vty)
 						" ip igmp query-interval %d\n",
 						pim_ifp->igmp_default_query_interval);
 					++writes;
+				}
+
+				/* IF ip igmp last-member_query-count */
+				if (pim_ifp->igmp_last_member_query_count
+				    != IGMP_DEFAULT_ROBUSTNESS_VARIABLE) {
+					vty_out(vty,
+						" ip igmp last-member-query-count %d\n",
+						pim_ifp->igmp_last_member_query_count);
+					++writes;
+				}
+
+				/* IF ip igmp last-member_query-interval */
+				if (pim_ifp->igmp_specific_query_max_response_time_dsec
+				    != IGMP_SPECIFIC_QUERY_MAX_RESPONSE_TIME_DSEC) {
+					vty_out(vty,
+						" ip igmp last-member-query-interval %d\n",
+						pim_ifp->igmp_specific_query_max_response_time_dsec);
+					  ++writes;
 				}
 
 				/* IF ip igmp join */

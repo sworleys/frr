@@ -79,9 +79,6 @@ struct zserv {
 	/* Threads for the main pthread */
 	struct thread *t_cleanup;
 
-	/* default routing table this client munges */
-	int rtm_table;
-
 	/* This client's redistribute flag. */
 	struct redist_proto mi_redist[AFI_MAX][ZEBRA_ROUTE_MAX];
 	vrf_bitmap_t redist[AFI_MAX][ZEBRA_ROUTE_MAX];
@@ -98,6 +95,13 @@ struct zserv {
 	uint8_t proto;
 	uint16_t instance;
 	uint8_t is_synchronous;
+
+	/*
+	 * Interested for MLAG Updates, and also stores the client
+	 * interested message mask
+	 */
+	bool mlag_updates_interested;
+	uint32_t mlag_reg_mask1;
 
 	/* Statistics */
 	uint32_t redist_v4_add_cnt;
@@ -172,8 +176,6 @@ struct zserv {
 DECLARE_HOOK(zserv_client_connect, (struct zserv *client), (client));
 DECLARE_KOOH(zserv_client_close, (struct zserv *client), (client));
 
-extern unsigned int multipath_num;
-
 /*
  * Initialize Zebra API server.
  *
@@ -235,6 +237,22 @@ extern struct zserv *zserv_find_client(uint8_t proto, unsigned short instance);
  *    the client to close
  */
 extern void zserv_close_client(struct zserv *client);
+
+
+/*
+ * Log a ZAPI message hexdump.
+ *
+ * errmsg
+ *    Error message to include with packet hexdump
+ *
+ * msg
+ *    Message to log
+ *
+ * hdr
+ *    Message header
+ */
+void zserv_log_message(const char *errmsg, struct stream *msg,
+		       struct zmsghdr *hdr);
 
 #if defined(HANDLE_ZAPI_FUZZING)
 extern void zserv_read_file(char *input);

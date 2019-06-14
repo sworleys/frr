@@ -612,9 +612,9 @@ int zebra_add_import_table_entry(struct route_node *rn, struct route_entry *re,
 	newre->flags = re->flags;
 	newre->metric = re->metric;
 	newre->mtu = re->mtu;
-	newre->table = zrouter.rtm_table_default;
+	newre->table = 0;
 	newre->nexthop_num = 0;
-	newre->uptime = time(NULL);
+	newre->uptime = monotime(NULL);
 	newre->instance = re->table;
 	route_entry_copy_nexthops(newre, re->ng.nexthop);
 
@@ -632,8 +632,8 @@ int zebra_del_import_table_entry(struct route_node *rn, struct route_entry *re)
 	prefix_copy(&p, &rn->p);
 
 	rib_delete(afi, SAFI_UNICAST, re->vrf_id, ZEBRA_ROUTE_TABLE, re->table,
-		   re->flags, &p, NULL, re->ng.nexthop,
-		   zrouter.rtm_table_default, re->metric, re->distance, false);
+		   re->flags, &p, NULL, re->ng.nexthop, 0, re->metric,
+		   re->distance, false);
 
 	return 0;
 }
@@ -647,14 +647,14 @@ int zebra_import_table(afi_t afi, uint32_t table_id, uint32_t distance,
 	struct route_node *rn;
 
 	if (!is_zebra_valid_kernel_table(table_id)
-	    || ((table_id == RT_TABLE_MAIN)
-		|| (table_id == zrouter.rtm_table_default)))
+	    || (table_id == RT_TABLE_MAIN))
 		return (-1);
 
 	if (afi >= AFI_MAX)
 		return (-1);
 
-	table = zebra_vrf_other_route_table(afi, table_id, VRF_DEFAULT);
+	table = zebra_vrf_table_with_table_id(afi, SAFI_UNICAST,
+					      table_id, VRF_DEFAULT);
 	if (table == NULL) {
 		return 0;
 	} else if (IS_ZEBRA_DEBUG_RIB) {
@@ -768,8 +768,15 @@ void zebra_import_table_rm_update(const char *rmap)
 			rmap_name = zebra_get_import_table_route_map(afi, i);
 			if ((!rmap_name) || (strcmp(rmap_name, rmap) != 0))
 				continue;
-			table = zebra_vrf_other_route_table(afi, i,
-							    VRF_DEFAULT);
+			table = zebra_vrf_table_with_table_id(afi, SAFI_UNICAST,
+							      i, VRF_DEFAULT);
+			if (!table) {
+				if (IS_ZEBRA_DEBUG_RIB_DETAILED)
+					zlog_debug("%s: Table id=%d not found",
+						   __func__, i);
+				continue;
+			}
+
 			for (rn = route_top(table); rn; rn = route_next(rn)) {
 				/* For each entry in the non-default
 				 * routing table,

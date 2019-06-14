@@ -119,6 +119,7 @@ static enum node_type bgp_node_type(afi_t afi, safi_t safi)
 	case AFI_L2VPN:
 		return BGP_EVPN_NODE;
 		break;
+	case AFI_UNSPEC:
 	case AFI_MAX:
 		// We should never be here but to clarify the switch statement..
 		return BGP_IPV4_NODE;
@@ -216,6 +217,10 @@ int argv_find_and_parse_afi(struct cmd_token **argv, int argc, int *index,
 		ret = 1;
 		if (afi)
 			*afi = AFI_IP6;
+	} else if (argv_find(argv, argc, "l2vpn", index)) {
+		ret = 1;
+		if (afi)
+			*afi = AFI_L2VPN;
 	}
 	return ret;
 }
@@ -259,6 +264,10 @@ int argv_find_and_parse_safi(struct cmd_token **argv, int argc, int *index,
 		ret = 1;
 		if (safi)
 			*safi = SAFI_MPLS_VPN;
+	} else if (argv_find(argv, argc, "evpn", index)) {
+		ret = 1;
+		if (safi)
+			*safi = SAFI_EVPN;
 	} else if (argv_find(argv, argc, "flowspec", index)) {
 		ret = 1;
 		if (safi)
@@ -295,6 +304,7 @@ int argv_find_and_parse_safi(struct cmd_token **argv, int argc, int *index,
  * afi  -> The parsed afi if it was included in the show command, returned here
  * safi -> The parsed safi if it was included in the show command, returned here
  * bgp  -> Pointer to the bgp data structure we need to fill in.
+ * use_json -> json is configured or not
  *
  * The function returns the correct location in the parse tree for the
  * last token found.
@@ -329,8 +339,17 @@ int bgp_vty_find_and_parse_afi_safi_bgp(struct vty *vty,
 		else {
 			*bgp = bgp_lookup_by_name(vrf_name);
 			if (!*bgp) {
-				if (use_json)
-					vty_out(vty, "{}\n");
+				if (use_json) {
+					json_object *json = NULL;
+					json = json_object_new_object();
+					json_object_string_add(
+					  json, "warning",
+					  "View/Vrf is unknown");
+					vty_out(vty, "%s\n",
+						json_object_to_json_string_ext(json,
+							JSON_C_TO_STRING_PRETTY));
+					json_object_free(json);
+				}
 				else
 					vty_out(vty, "View/Vrf %s is unknown\n",
 						vrf_name);
@@ -341,8 +360,17 @@ int bgp_vty_find_and_parse_afi_safi_bgp(struct vty *vty,
 	} else {
 		*bgp = bgp_get_default();
 		if (!*bgp) {
-			if (use_json)
-				vty_out(vty, "{}\n");
+			if (use_json) {
+				json_object *json = NULL;
+				json = json_object_new_object();
+				json_object_string_add(
+					json, "warning",
+					"Default BGP instance not found");
+				vty_out(vty, "%s\n",
+					json_object_to_json_string_ext(json,
+						JSON_C_TO_STRING_PRETTY));
+				json_object_free(json);
+			}
 			else
 				vty_out(vty,
 					"Default BGP instance not found\n");
@@ -795,41 +823,6 @@ static void bgp_clear_star_soft_out(struct vty *vty, const char *name)
 #include "bgpd/bgp_vty_clippy.c"
 #endif
 
-/* BGP global configuration.  */
-#if (CONFDATE > 20190601)
-CPP_NOTICE("bgpd: time to remove deprecated bgp multiple-instance")
-CPP_NOTICE("This includes BGP_OPT_MULTIPLE_INSTANCE")
-#endif
-DEFUN_HIDDEN (bgp_multiple_instance_func,
-	      bgp_multiple_instance_cmd,
-	      "bgp multiple-instance",
-	      BGP_STR
-	      "Enable bgp multiple instance\n")
-{
-	bgp_option_set(BGP_OPT_MULTIPLE_INSTANCE);
-	return CMD_SUCCESS;
-}
-
-DEFUN_HIDDEN (no_bgp_multiple_instance,
-       no_bgp_multiple_instance_cmd,
-       "no bgp multiple-instance",
-       NO_STR
-       BGP_STR
-       "BGP multiple instance\n")
-{
-	int ret;
-
-	vty_out(vty, "This config option is deprecated, and is scheduled for removal.\n");
-	vty_out(vty, "if you are using this please let the developers know\n");
-	zlog_info("Deprecated option: `bgp multiple-instance` being used");
-	ret = bgp_option_unset(BGP_OPT_MULTIPLE_INSTANCE);
-	if (ret < 0) {
-		vty_out(vty, "%% There are more than two BGP instances\n");
-		return CMD_WARNING_CONFIG_FAILED;
-	}
-	return CMD_SUCCESS;
-}
-
 DEFUN_HIDDEN (bgp_local_mac,
               bgp_local_mac_cmd,
               "bgp local-mac vni " CMD_VNI_RANGE " mac WORD seq (0-4294967295)",
@@ -910,44 +903,6 @@ DEFUN_HIDDEN (no_bgp_local_mac,
 
 	return CMD_SUCCESS;
 }
-
-#if (CONFDATE > 20190601)
-CPP_NOTICE("bgpd: time to remove deprecated cli bgp config-type cisco")
-CPP_NOTICE("This includes BGP_OPT_CISCO_CONFIG")
-#endif
-DEFUN_HIDDEN (bgp_config_type,
-	      bgp_config_type_cmd,
-	      "bgp config-type <cisco|zebra>",
-	      BGP_STR
-	      "Configuration type\n"
-	      "cisco\n"
-	      "zebra\n")
-{
-	int idx = 0;
-	if (argv_find(argv, argc, "cisco", &idx)) {
-		vty_out(vty, "This config option is deprecated, and is scheduled for removal.\n");
-		vty_out(vty, "if you are using this please let the developers know!\n");
-		zlog_info("Deprecated option: `bgp config-type cisco` being used");
-		bgp_option_set(BGP_OPT_CONFIG_CISCO);
-	} else
-		bgp_option_unset(BGP_OPT_CONFIG_CISCO);
-
-	return CMD_SUCCESS;
-}
-
-DEFUN_HIDDEN (no_bgp_config_type,
-	      no_bgp_config_type_cmd,
-	      "no bgp config-type [<cisco|zebra>]",
-	      NO_STR
-	      BGP_STR
-	      "Display configuration type\n"
-	      "cisco\n"
-	      "zebra\n")
-{
-	bgp_option_unset(BGP_OPT_CONFIG_CISCO);
-	return CMD_SUCCESS;
-}
-
 
 DEFUN (no_synchronization,
        no_synchronization_cmd,
@@ -1109,9 +1064,24 @@ DEFUN (no_router_bgp,
 		}
 
 		if (bgp->l3vni) {
-			vty_out(vty, "%% Please unconfigure l3vni %u",
+			vty_out(vty, "%% Please unconfigure l3vni %u\n",
 				bgp->l3vni);
 			return CMD_WARNING_CONFIG_FAILED;
+		}
+
+		/* Cannot delete default instance if vrf instances exist */
+		if (bgp->inst_type == BGP_INSTANCE_TYPE_DEFAULT) {
+			struct listnode *node;
+			struct bgp *tmp_bgp;
+
+			for (ALL_LIST_ELEMENTS_RO(bm->bgp, node, tmp_bgp)) {
+				if (tmp_bgp->inst_type
+				    == BGP_INSTANCE_TYPE_VRF) {
+					vty_out(vty,
+						"%% Cannot delete default BGP instance. Dependent VRF instances exist\n");
+					return CMD_WARNING_CONFIG_FAILED;
+				}
+			}
 		}
 	}
 
@@ -2097,28 +2067,6 @@ DEFUN (no_bgp_fast_external_failover,
 {
 	VTY_DECLVAR_CONTEXT(bgp, bgp);
 	bgp_flag_set(bgp, BGP_FLAG_NO_FAST_EXT_FAILOVER);
-	return CMD_SUCCESS;
-}
-
-/* "bgp enforce-first-as" configuration. */
-#if CONFDATE > 20190517
-CPP_NOTICE("bgpd: remove deprecated '[no] bgp enforce-first-as' commands")
-#endif
-
-DEFUN_HIDDEN (bgp_enforce_first_as,
-	      bgp_enforce_first_as_cmd,
-	      "[no] bgp enforce-first-as",
-	      NO_STR
-	      BGP_STR
-	      "Enforce the first AS for EBGP routes\n")
-{
-	VTY_DECLVAR_CONTEXT(bgp, bgp);
-
-	if (strmatch(argv[0]->text, "no"))
-		bgp_flag_unset(bgp, BGP_FLAG_ENFORCE_FIRST_AS);
-	else
-		bgp_flag_set(bgp, BGP_FLAG_ENFORCE_FIRST_AS);
-
 	return CMD_SUCCESS;
 }
 
@@ -3920,6 +3868,13 @@ ALIAS_HIDDEN(neighbor_nexthop_self_force,
 	     "Disable the next hop calculation for this neighbor\n"
 	     "Set the next hop to self for reflected routes\n")
 
+ALIAS_HIDDEN(neighbor_nexthop_self_force,
+	     neighbor_nexthop_self_all_hidden_cmd,
+	     "neighbor <A.B.C.D|X:X::X:X|WORD> next-hop-self all",
+	     NEIGHBOR_STR NEIGHBOR_ADDR_STR2
+	     "Disable the next hop calculation for this neighbor\n"
+	     "Set the next hop to self for reflected routes\n")
+
 DEFUN (no_neighbor_nexthop_self,
        no_neighbor_nexthop_self_cmd,
        "no neighbor <A.B.C.D|X:X::X:X|WORD> next-hop-self",
@@ -3957,6 +3912,13 @@ DEFUN (no_neighbor_nexthop_self_force,
 ALIAS_HIDDEN(no_neighbor_nexthop_self_force,
 	     no_neighbor_nexthop_self_force_hidden_cmd,
 	     "no neighbor <A.B.C.D|X:X::X:X|WORD> next-hop-self force",
+	     NO_STR NEIGHBOR_STR NEIGHBOR_ADDR_STR2
+	     "Disable the next hop calculation for this neighbor\n"
+	     "Set the next hop to self for reflected routes\n")
+
+ALIAS_HIDDEN(no_neighbor_nexthop_self_force,
+	     no_neighbor_nexthop_self_all_hidden_cmd,
+	     "no neighbor <A.B.C.D|X:X::X:X|WORD> next-hop-self all",
 	     NO_STR NEIGHBOR_STR NEIGHBOR_ADDR_STR2
 	     "Disable the next hop calculation for this neighbor\n"
 	     "Set the next hop to self for reflected routes\n")
@@ -7431,11 +7393,6 @@ DEFUN (show_bgp_views,
 	struct listnode *node;
 	struct bgp *bgp;
 
-	if (!bgp_option_check(BGP_OPT_MULTIPLE_INSTANCE)) {
-		vty_out(vty, "BGP Multiple Instance is not enabled\n");
-		return CMD_WARNING;
-	}
-
 	vty_out(vty, "Defined BGP views:\n");
 	for (ALL_LIST_ELEMENTS_RO(inst, node, bgp)) {
 		/* Skip VRFs. */
@@ -7465,11 +7422,6 @@ DEFUN (show_bgp_vrfs,
 	json_object *json = NULL;
 	json_object *json_vrfs = NULL;
 	int count = 0;
-
-	if (!bgp_option_check(BGP_OPT_MULTIPLE_INSTANCE)) {
-		vty_out(vty, "BGP Multiple Instance is not enabled\n");
-		return CMD_WARNING;
-	}
 
 	if (uj) {
 		json = json_object_new_object();
@@ -10848,11 +10800,11 @@ static void bgp_show_peer(struct vty *vty, struct peer *p, bool use_json,
 		if (p->password)
 			vty_out(vty, "Peer Authentication Enabled\n");
 
-		vty_out(vty, "Read thread: %s  Write thread: %s\n",
+		vty_out(vty, "Read thread: %s  Write thread: %s  FD used: %d\n",
 			p->t_read ? "on" : "off",
 			CHECK_FLAG(p->thread_flags, PEER_THREAD_WRITES_ON)
 				? "on"
-				: "off");
+				: "off", p->fd);
 	}
 
 	if (p->notify.code == BGP_NOTIFY_OPEN_ERR
@@ -12757,14 +12709,6 @@ void bgp_vty_init(void)
 	install_default(BGP_EVPN_NODE);
 	install_default(BGP_EVPN_VNI_NODE);
 
-	/* "bgp multiple-instance" commands. */
-	install_element(CONFIG_NODE, &bgp_multiple_instance_cmd);
-	install_element(CONFIG_NODE, &no_bgp_multiple_instance_cmd);
-
-	/* "bgp config-type" commands. */
-	install_element(CONFIG_NODE, &bgp_config_type_cmd);
-	install_element(CONFIG_NODE, &no_bgp_config_type_cmd);
-
 	/* "bgp local-mac" hidden commands. */
 	install_element(CONFIG_NODE, &bgp_local_mac_cmd);
 	install_element(CONFIG_NODE, &no_bgp_local_mac_cmd);
@@ -12885,9 +12829,6 @@ void bgp_vty_init(void)
 	/* "bgp fast-external-failover" commands */
 	install_element(BGP_NODE, &bgp_fast_external_failover_cmd);
 	install_element(BGP_NODE, &no_bgp_fast_external_failover_cmd);
-
-	/* "bgp enforce-first-as" commands */
-	install_element(BGP_NODE, &bgp_enforce_first_as_cmd);
 
 	/* "bgp bestpath compare-routerid" commands */
 	install_element(BGP_NODE, &bgp_bestpath_compare_router_id_cmd);
@@ -13118,6 +13059,8 @@ void bgp_vty_init(void)
 	/* "neighbor next-hop-self force" commands. */
 	install_element(BGP_NODE, &neighbor_nexthop_self_force_hidden_cmd);
 	install_element(BGP_NODE, &no_neighbor_nexthop_self_force_hidden_cmd);
+	install_element(BGP_NODE, &neighbor_nexthop_self_all_hidden_cmd);
+	install_element(BGP_NODE, &no_neighbor_nexthop_self_all_hidden_cmd);
 	install_element(BGP_IPV4_NODE, &neighbor_nexthop_self_force_cmd);
 	install_element(BGP_IPV4_NODE, &no_neighbor_nexthop_self_force_cmd);
 	install_element(BGP_IPV4M_NODE, &neighbor_nexthop_self_force_cmd);
@@ -14464,7 +14407,7 @@ static int lcommunity_list_unset_vty(struct vty *vty, int argc,
 		vty_out(vty, "This config option is deprecated, and is scheduled for removal.\n");
 		vty_out(vty, "if you are using this please migrate to the below command.\n");
 		vty_out(vty, "'no bgp large-community-list <(1-99)|(100-500)|standard|expanded> <deny|permit> <LINE|AA:BB:CC>'\n");
-		zlog_warn("Deprecated option: 'no ip large-community-list <(1-99)|(100-500)|standard|expanded> <deny|permit> <LINE|AA:BB:CC>' being used");	
+		zlog_warn("Deprecated option: 'no ip large-community-list <(1-99)|(100-500)|standard|expanded> <deny|permit> <LINE|AA:BB:CC>' being used");
 	}
 	argv_find(argv, argc, "permit", &idx);
 	argv_find(argv, argc, "deny", &idx);
@@ -14819,14 +14762,16 @@ static void lcommunity_list_show(struct vty *vty, struct community_list *list)
 		if (entry == list->head) {
 			if (all_digit(list->name))
 				vty_out(vty, "Large community %s list %s\n",
-					entry->style == EXTCOMMUNITY_LIST_STANDARD
+					entry->style ==
+						LARGE_COMMUNITY_LIST_STANDARD
 						? "standard"
 						: "(expanded) access",
 					list->name);
 			else
 				vty_out(vty,
 					"Named large community %s list %s\n",
-					entry->style == EXTCOMMUNITY_LIST_STANDARD
+					entry->style ==
+						LARGE_COMMUNITY_LIST_STANDARD
 						? "standard"
 						: "expanded",
 					list->name);

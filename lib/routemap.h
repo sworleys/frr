@@ -100,13 +100,18 @@ struct route_map_rule_cmd {
 };
 
 /* Route map apply error. */
-enum { RMAP_COMPILE_SUCCESS,
+enum {
+	RMAP_COMPILE_SUCCESS,
 
-       /* Route map rule is missing. */
-       RMAP_RULE_MISSING,
+	/* Route map rule is missing. */
+	RMAP_RULE_MISSING,
 
-       /* Route map rule can't compile */
-       RMAP_COMPILE_ERROR };
+	/* Route map rule can't compile */
+	RMAP_COMPILE_ERROR,
+
+	/* Route map rule is duplicate */
+	RMAP_DUPLICATE_RULE
+};
 
 /* Route map rule list. */
 struct route_map_rule_list {
@@ -185,7 +190,8 @@ extern void route_map_finish(void);
 
 /* Add match statement to route map. */
 extern int route_map_add_match(struct route_map_index *index,
-			       const char *match_name, const char *match_arg);
+			       const char *match_name, const char *match_arg,
+			       route_map_event_t type);
 
 /* Delete specified route match rule. */
 extern int route_map_delete_match(struct route_map_index *index,
@@ -231,7 +237,15 @@ extern route_map_result_t route_map_apply(struct route_map *map,
 
 extern void route_map_add_hook(void (*func)(const char *));
 extern void route_map_delete_hook(void (*func)(const char *));
-extern void route_map_event_hook(void (*func)(route_map_event_t, const char *));
+
+/*
+ * This is the callback for when something has changed about a
+ * route-map.  The interested parties can register to receive
+ * this data.
+ *
+ * name - Is the name of the changed route-map
+ */
+extern void route_map_event_hook(void (*func)(const char *name));
 extern int route_map_mark_updated(const char *name);
 extern void route_map_walk_update_list(void (*update_fn)(char *name));
 extern void route_map_upd8_dependency(route_map_event_t type, const char *arg,

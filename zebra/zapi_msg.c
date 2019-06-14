@@ -72,6 +72,7 @@ static void zserv_encode_interface(struct stream *s, struct interface *ifp)
 {
 	/* Interface information. */
 	struct zebra_if *zif = ifp->info;
+
 	stream_put(s, ifp->name, INTERFACE_NAMSIZ);
 	stream_putl(s, ifp->ifindex);
 	stream_putc(s, ifp->status);
@@ -523,6 +524,8 @@ int zsend_redistribute_route(int cmd, struct zserv *client,
 	struct nexthop *nexthop;
 	int count = 0;
 	afi_t afi;
+	size_t stream_size =
+		MAX(ZEBRA_MAX_PACKET_SIZ, sizeof(struct zapi_route));
 
 	memset(&api, 0, sizeof(api));
 	api.vrf_id = re->vrf_id;
@@ -604,7 +607,7 @@ int zsend_redistribute_route(int cmd, struct zserv *client,
 	SET_FLAG(api.message, ZAPI_MESSAGE_MTU);
 	api.mtu = re->mtu;
 
-	struct stream *s = stream_new(ZEBRA_MAX_PACKET_SIZ);
+	struct stream *s = stream_new(stream_size);
 
 	/* Encode route and send. */
 	if (zapi_route_encode(cmd, s, &api) < 0) {
@@ -1372,14 +1375,14 @@ stream_failure:
 void zserv_nexthop_num_warn(const char *caller, const struct prefix *p,
 			    const unsigned int nexthop_num)
 {
-	if (nexthop_num > multipath_num) {
+	if (nexthop_num > zrouter.multipath_num) {
 		char buff[PREFIX2STR_BUFFER];
 
 		prefix2str(p, buff, sizeof(buff));
 		flog_warn(
 			EC_ZEBRA_MORE_NH_THAN_MULTIPATH,
 			"%s: Prefix %s has %d nexthops, but we can only use the first %d",
-			caller, buff, nexthop_num, multipath_num);
+			caller, buff, nexthop_num, zrouter.multipath_num);
 	}
 }
 
@@ -1421,7 +1424,7 @@ static void zread_route_add(ZAPI_HANDLER_ARGS)
 	re->type = api.type;
 	re->instance = api.instance;
 	re->flags = api.flags;
-	re->uptime = time(NULL);
+	re->uptime = monotime(NULL);
 	re->vrf_id = vrf_id;
 	if (api.tableid && vrf_id == VRF_DEFAULT)
 		re->table = api.tableid;
@@ -1685,7 +1688,7 @@ static void zsend_capabilities(struct zserv *client, struct zebra_vrf *zvrf)
 	zclient_create_header(s, ZEBRA_CAPABILITIES, zvrf->vrf->vrf_id);
 	stream_putl(s, vrf_get_backend());
 	stream_putc(s, mpls_enabled);
-	stream_putl(s, multipath_num);
+	stream_putl(s, zrouter.multipath_num);
 	stream_putc(s, zebra_mlag_get_role());
 
 	stream_putw_at(s, 0, stream_get_endp(s));
@@ -2510,6 +2513,9 @@ void (*zserv_handlers[])(ZAPI_HANDLER_ARGS) = {
 	[ZEBRA_IPTABLE_ADD] = zread_iptable,
 	[ZEBRA_IPTABLE_DELETE] = zread_iptable,
 	[ZEBRA_VXLAN_FLOOD_CONTROL] = zebra_vxlan_flood_control,
+	[ZEBRA_MLAG_CLIENT_REGISTER] = zebra_mlag_client_register,
+	[ZEBRA_MLAG_CLIENT_UNREGISTER] = zebra_mlag_client_unregister,
+	[ZEBRA_MLAG_FORWARD_MSG] = zebra_mlag_forward_client_msg,
 };
 
 #if defined(HANDLE_ZAPI_FUZZING)
@@ -2541,6 +2547,9 @@ void zserv_handle_commands(struct zserv *client, struct stream *msg)
 	struct zebra_vrf *zvrf;
 
 	zapi_parse_header(msg, &hdr);
+
+	if (IS_ZEBRA_DEBUG_PACKET && IS_ZEBRA_DEBUG_RECV)
+		zserv_log_message(NULL, msg, &hdr);
 
 #if defined(HANDLE_ZAPI_FUZZING)
 	zserv_write_incoming(msg, hdr.command);

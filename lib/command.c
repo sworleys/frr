@@ -149,7 +149,7 @@ const char *node_names[] = {
 	"bfd",			 /* BFD_NODE */
 	"bfd peer",		 /* BFD_PEER_NODE */
 	"openfabric",		    // OPENFABRIC_NODE
-	"vrrp",			    // VRRP_NODE
+	"vrrp",			    /* VRRP_NODE */
 };
 /* clang-format on */
 
@@ -333,7 +333,7 @@ int argv_find(struct cmd_token **argv, int argc, const char *text, int *index)
 	return found;
 }
 
-static unsigned int cmd_hash_key(void *p)
+static unsigned int cmd_hash_key(const void *p)
 {
 	int size = sizeof(p);
 
@@ -1053,9 +1053,16 @@ static int cmd_execute_command_real(vector vline, enum filter_type filter,
 	if (matched_element->daemon)
 		ret = CMD_SUCCESS_DAEMON;
 	else {
-		/* Clear enqueued configuration changes. */
-		vty->num_cfg_changes = 0;
-		memset(&vty->cfg_changes, 0, sizeof(vty->cfg_changes));
+		if (vty->config) {
+			/* Clear array of enqueued configuration changes. */
+			vty->num_cfg_changes = 0;
+			memset(&vty->cfg_changes, 0, sizeof(vty->cfg_changes));
+
+			/* Regenerate candidate configuration. */
+			if (frr_get_cli_mode() == FRR_CLI_CLASSIC)
+				nb_config_replace(vty->candidate_config,
+						  running_config, true);
+		}
 
 		ret = matched_element->func(matched_element, vty, argc, argv);
 	}
@@ -1387,7 +1394,7 @@ int config_from_file(struct vty *vty, FILE *fp, unsigned int *line_num)
 /* Configuration from terminal */
 DEFUN (config_terminal,
        config_terminal_cmd,
-       "configure terminal",
+       "configure [terminal]",
        "Configuration from vty interface\n"
        "Configuration terminal\n")
 {
@@ -1756,10 +1763,10 @@ static int file_write_config(struct vty *vty)
 		dirfd = open(".", O_DIRECTORY | O_RDONLY);
 	/* if dirfd is invalid, directory sync fails, but we're still OK */
 
-	config_file_sav = XMALLOC(
-		MTYPE_TMP, strlen(config_file) + strlen(CONF_BACKUP_EXT) + 1);
-	strcpy(config_file_sav, config_file);
-	strcat(config_file_sav, CONF_BACKUP_EXT);
+	size_t config_file_sav_sz = strlen(config_file) + strlen(CONF_BACKUP_EXT) + 1;
+	config_file_sav = XMALLOC(MTYPE_TMP, config_file_sav_sz);
+	strlcpy(config_file_sav, config_file, config_file_sav_sz);
+	strlcat(config_file_sav, CONF_BACKUP_EXT, config_file_sav_sz);
 
 
 	config_file_tmp = XMALLOC(MTYPE_TMP, strlen(config_file) + 8);
@@ -1958,7 +1965,15 @@ DEFUN (config_hostname,
 	struct cmd_token *word = argv[1];
 
 	if (!isalnum((int)word->arg[0])) {
-		vty_out(vty, "Please specify string starting with alphabet\n");
+		vty_out(vty,
+		    "Please specify string starting with alphabet or number\n");
+		return CMD_WARNING_CONFIG_FAILED;
+	}
+
+	/* With reference to RFC 1123 Section 2.1 */
+	if (strlen(word->arg) > HOSTNAME_LEN) {
+		vty_out(vty, "Hostname length should be less than %d chars\n",
+			HOSTNAME_LEN);
 		return CMD_WARNING_CONFIG_FAILED;
 	}
 
@@ -2801,9 +2816,10 @@ void cmd_init(int terminal)
 	/* Each node's basic commands. */
 	install_element(VIEW_NODE, &show_version_cmd);
 	install_element(ENABLE_NODE, &show_startup_config_cmd);
-	install_element(ENABLE_NODE, &debug_memstats_cmd);
 
 	if (terminal) {
+		install_element(ENABLE_NODE, &debug_memstats_cmd);
+
 		install_element(VIEW_NODE, &config_list_cmd);
 		install_element(VIEW_NODE, &config_exit_cmd);
 		install_element(VIEW_NODE, &config_quit_cmd);
@@ -2837,9 +2853,10 @@ void cmd_init(int terminal)
 	install_element(CONFIG_NODE, &domainname_cmd);
 	install_element(CONFIG_NODE, &no_domainname_cmd);
 	install_element(CONFIG_NODE, &frr_version_defaults_cmd);
-	install_element(CONFIG_NODE, &debug_memstats_cmd);
 
 	if (terminal > 0) {
+		install_element(CONFIG_NODE, &debug_memstats_cmd);
+
 		install_element(CONFIG_NODE, &password_cmd);
 		install_element(CONFIG_NODE, &no_password_cmd);
 		install_element(CONFIG_NODE, &enable_password_cmd);

@@ -135,6 +135,7 @@ override_dh_auto_configure:
 		--enable-systemd=yes \
 		--enable-sharpd=yes \
 		$(USE_CUMULUS) \
+		--enable-protobuf=yes \
 		--enable-datacenter=yes \
 		--enable-bfdd=no \
 		--disable-dependency-tracking \

@@ -4,7 +4,7 @@
  * Quentin Young
  *
  * Portions:
- * 	Copyright (C) 2001-2017 Alexandre Cassen
+ *     Copyright (C) 2001-2017 Alexandre Cassen
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -134,11 +134,15 @@ static int vrrp_ndisc_una_build(struct interface *ifp, struct ipaddr *ip,
 	uint32_t len = sizeof(struct nd_neighbor_advert)
 		       + sizeof(struct nd_opt_hdr) + ETH_ALEN;
 	struct ipv6_ph ph = {};
+
 	ph.src = ip6h->ip6_src;
 	ph.dst = ip6h->ip6_dst;
 	ph.ulpl = htonl(len);
 	ph.next_hdr = IPPROTO_ICMPV6;
-	icmp6h->icmp6_cksum = in_cksum_with_ph6(&ph, (void *)icmp6h, len);
+
+	/* Suppress static analysis warnings about accessing icmp6 oob */
+	void *offset = icmp6h;
+	icmp6h->icmp6_cksum = in_cksum_with_ph6(&ph, offset, len);
 
 	return 0;
 }
@@ -149,8 +153,8 @@ int vrrp_ndisc_una_send(struct vrrp_router *r, struct ipaddr *ip)
 
 	int ret = 0;
 	struct interface *ifp = r->mvl_ifp;
-
 	uint8_t buf[VRRP_NDISC_SIZE];
+
 	ret = vrrp_ndisc_una_build(ifp, ip, buf, sizeof(buf));
 
 	if (ret == -1)
@@ -167,6 +171,7 @@ int vrrp_ndisc_una_send(struct vrrp_router *r, struct ipaddr *ip)
 	sll.sll_ifindex = (int)ifp->ifindex;
 
 	char ipbuf[INET6_ADDRSTRLEN];
+
 	ipaddr2str(ip, ipbuf, sizeof(ipbuf));
 
 	DEBUGD(&vrrp_dbg_ndisc,
@@ -209,11 +214,10 @@ int vrrp_ndisc_una_send_all(struct vrrp_router *r)
 
 void vrrp_ndisc_init(void)
 {
-	vrrp_privs.change(ZPRIVS_RAISE);
+	frr_elevate_privs(&vrrp_privs)
 	{
 		ndisc_fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_IPV6));
 	}
-	vrrp_privs.change(ZPRIVS_LOWER);
 
 	if (ndisc_fd > 0) {
 		DEBUGD(&vrrp_dbg_sock,
