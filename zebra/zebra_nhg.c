@@ -1366,7 +1366,10 @@ int nexthop_active_update(struct route_node *rn, struct route_entry *re)
 
 		zebra_nhg_re_update_ref(re, new_nhe);
 	}
-
+#if 0
+	/*
+	 * TODO: Determine how/when to handle nhg kernel installs
+	 */
 	if (curr_active) {
 		struct nhg_hash_entry *nhe = NULL;
 
@@ -1383,6 +1386,7 @@ int nexthop_active_update(struct route_node *rn, struct route_entry *re)
 				"Active update on NHE id=%u that we do not have in our tables",
 				re->nhe_id);
 	}
+#endif
 
 	/*
 	 * Do not need these nexthops anymore since they
