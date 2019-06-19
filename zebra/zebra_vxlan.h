@@ -208,5 +208,6 @@ extern int zebra_vxlan_clear_dup_detect_vni_all(struct vty *vty,
 extern int zebra_vxlan_clear_dup_detect_vni(struct vty *vty,
 					    struct zebra_vrf *zvrf,
 					    vni_t vni);
+extern void zebra_evpn_init(void);
 
 #endif /* _ZEBRA_VXLAN_H */
