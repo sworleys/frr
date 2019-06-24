@@ -32,13 +32,11 @@
  */
 #define PIM_OIF_FLAG_PROTO_IGMP   (1 << 0)
 #define PIM_OIF_FLAG_PROTO_PIM    (1 << 1)
-#define PIM_OIF_FLAG_PROTO_SOURCE (1 << 2)
-#define PIM_OIF_FLAG_PROTO_STAR   (1 << 3)
-#define PIM_OIF_FLAG_PROTO_VXLAN  (1 << 4)
+#define PIM_OIF_FLAG_PROTO_STAR   (1 << 2)
+#define PIM_OIF_FLAG_PROTO_VXLAN  (1 << 3)
 #define PIM_OIF_FLAG_PROTO_ANY                                 \
 	(PIM_OIF_FLAG_PROTO_IGMP | PIM_OIF_FLAG_PROTO_PIM      \
-	 | PIM_OIF_FLAG_PROTO_SOURCE | PIM_OIF_FLAG_PROTO_STAR \
-	 | PIM_OIF_FLAG_PROTO_VXLAN)
+	 | PIM_OIF_FLAG_PROTO_STAR | PIM_OIF_FLAG_PROTO_VXLAN)
 
 /*
  * We need a pimreg vif id from the kernel.
@@ -115,13 +113,14 @@ struct channel_oil *pim_find_channel_oil(struct pim_instance *pim,
 					 struct prefix_sg *sg);
 struct channel_oil *pim_channel_oil_add(struct pim_instance *pim,
 					struct prefix_sg *sg,
-					int input_vif_index);
+					int input_vif_index,
+					const char *caller);
 void pim_channel_oil_del(struct channel_oil *c_oil);
 
 int pim_channel_add_oif(struct channel_oil *c_oil, struct interface *oif,
-			uint32_t proto_mask);
+			uint32_t proto_mask, const char *caller);
 int pim_channel_del_oif(struct channel_oil *c_oil, struct interface *oif,
-			uint32_t proto_mask);
+			uint32_t proto_mask, const char *caller);
 
 int pim_channel_oil_empty(struct channel_oil *c_oil);
 

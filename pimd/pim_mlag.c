@@ -41,7 +41,7 @@ extern struct zclient *zclient;
 				"to oil:%s",                                   \
 				__func__, ch->interface->name, ch->sg_str);    \
 		pim_channel_add_oif(ch_oil, ch->interface,                     \
-				    PIM_OIF_FLAG_PROTO_IGMP);                  \
+				    PIM_OIF_FLAG_PROTO_IGMP, __func__);        \
 		ch->mlag_am_i_df = true;                                       \
 	} while (0)
 
@@ -53,7 +53,7 @@ extern struct zclient *zclient;
 				"to oil:%s",                                   \
 				__func__, ch->interface->name, ch->sg_str);    \
 		pim_channel_del_oif(ch_oil, ch->interface,                     \
-				    PIM_OIF_FLAG_PROTO_IGMP);                  \
+				    PIM_OIF_FLAG_PROTO_IGMP, __func__);        \
 		ch->mlag_am_i_df = false;                                      \
 	} while (0)
 
@@ -869,7 +869,8 @@ static void pim_mlag_process_mroute_add(struct mlag_mroute_add msg)
 		if (PIM_DEBUG_MLAG)
 			zlog_debug("%s: failed to find if-channel, creating",
 				   __func__);
-		pim_ifchannel_local_membership_add(ifp, &sg);
+		pim_ifchannel_local_membership_add(ifp, &sg,
+			false /*is_vxlan*/);
 		ch = pim_ifchannel_find(ifp, &sg);
 	}
 

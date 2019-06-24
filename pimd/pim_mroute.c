@@ -203,7 +203,8 @@ static int pim_mroute_msg_nocache(int fd, struct interface *ifp,
 		 * and causing us to consider them.
 		 */
 		c_oil = pim_channel_oil_add(pim_ifp->pim, &sg,
-					    pim_ifp->mroute_vif_index);
+					    pim_ifp->mroute_vif_index,
+						__func__);
 		pim_mroute_add(c_oil, __PRETTY_FUNCTION__);
 
 		return 0;
@@ -272,7 +273,7 @@ static int pim_mroute_msg_wholepkt(int fd, struct interface *ifp,
 
 		up = pim_upstream_find(pim_ifp->pim, &star);
 
-		if (up && PIM_UPSTREAM_FLAG_TEST_SRC_IGMP(up->flags)) {
+		if (up && PIM_UPSTREAM_FLAG_TEST_CAN_BE_LHR(up->flags)) {
 			up = pim_upstream_add(pim_ifp->pim, &sg, ifp,
 					      PIM_UPSTREAM_FLAG_MASK_SRC_LHR,
 					      __PRETTY_FUNCTION__, NULL);
@@ -523,7 +524,8 @@ static int pim_mroute_msg_wrvifwhole(int fd, struct interface *ifp,
 			if (!up->channel_oil)
 				up->channel_oil = pim_channel_oil_add(
 					pim_ifp->pim, &sg,
-					pim_ifp->mroute_vif_index);
+					pim_ifp->mroute_vif_index,
+					"wrvifwhole_1");
 			pim_upstream_inherited_olist(pim_ifp->pim, up);
 			if (!up->channel_oil->installed)
 				pim_mroute_add(up->channel_oil,
@@ -548,7 +550,8 @@ static int pim_mroute_msg_wrvifwhole(int fd, struct interface *ifp,
 	}
 
 	pim_ifp = ifp->info;
-	oil = pim_channel_oil_add(pim_ifp->pim, &sg, pim_ifp->mroute_vif_index);
+	oil = pim_channel_oil_add(pim_ifp->pim, &sg, pim_ifp->mroute_vif_index,
+			"wrvifwhole_2");
 	if (!oil->installed)
 		pim_mroute_add(oil, __PRETTY_FUNCTION__);
 	if (pim_if_connected_to_source(ifp, sg.src)) {

@@ -3275,6 +3275,9 @@ int bgp_delete(struct bgp *bgp)
 	THREAD_OFF(bgp->t_update_delay);
 	THREAD_OFF(bgp->t_establish_wait);
 
+	/* Set flag indicating bgp instance delete in progress */
+	bgp_flag_set(bgp, BGP_FLAG_DELETE_IN_PROGRESS);
+
 	if (BGP_DEBUG(zebra, ZEBRA)) {
 		if (bgp->inst_type == BGP_INSTANCE_TYPE_DEFAULT)
 			zlog_debug("Deleting Default VRF");
@@ -3820,6 +3823,7 @@ static const struct peer_flag_action peer_flag_action_list[] = {
 	{PEER_FLAG_DISABLE_CONNECTED_CHECK, 0, peer_change_reset},
 	{PEER_FLAG_CAPABILITY_ENHE, 0, peer_change_reset},
 	{PEER_FLAG_ENFORCE_FIRST_AS, 0, peer_change_reset_in},
+	{PEER_FLAG_IFPEER_V6ONLY, 0, peer_change_reset},
 	{PEER_FLAG_ROUTEADV, 0, peer_change_none},
 	{PEER_FLAG_TIMER, 0, peer_change_none},
 	{PEER_FLAG_TIMER_CONNECT, 0, peer_change_none},
@@ -6942,7 +6946,7 @@ static void bgp_config_write_peer_global(struct vty *vty, struct bgp *bgp,
 		}
 
 		/* For swpX peers we displayed the peer-group
-		 * via 'neighbor swpX interface peer-group WORD' */
+		 * via 'neighbor swpX interface peer-group PGNAME' */
 		if (!if_pg_printed)
 			vty_out(vty, " neighbor %s peer-group %s\n", addr,
 				peer->group->name);

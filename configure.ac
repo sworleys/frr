@@ -232,9 +232,7 @@ else
    fi
    if test "z$orig_cflags" = "z"; then
       AC_C_FLAG([-g])
-      AC_C_FLAG([-Os], [
-        AC_C_FLAG([-O2])
-      ])
+      AC_C_FLAG([-O2])
    fi
 fi
 AM_CONDITIONAL([DEV_BUILD], [test "x$enable_dev_build" = "xyes"])

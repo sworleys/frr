@@ -536,7 +536,8 @@ void pim_upstream_register_reevaluate(struct pim_instance *pim)
 				/* remove regiface from the OIL if it is there*/
 				pim_channel_del_oif(up->channel_oil,
 						    pim->regiface,
-						    PIM_OIF_FLAG_PROTO_PIM);
+						    PIM_OIF_FLAG_PROTO_PIM,
+							__func__);
 				up->reg_state = PIM_REG_NOINFO;
 			}
 		} else {
@@ -548,7 +549,8 @@ void pim_upstream_register_reevaluate(struct pim_instance *pim)
 						up->sg_str);
 				pim_channel_add_oif(up->channel_oil,
 						    pim->regiface,
-						    PIM_OIF_FLAG_PROTO_PIM);
+						    PIM_OIF_FLAG_PROTO_PIM,
+							__func__);
 				up->reg_state = PIM_REG_JOIN;
 			}
 		}
@@ -745,12 +747,14 @@ static struct pim_upstream *pim_upstream_new(struct pim_instance *pim,
 		pim_ifp = up->rpf.source_nexthop.interface->info;
 		assert(pim_ifp);
 		up->channel_oil = pim_channel_oil_add(pim,
-				&up->sg, pim_ifp->mroute_vif_index);
+				&up->sg, pim_ifp->mroute_vif_index,
+				"up_new_static_iif");
 	} else if (up->upstream_addr.s_addr == INADDR_ANY) {
 		/* Create a dummmy channel oil with incoming ineterface MAXVIFS,
 		 * since RP is not configured
 		 */
-		up->channel_oil = pim_channel_oil_add(pim, &up->sg, MAXVIFS);
+		up->channel_oil = pim_channel_oil_add(pim, &up->sg, MAXVIFS,
+				"up_new_dummy");
 
 	} else {
 		rpf_result = pim_rpf_update(pim, up, NULL);
@@ -763,14 +767,17 @@ static struct pim_upstream *pim_upstream_new(struct pim_instance *pim,
 			 * MAXVIFS, since RP is not reachable
 			 */
 			up->channel_oil = pim_channel_oil_add(
-				pim, &up->sg, MAXVIFS);
+					pim, &up->sg, MAXVIFS,
+					"up_new_rpf_fail");
 		}
 
 		if (up->rpf.source_nexthop.interface) {
 			pim_ifp = up->rpf.source_nexthop.interface->info;
 			if (pim_ifp)
 				up->channel_oil = pim_channel_oil_add(pim,
-					&up->sg, pim_ifp->mroute_vif_index);
+						&up->sg,
+						pim_ifp->mroute_vif_index,
+						"up_new");
 		}
 	}
 
@@ -1176,7 +1183,7 @@ static void pim_upstream_fhr_kat_expiry(struct pim_instance *pim,
 	THREAD_OFF(up->t_rs_timer);
 	/* remove regiface from the OIL if it is there*/
 	pim_channel_del_oif(up->channel_oil, pim->regiface,
-			    PIM_OIF_FLAG_PROTO_PIM);
+			    PIM_OIF_FLAG_PROTO_PIM, __func__);
 	/* clear the register state */
 	up->reg_state = PIM_REG_NOINFO;
 	PIM_UPSTREAM_FLAG_UNSET_FHR(up->flags);
@@ -1498,7 +1505,7 @@ static int pim_upstream_register_stop_timer(struct thread *t)
 	case PIM_REG_JOIN_PENDING:
 		up->reg_state = PIM_REG_JOIN;
 		pim_channel_add_oif(up->channel_oil, pim->regiface,
-				    PIM_OIF_FLAG_PROTO_PIM);
+				    PIM_OIF_FLAG_PROTO_PIM, __func__);
 		pim_vxlan_update_sg_reg_state(pim, up, TRUE /*reg_join*/);
 		break;
 	case PIM_REG_JOIN:
@@ -1583,7 +1590,8 @@ int pim_upstream_inherited_olist_decide(struct pim_instance *pim,
 	}
 	if (pim_ifp && !up->channel_oil)
 		up->channel_oil = pim_channel_oil_add(
-			pim, &up->sg, pim_ifp->mroute_vif_index);
+			pim, &up->sg, pim_ifp->mroute_vif_index,
+			__func__);
 
 	FOR_ALL_INTERFACES (pim->vrf, ifp) {
 		if (!ifp->info)
@@ -1606,7 +1614,8 @@ int pim_upstream_inherited_olist_decide(struct pim_instance *pim,
 			if (!ch)
 				flag = PIM_OIF_FLAG_PROTO_STAR;
 
-			pim_channel_add_oif(up->channel_oil, ifp, flag);
+			pim_channel_add_oif(up->channel_oil, ifp, flag,
+					__func__);
 			output_intf++;
 		}
 	}
@@ -1860,11 +1869,12 @@ void pim_upstream_add_lhr_star_pimreg(struct pim_instance *pim)
 		if (up->sg.src.s_addr != INADDR_ANY)
 			continue;
 
-		if (!PIM_UPSTREAM_FLAG_TEST_SRC_IGMP(up->flags))
+		if (!PIM_UPSTREAM_FLAG_TEST_CAN_BE_LHR(up->flags))
 			continue;
 
 		pim_channel_add_oif(up->channel_oil, pim->regiface,
-				    PIM_OIF_FLAG_PROTO_IGMP);
+				    PIM_OIF_FLAG_PROTO_IGMP,
+					__func__);
 	}
 }
 
@@ -1908,22 +1918,23 @@ void pim_upstream_remove_lhr_star_pimreg(struct pim_instance *pim,
 		if (up->sg.src.s_addr != INADDR_ANY)
 			continue;
 
-		if (!PIM_UPSTREAM_FLAG_TEST_SRC_IGMP(up->flags))
+		if (!PIM_UPSTREAM_FLAG_TEST_CAN_BE_LHR(up->flags))
 			continue;
 
 		if (!nlist) {
 			pim_channel_del_oif(up->channel_oil, pim->regiface,
-					    PIM_OIF_FLAG_PROTO_IGMP);
+					PIM_OIF_FLAG_PROTO_IGMP, __func__);
 			continue;
 		}
 		g.u.prefix4 = up->sg.grp;
 		apply_new = prefix_list_apply(np, &g);
 		if (apply_new == PREFIX_DENY)
 			pim_channel_add_oif(up->channel_oil, pim->regiface,
-					    PIM_OIF_FLAG_PROTO_IGMP);
+					    PIM_OIF_FLAG_PROTO_IGMP,
+						__func__);
 		else
 			pim_channel_del_oif(up->channel_oil, pim->regiface,
-					    PIM_OIF_FLAG_PROTO_IGMP);
+					PIM_OIF_FLAG_PROTO_IGMP, __func__);
 	}
 }
 

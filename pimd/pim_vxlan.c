@@ -402,7 +402,8 @@ static void pim_vxlan_orig_mr_oif_add(struct pim_vxlan_sg *vxlan_sg)
 
 	vxlan_sg->flags |= PIM_VXLAN_SGF_OIF_INSTALLED;
 	pim_channel_add_oif(vxlan_sg->up->channel_oil,
-		vxlan_sg->orig_oif, PIM_OIF_FLAG_PROTO_VXLAN);
+		vxlan_sg->orig_oif, PIM_OIF_FLAG_PROTO_VXLAN,
+		__func__);
 }
 
 static void pim_vxlan_orig_mr_oif_del(struct pim_vxlan_sg *vxlan_sg)
@@ -421,7 +422,7 @@ static void pim_vxlan_orig_mr_oif_del(struct pim_vxlan_sg *vxlan_sg)
 
 	vxlan_sg->flags &= ~PIM_VXLAN_SGF_OIF_INSTALLED;
 	pim_channel_del_oif(vxlan_sg->up->channel_oil,
-		orig_oif, PIM_OIF_FLAG_PROTO_VXLAN);
+			orig_oif, PIM_OIF_FLAG_PROTO_VXLAN, __func__);
 }
 
 static inline struct interface *pim_vxlan_orig_mr_oif_get(
@@ -542,8 +543,15 @@ static void pim_vxlan_term_mr_oif_add(struct pim_vxlan_sg *vxlan_sg)
 			vxlan_sg->sg_str, vxlan_sg->term_oif->name);
 
 	if (pim_ifchannel_local_membership_add(vxlan_sg->term_oif,
-				&vxlan_sg->sg)) {
+				&vxlan_sg->sg, true /*is_vxlan */)) {
 		vxlan_sg->flags |= PIM_VXLAN_SGF_OIF_INSTALLED;
+		/* update the inherited OIL */
+		/* XXX - I don't see the inherited OIL updated when a local
+		 * member is added. And that probably needs to be fixed. Till
+		 * that happens we do a force update on the inherited OIL
+		 * here.
+		 */
+		pim_upstream_inherited_olist(vxlan_sg->pim, vxlan_sg->up);
 	} else {
 		zlog_warn("vxlan SG %s term-oif %s add failed",
 			vxlan_sg->sg_str, vxlan_sg->term_oif->name);
@@ -561,6 +569,12 @@ static void pim_vxlan_term_mr_oif_del(struct pim_vxlan_sg *vxlan_sg)
 
 	vxlan_sg->flags &= ~PIM_VXLAN_SGF_OIF_INSTALLED;
 	pim_ifchannel_local_membership_del(vxlan_sg->term_oif, &vxlan_sg->sg);
+	/* update the inherited OIL */
+	/* XXX - I don't see the inherited OIL updated when a local member
+	 * is deleted. And that probably needs to be fixed. Till that happens
+	 * we do a force update on the inherited OIL here.
+	 */
+	pim_upstream_inherited_olist(vxlan_sg->pim, vxlan_sg->up);
 }
 
 static void pim_vxlan_update_sg_entry_mlag(struct pim_instance *pim,
@@ -805,7 +819,8 @@ bool pim_vxlan_do_mlag_reg(void)
  * to the MLAG peer which may mroute it over the underlay if there are any
  * interested receivers.
  */
-static void pim_vxlan_sg_peerlink_update(struct hash_backet *backet, void *arg)
+static void pim_vxlan_sg_peerlink_oif_update(struct hash_backet *backet,
+		void *arg)
 {
 	struct interface *new_oif = (struct interface *)arg;
 	struct pim_vxlan_sg *vxlan_sg = (struct pim_vxlan_sg *)backet->data;
@@ -844,8 +859,6 @@ void pim_vxlan_mlag_update(bool enable, bool peer_state, uint32_t role,
 				struct in_addr *reg_addr)
 {
 	struct pim_instance *pim;
-	struct interface *old_oif;
-	struct interface *new_oif;
 	char addr_buf[INET_ADDRSTRLEN];
 	struct pim_interface *pim_ifp = NULL;
 
@@ -864,8 +877,6 @@ void pim_vxlan_mlag_update(bool enable, bool peer_state, uint32_t role,
 	 * when that changes this will need to change to iterate all VRFs
 	 */
 	pim = pim_get_pim_instance(VRF_DEFAULT);
-
-	old_oif = pim_vxlan_orig_mr_oif_get(pim);
 
 	if (enable)
 		vxlan_mlag.flags |= PIM_VXLAN_MLAGF_ENABLED;
@@ -887,11 +898,6 @@ void pim_vxlan_mlag_update(bool enable, bool peer_state, uint32_t role,
 		pim_vxlan_set_peerlink_rif(pim, peerlink_rif);
 	else
 		pim_vxlan_set_peerlink_rif(pim, NULL);
-
-	new_oif = pim_vxlan_orig_mr_oif_get(pim);
-	if (old_oif != new_oif)
-		hash_iterate(pim->vxlan.sg_hash, pim_vxlan_sg_peerlink_update,
-			new_oif);
 }
 
 /****************************** misc callbacks *******************************/
@@ -989,6 +995,9 @@ static void pim_vxlan_set_peerlink_rif(struct pim_instance *pim,
 			struct interface *ifp)
 {
 	struct interface *old_iif;
+	struct interface *new_iif;
+	struct interface *old_oif;
+	struct interface *new_oif;
 
 	if (pim->vxlan.peerlink_rif == ifp)
 		return;
@@ -1000,22 +1009,36 @@ static void pim_vxlan_set_peerlink_rif(struct pim_instance *pim,
 			ifp ? ifp->name : "-");
 
 	old_iif = pim_vxlan_orig_mr_iif_get(pim);
+	old_oif = pim_vxlan_orig_mr_oif_get(pim);
 	pim->vxlan.peerlink_rif = ifp;
-	ifp = pim_vxlan_orig_mr_iif_get(pim);
-	if (old_iif == ifp)
-		return;
 
-	if (PIM_DEBUG_VXLAN)
-		zlog_debug("%s: vxlan orig iif changed from %s to %s",
-			__PRETTY_FUNCTION__, old_iif ? old_iif->name : "-",
-			ifp ? ifp->name : "-");
+	new_iif = pim_vxlan_orig_mr_iif_get(pim);
+	if (old_iif != new_iif) {
+		if (PIM_DEBUG_VXLAN)
+			zlog_debug("%s: vxlan orig iif changed from %s to %s",
+				__PRETTY_FUNCTION__,
+				old_iif ? old_iif->name : "-",
+				new_iif ? new_iif->name : "-");
 
-	/* add/del upstream entries for the existing vxlan SG when the
-	 * interface becomes available
-	 */
-	if (pim->vxlan.sg_hash)
+		/* add/del upstream entries for the existing vxlan SG when the
+		 * interface becomes available
+		 */
+		if (pim->vxlan.sg_hash)
+			hash_iterate(pim->vxlan.sg_hash,
+					pim_vxlan_sg_peerlink_rif_update,
+					old_iif);
+	}
+
+	new_oif = pim_vxlan_orig_mr_oif_get(pim);
+	if (old_oif != new_oif) {
+		if (PIM_DEBUG_VXLAN)
+			zlog_debug("%s: vxlan orig oif changed from %s to %s",
+				__PRETTY_FUNCTION__,
+				old_oif ? old_oif->name : "-",
+				new_oif ? new_oif->name : "-");
 		hash_iterate(pim->vxlan.sg_hash,
-				pim_vxlan_sg_peerlink_rif_update, old_iif);
+			pim_vxlan_sg_peerlink_oif_update, new_oif);
+	}
 }
 
 void pim_vxlan_add_vif(struct interface *ifp)

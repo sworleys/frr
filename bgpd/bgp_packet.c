@@ -822,12 +822,13 @@ void bgp_route_refresh_send(struct peer *peer, afi_t afi, safi_t safi,
 				stream_putc(s, ORF_COMMON_PART_REMOVE_ALL);
 				if (bgp_debug_neighbor_events(peer))
 					zlog_debug(
-						"%s sending REFRESH_REQ to remove ORF(%d) (%s) for afi/safi: %d/%d",
+						"%s sending REFRESH_REQ to remove ORF(%d) (%s) for afi/safi: %s/%s",
 						peer->host, orf_type,
 						(when_to_refresh == REFRESH_DEFER
 							 ? "defer"
 							 : "immediate"),
-						pkt_afi, pkt_safi);
+						iana_afi2str(pkt_afi),
+						iana_safi2str(pkt_safi));
 			} else {
 				SET_FLAG(peer->af_sflags[afi][safi],
 					 PEER_STATUS_ORF_PREFIX_SEND);
@@ -838,12 +839,13 @@ void bgp_route_refresh_send(struct peer *peer, afi_t afi, safi_t safi,
 					ORF_COMMON_PART_DENY);
 				if (bgp_debug_neighbor_events(peer))
 					zlog_debug(
-						"%s sending REFRESH_REQ with pfxlist ORF(%d) (%s) for afi/safi: %d/%d",
+						"%s sending REFRESH_REQ with pfxlist ORF(%d) (%s) for afi/safi: %s/%s",
 						peer->host, orf_type,
 						(when_to_refresh == REFRESH_DEFER
 							 ? "defer"
 							 : "immediate"),
-						pkt_afi, pkt_safi);
+						iana_afi2str(pkt_afi),
+						iana_safi2str(pkt_safi));
 			}
 
 			/* Total ORF Entry Len. */
@@ -856,8 +858,9 @@ void bgp_route_refresh_send(struct peer *peer, afi_t afi, safi_t safi,
 
 	if (bgp_debug_neighbor_events(peer)) {
 		if (!orf_refresh)
-			zlog_debug("%s sending REFRESH_REQ for afi/safi: %d/%d",
-				   peer->host, pkt_afi, pkt_safi);
+			zlog_debug("%s sending REFRESH_REQ for afi/safi: %s/%s",
+				   peer->host, iana_afi2str(pkt_afi),
+				   iana_safi2str(pkt_safi));
 	}
 
 	/* Add packet to the peer. */
@@ -901,11 +904,11 @@ void bgp_capability_send(struct peer *peer, afi_t afi, safi_t safi,
 
 		if (bgp_debug_neighbor_events(peer))
 			zlog_debug(
-				"%s sending CAPABILITY has %s MP_EXT CAP for afi/safi: %d/%d",
+				"%s sending CAPABILITY has %s MP_EXT CAP for afi/safi: %s/%s",
 				peer->host,
 				action == CAPABILITY_ACTION_SET ? "Advertising"
 								: "Removing",
-				pkt_afi, pkt_safi);
+				iana_afi2str(pkt_afi), iana_safi2str(pkt_safi));
 	}
 
 	/* Set packet size. */
@@ -1045,7 +1048,7 @@ static int bgp_open_receive(struct peer *peer, bgp_size_t size)
 	uint16_t holdtime;
 	uint16_t send_holdtime;
 	as_t remote_as;
-	as_t as4 = 0;
+	as_t as4 = 0, as4_be;
 	struct in_addr remote_id;
 	int mp_capability;
 	uint8_t notify_data_remote_as[2];
@@ -1088,8 +1091,10 @@ static int bgp_open_receive(struct peer *peer, bgp_size_t size)
 		 * that we do not know which peer is connecting to us now.
 		 */
 		as4 = peek_for_as4_capability(peer, optlen);
-		memcpy(notify_data_remote_as4, &as4, 4);
 	}
+
+	as4_be = htonl(as4);
+	memcpy(notify_data_remote_as4, &as4_be, 4);
 
 	/* Just in case we have a silly peer who sends AS4 capability set to 0
 	 */
@@ -1788,14 +1793,16 @@ static int bgp_route_refresh_receive(struct peer *peer, bgp_size_t size)
 	pkt_safi = stream_getc(s);
 
 	if (bgp_debug_update(peer, NULL, NULL, 0))
-		zlog_debug("%s rcvd REFRESH_REQ for afi/safi: %d/%d",
-			   peer->host, pkt_afi, pkt_safi);
+		zlog_debug("%s rcvd REFRESH_REQ for afi/safi: %s/%s",
+			   peer->host, iana_afi2str(pkt_afi),
+			   iana_safi2str(pkt_safi));
 
 	/* Convert AFI, SAFI to internal values and check. */
 	if (bgp_map_afi_safi_iana2int(pkt_afi, pkt_safi, &afi, &safi)) {
 		zlog_info(
-			"%s REFRESH_REQ for unrecognized afi/safi: %d/%d - ignored",
-			peer->host, pkt_afi, pkt_safi);
+			"%s REFRESH_REQ for unrecognized afi/safi: %s/%s - ignored",
+			peer->host, iana_afi2str(pkt_afi),
+			iana_safi2str(pkt_safi));
 		return BGP_PACKET_NOOP;
 	}
 
@@ -2090,8 +2097,10 @@ static int bgp_capability_msg_parse(struct peer *peer, uint8_t *pnt,
 				if (bgp_debug_neighbor_events(peer))
 					zlog_debug(
 						"%s Dynamic Capability MP_EXT afi/safi invalid "
-						"(%u/%u)",
-						peer->host, pkt_afi, pkt_safi);
+						"(%s/%s)",
+						peer->host,
+						iana_afi2str(pkt_afi),
+						iana_safi2str(pkt_safi));
 				continue;
 			}
 

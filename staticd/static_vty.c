@@ -746,7 +746,6 @@ DEFPY(ip_route_blackhole,
 	  |(1-255)$distance                                                   \
 	  |vrf NAME                                                           \
 	  |label WORD                                                         \
-          |table (1-4294967295)                                               \
           }]",
       NO_STR IP_STR
       "Establish static routes\n"
@@ -759,15 +758,9 @@ DEFPY(ip_route_blackhole,
       "Tag value\n"
       "Distance value for this route\n"
       VRF_CMD_HELP_STR
-      MPLS_LABEL_HELPSTR
-      "Table to configure\n"
-      "The table number to configure\n")
+      MPLS_LABEL_HELPSTR)
 {
-	if (table_str && vrf && !vrf_is_backend_netns()) {
-		vty_out(vty,
-			"%% table param only available when running on netns-based vrfs\n");
-		return CMD_WARNING_CONFIG_FAILED;
-	}
+	char *table_str = NULL;
 
 	return static_route(vty, AFI_IP, SAFI_UNICAST, no, prefix,
 			    mask_str, NULL, NULL, NULL, flag, tag_str,
@@ -783,7 +776,6 @@ DEFPY(ip_route_blackhole_vrf,
 	  tag (1-4294967295)                                                  \
 	  |(1-255)$distance                                                   \
 	  |label WORD                                                         \
-	  |table (1-4294967295)                                               \
           }]",
       NO_STR IP_STR
       "Establish static routes\n"
@@ -795,18 +787,11 @@ DEFPY(ip_route_blackhole_vrf,
       "Set tag for this route\n"
       "Tag value\n"
       "Distance value for this route\n"
-      MPLS_LABEL_HELPSTR
-      "Table to configure\n"
-      "The table number to configure\n")
+      MPLS_LABEL_HELPSTR)
 {
 	VTY_DECLVAR_CONTEXT(vrf, vrf);
 	struct static_vrf *svrf = vrf->info;
-
-	if (table_str && !vrf_is_backend_netns()) {
-		vty_out(vty,
-			"%% table param only available when running on netns-based vrfs\n");
-		return CMD_WARNING_CONFIG_FAILED;
-	}
+	char *table_str = NULL;
 
 	/*
 	 * Coverity is complaining that prefix could
@@ -831,7 +816,6 @@ DEFPY(ip_route_address_interface,
 	  |(1-255)$distance                            \
 	  |vrf NAME                                    \
 	  |label WORD                                  \
-	  |table (1-4294967295)                        \
 	  |nexthop-vrf NAME                            \
 	  |onlink$onlink                               \
           }]",
@@ -848,14 +832,13 @@ DEFPY(ip_route_address_interface,
       "Distance value for this route\n"
       VRF_CMD_HELP_STR
       MPLS_LABEL_HELPSTR
-      "Table to configure\n"
-      "The table number to configure\n"
       VRF_CMD_HELP_STR
       "Treat the nexthop as directly attached to the interface")
 {
 	struct static_vrf *svrf;
 	struct static_vrf *nh_svrf;
 	const char *flag = NULL;
+	char *table_str = NULL;
 
 	if (ifname && !strncasecmp(ifname, "Null0", 5)) {
 		flag = "Null0";
@@ -865,12 +848,6 @@ DEFPY(ip_route_address_interface,
 	svrf = static_vty_get_unknown_vrf(vty, vrf);
 	if (!svrf) {
 		vty_out(vty, "%% vrf %s is not defined\n", vrf);
-		return CMD_WARNING_CONFIG_FAILED;
-	}
-
-	if (table_str && vrf && !vrf_is_backend_netns()) {
-		vty_out(vty,
-			"%% table param only available when running on netns-based vrfs\n");
 		return CMD_WARNING_CONFIG_FAILED;
 	}
 
@@ -900,7 +877,6 @@ DEFPY(ip_route_address_interface_vrf,
 	  tag (1-4294967295)                           \
 	  |(1-255)$distance                            \
 	  |label WORD                                  \
-	  |table (1-4294967295)                        \
 	  |nexthop-vrf NAME                            \
 	  |onlink$onlink                               \
           }]",
@@ -916,8 +892,6 @@ DEFPY(ip_route_address_interface_vrf,
       "Tag value\n"
       "Distance value for this route\n"
       MPLS_LABEL_HELPSTR
-      "Table to configure\n"
-      "The table number to configure\n"
       VRF_CMD_HELP_STR
       "Treat the nexthop as directly attached to the interface")
 {
@@ -925,12 +899,7 @@ DEFPY(ip_route_address_interface_vrf,
 	const char *flag = NULL;
 	struct static_vrf *svrf = vrf->info;
 	struct static_vrf *nh_svrf;
-
-	if (table_str && !vrf_is_backend_netns()) {
-		vty_out(vty,
-			"%% table param only available when running on netns-based vrfs\n");
-		return CMD_WARNING_CONFIG_FAILED;
-	}
+	char *table_str = NULL;
 
 	if (ifname && !strncasecmp(ifname, "Null0", 5)) {
 		flag = "Null0";
@@ -963,7 +932,6 @@ DEFPY(ip_route,
 	  |(1-255)$distance                            \
 	  |vrf NAME                                    \
 	  |label WORD                                  \
-	  |table (1-4294967295)                        \
 	  |nexthop-vrf NAME                            \
           }]",
       NO_STR IP_STR
@@ -979,19 +947,12 @@ DEFPY(ip_route,
       "Distance value for this route\n"
       VRF_CMD_HELP_STR
       MPLS_LABEL_HELPSTR
-      "Table to configure\n"
-      "The table number to configure\n"
       VRF_CMD_HELP_STR)
 {
 	struct static_vrf *svrf;
 	struct static_vrf *nh_svrf;
 	const char *flag = NULL;
-
-	if (table_str && vrf && !vrf_is_backend_netns()) {
-		vty_out(vty,
-			"%% table param only available when running on netns-based vrfs\n");
-		return CMD_WARNING_CONFIG_FAILED;
-	}
+	char *table_str = NULL;
 
 	if (ifname && !strncasecmp(ifname, "Null0", 5)) {
 		flag = "Null0";
@@ -1029,7 +990,6 @@ DEFPY(ip_route_vrf,
 	  tag (1-4294967295)                           \
 	  |(1-255)$distance                            \
 	  |label WORD                                  \
-	  |table (1-4294967295)                        \
 	  |nexthop-vrf NAME                            \
           }]",
       NO_STR IP_STR
@@ -1044,20 +1004,13 @@ DEFPY(ip_route_vrf,
       "Tag value\n"
       "Distance value for this route\n"
       MPLS_LABEL_HELPSTR
-      "Table to configure\n"
-      "The table number to configure\n"
       VRF_CMD_HELP_STR)
 {
 	VTY_DECLVAR_CONTEXT(vrf, vrf);
 	struct static_vrf *svrf = vrf->info;
 	struct static_vrf *nh_svrf;
 	const char *flag = NULL;
-
-	if (table_str && !vrf_is_backend_netns()) {
-		vty_out(vty,
-			"%% table param only available when running on netns-based vrfs\n");
-		return CMD_WARNING_CONFIG_FAILED;
-	}
+	char *table_str = NULL;
 
 	if (ifname && !strncasecmp(ifname, "Null0", 5)) {
 		flag = "Null0";
@@ -1089,7 +1042,6 @@ DEFPY(ipv6_route_blackhole,
             |(1-255)$distance                              \
             |vrf NAME                                      \
             |label WORD                                    \
-            |table (1-4294967295)                          \
           }]",
       NO_STR
       IPV6_STR
@@ -1103,15 +1055,9 @@ DEFPY(ipv6_route_blackhole,
       "Tag value\n"
       "Distance value for this prefix\n"
       VRF_CMD_HELP_STR
-      MPLS_LABEL_HELPSTR
-      "Table to configure\n"
-      "The table number to configure\n")
+      MPLS_LABEL_HELPSTR)
 {
-	if (table_str && vrf && !vrf_is_backend_netns()) {
-		vty_out(vty,
-			"%% table param only available when running on netns-based vrfs\n");
-		return CMD_WARNING_CONFIG_FAILED;
-	}
+	char *table_str = NULL;
 
 	return static_route(vty, AFI_IP6, SAFI_UNICAST, no, prefix_str,
 			    NULL, from_str, NULL, NULL, flag, tag_str,
@@ -1126,7 +1072,6 @@ DEFPY(ipv6_route_blackhole_vrf,
             tag (1-4294967295)                             \
             |(1-255)$distance                              \
             |label WORD                                    \
-            |table (1-4294967295)                          \
           }]",
       NO_STR
       IPV6_STR
@@ -1139,10 +1084,10 @@ DEFPY(ipv6_route_blackhole_vrf,
       "Set tag for this route\n"
       "Tag value\n"
       "Distance value for this prefix\n"
-      MPLS_LABEL_HELPSTR
-      "Table to configure\n"
-      "The table number to configure\n")
+      MPLS_LABEL_HELPSTR)
 {
+	char *table_str = NULL;
+
 	VTY_DECLVAR_CONTEXT(vrf, vrf);
 	struct static_vrf *svrf = vrf->info;
 
@@ -1174,7 +1119,6 @@ DEFPY(ipv6_route_address_interface,
             |(1-255)$distance                              \
             |vrf NAME                                      \
             |label WORD                                    \
-	    |table (1-4294967295)                          \
             |nexthop-vrf NAME                              \
 	    |onlink$onlink                                 \
           }]",
@@ -1192,20 +1136,13 @@ DEFPY(ipv6_route_address_interface,
       "Distance value for this prefix\n"
       VRF_CMD_HELP_STR
       MPLS_LABEL_HELPSTR
-      "Table to configure\n"
-      "The table number to configure\n"
       VRF_CMD_HELP_STR
       "Treat the nexthop as directly attached to the interface")
 {
 	struct static_vrf *svrf;
 	struct static_vrf *nh_svrf;
 	const char *flag = NULL;
-
-	if (table_str && vrf && !vrf_is_backend_netns()) {
-		vty_out(vty,
-			"%% table param only available when running on netns-based vrfs\n");
-		return CMD_WARNING_CONFIG_FAILED;
-	}
+	char *table_str = NULL;
 
 	svrf = static_vty_get_unknown_vrf(vty, vrf);
 	if (!svrf) {
@@ -1243,7 +1180,6 @@ DEFPY(ipv6_route_address_interface_vrf,
             tag (1-4294967295)                             \
             |(1-255)$distance                              \
             |label WORD                                    \
-	    |table (1-4294967295)                          \
             |nexthop-vrf NAME                              \
 	    |onlink$onlink                                 \
           }]",
@@ -1260,8 +1196,6 @@ DEFPY(ipv6_route_address_interface_vrf,
       "Tag value\n"
       "Distance value for this prefix\n"
       MPLS_LABEL_HELPSTR
-      "Table to configure\n"
-      "The table number to configure\n"
       VRF_CMD_HELP_STR
       "Treat the nexthop as directly attached to the interface")
 {
@@ -1269,12 +1203,7 @@ DEFPY(ipv6_route_address_interface_vrf,
 	struct static_vrf *svrf = vrf->info;
 	struct static_vrf *nh_svrf;
 	const char *flag = NULL;
-
-	if (table_str && !vrf_is_backend_netns()) {
-		vty_out(vty,
-			"%% table param only available when running on netns-based vrfs\n");
-		return CMD_WARNING_CONFIG_FAILED;
-	}
+	char *table_str = NULL;
 
 	if (nexthop_vrf)
 		nh_svrf = static_vty_get_unknown_vrf(vty, nexthop_vrf);
@@ -1306,7 +1235,6 @@ DEFPY(ipv6_route,
             |(1-255)$distance                              \
             |vrf NAME                                      \
             |label WORD                                    \
-	    |table (1-4294967295)                          \
             |nexthop-vrf NAME                              \
           }]",
       NO_STR
@@ -1323,19 +1251,12 @@ DEFPY(ipv6_route,
       "Distance value for this prefix\n"
       VRF_CMD_HELP_STR
       MPLS_LABEL_HELPSTR
-      "Table to configure\n"
-      "The table number to configure\n"
       VRF_CMD_HELP_STR)
 {
 	struct static_vrf *svrf;
 	struct static_vrf *nh_svrf;
 	const char *flag = NULL;
-
-	if (table_str && vrf && !vrf_is_backend_netns()) {
-		vty_out(vty,
-			"%% table param only available when running on netns-based vrfs\n");
-		return CMD_WARNING_CONFIG_FAILED;
-	}
+	char *table_str = NULL;
 
 	svrf = static_vty_get_unknown_vrf(vty, vrf);
 	if (!svrf) {
@@ -1372,7 +1293,6 @@ DEFPY(ipv6_route_vrf,
             tag (1-4294967295)                             \
             |(1-255)$distance                              \
             |label WORD                                    \
-	    |table (1-4294967295)                          \
             |nexthop-vrf NAME                              \
           }]",
       NO_STR
@@ -1388,20 +1308,13 @@ DEFPY(ipv6_route_vrf,
       "Tag value\n"
       "Distance value for this prefix\n"
       MPLS_LABEL_HELPSTR
-      "Table to configure\n"
-      "The table number to configure\n"
       VRF_CMD_HELP_STR)
 {
 	VTY_DECLVAR_CONTEXT(vrf, vrf);
 	struct static_vrf *svrf = vrf->info;
 	struct static_vrf *nh_svrf;
 	const char *flag = NULL;
-
-	if (table_str && !vrf_is_backend_netns()) {
-		vty_out(vty,
-			"%% table param only available when running on netns-based vrfs\n");
-		return CMD_WARNING_CONFIG_FAILED;
-	}
+	char *table_str = NULL;
 
 	if (nexthop_vrf)
 		nh_svrf = static_vty_get_unknown_vrf(vty, nexthop_vrf);

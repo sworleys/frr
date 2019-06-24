@@ -158,10 +158,11 @@ void pim_ifchannel_delete(struct pim_ifchannel *ch)
 					ch->upstream, ch, ch->parent))
 			pim_channel_add_oif(ch->upstream->channel_oil,
 					ch->interface,
-					PIM_OIF_FLAG_PROTO_STAR);
+					PIM_OIF_FLAG_PROTO_STAR,
+					__func__);
 
 		pim_channel_del_oif(ch->upstream->channel_oil,
-					ch->interface, mask);
+					ch->interface, mask, __func__);
 		/*
 		 * Do we have any S,G's that are inheriting?
 		 * Nuke from on high too.
@@ -174,7 +175,8 @@ void pim_ifchannel_delete(struct pim_ifchannel *ch)
 						  up_node, child))
 				pim_channel_del_oif(child->channel_oil,
 						    ch->interface,
-						    PIM_OIF_FLAG_PROTO_STAR);
+						    PIM_OIF_FLAG_PROTO_STAR,
+							__func__);
 		}
 	}
 
@@ -222,8 +224,9 @@ void pim_ifchannel_delete(struct pim_ifchannel *ch)
 	RB_REMOVE(pim_ifchannel_rb, &pim_ifp->ifchannel_rb, ch);
 
 	if (PIM_DEBUG_PIM_TRACE)
-		zlog_debug("%s: ifchannel entry %s is deleted ",
-			   __PRETTY_FUNCTION__, ch->sg_str);
+		zlog_debug("%s: ifchannel entry %s(%s) is deleted ",
+			   __PRETTY_FUNCTION__, ch->sg_str,
+			   ch->interface->name);
 
 	XFREE(MTYPE_PIM_IFCHANNEL, ch);
 }
@@ -306,7 +309,8 @@ void pim_ifchannel_ifjoin_switch(const char *caller, struct pim_ifchannel *ch,
 						    pim_ifp->pim, child)) {
 						pim_channel_del_oif(
 							c_oil, ch->interface,
-							PIM_OIF_FLAG_PROTO_STAR);
+							PIM_OIF_FLAG_PROTO_STAR,
+							__func__);
 						pim_upstream_update_join_desired(
 							pim_ifp->pim, child);
 					}
@@ -323,7 +327,8 @@ void pim_ifchannel_ifjoin_switch(const char *caller, struct pim_ifchannel *ch,
 						    [pim_ifp->mroute_vif_index])
 						pim_channel_del_oif(
 							c_oil, ch->interface,
-							PIM_OIF_FLAG_PROTO_STAR);
+							PIM_OIF_FLAG_PROTO_STAR,
+							__func__);
 				}
 			}
 			if (ch->ifjoin_state == PIM_IFJOIN_JOIN) {
@@ -342,7 +347,8 @@ void pim_ifchannel_ifjoin_switch(const char *caller, struct pim_ifchannel *ch,
 						pim_channel_add_oif(
 							child->channel_oil,
 							ch->interface,
-							PIM_OIF_FLAG_PROTO_STAR);
+							PIM_OIF_FLAG_PROTO_STAR,
+							__func__);
 						pim_upstream_update_join_desired(
 							pim_ifp->pim, child);
 					}
@@ -648,6 +654,10 @@ static int on_ifjoin_expiry_timer(struct thread *t)
 
 	ch = THREAD_ARG(t);
 
+	if (PIM_DEBUG_TRACE)
+		zlog_debug("%s: ifchannel %s expiry timer", __PRETTY_FUNCTION__,
+			   ch->sg_str);
+
 	ifjoin_to_noinfo(ch, true);
 	/* ch may have been deleted */
 
@@ -867,8 +877,9 @@ void pim_ifchannel_join_add(struct interface *ifp, struct in_addr neigh_addr,
 		/*
 		 * If we are going to be a LHR, we need to note it
 		 */
-		if (ch->upstream->parent && (ch->upstream->parent->flags
-					     & PIM_UPSTREAM_FLAG_MASK_SRC_IGMP)
+		if (ch->upstream->parent &&
+			(PIM_UPSTREAM_FLAG_TEST_CAN_BE_LHR(
+						   ch->upstream->parent->flags))
 		    && !(ch->upstream->flags
 			 & PIM_UPSTREAM_FLAG_MASK_SRC_LHR)) {
 			pim_upstream_ref(pim_ifp->pim, ch->upstream,
@@ -931,7 +942,8 @@ void pim_ifchannel_join_add(struct interface *ifp, struct in_addr neigh_addr,
 							       ch->upstream)) {
 				pim_channel_add_oif(ch->upstream->channel_oil,
 						    ch->interface,
-						    PIM_OIF_FLAG_PROTO_PIM);
+						    PIM_OIF_FLAG_PROTO_PIM,
+							__func__);
 				pim_upstream_update_join_desired(pim_ifp->pim,
 								 ch->upstream);
 			}
@@ -1074,11 +1086,12 @@ void pim_ifchannel_prune(struct interface *ifp, struct in_addr upstream,
 }
 
 int pim_ifchannel_local_membership_add(struct interface *ifp,
-				       struct prefix_sg *sg)
+				       struct prefix_sg *sg, bool is_vxlan)
 {
 	struct pim_ifchannel *ch, *starch;
 	struct pim_interface *pim_ifp;
 	struct pim_instance *pim;
+	int up_flags;
 
 	/* PIM enabled on interface? */
 	pim_ifp = ifp->info;
@@ -1112,7 +1125,12 @@ int pim_ifchannel_local_membership_add(struct interface *ifp,
 		}
 	}
 
-	ch = pim_ifchannel_add(ifp, sg, 0, PIM_UPSTREAM_FLAG_MASK_SRC_IGMP);
+	/* vxlan term mroutes use ipmr-lo as local member to
+	 * pull down multicast vxlan tunnel traffic
+	 */
+	up_flags = is_vxlan ? PIM_UPSTREAM_FLAG_MASK_SRC_VXLAN_TERM :
+		PIM_UPSTREAM_FLAG_MASK_SRC_IGMP;
+	ch = pim_ifchannel_add(ifp, sg, 0, up_flags);
 	if (!ch) {
 		if (PIM_DEBUG_EVENTS)
 			zlog_debug("%s:%s Unable to add ifchannel",
@@ -1141,7 +1159,8 @@ int pim_ifchannel_local_membership_add(struct interface *ifp,
 			if (pim_upstream_evaluate_join_desired_interface(
 				    child, ch, starch)) {
 				pim_channel_add_oif(child->channel_oil, ifp,
-						    PIM_OIF_FLAG_PROTO_STAR);
+						    PIM_OIF_FLAG_PROTO_STAR,
+							__func__);
 				pim_upstream_switch(pim, child,
 						    PIM_UPSTREAM_JOINED);
 			}
@@ -1160,12 +1179,14 @@ int pim_ifchannel_local_membership_add(struct interface *ifp,
 				    == PREFIX_DENY) {
 					pim_channel_add_oif(
 						up->channel_oil, pim->regiface,
-						PIM_OIF_FLAG_PROTO_IGMP);
+						PIM_OIF_FLAG_PROTO_IGMP,
+						__func__);
 				}
 			}
 		} else
 			pim_channel_add_oif(up->channel_oil, pim->regiface,
-					    PIM_OIF_FLAG_PROTO_IGMP);
+					PIM_OIF_FLAG_PROTO_IGMP,
+					__func__);
 	}
 
 	return 1;
@@ -1214,7 +1235,8 @@ void pim_ifchannel_local_membership_del(struct interface *ifp,
 			    && !pim_upstream_evaluate_join_desired_interface(
 				       child, ch, starch))
 				pim_channel_del_oif(c_oil, ifp,
-						    PIM_OIF_FLAG_PROTO_STAR);
+						    PIM_OIF_FLAG_PROTO_STAR,
+							__func__);
 
 			/*
 			 * If the S,G has no if channel and the c_oil still
@@ -1225,7 +1247,8 @@ void pim_ifchannel_local_membership_del(struct interface *ifp,
 			if (!chchannel && c_oil
 			    && c_oil->oil.mfcc_ttls[pim_ifp->mroute_vif_index])
 				pim_channel_del_oif(c_oil, ifp,
-						    PIM_OIF_FLAG_PROTO_STAR);
+						    PIM_OIF_FLAG_PROTO_STAR,
+							__func__);
 
 			/* Child node removal/ref count-- will happen as part of
 			 * parent' delete_no_info */
@@ -1444,7 +1467,8 @@ void pim_ifchannel_set_star_g_join_state(struct pim_ifchannel *ch, int eom,
 				child->upstream))) {
 				pim_channel_add_oif(
 					child->upstream->channel_oil,
-					ch->interface, PIM_OIF_FLAG_PROTO_STAR);
+					ch->interface, PIM_OIF_FLAG_PROTO_STAR,
+					__func__);
 				pim_upstream_switch(pim, child->upstream,
 						    PIM_UPSTREAM_JOINED);
 				pim_jp_agg_single_upstream_send(

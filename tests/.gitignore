@@ -29,6 +29,8 @@
 /lib/test_idalloc
 /lib/test_memory
 /lib/test_nexthop_iter
+/lib/test_ntop
+/lib/test_prefix2str
 /lib/test_privs
 /lib/test_ringbuf
 /lib/test_segv

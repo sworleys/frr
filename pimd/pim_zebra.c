@@ -887,7 +887,8 @@ static void igmp_source_forward_reevaluate_one(struct pim_instance *pim,
 					"local membership add for %s as G is now ASM",
 					pim_str_sg_dump(&sg));
 			pim_ifchannel_local_membership_add(
-				group->group_igmp_sock->interface, &sg);
+				group->group_igmp_sock->interface, &sg,
+				false /*is_vxlan*/);
 		}
 	}
 }
@@ -979,7 +980,8 @@ void igmp_source_forward_start(struct pim_instance *pim,
 					      source->source_addr, sg.grp)) {
 			/*Create a dummy channel oil */
 			source->source_channel_oil =
-			    pim_channel_oil_add(pim, &sg, MAXVIFS);
+				pim_channel_oil_add(pim, &sg, MAXVIFS,
+						"igmp_fwd_dummy");
 
 			if (!source->source_channel_oil) {
 				if (PIM_DEBUG_IGMP_TRACE) {
@@ -1039,7 +1041,8 @@ void igmp_source_forward_start(struct pim_instance *pim,
 					    source_str);
 				}
 				source->source_channel_oil =
-				    pim_channel_oil_add(pim, &sg, MAXVIFS);
+					pim_channel_oil_add(pim, &sg, MAXVIFS,
+							"igmp_fwd_no_iif");
 			}
 
 			else {
@@ -1070,7 +1073,7 @@ void igmp_source_forward_start(struct pim_instance *pim,
 
 				source->source_channel_oil =
 				    pim_channel_oil_add(pim, &sg,
-					input_iface_vif_index);
+					input_iface_vif_index, "igmp_fwd");
 				if (!source->source_channel_oil) {
 					if (PIM_DEBUG_IGMP_TRACE) {
 						zlog_debug(
@@ -1087,7 +1090,8 @@ void igmp_source_forward_start(struct pim_instance *pim,
 
 	result = pim_channel_add_oif(source->source_channel_oil,
 				     group->group_igmp_sock->interface,
-				     PIM_OIF_FLAG_PROTO_IGMP);
+					 PIM_OIF_FLAG_PROTO_IGMP,
+					 __func__);
 	if (result) {
 		if (PIM_DEBUG_MROUTE) {
 			zlog_warn("%s: add_oif() failed with return=%d",
@@ -1106,7 +1110,7 @@ void igmp_source_forward_start(struct pim_instance *pim,
 
 		pim_channel_del_oif(source->source_channel_oil,
 				    group->group_igmp_sock->interface,
-				    PIM_OIF_FLAG_PROTO_IGMP);
+				    PIM_OIF_FLAG_PROTO_IGMP, __func__);
 		return;
 	}
 	/*
@@ -1114,14 +1118,15 @@ void igmp_source_forward_start(struct pim_instance *pim,
 	  per-interface (S,G) state.
 	 */
 	if (!pim_ifchannel_local_membership_add(
-						group->group_igmp_sock->interface, &sg)) {
+						group->group_igmp_sock->interface, &sg,
+						false /*is_vxlan*/)) {
 		if (PIM_DEBUG_MROUTE)
 			zlog_warn("%s: Failure to add local membership for %s",
 				  __PRETTY_FUNCTION__, pim_str_sg_dump(&sg));
 
 		pim_channel_del_oif(source->source_channel_oil,
 				    group->group_igmp_sock->interface,
-				    PIM_OIF_FLAG_PROTO_IGMP);
+				    PIM_OIF_FLAG_PROTO_IGMP, __func__);
 		return;
 	}
 
@@ -1172,7 +1177,7 @@ void igmp_source_forward_stop(struct igmp_source *source)
 	*/
 	result = pim_channel_del_oif(source->source_channel_oil,
 				     group->group_igmp_sock->interface,
-				     PIM_OIF_FLAG_PROTO_IGMP);
+				     PIM_OIF_FLAG_PROTO_IGMP, __func__);
 	if (result) {
 		if (PIM_DEBUG_IGMP_TRACE)
 			zlog_debug(
@@ -1247,12 +1252,13 @@ void pim_forward_start(struct pim_ifchannel *ch)
 					source_str);
 			}
 			up->channel_oil = pim_channel_oil_add(pim, &up->sg,
-								MAXVIFS);
+						MAXVIFS, "pim_fwd_no_iif");
 		}
 
 		else {
 			up->channel_oil = pim_channel_oil_add(pim, &up->sg,
-							input_iface_vif_index);
+							input_iface_vif_index,
+							"pim_fwd_with_iif");
 			if (!up->channel_oil) {
 				if (PIM_DEBUG_PIM_TRACE)
 					zlog_debug(
@@ -1274,7 +1280,7 @@ void pim_forward_start(struct pim_ifchannel *ch)
 		}
 
 		up->channel_oil = pim_channel_oil_add(pim, &up->sg,
-						      input_iface_vif_index);
+				      input_iface_vif_index, "pim_fwd");
 		if (!up->channel_oil) {
 			if (PIM_DEBUG_PIM_TRACE)
 				zlog_debug(
@@ -1288,7 +1294,8 @@ void pim_forward_start(struct pim_ifchannel *ch)
 	if (up->flags & PIM_UPSTREAM_FLAG_MASK_SRC_IGMP)
 		mask = PIM_OIF_FLAG_PROTO_IGMP;
 
-	pim_channel_add_oif(up->channel_oil, ch->interface, mask);
+	pim_channel_add_oif(up->channel_oil, ch->interface,
+			mask, __func__);
 }
 
 void pim_forward_stop(struct pim_ifchannel *ch, bool install_it)
@@ -1307,10 +1314,10 @@ void pim_forward_stop(struct pim_ifchannel *ch, bool install_it)
 	 */
 	if (pim_upstream_evaluate_join_desired_interface(up, ch, ch->parent))
 		pim_channel_add_oif(up->channel_oil, ch->interface,
-				    PIM_OIF_FLAG_PROTO_PIM);
+				    PIM_OIF_FLAG_PROTO_PIM, __func__);
 	else
 		pim_channel_del_oif(up->channel_oil, ch->interface,
-				    PIM_OIF_FLAG_PROTO_PIM);
+				    PIM_OIF_FLAG_PROTO_PIM, __func__);
 
 	if (install_it && !up->channel_oil->installed)
 		pim_mroute_add(up->channel_oil, __PRETTY_FUNCTION__);
