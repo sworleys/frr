@@ -1,3 +1,22 @@
+frr (4.0+cl3u13) Released; urgency=medium
+
+  * Fixes: CM-25353 bgpd: add extended community in header
+  * Fixes: CM-25380 zebra: show evpn mac vni XX json output is broken
+  * Fixes: CM-24484 bgpd: vrf leak show cmds to check deleted instance
+  * Fixes: CM-20534 bgpd: router bgp export leaked vpn routes
+  * Fixes: CM-25120 tools: Add a few useful commands to cl_support
+  * Fixes: CM-25351 bgpd: Fix memleak of Mac Hash String upon insertion
+  * Fixes: CM-24913 zebra: Clean up BGP EVPN configuration when the client goes down
+  * Fixes: CM-24397 bgpd: add bgp l2vpn evpn route detail
+  * Fixes: CM-25317 tools: Add show bgp vrfs command to support file
+  * Fixes: CM-24569 zebra: Modify some debug logs
+  * Fixes: CM-25118 tools: Add additional commands to cl_support
+  * Fixes: CM-25167 bgpd: Add l2vpn evpn to afi safi parse utility
+  * Fixes: CM-24933 bgpd: skip evpn remove marked routes from rescan
+  * Fixes: CM-25103 bgpd: Ensure correct checks for EVPN route import
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Tue, 24 Jun 2019 19:39:59 -0400
+
 frr (4.0+cl3u12) RELEASED; urgency=medium
 
   * Fixes: CM-24606 tools: frr-reload.py stop bouncing peers on bfd timer change
