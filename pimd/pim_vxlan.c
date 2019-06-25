@@ -1036,8 +1036,9 @@ static void pim_vxlan_set_peerlink_rif(struct pim_instance *pim,
 				__PRETTY_FUNCTION__,
 				old_oif ? old_oif->name : "-",
 				new_oif ? new_oif->name : "-");
-		hash_iterate(pim->vxlan.sg_hash,
-			pim_vxlan_sg_peerlink_oif_update, new_oif);
+		if (pim->vxlan.sg_hash)
+		    hash_iterate(pim->vxlan.sg_hash,
+			    pim_vxlan_sg_peerlink_oif_update, new_oif);
 	}
 }
 
