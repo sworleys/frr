@@ -2617,7 +2617,7 @@ int mpls_ftn_update(int add, struct zebra_vrf *zvrf, enum lsp_types_t type,
 	}
 
 	if (found) {
-		nhe = zebra_nhg_rib_find(0, &new_grp, re->vrf_id, afi);
+		nhe = zebra_nhg_rib_find(0, &new_grp, afi);
 
 		zebra_nhg_re_update_ref(re, nhe);
 
@@ -2821,8 +2821,7 @@ void mpls_ldp_ftn_uninstall_all(struct zebra_vrf *zvrf, int afi)
 
 			if (CHECK_FLAG(re->status,
 				       ROUTE_ENTRY_LABELS_CHANGED)) {
-				nhe = zebra_nhg_rib_find(0, &new_grp,
-							 re->vrf_id, afi);
+				nhe = zebra_nhg_rib_find(0, &new_grp, afi);
 				zebra_nhg_re_update_ref(re, nhe);
 			}
 
