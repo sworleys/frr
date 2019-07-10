@@ -1,5 +1,6 @@
 frr (4.0+cl3u13) Released; urgency=medium
 
+  * Fixes: CM-25581 bgpd: fix show evpn route json command
   * Fixes: CM-25468 zebra: evpn entries are not cleaned upon frr stop
   * Fixes: CM-25250 pimd: Allow zlookup socket to drain
   * Fixes: CM-25353 bgpd: add extended community in header
@@ -17,7 +18,7 @@ frr (4.0+cl3u13) Released; urgency=medium
   * Fixes: CM-24933 bgpd: skip evpn remove marked routes from rescan
   * Fixes: CM-25103 bgpd: Ensure correct checks for EVPN route import
 
- -- dev-support <dev-support@cumulusnetworks.com>  Fri, 5 Jul 2019 19:00:00 -0400
+ -- dev-support <dev-support@cumulusnetworks.com>  Wed, 10 Jul 2019 13:43:31 -0700
 
 frr (4.0+cl3u12) RELEASED; urgency=medium
 
