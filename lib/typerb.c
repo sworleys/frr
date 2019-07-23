@@ -376,10 +376,10 @@ struct typed_rb_entry *typed_rb_insert(struct rbt_tree *rbt,
 }
 
 /* Finds the node with the same key as elm */
-struct rb_entry *typed_rb_find(struct rbt_tree *rbt, const struct rb_entry *key,
-		int (*cmpfn)(
-			const struct typed_rb_entry *a,
-			const struct typed_rb_entry *b))
+struct rb_entry *typed_rb_find(const struct rbt_tree *rbt,
+			       const struct rb_entry *key,
+			       int (*cmpfn)(const struct typed_rb_entry *a,
+					    const struct typed_rb_entry *b))
 {
 	struct rb_entry *tmp = RBH_ROOT(rbt);
 	int comp;
@@ -397,7 +397,7 @@ struct rb_entry *typed_rb_find(struct rbt_tree *rbt, const struct rb_entry *key,
 	return (NULL);
 }
 
-struct rb_entry *typed_rb_find_gteq(struct rbt_tree *rbt,
+struct rb_entry *typed_rb_find_gteq(const struct rbt_tree *rbt,
 		const struct rb_entry *key,
 		int (*cmpfn)(
 			const struct typed_rb_entry *a,
@@ -420,7 +420,7 @@ struct rb_entry *typed_rb_find_gteq(struct rbt_tree *rbt,
 	return best;
 }
 
-struct rb_entry *typed_rb_find_lt(struct rbt_tree *rbt,
+struct rb_entry *typed_rb_find_lt(const struct rbt_tree *rbt,
 		const struct rb_entry *key,
 		int (*cmpfn)(
 			const struct typed_rb_entry *a,
@@ -462,7 +462,7 @@ struct rb_entry *typed_rb_next(struct rb_entry *rbe)
 	return rbe;
 }
 
-struct rb_entry *typed_rb_min(struct rbt_tree *rbt)
+struct rb_entry *typed_rb_min(const struct rbt_tree *rbt)
 {
 	struct rb_entry *rbe = RBH_ROOT(rbt);
 	struct rb_entry *parent = NULL;
