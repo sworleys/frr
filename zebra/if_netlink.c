@@ -1455,13 +1455,16 @@ void interface_list(struct zebra_ns *zns)
 	 * from the kernel before we can do that
 	 */
 
-	/*
-	 * Forcing nexthop object api for now...
-	netlink_nexthop_read(zns);
-	zlog_debug("Nexthop objects disabled on this kernel");
-	*/
+	if (netlink_nexthop_read(zns)) {
+		/* If the nexthop read fails, assume the kernel
+		 * cannot handle nexthop objects.
+		 */
+		zlog_debug("Nexthop objects disabled on this kernel");
+		zns->supports_nh = false;
+	} else {
+		zns->supports_nh = true;
+	}
 
-	zns->supports_nh = false;
 	interface_addr_lookup_netlink(zns);
 }
 
