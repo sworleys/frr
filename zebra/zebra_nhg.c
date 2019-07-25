@@ -1392,13 +1392,16 @@ done:
 }
 
 /* Convert a nhe into a group array */
-uint8_t zebra_nhg_nhe2grp(struct nh_grp *grp, struct nhg_hash_entry *nhe)
+uint8_t zebra_nhg_nhe2grp(struct nh_grp *grp, struct nhg_hash_entry *nhe,
+			  int max_num)
 {
 	struct nhg_connected *rb_node_dep = NULL;
 	struct nhg_hash_entry *depend = NULL;
 	uint8_t i = 0;
 
 	frr_each (nhg_connected_tree, &nhe->nhg_depends, rb_node_dep) {
+		bool duplicate = false;
+
 		depend = rb_node_dep->nhe;
 
 		/*
@@ -1415,11 +1418,24 @@ uint8_t zebra_nhg_nhe2grp(struct nh_grp *grp, struct nhg_hash_entry *nhe)
 			}
 		}
 
-		grp[i].id = depend->id;
-		/* We aren't using weights for anything right now */
-		grp[i].weight = 0;
-		i++;
+		/* Check for duplicate IDs, kernel doesn't like that */
+		for (int j = 0; j < i; j++) {
+			if (depend->id == grp[j].id)
+				duplicate = true;
+		}
+
+		if (!duplicate) {
+			grp[i].id = depend->id;
+			/* We aren't using weights for anything right now */
+			grp[i].weight = 0;
+			i++;
+		}
+
+		if (i >= max_num)
+			goto done;
 	}
+
+done:
 	return i;
 }
 
