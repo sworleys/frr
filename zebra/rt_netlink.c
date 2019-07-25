@@ -153,6 +153,7 @@ static inline int zebra2proto(int proto)
 		proto = RTPROT_OPENFABRIC;
 		break;
 	case ZEBRA_ROUTE_TABLE:
+	case ZEBRA_NHG:
 		proto = RTPROT_ZEBRA;
 		break;
 	default:
