@@ -47,6 +47,5 @@ extern const char *zlog_priority[];
 
 /* Generic function for zlog. */
 extern void vzlog(int priority, const char *format, va_list args);
-extern void zlog(int priority, const char *format, ...) PRINTF_ATTRIBUTE(2, 3);
 
 #endif /* _ZEBRA_LOG_PRIVATE_H */

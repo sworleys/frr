@@ -46,8 +46,6 @@ struct pim_vxlan vxlan_info, *pim_vxlan_p = &vxlan_info;
 static void pim_vxlan_work_timer_setup(bool start);
 static void pim_vxlan_set_peerlink_rif(struct pim_instance *pim,
 			struct interface *ifp);
-static void pim_vxlan_update_sg_entry_mlag(struct pim_instance *pim,
-		struct pim_upstream *up, bool enable);
 
 /*************************** vxlan work list **********************************
  * A work list is maintained for staggered generation of pim null register
@@ -118,7 +116,7 @@ static void pim_vxlan_init_work(void)
 	vxlan_info.max_work_cnt = PIM_VXLAN_WORK_MAX;
 	vxlan_info.flags |= PIM_VXLANF_WORK_INITED;
 	vxlan_info.work_list = list_new();
-	pim_vxlan_work_timer_setup(TRUE /* start */);
+	pim_vxlan_work_timer_setup(true/* start */);
 }
 
 static void pim_vxlan_add_work(struct pim_vxlan_sg *vxlan_sg)
@@ -249,14 +247,6 @@ static void pim_vxlan_orig_mr_up_del(struct pim_vxlan_sg *vxlan_sg)
 			 * for nht
 			 */
 			pim_rpf_update(vxlan_sg->pim, up, NULL);
-			/* set MLAG flag as it is no longer the origination
-			 * entry */
-			if (up->parent &&
-					PIM_UPSTREAM_FLAG_TEST_MLAG_VXLAN(
-						up->parent->flags)) {
-				pim_vxlan_update_sg_entry_mlag(vxlan_sg->pim,
-						up, true /* enable */);
-			}
 		}
 	}
 }
@@ -304,6 +294,7 @@ static void pim_vxlan_orig_mr_up_add(struct pim_vxlan_sg *vxlan_sg)
 	struct pim_upstream *up;
 	int flags = 0;
 	struct prefix nht_p;
+	struct pim_instance *pim = vxlan_sg->pim;
 
 	if (vxlan_sg->up) {
 		/* nothing to do */
@@ -362,9 +353,10 @@ static void pim_vxlan_orig_mr_up_add(struct pim_vxlan_sg *vxlan_sg)
 				__PRETTY_FUNCTION__);
 		vxlan_sg->up = up;
 		pim_vxlan_orig_mr_up_iif_update(vxlan_sg);
-		/* clear MLAG flag on the origination entry */
-		pim_vxlan_update_sg_entry_mlag(vxlan_sg->pim,
-				up, false /* enable */);
+		/* mute pimreg on origination mroutes */
+		if (pim->regiface)
+			pim_channel_update_oif_mute(up->channel_oil,
+					pim->regiface->info);
 	} else {
 		up = pim_upstream_add(vxlan_sg->pim, &vxlan_sg->sg,
 				vxlan_sg->iif, flags,
@@ -578,52 +570,33 @@ static void pim_vxlan_term_mr_oif_del(struct pim_vxlan_sg *vxlan_sg)
 }
 
 static void pim_vxlan_update_sg_entry_mlag(struct pim_instance *pim,
-		struct pim_upstream *up, bool enable)
+		struct pim_upstream *up, bool inherit)
 {
-	if (enable) {
-		if (!PIM_UPSTREAM_FLAG_TEST_MLAG_VXLAN(up->flags)) {
-			if (PIM_DEBUG_VXLAN)
-				zlog_debug("upstream %s inherited mlag vxlan flag from parent",
-						up->sg_str);
-			PIM_UPSTREAM_FLAG_SET_MLAG_VXLAN(up->flags);
-			pim_mlag_up_local_add(pim, up);
-		}
-	} else {
-		if (PIM_UPSTREAM_FLAG_TEST_MLAG_VXLAN(up->flags)) {
-			zlog_debug("upstream %s cleared mlag vxlan flag",
-					up->sg_str);
-			PIM_UPSTREAM_FLAG_UNSET_MLAG_VXLAN(up->flags);
-			pim_mlag_up_local_del(pim, up);
-		}
-	}
+	bool is_df = true;
+
+	if (inherit && up->parent &&
+			PIM_UPSTREAM_FLAG_TEST_MLAG_VXLAN(up->parent->flags) &&
+			PIM_UPSTREAM_FLAG_TEST_MLAG_NON_DF(up->parent->flags))
+		is_df = false;
+
+	pim_mlag_up_df_role_update(pim, up, is_df, "inherit_xg_df");
 }
 
-static void pim_vxlan_inherit_mlag_flags(struct pim_instance *pim,
-		struct pim_upstream *up, bool enable)
+/* We run MLAG DF election only on mroutes that have the termination
+ * device ipmr-lo in the immediate OIL. This is only (*, G) entries at the
+ * moment. For (S, G) entries that (with ipmr-lo in the inherited OIL) we
+ * inherit the DF role from the (*, G) entry.
+ */
+void pim_vxlan_inherit_mlag_flags(struct pim_instance *pim,
+		struct pim_upstream *up, bool inherit)
 {
 	struct listnode *listnode;
 	struct pim_upstream *child;
 
 	for (ALL_LIST_ELEMENTS_RO(up->sources, listnode,
 				child)) {
-		if (enable) {
-			/* skip orig mroutes */
-			if (PIM_UPSTREAM_FLAG_TEST_SRC_VXLAN_ORIG(
-					child->flags)) {
-				/* in the unlikely case that the flag was set
-				 * in a previous pass clear it
-				*/
-				pim_vxlan_update_sg_entry_mlag(pim,
-						child, false /* enable */);
-			} else {
-				/* set MLAG flag on the child */
-				pim_vxlan_update_sg_entry_mlag(pim,
-						child, true /* enable */);
-			}
-		} else {
-			pim_vxlan_update_sg_entry_mlag(pim,
-					child, false /* enable */);
-		}
+		pim_vxlan_update_sg_entry_mlag(pim,
+				child, true /* inherit */);
 	}
 }
 

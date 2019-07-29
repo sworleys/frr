@@ -89,7 +89,7 @@ DEFPY(no_router_isis, no_router_isis_cmd, "no router isis WORD$tag",
 		return CMD_ERR_NOTHING_TODO;
 	}
 
-	nb_cli_enqueue_change(vty, ".", NB_OP_DELETE, NULL);
+	nb_cli_enqueue_change(vty, ".", NB_OP_DESTROY, NULL);
 	area = isis_area_lookup(tag);
 	if (area && area->circuit_list && listcount(area->circuit_list)) {
 		for (ALL_LIST_ELEMENTS(area->circuit_list, node, nnode,
@@ -103,7 +103,7 @@ DEFPY(no_router_isis, no_router_isis_cmd, "no router isis WORD$tag",
 				temp_xpath, XPATH_MAXLEN,
 				"/frr-interface:lib/interface[name='%s'][vrf='%s']/frr-isisd:isis",
 				circuit->interface->name, vrf_name);
-			nb_cli_enqueue_change(vty, temp_xpath, NB_OP_DELETE,
+			nb_cli_enqueue_change(vty, temp_xpath, NB_OP_DESTROY,
 					      NULL);
 		}
 	}
@@ -136,8 +136,6 @@ DEFPY(ip_router_isis, ip_router_isis_cmd, "ip router isis WORD$tag",
 	const char *circ_type;
 	struct isis_area *area;
 	struct interface *ifp;
-	const struct lyd_node *dnode =
-		yang_dnode_get(running_config->dnode, VTY_CURR_XPATH);
 
 	/* area will be created if it is not present. make sure the yang model
 	 * is synced with FRR and call the appropriate NB cb.
@@ -190,10 +188,14 @@ DEFPY(ip_router_isis, ip_router_isis_cmd, "ip router isis WORD$tag",
 	}
 
 	/* check if the interface is a loopback and if so set it as passive */
-	ifp = yang_dnode_get_entry(dnode, false);
-	if (ifp && if_is_loopback(ifp))
-		nb_cli_enqueue_change(vty, "./frr-isisd:isis/passive",
-				      NB_OP_MODIFY, "true");
+	pthread_rwlock_rdlock(&running_config->lock);
+	{
+		ifp = nb_running_get_entry(NULL, VTY_CURR_XPATH, false);
+		if (ifp && if_is_loopback(ifp))
+			nb_cli_enqueue_change(vty, "./frr-isisd:isis/passive",
+					      NB_OP_MODIFY, "true");
+	}
+	pthread_rwlock_unlock(&running_config->lock);
 
 	return nb_cli_apply_changes(vty, NULL);
 }
@@ -208,8 +210,6 @@ DEFPY(ip6_router_isis, ip6_router_isis_cmd, "ipv6 router isis WORD$tag",
 	const char *circ_type;
 	struct isis_area *area;
 	struct interface *ifp;
-	const struct lyd_node *dnode =
-		yang_dnode_get(running_config->dnode, VTY_CURR_XPATH);
 
 	/* area will be created if it is not present. make sure the yang model
 	 * is synced with FRR and call the appropriate NB cb.
@@ -262,10 +262,14 @@ DEFPY(ip6_router_isis, ip6_router_isis_cmd, "ipv6 router isis WORD$tag",
 	}
 
 	/* check if the interface is a loopback and if so set it as passive */
-	ifp = yang_dnode_get_entry(dnode, false);
-	if (ifp && if_is_loopback(ifp))
-		nb_cli_enqueue_change(vty, "./frr-isisd:isis/passive",
-				      NB_OP_MODIFY, "true");
+	pthread_rwlock_rdlock(&running_config->lock);
+	{
+		ifp = nb_running_get_entry(NULL, VTY_CURR_XPATH, false);
+		if (ifp && if_is_loopback(ifp))
+			nb_cli_enqueue_change(vty, "./frr-isisd:isis/passive",
+					      NB_OP_MODIFY, "true");
+	}
+	pthread_rwlock_unlock(&running_config->lock);
 
 	return nb_cli_apply_changes(vty, NULL);
 }
@@ -289,7 +293,7 @@ DEFPY(no_ip_router_isis, no_ip_router_isis_cmd,
 		    && !yang_dnode_get_bool(dnode,
 					    "./frr-isisd:isis/ipv4-routing"))
 			nb_cli_enqueue_change(vty, "./frr-isisd:isis",
-					      NB_OP_DELETE, NULL);
+					      NB_OP_DESTROY, NULL);
 		else
 			nb_cli_enqueue_change(vty,
 					      "./frr-isisd:isis/ipv6-routing",
@@ -299,7 +303,7 @@ DEFPY(no_ip_router_isis, no_ip_router_isis_cmd,
 		    && !yang_dnode_get_bool(dnode,
 					    "./frr-isisd:isis/ipv6-routing"))
 			nb_cli_enqueue_change(vty, "./frr-isisd:isis",
-					      NB_OP_DELETE, NULL);
+					      NB_OP_DESTROY, NULL);
 		else
 			nb_cli_enqueue_change(vty,
 					      "./frr-isisd:isis/ipv4-routing",
@@ -336,7 +340,7 @@ DEFPY(net, net_cmd, "[no] net WORD",
       "XX.XXXX. ... .XXX.XX  Network entity title (NET)\n")
 {
 	nb_cli_enqueue_change(vty, "./area-address",
-			      no ? NB_OP_DELETE : NB_OP_CREATE, net);
+			      no ? NB_OP_DESTROY : NB_OP_CREATE, net);
 
 	return nb_cli_apply_changes(vty, NULL);
 }
@@ -371,20 +375,26 @@ DEFPY(no_is_type, no_is_type_cmd,
       "Act as both a station router and an area router\n"
       "Act as an area router only\n")
 {
-	const char *value = NULL;
-	const struct lyd_node *dnode =
-		yang_dnode_get(running_config->dnode, VTY_CURR_XPATH);
-	struct isis_area *area = yang_dnode_get_entry(dnode, false);
+	const char *value;
 
-	/*
-	 * Put the is-type back to defaults:
-	 * - level-1-2 on first area
-	 * - level-1 for the rest
-	 */
-	if (area && listgetdata(listhead(isis->area_list)) == area)
-		value = "level-1-2";
-	else
-		value = NULL;
+	pthread_rwlock_rdlock(&running_config->lock);
+	{
+		struct isis_area *area;
+
+		area = nb_running_get_entry(NULL, VTY_CURR_XPATH, false);
+
+		/*
+		 * Put the is-type back to defaults:
+		 * - level-1-2 on first area
+		 * - level-1 for the rest
+		 */
+		if (area && listgetdata(listhead(isis->area_list)) == area)
+			value = "level-1-2";
+		else
+			value = NULL;
+	}
+	pthread_rwlock_unlock(&running_config->lock);
+
 	nb_cli_enqueue_change(vty, "./is-type", NB_OP_MODIFY, value);
 
 	return nb_cli_apply_changes(vty, NULL);
@@ -589,7 +599,7 @@ DEFPY(no_area_passwd, no_area_passwd_cmd,
       "Configure the authentication password for an area\n"
       "Set the authentication password for a routing domain\n")
 {
-	nb_cli_enqueue_change(vty, ".", NB_OP_DELETE, NULL);
+	nb_cli_enqueue_change(vty, ".", NB_OP_DESTROY, NULL);
 
 	return nb_cli_apply_changes(vty, "./%s", cmd);
 }
@@ -892,7 +902,7 @@ DEFPY(no_spf_delay_ietf, no_spf_delay_ietf_cmd,
       "Maximum duration needed to learn all the events related to a single failure\n"
       "Maximum duration needed to learn all the events related to a single failure (in milliseconds)\n")
 {
-	nb_cli_enqueue_change(vty, "./spf/ietf-backoff-delay", NB_OP_DELETE,
+	nb_cli_enqueue_change(vty, "./spf/ietf-backoff-delay", NB_OP_DESTROY,
 			      NULL);
 
 	return nb_cli_apply_changes(vty, NULL);
@@ -947,7 +957,7 @@ DEFPY(no_isis_mpls_te_on, no_isis_mpls_te_on_cmd, "no mpls-te [on]",
       "Disable the MPLS-TE functionality\n"
       "Enable the MPLS-TE functionality\n")
 {
-	nb_cli_enqueue_change(vty, "/frr-isisd:isis/mpls-te", NB_OP_DELETE,
+	nb_cli_enqueue_change(vty, "/frr-isisd:isis/mpls-te", NB_OP_DESTROY,
 			      NULL);
 
 	return nb_cli_apply_changes(vty, NULL);
@@ -1014,16 +1024,16 @@ DEFPY(isis_default_originate, isis_default_originate_cmd,
       "Pointer to route-map entries\n")
 {
 	if (no)
-		nb_cli_enqueue_change(vty, ".", NB_OP_DELETE, NULL);
+		nb_cli_enqueue_change(vty, ".", NB_OP_DESTROY, NULL);
 	else {
 		nb_cli_enqueue_change(vty, ".", NB_OP_CREATE, NULL);
 		nb_cli_enqueue_change(vty, "./always", NB_OP_MODIFY,
 				      always ? "true" : "false");
 		nb_cli_enqueue_change(vty, "./route-map",
-				      rmap ? NB_OP_MODIFY : NB_OP_DELETE,
+				      rmap ? NB_OP_MODIFY : NB_OP_DESTROY,
 				      rmap ? rmap : NULL);
 		nb_cli_enqueue_change(vty, "./metric",
-				      metric ? NB_OP_MODIFY : NB_OP_DELETE,
+				      metric ? NB_OP_MODIFY : NB_OP_DESTROY,
 				      metric ? metric_str : NULL);
 		if (strmatch(ip, "ipv6") && !always) {
 			vty_out(vty,
@@ -1094,14 +1104,14 @@ DEFPY(isis_redistribute, isis_redistribute_cmd,
       "Pointer to route-map entries\n")
 {
 	if (no)
-		nb_cli_enqueue_change(vty, ".", NB_OP_DELETE, NULL);
+		nb_cli_enqueue_change(vty, ".", NB_OP_DESTROY, NULL);
 	else {
 		nb_cli_enqueue_change(vty, ".", NB_OP_CREATE, NULL);
 		nb_cli_enqueue_change(vty, "./route-map",
-				      route_map ? NB_OP_MODIFY : NB_OP_DELETE,
+				      route_map ? NB_OP_MODIFY : NB_OP_DESTROY,
 				      route_map ? route_map : NULL);
 		nb_cli_enqueue_change(vty, "./metric",
-				      metric ? NB_OP_MODIFY : NB_OP_DELETE,
+				      metric ? NB_OP_MODIFY : NB_OP_DESTROY,
 				      metric ? metric_str : NULL);
 	}
 
@@ -1182,7 +1192,7 @@ DEFPY(isis_topology, isis_topology_cmd,
 			 topology);
 
 	if (no)
-		nb_cli_enqueue_change(vty, ".", NB_OP_DELETE, NULL);
+		nb_cli_enqueue_change(vty, ".", NB_OP_DESTROY, NULL);
 	else {
 		nb_cli_enqueue_change(vty, ".", NB_OP_CREATE, NULL);
 		nb_cli_enqueue_change(vty, "./overload", NB_OP_MODIFY,
@@ -1297,7 +1307,7 @@ DEFPY(no_isis_passwd, no_isis_passwd_cmd, "no isis password [<md5|clear> WORD]",
       "Cleartext password\n"
       "Circuit password\n")
 {
-	nb_cli_enqueue_change(vty, "./frr-isisd:isis/password", NB_OP_DELETE,
+	nb_cli_enqueue_change(vty, "./frr-isisd:isis/password", NB_OP_DESTROY,
 			      NULL);
 
 	return nb_cli_apply_changes(vty, NULL);
@@ -1765,52 +1775,43 @@ DEFPY(no_isis_circuit_type, no_isis_circuit_type_cmd,
       "Level-1-2 adjacencies are formed\n"
       "Level-2 only adjacencies are formed\n")
 {
-	const struct lyd_node *dnode;
-	struct interface *ifp;
-	struct isis_circuit *circuit;
-	int is_type;
-	const char *circ_type;
+	const char *circ_type = NULL;
 
 	/*
 	 * Default value depends on whether the circuit is part of an area,
 	 * and the is-type of the area if there is one. So we need to do this
 	 * here.
 	 */
-	dnode = yang_dnode_get(running_config->dnode, VTY_CURR_XPATH);
-	ifp = yang_dnode_get_entry(dnode, false);
-	if (!ifp)
-		goto def_val;
+	pthread_rwlock_rdlock(&running_config->lock);
+	{
+		struct interface *ifp;
+		struct isis_circuit *circuit;
 
-	circuit = circuit_scan_by_ifp(ifp);
-	if (!circuit)
-		goto def_val;
+		ifp = nb_running_get_entry(NULL, VTY_CURR_XPATH, false);
+		if (!ifp)
+			goto unlock;
 
-	if (circuit->state == C_STATE_UP)
-		is_type = circuit->area->is_type;
-	else
-		goto def_val;
+		circuit = circuit_scan_by_ifp(ifp);
+		if (!circuit || circuit->state != C_STATE_UP)
+			goto unlock;
 
-	switch (is_type) {
-	case IS_LEVEL_1:
-		circ_type = "level-1";
-		break;
-	case IS_LEVEL_2:
-		circ_type = "level-2";
-		break;
-	case IS_LEVEL_1_AND_2:
-		circ_type = "level-1-2";
-		break;
-	default:
-		return CMD_ERR_NO_MATCH;
+		switch (circuit->area->is_type) {
+		case IS_LEVEL_1:
+			circ_type = "level-1";
+			break;
+		case IS_LEVEL_2:
+			circ_type = "level-2";
+			break;
+		case IS_LEVEL_1_AND_2:
+			circ_type = "level-1-2";
+			break;
+		}
 	}
+unlock:
+	pthread_rwlock_unlock(&running_config->lock);
+
 	nb_cli_enqueue_change(vty, "./frr-isisd:isis/circuit-type",
 			      NB_OP_MODIFY, circ_type);
-
-	return nb_cli_apply_changes(vty, NULL);
-
-def_val:
-	nb_cli_enqueue_change(vty, "./frr-isisd:isis/circuit-type",
-			      NB_OP_MODIFY, NULL);
 
 	return nb_cli_apply_changes(vty, NULL);
 }

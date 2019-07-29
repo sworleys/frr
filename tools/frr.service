@@ -14,10 +14,13 @@ WatchdogSec=60s
 RestartSec=5
 Restart=on-abnormal
 LimitNOFILE=1024
-ExecStart=/usr/lib/frr/frr start
-ExecStop=/usr/lib/frr/frr stop
+LimitAS=infinity
+LimitDATA=infinity
+Environment=ASAN_OPTIONS=detect_leaks=0
+ExecStart=/usr/lib/frr/frrinit.sh start
+ExecStop=/usr/lib/frr/frrinit.sh stop
 ExecStopPost=/usr/lib/cumulus/on-failure-run-support %N
-ExecReload=/usr/lib/frr/frr reload
+ExecReload=/usr/lib/frr/frrinit.sh reload
 
 [Install]
 WantedBy=network-online.target

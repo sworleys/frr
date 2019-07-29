@@ -202,6 +202,11 @@ static void pim_rpf_cost_change(struct pim_instance *pim,
 	uint32_t new_cost;
 
 	new_cost = pim_up_mlag_local_cost(pim, up);
+	if (PIM_DEBUG_MLAG)
+		zlog_debug(
+			"%s: Cost_to_rp of upstream-%s changed to:%u, from:%u",
+			__func__, up->sg_str, new_cost, old_cost);
+
 	if (old_cost == new_cost) {
 		return;
 	}
@@ -256,10 +261,12 @@ enum pim_rpf_result pim_rpf_update(struct pim_instance *pim,
 
 	if ((up->sg.src.s_addr == INADDR_ANY && I_am_RP(pim, up->sg.grp)) ||
 	    PIM_UPSTREAM_FLAG_TEST_FHR(up->flags))
-		neigh_needed = FALSE;
+		neigh_needed = false;
 	pim_find_or_track_nexthop(pim, &nht_p, up, NULL, NULL);
 	if (!pim_ecmp_nexthop_lookup(pim, &rpf->source_nexthop, &src, &grp,
 				neigh_needed)) {
+		/* Route is Deleted in Zebra, reset the stored NH data */
+		pim_upstream_rpf_clear(pim, up);
 		pim_rpf_cost_change(pim, up, saved_mrib_route_metric);
 		return PIM_RPF_FAILURE;
 	}
@@ -348,11 +355,11 @@ void pim_upstream_rpf_clear(struct pim_instance *pim,
 			    struct pim_upstream *up)
 {
 	if (up->rpf.source_nexthop.interface) {
-		if (up->channel_oil) {
-			up->channel_oil->oil.mfcc_parent = MAXVIFS;
-			pim_mroute_del(up->channel_oil, __PRETTY_FUNCTION__);
+		if (up->channel_oil)
+			pim_channel_oil_change_iif(pim, up->channel_oil,
+						   MAXVIFS,
+						   __PRETTY_FUNCTION__);
 
-		}
 		pim_upstream_switch(pim, up, PIM_UPSTREAM_NOTJOINED);
 		up->rpf.source_nexthop.interface = NULL;
 		up->rpf.source_nexthop.mrib_nexthop_addr.u.prefix4.s_addr =

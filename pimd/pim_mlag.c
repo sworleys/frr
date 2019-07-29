@@ -196,11 +196,12 @@ void pim_mlag_del_entry_to_peer(struct pim_ifchannel *ch)
 
 /******************************* pim upstream sync **************************/
 /* Update DF role for the upstream entry and return true on role change */
-static bool pim_mlag_up_df_role_update(struct pim_upstream *up,
-		bool is_df, const char *reason)
+bool pim_mlag_up_df_role_update(struct pim_instance *pim,
+		struct pim_upstream *up, bool is_df, const char *reason)
 {
 	struct channel_oil *c_oil = up->channel_oil;
 	bool old_is_df = !PIM_UPSTREAM_FLAG_TEST_MLAG_NON_DF(up->flags);
+	struct pim_interface *vxlan_ifp;
 
 	if (is_df == old_is_df)
 		return false;
@@ -214,14 +215,26 @@ static bool pim_mlag_up_df_role_update(struct pim_upstream *up,
 	else
 		PIM_UPSTREAM_FLAG_SET_MLAG_NON_DF(up->flags);
 
-	/* If the DF role has changed re-install OIL. Active-Active devices
-	 * and vxlan termination device (ipmr-lo) are suppressed on the non-DF.
+	/* If the DF role has changed check if ipmr-lo needs to be
+	 * muted/un-muted. Active-Active devices and vxlan termination
+	 * devices (ipmr-lo) are suppressed on the non-DF.
 	 * This may leave the mroute with the empty OIL in which case the
 	 * the forwarding entry's sole purpose is to just blackhole the flow
 	 * headed to the switch.
 	 */
-	if (c_oil && c_oil->installed)
-		pim_mroute_add(c_oil, __PRETTY_FUNCTION__);
+	if (c_oil) {
+		vxlan_ifp = pim_vxlan_get_term_ifp(pim);
+		if (vxlan_ifp)
+			pim_channel_update_oif_mute(c_oil, vxlan_ifp);
+	}
+
+	/* If DF role changed on a (*,G) termination mroute update the
+	 * associated DF role on the inherited (S,G) entries
+	 */
+	if ((up->sg.src.s_addr == INADDR_ANY) &&
+			PIM_UPSTREAM_FLAG_TEST_MLAG_VXLAN(up->flags))
+		pim_vxlan_inherit_mlag_flags(pim, up, true /* inherit */);
+
 	return true;
 }
 
@@ -241,7 +254,7 @@ static bool pim_mlag_up_df_role_elect(struct pim_instance *pim,
 	 * we will assume DF status.
 	 */
 	if (!(router->mlag_flags & PIM_MLAGF_STATUS_RXED))
-		return pim_mlag_up_df_role_update(up,
+		return pim_mlag_up_df_role_update(pim, up,
 				true /*is_df*/, "mlagd-down");
 
 	/* If not connected to peer assume DF role on the MLAG primary
@@ -249,9 +262,16 @@ static bool pim_mlag_up_df_role_elect(struct pim_instance *pim,
 	 */
 	if (!(router->mlag_flags & PIM_MLAGF_PEER_CONN_UP)) {
 		is_df = (router->mlag_role == MLAG_ROLE_PRIMARY) ? true : false;
-		return pim_mlag_up_df_role_update(up,
+		return pim_mlag_up_df_role_update(pim, up,
 				is_df, "peer-down");
 	}
+
+	/* If MLAG peer session is up but zebra is down on the peer
+	 * assume DF role.
+	 */
+	if (!(router->mlag_flags & PIM_MLAGF_PEER_ZEBRA_UP))
+		return pim_mlag_up_df_role_update(pim, up,
+				true /*is_df*/, "zebra-down");
 
 	/* If we are connected to peer switch but don't have a mroute
 	 * from it we have to assume non-DF role to avoid duplicates.
@@ -260,7 +280,7 @@ static bool pim_mlag_up_df_role_elect(struct pim_instance *pim,
 	 * without a peer reference to non-df role.
 	 */
 	if (!PIM_UPSTREAM_FLAG_TEST_MLAG_PEER(up->flags))
-		return pim_mlag_up_df_role_update(up,
+		return pim_mlag_up_df_role_update(pim, up,
 				false /*is_df*/, "no-peer-mroute");
 
 	/* switch with the lowest RPF cost wins. if both switches have the same
@@ -270,10 +290,10 @@ static bool pim_mlag_up_df_role_elect(struct pim_instance *pim,
 	local_cost = pim_up_mlag_local_cost(pim, up);
 	if (local_cost == peer_cost) {
 		is_df = (router->mlag_role == MLAG_ROLE_PRIMARY) ? true : false;
-		rv = pim_mlag_up_df_role_update(up, is_df, "equal-cost");
+		rv = pim_mlag_up_df_role_update(pim, up, is_df, "equal-cost");
 	} else {
 		is_df = (local_cost < peer_cost) ? true : false;
-		rv = pim_mlag_up_df_role_update(up, is_df, "cost");
+		rv = pim_mlag_up_df_role_update(pim, up, is_df, "cost");
 	}
 
 	return rv;
@@ -765,22 +785,60 @@ static void pim_mlag_process_mlagd_state_change(struct mlag_status msg)
 		pim_mlag_vxlan_state_update();
 
 	if (state_chg) {
-		if (!(router->mlag_flags & PIM_MLAGF_PEER_CONN_UP)) {
+		if (!(router->mlag_flags & PIM_MLAGF_PEER_CONN_UP))
 			/* when a connection goes down the primary takes over
 			 * DF role for all entries
 			 */
 			pim_mlag_up_local_reeval(true /*mlagd_send*/,
 					"peer_down");
-		}
-		/* XXX - when session comes up we need to wait for
-		 * PEER_REPLAY_DONE before running re-election on local-mlag
-		 * entries that are missing peer reference
-		 */
-		pim_mlag_up_local_reeval(true /*mlagd_send*/,
-				"peer_up");
+		else
+			/* XXX - when session comes up we need to wait for
+			 * PEER_REPLAY_DONE before running re-election on
+			 * local-mlag entries that are missing peer reference
+			 */
+			pim_mlag_up_local_reeval(true /*mlagd_send*/,
+					"peer_up");
 	} else if (role_chg) {
 		/* MLAG role changed without a state change */
 		pim_mlag_up_local_reeval(true /*mlagd_send*/, "role_chg");
+	}
+}
+
+static void pim_mlag_process_peer_frr_state_change(
+		struct mlag_frr_status msg)
+{
+	if (PIM_DEBUG_MLAG)
+		zlog_debug(
+			"%s: msg dump: peer_frr_state:%s", __func__,
+			(msg.frr_state == MLAG_FRR_STATE_UP ? "UP" : "DOWN"));
+
+	if (!(router->mlag_flags & PIM_MLAGF_LOCAL_CONN_UP)) {
+		if (PIM_DEBUG_MLAG)
+			zlog_debug("%s: msg ignored mlagd process state down",
+					__func__);
+		return;
+	}
+	++router->mlag_stats.msg.peer_zebra_status_updates;
+
+	/* evaluate the changes first */
+	if (msg.frr_state == MLAG_FRR_STATE_UP) {
+		if (!(router->mlag_flags & PIM_MLAGF_PEER_ZEBRA_UP)) {
+			router->mlag_flags |= PIM_MLAGF_PEER_ZEBRA_UP;
+			/* XXX - when peer zebra comes up we need to wait for
+			 * for some time to let the peer setup MDTs before
+			 * before relinquishing DF status
+			 */
+			pim_mlag_up_local_reeval(true /*mlagd_send*/,
+					"zebra_up");
+		}
+	} else {
+		if (router->mlag_flags & PIM_MLAGF_PEER_ZEBRA_UP) {
+			++router->mlag_stats.peer_zebra_downs;
+			router->mlag_flags &= ~PIM_MLAGF_PEER_ZEBRA_UP;
+			/* when a peer zebra goes down we assume DF role */
+			pim_mlag_up_local_reeval(true /*mlagd_send*/,
+					"zebra_down");
+		}
 	}
 }
 
@@ -946,6 +1004,14 @@ int pim_zebra_mlag_handle_msg(struct stream *s, int len)
 			return (rc);
 		pim_mlag_process_mlagd_state_change(msg);
 	} break;
+	case MLAG_PEER_FRR_STATUS: {
+		struct mlag_frr_status msg;
+
+		rc = zebra_mlag_lib_decode_frr_status(s, &msg);
+		if (rc)
+			return (rc);
+		pim_mlag_process_peer_frr_state_change(msg);
+	} break;
 	case MLAG_VXLAN_UPDATE:
 	{
 		struct mlag_vxlan msg;
@@ -1034,7 +1100,8 @@ static void pim_mlag_param_reset(void)
 	/* reset the cached params and stats */
 	router->mlag_flags &= ~(PIM_MLAGF_STATUS_RXED |
 			PIM_MLAGF_LOCAL_CONN_UP |
-			PIM_MLAGF_PEER_CONN_UP);
+			PIM_MLAGF_PEER_CONN_UP |
+			PIM_MLAGF_PEER_ZEBRA_UP);
 	router->local_vtep_ip.s_addr = INADDR_ANY;
 	router->anycast_vtep_ip.s_addr = INADDR_ANY;
 	router->mlag_role = MLAG_ROLE_NONE;
@@ -1053,6 +1120,8 @@ int pim_zebra_mlag_process_down(void)
 	 */
 	if (router->mlag_flags & PIM_MLAGF_PEER_CONN_UP)
 		++router->mlag_stats.peer_session_downs;
+	if (router->mlag_flags & PIM_MLAGF_PEER_ZEBRA_UP)
+		++router->mlag_stats.peer_zebra_downs;
 	router->connected_to_mlag = false;
 	pim_mlag_param_reset();
 	/* on mlagd session down re-eval DF status */
@@ -1081,6 +1150,7 @@ static int pim_mlag_register_handler(struct thread *thread)
 	SET_FLAG(bit_mask, (1 << MLAG_PIM_STATUS_UPDATE));
 	SET_FLAG(bit_mask, (1 << MLAG_PIM_CFG_DUMP));
 	SET_FLAG(bit_mask, (1 << MLAG_VXLAN_UPDATE));
+	SET_FLAG(bit_mask, (1 << MLAG_PEER_FRR_STATUS));
 
 	if (PIM_DEBUG_MLAG)
 		zlog_debug("%s: Posting Client Register to MLAG mask:0x%x",

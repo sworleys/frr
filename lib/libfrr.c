@@ -31,6 +31,7 @@
 #include "command.h"
 #include "version.h"
 #include "memory_vty.h"
+#include "log_vty.h"
 #include "zclient.h"
 #include "log_int.h"
 #include "module.h"
@@ -38,6 +39,7 @@
 #include "lib_errors.h"
 #include "db.h"
 #include "northbound_cli.h"
+#include "northbound_db.h"
 
 DEFINE_HOOK(frr_late_init, (struct thread_master * tm), (tm))
 DEFINE_KOOH(frr_early_fini, (), ())
@@ -648,12 +650,18 @@ struct thread_master *frr_init(void)
 
 	vty_init(master);
 	memory_init();
+	log_filter_cmd_init();
 
 	log_ref_init();
+	log_ref_vty_init();
 	lib_error_init();
 
 	yang_init();
 	nb_init(master, di->yang_modules, di->n_yang_modules);
+	if (nb_db_init() != NB_OK)
+		flog_warn(EC_LIB_NB_DATABASE,
+			  "%s: failed to initialize northbound database",
+			  __func__);
 
 	return master;
 }
@@ -825,7 +833,12 @@ static int frr_config_read_in(struct thread *t)
 	/*
 	 * Update the shared candidate after reading the startup configuration.
 	 */
-	nb_config_replace(vty_shared_candidate_config, running_config, true);
+	pthread_rwlock_rdlock(&running_config->lock);
+	{
+		nb_config_replace(vty_shared_candidate_config, running_config,
+				  true);
+	}
+	pthread_rwlock_unlock(&running_config->lock);
 
 	return 0;
 }

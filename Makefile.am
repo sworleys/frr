@@ -4,6 +4,8 @@ AUTOMAKE_OPTIONS = subdir-objects 1.12
 ACLOCAL_AMFLAGS = -I m4
 
 AM_CFLAGS = \
+	$(LIBYANG_CFLAGS) \
+	$(SQLITE3_CFLAGS) \
 	$(UNWIND_CFLAGS) \
 	$(SAN_FLAGS) \
 	$(WERROR) \
@@ -19,7 +21,6 @@ AM_LDFLAGS = \
 	$(SAN_FLAGS) \
 	# end
 DEFS = @DEFS@ -DSYSCONFDIR=\"$(sysconfdir)/\" -DCONFDATE=$(CONFDATE)
-LIBCAP = @LIBCAP@
 
 AR_FLAGS = @AR_FLAGS@
 ARFLAGS = @ARFLAGS@
@@ -38,6 +39,12 @@ shvar-%:
 	@echo "$*=\"$($*)\"" >&$(VARFD)
 var-%:
 	@echo "$($*)" >&$(VARFD)
+
+if ONLY_CLIPPY
+.DEFAULT_GOAL := clippy-only
+endif
+clippy-only: Makefile lib/clippy config.h
+.PHONY: clippy-only
 
 # overwriting these vars breaks cross-compilation.  let's be helpful and warn.
 #
@@ -97,7 +104,6 @@ noinst_LIBRARIES =
 nodist_noinst_DATA =
 lib_LTLIBRARIES =
 module_LTLIBRARIES =
-libyang_plugins_LTLIBRARIES =
 pkginclude_HEADERS =
 nodist_pkginclude_HEADERS =
 dist_examples_DATA =
@@ -112,7 +118,6 @@ vtysh_scan =
 $(AUTOMAKE_DUMMY)install-moduleLTLIBRARIES: install-libLTLIBRARIES
 $(AUTOMAKE_DUMMY)install-binPROGRAMS: install-libLTLIBRARIES
 $(AUTOMAKE_DUMMY)install-sbinPROGRAMS: install-libLTLIBRARIES
-$(AUTOMAKE_DUMMY)install-libyang_pluginsLTLIBRARIES: install-libLTLIBRARIES
 
 include doc/subdir.am
 include doc/user/subdir.am
@@ -125,8 +130,8 @@ include watchfrr/subdir.am
 include qpb/subdir.am
 include fpm/subdir.am
 include mlag/subdir.am
+include grpc/subdir.am
 include tools/subdir.am
-include debianpkg/subdir.am
 include solaris/subdir.am
 
 include bgpd/subdir.am
@@ -173,6 +178,8 @@ EXTRA_DIST += \
 	m4/README.txt \
 	m4/libtool-whole-archive.patch \
 	config.version \
+	changelog-auto \
+	changelog-auto.in \
 	\
 	python/clidef.py \
 	python/clippy/__init__.py \
@@ -203,6 +210,7 @@ EXTRA_DIST += \
 	doc/user/Makefile \
 	eigrpd/Makefile \
 	fpm/Makefile \
+	grpc/Makefile \
 	isisd/Makefile \
 	ldpd/Makefile \
 	lib/Makefile \

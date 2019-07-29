@@ -108,6 +108,12 @@ static const struct message bgp_pmsi_tnltype_str[] = {
 
 #define VRFID_NONE_STR "-"
 
+DEFINE_HOOK(bgp_process,
+		(struct bgp *bgp, afi_t afi, safi_t safi,
+			struct bgp_node *bn, struct peer *peer, bool withdraw),
+		(bgp, afi, safi, bn, peer, withdraw))
+
+
 struct bgp_node *bgp_afi_node_get(struct bgp_table *table, afi_t afi,
 				  safi_t safi, struct prefix *p,
 				  struct prefix_rd *prd)
@@ -2294,6 +2300,17 @@ static void bgp_process_main_one(struct bgp *bgp, struct bgp_node *rn,
 	char pfx_buf[PREFIX2STR_BUFFER];
 	int debug = 0;
 
+	if (bgp_flag_check(bgp, BGP_FLAG_DELETE_IN_PROGRESS)) {
+		if (rn)
+			debug = bgp_debug_bestpath(&rn->p);
+		if (debug) {
+			prefix2str(&rn->p, pfx_buf, sizeof(pfx_buf));
+			zlog_debug(
+			     "%s: bgp delete in progress, ignoring event, p=%s",
+			     __func__, pfx_buf);
+		}
+		return;
+	}
 	/* Is it end of initial update? (after startup) */
 	if (!rn) {
 		quagga_timestamp(3, bgp->update_delay_zebra_resume_time,
@@ -2791,6 +2808,8 @@ void bgp_rib_remove(struct bgp_node *rn, struct bgp_path_info *pi,
 	if (!CHECK_FLAG(pi->flags, BGP_PATH_HISTORY))
 		bgp_path_info_delete(rn, pi); /* keep historical info */
 
+	hook_call(bgp_process, peer->bgp, afi, safi, rn, peer, true);
+
 	bgp_process(peer->bgp, rn, afi, safi);
 }
 
@@ -3040,6 +3059,7 @@ int bgp_update(struct peer *peer, struct prefix *p, uint32_t addpath_id,
 
 		if (aspath_loop_check(attr->aspath, peer->change_local_as)
 		    > aspath_loop_count) {
+			peer->stat_pfx_aspath_loop++;
 			reason = "as-path contains our own AS;";
 			goto filtered;
 		}
@@ -3060,6 +3080,7 @@ int bgp_update(struct peer *peer, struct prefix *p, uint32_t addpath_id,
 		    || (CHECK_FLAG(bgp->config, BGP_CONFIG_CONFEDERATION)
 			&& aspath_loop_check(attr->aspath, bgp->confed_id)
 				   > peer->allowas_in[afi][safi])) {
+			peer->stat_pfx_aspath_loop++;
 			reason = "as-path contains our own AS;";
 			goto filtered;
 		}
@@ -3068,18 +3089,21 @@ int bgp_update(struct peer *peer, struct prefix *p, uint32_t addpath_id,
 	/* Route reflector originator ID check.  */
 	if (attr->flag & ATTR_FLAG_BIT(BGP_ATTR_ORIGINATOR_ID)
 	    && IPV4_ADDR_SAME(&bgp->router_id, &attr->originator_id)) {
+		peer->stat_pfx_originator_loop++;
 		reason = "originator is us;";
 		goto filtered;
 	}
 
 	/* Route reflector cluster ID check.  */
 	if (bgp_cluster_filter(peer, attr)) {
+		peer->stat_pfx_cluster_loop++;
 		reason = "reflected from the same cluster;";
 		goto filtered;
 	}
 
 	/* Apply incoming filter.  */
 	if (bgp_input_filter(peer, p, attr, afi, safi) == FILTER_DENY) {
+		peer->stat_pfx_filter++;
 		reason = "filter;";
 		goto filtered;
 	}
@@ -3094,6 +3118,7 @@ int bgp_update(struct peer *peer, struct prefix *p, uint32_t addpath_id,
 	 * the attr (which takes over the memory references) */
 	if (bgp_input_modifier(peer, p, &new_attr, afi, safi, NULL)
 	    == RMAP_DENY) {
+		peer->stat_pfx_filter++;
 		reason = "route-map;";
 		bgp_attr_flush(&new_attr);
 		goto filtered;
@@ -3119,12 +3144,14 @@ int bgp_update(struct peer *peer, struct prefix *p, uint32_t addpath_id,
 	/* next hop check.  */
 	if (!CHECK_FLAG(peer->flags, PEER_FLAG_IS_RFAPI_HD)
 	    && bgp_update_martian_nexthop(bgp, afi, safi, &new_attr)) {
+		peer->stat_pfx_nh_invalid++;
 		reason = "martian or self next-hop;";
 		bgp_attr_flush(&new_attr);
 		goto filtered;
 	}
 
 	if (bgp_mac_entry_exists(p) || bgp_mac_exist(&attr->rmac)) {
+		peer->stat_pfx_nh_invalid++;
 		reason = "self mac;";
 		goto filtered;
 	}
@@ -3135,6 +3162,8 @@ int bgp_update(struct peer *peer, struct prefix *p, uint32_t addpath_id,
 	if (pi) {
 		pi->uptime = bgp_clock();
 		same_attr = attrhash_cmp(pi->attr, attr_new);
+
+		hook_call(bgp_process, bgp, afi, safi, rn, peer, true);
 
 		/* Same attribute comes in. */
 		if (!CHECK_FLAG(pi->flags, BGP_PATH_REMOVED)
@@ -3564,6 +3593,8 @@ int bgp_update(struct peer *peer, struct prefix *p, uint32_t addpath_id,
 	if (safi == SAFI_EVPN)
 		bgp_evpn_import_route(bgp, afi, safi, p, new);
 
+	hook_call(bgp_process, bgp, afi, safi, rn, peer, false);
+
 	/* Process change. */
 	bgp_process(bgp, rn, afi, safi);
 
@@ -3595,6 +3626,8 @@ int bgp_update(struct peer *peer, struct prefix *p, uint32_t addpath_id,
 /* This BGP update is filtered.  Log the reason then update BGP
    entry.  */
 filtered:
+	hook_call(bgp_process, bgp, afi, safi, rn, peer, true);
+
 	if (bgp_debug_update(peer, p, NULL, 1)) {
 		if (!peer->rcvd_attr_printed) {
 			zlog_debug("%s rcvd UPDATE w/ attr: %s", peer->host,
@@ -3683,6 +3716,8 @@ int bgp_withdraw(struct peer *peer, struct prefix *p, uint32_t addpath_id,
 	if (CHECK_FLAG(peer->af_flags[afi][safi], PEER_FLAG_SOFT_RECONFIG)
 	    && peer != bgp->peer_self)
 		if (!bgp_adj_in_unset(rn, peer, addpath_id)) {
+			peer->stat_pfx_dup_withdraw++;
+
 			if (bgp_debug_update(peer, p, NULL, 1)) {
 				bgp_debug_rdpfxpath2str(
 					afi, safi, prd, p, label, num_labels,
@@ -6684,6 +6719,7 @@ void route_vty_out(struct vty *vty, struct prefix *p,
 	json_object *json_nexthops = NULL;
 	json_object *json_nexthop_global = NULL;
 	json_object *json_nexthop_ll = NULL;
+	json_object *json_ext_community = NULL;
 	char vrf_id_str[VRF_NAMSIZ] = {0};
 	bool nexthop_self =
 		CHECK_FLAG(path->flags, BGP_PATH_ANNC_NH_SELF) ? true : false;
@@ -7010,6 +7046,17 @@ void route_vty_out(struct vty *vty, struct prefix *p,
 		vty_out(vty, "%s", bgp_origin_str[attr->origin]);
 
 	if (json_paths) {
+		if (safi == SAFI_EVPN &&
+		    attr->flag & ATTR_FLAG_BIT(BGP_ATTR_EXT_COMMUNITIES)) {
+			json_ext_community = json_object_new_object();
+			json_object_string_add(json_ext_community,
+					       "string",
+					       attr->ecommunity->str);
+			json_object_object_add(json_path,
+					       "extendedCommunity",
+					       json_ext_community);
+		}
+
 		if (nexthop_self)
 			json_object_boolean_true_add(json_path,
 				"announceNexthopSelf");
@@ -7043,6 +7090,13 @@ void route_vty_out(struct vty *vty, struct prefix *p,
 		json_object_array_add(json_paths, json_path);
 	} else {
 		vty_out(vty, "\n");
+
+		if (safi == SAFI_EVPN &&
+		    attr->flag & ATTR_FLAG_BIT(BGP_ATTR_EXT_COMMUNITIES)) {
+			vty_out(vty, "%*s", 20, " ");
+			vty_out(vty, "%s\n", attr->ecommunity->str);
+		}
+
 #if ENABLE_BGP_VNC
 		/* prints an additional line, indented, with VNC info, if
 		 * present */
@@ -8838,11 +8892,28 @@ static int bgp_show_table(struct vty *vty, struct bgp *bgp, safi_t safi,
 							 lcom))
 					continue;
 			}
+
+			if (type == bgp_show_type_lcommunity_exact) {
+				struct lcommunity *lcom = output_arg;
+
+				if (!pi->attr->lcommunity
+				    || !lcommunity_cmp(pi->attr->lcommunity,
+						      lcom))
+					continue;
+			}
 			if (type == bgp_show_type_lcommunity_list) {
 				struct community_list *list = output_arg;
 
 				if (!lcommunity_list_match(pi->attr->lcommunity,
 							   list))
+					continue;
+			}
+			if (type
+			    == bgp_show_type_lcommunity_list_exact) {
+				struct community_list *list = output_arg;
+
+				if (!lcommunity_list_exact_match(
+					    pi->attr->lcommunity, list))
 					continue;
 			}
 			if (type == bgp_show_type_lcommunity_all) {
@@ -9466,8 +9537,8 @@ static int bgp_show_route(struct vty *vty, struct bgp *bgp, const char *ip_str,
 }
 
 static int bgp_show_lcommunity(struct vty *vty, struct bgp *bgp, int argc,
-			       struct cmd_token **argv, afi_t afi, safi_t safi,
-			       bool uj)
+			       struct cmd_token **argv, bool exact, afi_t afi,
+			       safi_t safi, bool uj)
 {
 	struct lcommunity *lcom;
 	struct buffer *b;
@@ -9498,13 +9569,15 @@ static int bgp_show_lcommunity(struct vty *vty, struct bgp *bgp, int argc,
 		return CMD_WARNING;
 	}
 
-	return bgp_show(vty, bgp, afi, safi, bgp_show_type_lcommunity, lcom,
-			uj);
+	return bgp_show(vty, bgp, afi, safi,
+			(exact ? bgp_show_type_lcommunity_exact
+			 : bgp_show_type_lcommunity),
+			lcom, uj);
 }
 
 static int bgp_show_lcommunity_list(struct vty *vty, struct bgp *bgp,
-				    const char *lcom, afi_t afi, safi_t safi,
-				    bool uj)
+				    const char *lcom, bool exact, afi_t afi,
+				    safi_t safi, bool uj)
 {
 	struct community_list *list;
 
@@ -9516,13 +9589,15 @@ static int bgp_show_lcommunity_list(struct vty *vty, struct bgp *bgp,
 		return CMD_WARNING;
 	}
 
-	return bgp_show(vty, bgp, afi, safi, bgp_show_type_lcommunity_list,
+	return bgp_show(vty, bgp, afi, safi,
+			(exact ? bgp_show_type_lcommunity_list_exact
+			 : bgp_show_type_lcommunity_list),
 			list, uj);
 }
 
 DEFUN (show_ip_bgp_large_community_list,
        show_ip_bgp_large_community_list_cmd,
-       "show [ip] bgp [<view|vrf> VIEWVRFNAME] ["BGP_AFI_CMD_STR" ["BGP_SAFI_WITH_LABEL_CMD_STR"]] large-community-list <(1-500)|WORD> [json]",
+       "show [ip] bgp [<view|vrf> VIEWVRFNAME] ["BGP_AFI_CMD_STR" ["BGP_SAFI_WITH_LABEL_CMD_STR"]] large-community-list <(1-500)|WORD> [exact-match] [json]",
        SHOW_STR
        IP_STR
        BGP_STR
@@ -9532,12 +9607,14 @@ DEFUN (show_ip_bgp_large_community_list,
        "Display routes matching the large-community-list\n"
        "large-community-list number\n"
        "large-community-list name\n"
+       "Exact match of the large-communities\n"
        JSON_STR)
 {
 	char *vrf = NULL;
 	afi_t afi = AFI_IP6;
 	safi_t safi = SAFI_UNICAST;
 	int idx = 0;
+	bool exact_match = 0;
 
 	if (argv_find(argv, argc, "ip", &idx))
 		afi = AFI_IP;
@@ -9561,12 +9638,18 @@ DEFUN (show_ip_bgp_large_community_list,
 	}
 
 	argv_find(argv, argc, "large-community-list", &idx);
-	return bgp_show_lcommunity_list(vty, bgp, argv[idx + 1]->arg, afi, safi,
-					uj);
+
+	const char *clist_number_or_name = argv[++idx]->arg;
+
+	if (++idx < argc && strmatch(argv[idx]->text, "exact-match"))
+		exact_match = 1;
+
+	return bgp_show_lcommunity_list(vty, bgp, clist_number_or_name,
+					exact_match, afi, safi, uj);
 }
 DEFUN (show_ip_bgp_large_community,
        show_ip_bgp_large_community_cmd,
-       "show [ip] bgp [<view|vrf> VIEWVRFNAME] ["BGP_AFI_CMD_STR" ["BGP_SAFI_WITH_LABEL_CMD_STR"]] large-community [AA:BB:CC] [json]",
+       "show [ip] bgp [<view|vrf> VIEWVRFNAME] ["BGP_AFI_CMD_STR" ["BGP_SAFI_WITH_LABEL_CMD_STR"]] large-community [<AA:BB:CC> [exact-match]] [json]",
        SHOW_STR
        IP_STR
        BGP_STR
@@ -9575,12 +9658,14 @@ DEFUN (show_ip_bgp_large_community,
        BGP_SAFI_WITH_LABEL_HELP_STR
        "Display routes matching the large-communities\n"
        "List of large-community numbers\n"
+       "Exact match of the large-communities\n"
        JSON_STR)
 {
 	char *vrf = NULL;
 	afi_t afi = AFI_IP6;
 	safi_t safi = SAFI_UNICAST;
 	int idx = 0;
+	bool exact_match = 0;
 
 	if (argv_find(argv, argc, "ip", &idx))
 		afi = AFI_IP;
@@ -9603,9 +9688,12 @@ DEFUN (show_ip_bgp_large_community,
 		return CMD_WARNING;
 	}
 
-	if (argv_find(argv, argc, "AA:BB:CC", &idx))
-		return bgp_show_lcommunity(vty, bgp, argc, argv, afi, safi, uj);
-	else
+	if (argv_find(argv, argc, "AA:BB:CC", &idx)) {
+		if (argv_find(argv, argc, "exact-match", &idx))
+			exact_match = 1;
+		return bgp_show_lcommunity(vty, bgp, argc, argv,
+					exact_match, afi, safi, uj);
+	} else
 		return bgp_show(vty, bgp, afi, safi,
 				bgp_show_type_lcommunity_all, NULL, uj);
 }

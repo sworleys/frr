@@ -2172,7 +2172,7 @@ DEFPY (show_evpn_mac_vni_all_dad,
 
 DEFPY (show_evpn_mac_vni_dad,
        show_evpn_mac_vni_dad_cmd,
-       "show evpn mac vni " CMD_VNI_RANGE " duplicate" "[json]",
+       "show evpn mac vni " CMD_VNI_RANGE " duplicate [json]",
        SHOW_STR
        "EVPN\n"
        "MAC addresses\n"
@@ -2182,10 +2182,8 @@ DEFPY (show_evpn_mac_vni_dad,
        JSON_STR)
 {
 	struct zebra_vrf *zvrf;
-	vni_t vni;
 	bool uj = use_json(argc, argv);
 
-	vni = strtoul(argv[4]->arg, NULL, 10);
 	zvrf = zebra_vrf_get_evpn();
 
 	zebra_vxlan_print_macs_vni_dad(vty, zvrf, vni, uj);
@@ -2195,7 +2193,7 @@ DEFPY (show_evpn_mac_vni_dad,
 
 DEFPY (show_evpn_neigh_vni_dad,
        show_evpn_neigh_vni_dad_cmd,
-       "show evpn arp-cache vni " CMD_VNI_RANGE "duplicate" "[json]",
+       "show evpn arp-cache vni " CMD_VNI_RANGE "duplicate [json]",
        SHOW_STR
        "EVPN\n"
        "ARP and ND cache\n"
@@ -2205,10 +2203,8 @@ DEFPY (show_evpn_neigh_vni_dad,
        JSON_STR)
 {
 	struct zebra_vrf *zvrf;
-	vni_t vni;
 	bool uj = use_json(argc, argv);
 
-	vni = strtoul(argv[4]->arg, NULL, 10);
 	zvrf = zebra_vrf_get_evpn();
 	zebra_vxlan_print_neigh_vni_dad(vty, zvrf, vni, uj);
 	return CMD_SUCCESS;
@@ -2387,7 +2383,7 @@ DEFUN (show_pbr_iptable,
 
 DEFPY (clear_evpn_dup_addr,
        clear_evpn_dup_addr_cmd,
-       "clear evpn dup-addr vni <all$vni_all |" CMD_VNI_RANGE"$vni_val [mac M:A:C$mac_val | ip <A.B.C.D|X:X::X:X>]>",
+       "clear evpn dup-addr vni <all$vni_all |" CMD_VNI_RANGE"$vni [mac X:X:X:X:X:X | ip <A.B.C.D|X:X::X:X>]>",
        CLEAR_STR
        "EVPN\n"
        "Duplicate address \n"
@@ -2401,20 +2397,15 @@ DEFPY (clear_evpn_dup_addr,
        "IPv6 address\n")
 {
 	struct zebra_vrf *zvrf;
-	vni_t vni = 0;
 	struct ipaddr host_ip = {.ipa_type = IPADDR_NONE };
-	struct ethaddr mac_addr;
 	int ret = CMD_SUCCESS;
 
 	zvrf = zebra_vrf_get_evpn();
-	if (vni_val) {
-		vni = strtoul(vni_val, NULL, 10);
-
-		if (mac_val) {
-			prefix_str2mac(mac_val, &mac_addr);
+	if (vni_str) {
+		if (mac) {
 			ret = zebra_vxlan_clear_dup_detect_vni_mac(vty, zvrf,
 								   vni,
-								   &mac_addr);
+								   &mac->eth_addr);
 	        } else if (ip) {
 			if (sockunion_family(ip) == AF_INET) {
 				host_ip.ipa_type = IPADDR_V4;
@@ -2442,7 +2433,7 @@ static int zebra_ip_config(struct vty *vty)
 {
 	int write = 0;
 
-	write += zebra_import_table_config(vty);
+	write += zebra_import_table_config(vty, VRF_DEFAULT);
 
 	return write;
 }
@@ -2489,7 +2480,8 @@ DEFUN (ip_zebra_import_table_distance,
 		return CMD_WARNING;
 	}
 
-	ret = zebra_import_table(AFI_IP, table_id, distance, rmap, 1);
+	ret = zebra_import_table(AFI_IP, VRF_DEFAULT, table_id,
+				 distance, rmap, 1);
 	if (rmap)
 		XFREE(MTYPE_ROUTE_MAP_NAME, rmap);
 
@@ -2580,10 +2572,10 @@ DEFUN (no_ip_zebra_import_table,
 		return CMD_WARNING;
 	}
 
-	if (!is_zebra_import_table_enabled(AFI_IP, table_id))
+	if (!is_zebra_import_table_enabled(AFI_IP, VRF_DEFAULT, table_id))
 		return CMD_SUCCESS;
 
-	return (zebra_import_table(AFI_IP, table_id, 0, NULL, 0));
+	return (zebra_import_table(AFI_IP, VRF_DEFAULT, table_id, 0, NULL, 0));
 }
 
 static int config_write_protocol(struct vty *vty)
@@ -2848,6 +2840,20 @@ DEFUN (no_zebra_dplane_queue_limit,
 	return CMD_SUCCESS;
 }
 
+DEFUN (zebra_show_routing_tables_summary,
+       zebra_show_routing_tables_summary_cmd,
+       "show zebra router table summary",
+       SHOW_STR
+       ZEBRA_STR
+       "The Zebra Router Information\n"
+       "Table Information about this Zebra Router\n"
+       "Summary Information\n")
+{
+	zebra_router_show_table_summary(vty);
+
+	return CMD_SUCCESS;
+}
+
 /* Table configuration write function. */
 static int config_write_table(struct vty *vty)
 {
@@ -3043,4 +3049,6 @@ void zebra_vty_init(void)
 	install_element(VIEW_NODE, &show_dataplane_providers_cmd);
 	install_element(CONFIG_NODE, &zebra_dplane_queue_limit_cmd);
 	install_element(CONFIG_NODE, &no_zebra_dplane_queue_limit_cmd);
+
+	install_element(VIEW_NODE, &zebra_show_routing_tables_summary_cmd);
 }

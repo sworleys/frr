@@ -84,6 +84,7 @@ extern void zlog_warn(const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
 extern void zlog_info(const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
 extern void zlog_notice(const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
 extern void zlog_debug(const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
+extern void zlog(int priority, const char *format, ...) PRINTF_ATTRIBUTE(2, 3);
 
 /* For logs which have error codes associated with them */
 #define flog_err(ferr_id, format, ...)                                        \
@@ -92,7 +93,8 @@ extern void zlog_debug(const char *format, ...) PRINTF_ATTRIBUTE(1, 2);
 	flog_err(ferr_id, format, ##__VA_ARGS__)
 #define flog_warn(ferr_id, format, ...)                                        \
 	zlog_warn("[EC %" PRIu32 "] " format, ferr_id, ##__VA_ARGS__)
-
+#define flog(priority, ferr_id, format, ...)                                   \
+	zlog(priority, "[EC %" PRIu32 "] " format, ferr_id, ##__VA_ARGS__)
 
 extern void zlog_thread_info(int log_level);
 
@@ -109,6 +111,15 @@ extern int zlog_reset_file(void);
 
 /* Rotate log. */
 extern int zlog_rotate(void);
+
+#define ZLOG_FILTERS_MAX 100      /* Max # of filters at once */
+#define ZLOG_FILTER_LENGTH_MAX 80 /* 80 character filter limit */
+
+/* Add/Del/Dump log filters */
+extern void zlog_filter_clear(void);
+extern int zlog_filter_add(const char *filter);
+extern int zlog_filter_del(const char *filter);
+extern int zlog_filter_dump(char *buf, size_t max_size);
 
 const char *lookup_msg(const struct message *mz, int kz, const char *nf);
 

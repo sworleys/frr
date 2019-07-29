@@ -87,9 +87,6 @@ static vector Vvty_serv_thread;
 /* Current directory. */
 char vty_cwd[MAXPATHLEN];
 
-/* Exclusive configuration lock. */
-struct vty *vty_exclusive_lock;
-
 /* Login password check. */
 static int no_password_check = 0;
 
@@ -1333,7 +1330,6 @@ static int vty_read(struct thread *thread)
 
 	int vty_sock = THREAD_FD(thread);
 	struct vty *vty = THREAD_ARG(thread);
-	vty->t_read = NULL;
 
 	/* Read raw data from socket */
 	if ((nbytes = read(vty->fd, buf, VTY_READ_BUFSIZ)) <= 0) {
@@ -1527,13 +1523,9 @@ static int vty_flush(struct thread *thread)
 	int vty_sock = THREAD_FD(thread);
 	struct vty *vty = THREAD_ARG(thread);
 
-	vty->t_write = NULL;
-
 	/* Tempolary disable read thread. */
-	if ((vty->lines == 0) && vty->t_read) {
-		thread_cancel(vty->t_read);
-		vty->t_read = NULL;
-	}
+	if (vty->lines == 0)
+		THREAD_OFF(vty->t_read);
 
 	/* Function execution continue. */
 	erase = ((vty->status == VTY_MORE || vty->status == VTY_MORELINE));
@@ -1711,12 +1703,9 @@ void vty_stdio_suspend(void)
 	if (!stdio_vty)
 		return;
 
-	if (stdio_vty->t_write)
-		thread_cancel(stdio_vty->t_write);
-	if (stdio_vty->t_read)
-		thread_cancel(stdio_vty->t_read);
-	if (stdio_vty->t_timeout)
-		thread_cancel(stdio_vty->t_timeout);
+	THREAD_OFF(stdio_vty->t_write);
+	THREAD_OFF(stdio_vty->t_read);
+	THREAD_OFF(stdio_vty->t_timeout);
 
 	if (stdio_termios)
 		tcsetattr(0, TCSANOW, &stdio_orig_termios);
@@ -2075,7 +2064,6 @@ static int vtysh_read(struct thread *thread)
 
 	sock = THREAD_FD(thread);
 	vty = THREAD_ARG(thread);
-	vty->t_read = NULL;
 
 	if ((nbytes = read(sock, buf, VTY_READ_BUFSIZ)) <= 0) {
 		if (nbytes < 0) {
@@ -2155,7 +2143,6 @@ static int vtysh_write(struct thread *thread)
 {
 	struct vty *vty = THREAD_ARG(thread);
 
-	vty->t_write = NULL;
 	vtysh_flush(vty);
 	return 0;
 }
@@ -2191,12 +2178,9 @@ void vty_close(struct vty *vty)
 	bool was_stdio = false;
 
 	/* Cancel threads.*/
-	if (vty->t_read)
-		thread_cancel(vty->t_read);
-	if (vty->t_write)
-		thread_cancel(vty->t_write);
-	if (vty->t_timeout)
-		thread_cancel(vty->t_timeout);
+	THREAD_OFF(vty->t_read);
+	THREAD_OFF(vty->t_write);
+	THREAD_OFF(vty->t_timeout);
 
 	/* Flush buffer. */
 	buffer_flush_all(vty->obuf, vty->wfd);
@@ -2252,7 +2236,6 @@ static int vty_timeout(struct thread *thread)
 	struct vty *vty;
 
 	vty = THREAD_ARG(thread);
-	vty->t_timeout = NULL;
 	vty->v_timeout = 0;
 
 	/* Clear buffer*/
@@ -2346,7 +2329,7 @@ static void vty_read_file(struct nb_config *config, FILE *confp)
 	if (config == NULL && vty->candidate_config
 	    && frr_get_cli_mode() == FRR_CLI_TRANSACTIONAL) {
 		ret = nb_candidate_commit(vty->candidate_config, NB_CLIENT_CLI,
-					  true, "Read configuration file",
+					  vty, true, "Read configuration file",
 					  NULL);
 		if (ret != NB_OK && ret != NB_ERR_NO_CHANGES)
 			zlog_err("%s: failed to read configuration file.",
@@ -2574,8 +2557,8 @@ void vty_log_fixed(char *buf, size_t len)
 
 int vty_config_enter(struct vty *vty, bool private_config, bool exclusive)
 {
-	if (exclusive && !vty_config_exclusive_lock(vty)) {
-		vty_out(vty, "VTY configuration is locked by other VTY\n");
+	if (exclusive && nb_running_lock(NB_CLIENT_CLI, vty)) {
+		vty_out(vty, "%% Configuration is locked by other client\n");
 		return CMD_WARNING;
 	}
 
@@ -2584,17 +2567,22 @@ int vty_config_enter(struct vty *vty, bool private_config, bool exclusive)
 	vty->private_config = private_config;
 	vty->xpath_index = 0;
 
-	if (private_config) {
-		vty->candidate_config = nb_config_dup(running_config);
-		vty->candidate_config_base = nb_config_dup(running_config);
-		vty_out(vty,
-			"Warning: uncommitted changes will be discarded on exit.\n\n");
-	} else {
-		vty->candidate_config = vty_shared_candidate_config;
-		if (frr_get_cli_mode() == FRR_CLI_TRANSACTIONAL)
+	pthread_rwlock_rdlock(&running_config->lock);
+	{
+		if (private_config) {
+			vty->candidate_config = nb_config_dup(running_config);
 			vty->candidate_config_base =
 				nb_config_dup(running_config);
+			vty_out(vty,
+				"Warning: uncommitted changes will be discarded on exit.\n\n");
+		} else {
+			vty->candidate_config = vty_shared_candidate_config;
+			if (frr_get_cli_mode() == FRR_CLI_TRANSACTIONAL)
+				vty->candidate_config_base =
+					nb_config_dup(running_config);
+		}
 	}
+	pthread_rwlock_unlock(&running_config->lock);
 
 	return CMD_SUCCESS;
 }
@@ -2609,7 +2597,7 @@ void vty_config_exit(struct vty *vty)
 		nb_cli_confirmed_commit_clean(vty);
 	}
 
-	vty_config_exclusive_unlock(vty);
+	(void)nb_running_unlock(NB_CLIENT_CLI, vty);
 
 	if (vty->candidate_config) {
 		if (vty->private_config)
@@ -2622,21 +2610,6 @@ void vty_config_exit(struct vty *vty)
 	}
 
 	vty->config = false;
-}
-
-int vty_config_exclusive_lock(struct vty *vty)
-{
-	if (vty_exclusive_lock == NULL) {
-		vty_exclusive_lock = vty;
-		return 1;
-	}
-	return 0;
-}
-
-void vty_config_exclusive_unlock(struct vty *vty)
-{
-	if (vty_exclusive_lock == vty)
-		vty_exclusive_lock = NULL;
 }
 
 /* Master of the threads. */
@@ -2659,25 +2632,20 @@ static void vty_event(enum event event, int sock, struct vty *vty)
 		vector_set_index(Vvty_serv_thread, sock, vty_serv_thread);
 		break;
 	case VTYSH_READ:
-		vty->t_read = NULL;
 		thread_add_read(vty_master, vtysh_read, vty, sock,
 				&vty->t_read);
 		break;
 	case VTYSH_WRITE:
-		vty->t_write = NULL;
 		thread_add_write(vty_master, vtysh_write, vty, sock,
 				 &vty->t_write);
 		break;
 #endif /* VTYSH */
 	case VTY_READ:
-		vty->t_read = NULL;
 		thread_add_read(vty_master, vty_read, vty, sock, &vty->t_read);
 
 		/* Time out treatment. */
 		if (vty->v_timeout) {
-			if (vty->t_timeout)
-				thread_cancel(vty->t_timeout);
-			vty->t_timeout = NULL;
+			THREAD_OFF(vty->t_timeout);
 			thread_add_timer(vty_master, vty_timeout, vty,
 					 vty->v_timeout, &vty->t_timeout);
 		}
@@ -2687,15 +2655,10 @@ static void vty_event(enum event event, int sock, struct vty *vty)
 				 &vty->t_write);
 		break;
 	case VTY_TIMEOUT_RESET:
-		if (vty->t_timeout) {
-			thread_cancel(vty->t_timeout);
-			vty->t_timeout = NULL;
-		}
-		if (vty->v_timeout) {
-			vty->t_timeout = NULL;
+		THREAD_OFF(vty->t_timeout);
+		if (vty->v_timeout)
 			thread_add_timer(vty_master, vty_timeout, vty,
 					 vty->v_timeout, &vty->t_timeout);
-		}
 		break;
 	}
 }
@@ -3021,7 +2984,7 @@ void vty_reset(void)
 	for (i = 0; i < vector_active(Vvty_serv_thread); i++)
 		if ((vty_serv_thread = vector_slot(Vvty_serv_thread, i))
 		    != NULL) {
-			thread_cancel(vty_serv_thread);
+			THREAD_OFF(vty_serv_thread);
 			vector_slot(Vvty_serv_thread, i) = NULL;
 			close(i);
 		}

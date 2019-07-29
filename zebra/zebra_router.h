@@ -194,4 +194,5 @@ extern void multicast_mode_ipv4_set(enum multicast_mode mode);
 
 extern enum multicast_mode multicast_mode_ipv4_get(void);
 
+extern void zebra_router_show_table_summary(struct vty *vty);
 #endif

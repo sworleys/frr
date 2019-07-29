@@ -213,7 +213,7 @@ static int ripngd_instance_offset_list_create(enum nb_event event,
 	ifname = yang_dnode_get_string(dnode, "./interface");
 
 	offset = ripng_offset_list_new(ifname);
-	yang_dnode_set_entry(dnode, offset);
+	nb_running_set_entry(dnode, offset);
 
 	return NB_OK;
 }
@@ -229,7 +229,7 @@ static int ripngd_instance_offset_list_delete(enum nb_event event,
 
 	direct = yang_dnode_get_enum(dnode, "./direction");
 
-	offset = yang_dnode_get_entry(dnode, true);
+	offset = nb_running_unset_entry(dnode);
 	if (offset->direct[direct].alist_name) {
 		free(offset->direct[direct].alist_name);
 		offset->direct[direct].alist_name = NULL;
@@ -259,7 +259,7 @@ ripngd_instance_offset_list_access_list_modify(enum nb_event event,
 	direct = yang_dnode_get_enum(dnode, "../direction");
 	alist_name = yang_dnode_get_string(dnode, NULL);
 
-	offset = yang_dnode_get_entry(dnode, true);
+	offset = nb_running_get_entry(dnode, NULL, true);
 	if (offset->direct[direct].alist_name)
 		free(offset->direct[direct].alist_name);
 	offset->direct[direct].alist_name = strdup(alist_name);
@@ -285,7 +285,7 @@ ripngd_instance_offset_list_metric_modify(enum nb_event event,
 	direct = yang_dnode_get_enum(dnode, "../direction");
 	metric = yang_dnode_get_uint8(dnode, NULL);
 
-	offset = yang_dnode_get_entry(dnode, true);
+	offset = nb_running_get_entry(dnode, NULL, true);
 	offset->direct[direct].metric = metric;
 
 	return NB_OK;
@@ -831,7 +831,7 @@ lib_interface_ripng_split_horizon_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	ifp = yang_dnode_get_entry(dnode, true);
+	ifp = nb_running_get_entry(dnode, NULL, true);
 	ri = ifp->info;
 	ri->split_horizon = yang_dnode_get_enum(dnode, NULL);
 

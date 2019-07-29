@@ -74,6 +74,9 @@ char *zebra_mlag_lib_msgid_to_str(enum mlag_msg_type msg_type, char *buf,
 	case MLAG_VXLAN_UPDATE:
 		snprintf(buf, size, "Mlag vxlan update");
 		break;
+	case MLAG_PEER_FRR_STATUS:
+		snprintf(buf, size, "Mlag Peer FRR Status");
+		break;
 	default:
 		snprintf(buf, size, "Unknown %d", msg_type);
 		break;
@@ -168,6 +171,18 @@ int zebra_mlag_lib_decode_vxlan_update(struct stream *s,
 	STREAM_GETL(s, msg->local_ip);
 	return 0;
 
+stream_failure:
+	return -1;
+}
+
+int zebra_mlag_lib_decode_frr_status(struct stream *s,
+				     struct mlag_frr_status *msg)
+{
+	if (s == NULL || msg == NULL)
+		return -1;
+
+	STREAM_GETL(s, msg->frr_state);
+	return 0;
 stream_failure:
 	return -1;
 }

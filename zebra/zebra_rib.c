@@ -24,7 +24,6 @@
 #include "if.h"
 #include "linklist.h"
 #include "log.h"
-#include "log_int.h"
 #include "memory.h"
 #include "mpls.h"
 #include "nexthop.h"
@@ -37,6 +36,7 @@
 #include "thread.h"
 #include "vrf.h"
 #include "workqueue.h"
+#include "nexthop_group_private.h"
 
 #include "zebra/zebra_router.h"
 #include "zebra/connected.h"
@@ -193,7 +193,7 @@ int zebra_check_addr(const struct prefix *p)
 /* Add nexthop to the end of a rib node's nexthop list */
 void route_entry_nexthop_add(struct route_entry *re, struct nexthop *nexthop)
 {
-	nexthop_add(&re->ng.nexthop, nexthop);
+	_nexthop_add(&re->ng.nexthop, nexthop);
 	re->nexthop_num++;
 }
 
@@ -698,7 +698,7 @@ static void rib_uninstall(struct route_node *rn, struct route_entry *re)
 /*
  * rib_can_delete_dest
  *
- * Returns TRUE if the given dest can be deleted from the table.
+ * Returns true if the given dest can be deleted from the table.
  */
 static int rib_can_delete_dest(rib_dest_t *dest)
 {
@@ -762,7 +762,7 @@ void zebra_rib_evaluate_rn_nexthops(struct route_node *rn, uint32_t seq)
 		 * nht resolution and as such we need to call the
 		 * nexthop tracking evaluation code
 		 */
-		frr_each (rnh_list, &dest->nht, rnh) {
+		frr_each_safe(rnh_list, &dest->nht, rnh) {
 			struct zebra_vrf *zvrf =
 				zebra_vrf_lookup_by_id(rnh->vrf_id);
 			struct prefix *p = &rnh->node->p;
@@ -816,7 +816,7 @@ void zebra_rib_evaluate_rn_nexthops(struct route_node *rn, uint32_t seq)
  * Garbage collect the rib dest corresponding to the given route node
  * if appropriate.
  *
- * Returns TRUE if the dest was deleted, FALSE otherwise.
+ * Returns true if the dest was deleted, false otherwise.
  */
 int rib_gc_dest(struct route_node *rn)
 {
@@ -1589,7 +1589,7 @@ static bool rib_update_re_from_ctx(struct route_entry *re,
 		 */
 		nexthop = nexthop_new();
 		nexthop->type = NEXTHOP_TYPE_IPV4;
-		nexthop_add(&(re->fib_ng.nexthop), nexthop);
+		_nexthop_add(&(re->fib_ng.nexthop), nexthop);
 	}
 
 done:
@@ -2346,9 +2346,11 @@ static void rib_link(struct route_node *rn, struct route_entry *re, int process)
 	afi = (rn->p.family == AF_INET)
 		      ? AFI_IP
 		      : (rn->p.family == AF_INET6) ? AFI_IP6 : AFI_MAX;
-	if (is_zebra_import_table_enabled(afi, re->table)) {
+	if (is_zebra_import_table_enabled(afi, re->vrf_id, re->table)) {
+		struct zebra_vrf *zvrf = zebra_vrf_lookup_by_id(re->vrf_id);
+
 		rmap_name = zebra_get_import_table_route_map(afi, re->table);
-		zebra_add_import_table_entry(rn, re, rmap_name);
+		zebra_add_import_table_entry(zvrf, rn, re, rmap_name);
 	} else if (process)
 		rib_queue_add(rn);
 }
@@ -2414,8 +2416,10 @@ void rib_delnode(struct route_node *rn, struct route_entry *re)
 	afi = (rn->p.family == AF_INET)
 		      ? AFI_IP
 		      : (rn->p.family == AF_INET6) ? AFI_IP6 : AFI_MAX;
-	if (is_zebra_import_table_enabled(afi, re->table)) {
-		zebra_del_import_table_entry(rn, re);
+	if (is_zebra_import_table_enabled(afi, re->vrf_id, re->table)) {
+		struct zebra_vrf *zvrf = zebra_vrf_lookup_by_id(re->vrf_id);
+
+		zebra_del_import_table_entry(zvrf, rn, re);
 		/* Just clean up if non main table */
 		if (IS_ZEBRA_DEBUG_RIB) {
 			char buf[SRCDEST2STR_BUFFER];
@@ -2444,6 +2448,7 @@ void _route_entry_dump(const char *func, union prefixconstptr pp,
 	bool is_srcdst = src_p && src_p->prefixlen;
 	char straddr[PREFIX_STRLEN];
 	char srcaddr[PREFIX_STRLEN];
+	char nhname[PREFIX_STRLEN];
 	struct nexthop *nexthop;
 
 	zlog_debug("%s: dumping RE entry %p for %s%s%s vrf %u", func,
@@ -2453,12 +2458,12 @@ void _route_entry_dump(const char *func, union prefixconstptr pp,
 			     : "",
 		   re->vrf_id);
 	zlog_debug("%s: uptime == %lu, type == %u, instance == %d, table == %d",
-		   func, (unsigned long)re->uptime, re->type, re->instance,
+		   straddr, (unsigned long)re->uptime, re->type, re->instance,
 		   re->table);
 	zlog_debug(
 		"%s: metric == %u, mtu == %u, distance == %u, flags == %u, status == %u",
-		func, re->metric, re->mtu, re->distance, re->flags, re->status);
-	zlog_debug("%s: nexthop_num == %u, nexthop_active_num == %u", func,
+		straddr, re->metric, re->mtu, re->distance, re->flags, re->status);
+	zlog_debug("%s: nexthop_num == %u, nexthop_active_num == %u", straddr,
 		   re->nexthop_num, re->nexthop_active_num);
 
 	for (ALL_NEXTHOPS(re->ng, nexthop)) {
@@ -2467,27 +2472,27 @@ void _route_entry_dump(const char *func, union prefixconstptr pp,
 
 		switch (nexthop->type) {
 		case NEXTHOP_TYPE_BLACKHOLE:
-			sprintf(straddr, "Blackhole");
+			sprintf(nhname, "Blackhole");
 			break;
 		case NEXTHOP_TYPE_IFINDEX:
 			ifp = if_lookup_by_index(nexthop->ifindex,
 						 nexthop->vrf_id);
-			sprintf(straddr, "%s", ifp ? ifp->name : "Unknown");
+			sprintf(nhname, "%s", ifp ? ifp->name : "Unknown");
 			break;
 		case NEXTHOP_TYPE_IPV4:
 			/* fallthrough */
 		case NEXTHOP_TYPE_IPV4_IFINDEX:
-			inet_ntop(AF_INET, &nexthop->gate, straddr,
+			inet_ntop(AF_INET, &nexthop->gate, nhname,
 				  INET6_ADDRSTRLEN);
 			break;
 		case NEXTHOP_TYPE_IPV6:
 		case NEXTHOP_TYPE_IPV6_IFINDEX:
-			inet_ntop(AF_INET6, &nexthop->gate, straddr,
+			inet_ntop(AF_INET6, &nexthop->gate, nhname,
 				  INET6_ADDRSTRLEN);
 			break;
 		}
 		zlog_debug("%s: %s %s[%u] vrf %s(%u) with flags %s%s%s%s%s%s",
-			   func, (nexthop->rparent ? "  NH" : "NH"), straddr,
+			   straddr, (nexthop->rparent ? "  NH" : "NH"), nhname,
 			   nexthop->ifindex, vrf ? vrf->name : "Unknown",
 			   nexthop->vrf_id,
 			   (CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_ACTIVE)
@@ -2509,7 +2514,7 @@ void _route_entry_dump(const char *func, union prefixconstptr pp,
 				    ? "DUPLICATE "
 				    : ""));
 	}
-	zlog_debug("%s: dump complete", func);
+	zlog_debug("%s: dump complete", straddr);
 }
 
 /* This is an exported helper to rtm_read() to dump the strange
@@ -2740,11 +2745,14 @@ void rib_delete(afi_t afi, safi_t safi, vrf_id_t vrf_id, int type,
 		else
 			src_buf[0] = '\0';
 
-		if (IS_ZEBRA_DEBUG_RIB)
-			zlog_debug("%u:%s%s%s doesn't exist in rib", vrf_id,
-				   dst_buf,
+		if (IS_ZEBRA_DEBUG_RIB) {
+			struct vrf *vrf = vrf_lookup_by_id(vrf_id);
+
+			zlog_debug("%s[%d]:%s%s%s doesn't exist in rib",
+				   vrf->name, table_id, dst_buf,
 				   (src_buf[0] != '\0') ? " from " : "",
 				   src_buf);
+		}
 		return;
 	}
 
@@ -3382,7 +3390,7 @@ void rib_init(void)
  *
  * Get the first vrf id that is greater than the given vrf id if any.
  *
- * Returns TRUE if a vrf id was found, FALSE otherwise.
+ * Returns true if a vrf id was found, false otherwise.
  */
 static inline int vrf_id_get_next(vrf_id_t vrf_id, vrf_id_t *next_id_p)
 {

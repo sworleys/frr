@@ -53,6 +53,7 @@ message ZebraMlag_Header {
         ZEBRA_MLAG_PIM_STATUS_UPDATE = 9;
         ZEBRA_MLAG_PIM_CFG_DUMP = 10;
         ZEBRA_MLAG_VXLAN_UPDATE = 11;
+        ZEBRA_MLAG_ZEBRA_STATUS_UPDATE = 12;
     }
 
     /*
@@ -115,6 +116,23 @@ message ZebraMlagStatusUpdate {
 message ZebraMlagVxlanUpdate {
 	uint32 anycast_ip = 1;
 	uint32 local_ip = 2;
+}
+
+/*
+ * ZebraMlagZebraStatusUpdate
+ *
+ * This message will be posted by CLAGD to advertise FRR state
+ * Change Information to peer
+ */
+
+message ZebraMlagZebraStatusUpdate{
+    enum FrrState {
+        FRR_STATE_NONE = 0;
+        FRR_STATE_DOWN = 1;
+        FRR_STATE_UP = 2;
+    }
+
+    FrrState peer_frrstate = 1;
 }
 
 /*

@@ -31,6 +31,9 @@
 #include "pim_str.h"
 #include "pim_iface.h"
 #include "pim_time.h"
+#include "pim_vxlan.h"
+
+static void pim_channel_update_mute(struct channel_oil *c_oil);
 
 char *pim_channel_oil_dump(struct channel_oil *c_oil, char *buf, size_t size)
 {
@@ -143,6 +146,43 @@ struct channel_oil *pim_find_channel_oil(struct pim_instance *pim,
 	return c_oil;
 }
 
+void pim_channel_oil_change_iif(struct pim_instance *pim,
+				struct channel_oil *c_oil,
+				int input_vif_index,
+				const char *name)
+{
+	int old_vif_index = c_oil->oil.mfcc_parent;
+	struct prefix_sg sg = {.src = c_oil->oil.mfcc_mcastgrp,
+			       .grp = c_oil->oil.mfcc_origin};
+
+	if (c_oil->oil.mfcc_parent == input_vif_index) {
+		if (PIM_DEBUG_MROUTE_DETAIL)
+			zlog_debug("%s(%s): Existing channel oil %pSG4 already using %d as IIF",
+				   __PRETTY_FUNCTION__, name, &sg,
+				   input_vif_index);
+
+		return;
+	}
+
+	if (PIM_DEBUG_MROUTE_DETAIL)
+		zlog_debug("%s(%s): Changing channel oil %pSG4 IIF from %d to %d installed: %d",
+			   __PRETTY_FUNCTION__, name, &sg,
+			   c_oil->oil.mfcc_parent, input_vif_index,
+			   c_oil->installed);
+
+	c_oil->oil.mfcc_parent = input_vif_index;
+	if (c_oil->installed) {
+		if (input_vif_index == MAXVIFS)
+			pim_mroute_del(c_oil, name);
+		else
+			pim_mroute_add(c_oil, name);
+	} else
+		if (old_vif_index == MAXVIFS)
+			pim_mroute_add(c_oil, name);
+
+	return;
+}
+
 struct channel_oil *pim_channel_oil_add(struct pim_instance *pim,
 					struct prefix_sg *sg,
 					int input_vif_index,
@@ -163,14 +203,23 @@ struct channel_oil *pim_channel_oil_add(struct pim_instance *pim,
 					c_oil->oil.mfcc_parent,
 					input_vif_index);
 		}
-		c_oil->oil.mfcc_parent = input_vif_index;
+		pim_channel_oil_change_iif(pim, c_oil, input_vif_index,
+					   caller);
 		++c_oil->oil_ref_count;
 		if (PIM_DEBUG_MROUTE)
 			zlog_debug("%s(%s): c_oil %s ref count %d increment",
 					__func__, caller, pim_str_sg_dump(sg),
 					c_oil->oil_ref_count);
-		c_oil->up = pim_upstream_find(
-			pim, sg); // channel might be present prior to upstream
+		if (!c_oil->up) {
+			/* channel might be present prior to upstream */
+			c_oil->up = pim_upstream_find(
+					pim, sg);
+			/* if the upstream entry is being anchored to an
+			 * already existing channel OIL we need to re-evaluate
+			 * the "Mute" state on AA OIFs
+			 */
+			pim_channel_update_mute(c_oil);
+		}
 		return c_oil;
 	}
 
@@ -198,14 +247,14 @@ struct channel_oil *pim_channel_oil_add(struct pim_instance *pim,
 	c_oil->pim = pim;
 
 	if (PIM_DEBUG_MROUTE)
-		zlog_debug("%s(%s): c_oil %s add",
-				__func__, caller, pim_str_sg_dump(sg));
+		zlog_debug("%s(%s): c_oil %s add %d as IIF",
+				__func__, caller, pim_str_sg_dump(sg), input_vif_index);
 	listnode_add_sort(pim->channel_oil_list, c_oil);
 
 	return c_oil;
 }
 
-void pim_channel_oil_del(struct channel_oil *c_oil)
+struct channel_oil *pim_channel_oil_del(struct channel_oil *c_oil)
 {
 	--c_oil->oil_ref_count;
 
@@ -220,6 +269,24 @@ void pim_channel_oil_del(struct channel_oil *c_oil)
 		hash_release(c_oil->pim->channel_oil_hash, c_oil);
 
 		pim_channel_oil_free(c_oil);
+		return NULL;
+	}
+
+	return c_oil;
+}
+
+void pim_channel_oil_upstream_deref(struct channel_oil *c_oil)
+{
+	/* The upstream entry associated with a channel_oil is abt to be
+	 * deleted. If the channel_oil is kept around because of other
+	 * references we need to remove upstream based states out of it.
+	 */
+	c_oil = pim_channel_oil_del(c_oil);
+	if (c_oil) {
+		/* note: here we assume that c_oil->up has already been
+		 * cleared
+		 */
+		pim_channel_update_mute(c_oil);
 	}
 }
 
@@ -262,7 +329,8 @@ int pim_channel_del_oif(struct channel_oil *channel_oil, struct interface *oif,
 
 	channel_oil->oif_flags[pim_ifp->mroute_vif_index] &= ~proto_mask;
 
-	if (channel_oil->oif_flags[pim_ifp->mroute_vif_index]) {
+	if (channel_oil->oif_flags[pim_ifp->mroute_vif_index] &
+			PIM_OIF_FLAG_PROTO_ANY) {
 		if (PIM_DEBUG_MROUTE) {
 			char group_str[INET_ADDRSTRLEN];
 			char source_str[INET_ADDRSTRLEN];
@@ -284,6 +352,8 @@ int pim_channel_del_oif(struct channel_oil *channel_oil, struct interface *oif,
 	}
 
 	channel_oil->oil.mfcc_ttls[pim_ifp->mroute_vif_index] = 0;
+	/* clear mute; will be re-evaluated when the OIF becomes valid again */
+	channel_oil->oif_flags[pim_ifp->mroute_vif_index] &= ~PIM_OIF_FLAG_MUTE;
 
 	if (pim_mroute_add(channel_oil, __PRETTY_FUNCTION__)) {
 		if (PIM_DEBUG_MROUTE) {
@@ -324,6 +394,93 @@ int pim_channel_del_oif(struct channel_oil *channel_oil, struct interface *oif,
 }
 
 
+static bool pim_channel_eval_oif_mute(struct channel_oil *c_oil,
+		struct pim_interface *pim_ifp)
+{
+	struct pim_interface *pim_reg_ifp;
+	struct pim_interface *vxlan_ifp;
+	bool do_mute = false;
+	struct pim_instance *pim = c_oil->pim;
+
+	if (!c_oil->up)
+		return do_mute;
+
+	pim_reg_ifp = pim->regiface->info;
+	if (pim_ifp == pim_reg_ifp) {
+		/* suppress pimreg in the OIL if the mroute is not supposed to
+		 * trigger register encapsulated data
+		 */
+		if (PIM_UPSTREAM_FLAG_TEST_NO_PIMREG_DATA(c_oil->up->flags))
+			do_mute = true;
+
+		return do_mute;
+	}
+
+	vxlan_ifp = pim_vxlan_get_term_ifp(pim);
+	if (pim_ifp == vxlan_ifp) {
+		/* 1. vxlan termination device must never be added to the
+		 * origination mroute (and that can actually happen because
+		 * of XG inheritance from the termination mroute) otherwise
+		 * traffic will end up looping.
+		 * PS: This check has also been extended to non-orig mroutes
+		 * that have a local SIP as such mroutes can move back and
+		 * forth between orig<=>non-orig type.
+		 * 2. vxlan termination device should be removed from the non-DF
+		 * to prevent duplicates to the overlay rxer
+		 */
+		if (PIM_UPSTREAM_FLAG_TEST_SRC_VXLAN_ORIG(c_oil->up->flags) ||
+			PIM_UPSTREAM_FLAG_TEST_MLAG_NON_DF(c_oil->up->flags) ||
+			pim_vxlan_is_local_sip(c_oil->up))
+			do_mute = true;
+
+		return do_mute;
+	}
+
+	return do_mute;
+}
+
+void pim_channel_update_oif_mute(struct channel_oil *c_oil,
+		struct pim_interface *pim_ifp)
+{
+	bool old_mute;
+	bool new_mute;
+
+	/* If pim_ifp is not a part of the OIL there is nothing to do */
+	if (!c_oil->oil.mfcc_ttls[pim_ifp->mroute_vif_index])
+		return;
+
+	old_mute = !!(c_oil->oif_flags[pim_ifp->mroute_vif_index] &
+			PIM_OIF_FLAG_MUTE);
+	new_mute = pim_channel_eval_oif_mute(c_oil, pim_ifp);
+	if (old_mute == new_mute)
+		return;
+
+	if (new_mute)
+		c_oil->oif_flags[pim_ifp->mroute_vif_index] |=
+			PIM_OIF_FLAG_MUTE;
+	else
+		c_oil->oif_flags[pim_ifp->mroute_vif_index] &=
+			~PIM_OIF_FLAG_MUTE;
+
+	pim_mroute_add(c_oil, __PRETTY_FUNCTION__);
+}
+
+/* pim_upstream has been set or cleared on the c_oil. re-eval mute state
+ * on all existing OIFs
+ */
+static void pim_channel_update_mute(struct channel_oil *c_oil)
+{
+	struct pim_interface *pim_reg_ifp;
+	struct pim_interface *vxlan_ifp;
+
+	pim_reg_ifp = c_oil->pim->regiface->info;
+	if (pim_reg_ifp)
+		pim_channel_update_oif_mute(c_oil, pim_reg_ifp);
+	vxlan_ifp = pim_vxlan_get_term_ifp(c_oil->pim);
+	if (vxlan_ifp)
+		pim_channel_update_oif_mute(c_oil, vxlan_ifp);
+}
+
 int pim_channel_add_oif(struct channel_oil *channel_oil, struct interface *oif,
 			uint32_t proto_mask, const char *caller)
 {
@@ -353,10 +510,12 @@ int pim_channel_add_oif(struct channel_oil *channel_oil, struct interface *oif,
 	  IGMP must be protected against adding looped MFC entries created
 	  by both source and receiver attached to the same interface. See
 	  TODO T22.
+	  We shall allow igmp to create upstream when it is DR for the intf.
+	  Assume RP reachable via non DR.
 	*/
-	if (channel_oil->up &&
-			PIM_UPSTREAM_FLAG_TEST_ALLOW_IIF_IN_OIL(
-				channel_oil->up->flags)) {
+	if ((channel_oil->up &&
+	    PIM_UPSTREAM_FLAG_TEST_ALLOW_IIF_IN_OIL(channel_oil->up->flags)) ||
+	    ((proto_mask == PIM_OIF_FLAG_PROTO_IGMP) && PIM_I_am_DR(pim_ifp))) {
 		allow_iif_in_oil = true;
 	}
 
@@ -466,6 +625,18 @@ int pim_channel_add_oif(struct channel_oil *channel_oil, struct interface *oif,
 	channel_oil->oil.mfcc_ttls[pim_ifp->mroute_vif_index] =
 		PIM_MROUTE_MIN_TTL;
 
+	/* Some OIFs are held in a muted state i.e. the PIM state machine
+	 * decided to include the OIF but additional status check such as
+	 * MLAG DF role prevent it from being activated for traffic
+	 * forwarding.
+	 */
+	if (pim_channel_eval_oif_mute(channel_oil, pim_ifp))
+		channel_oil->oif_flags[pim_ifp->mroute_vif_index] |=
+			PIM_OIF_FLAG_MUTE;
+	else
+		channel_oil->oif_flags[pim_ifp->mroute_vif_index] &=
+			~PIM_OIF_FLAG_MUTE;
+
 	/* channel_oil->oil.mfcc_parent != MAXVIFS indicate this entry is not
 	 * valid to get installed in kernel.
 	 */
@@ -530,5 +701,5 @@ int pim_channel_oil_empty(struct channel_oil *c_oil)
 		inited = 1;
 	}
 
-	return !memcmp(c_oil->oif_flags, zero, MAXVIFS * sizeof(uint32_t));
+	return !memcmp(c_oil->oil.mfcc_ttls, zero, MAXVIFS * sizeof(uint32_t));
 }

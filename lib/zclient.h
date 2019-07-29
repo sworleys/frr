@@ -181,6 +181,7 @@ typedef enum {
 	ZEBRA_MLAG_CLIENT_REGISTER,
 	ZEBRA_MLAG_CLIENT_UNREGISTER,
 	ZEBRA_MLAG_FORWARD_MSG,
+	ZEBRA_VXLAN_SG_REPLAY,
 } zebra_message_types_t;
 
 struct redist_proto {

@@ -277,7 +277,6 @@ static int pim_update_upstream_nh_helper(struct hash_bucket *bucket, void *arg)
 	old.source_nexthop.interface = up->rpf.source_nexthop.interface;
 	rpf_result = pim_rpf_update(pim, up, &old);
 	if (rpf_result == PIM_RPF_FAILURE) {
-		pim_upstream_rpf_clear(pim, up);
 		return HASHWALK_CONTINUE;
 	}
 
@@ -404,6 +403,13 @@ static int pim_ecmp_nexthop_search(struct pim_instance *pim,
 							"%s: current nexthop does not have nbr ",
 							__PRETTY_FUNCTION__);
 				} else {
+					/* update metric even if the upstream
+					 * neighbor stays unchanged
+					 */
+					nexthop->mrib_metric_preference =
+						pnc->distance;
+					nexthop->mrib_route_metric =
+						pnc->metric;
 					if (PIM_DEBUG_PIM_NHT) {
 						char src_str[INET_ADDRSTRLEN];
 						pim_inet4_dump("<addr?>",
@@ -670,6 +676,14 @@ int pim_parse_nexthop_update(ZAPI_CALLBACK_ARGS)
 			}
 
 			if (!ifp->info) {
+				/*
+				 * Though Multicast is not enabled on this
+				 * Interface store it in database otheriwse we
+				 * may miss this update and this will not cause
+				 * any issue, because while choosing the path we
+				 * are ommitting the Interfaces which are not
+				 * multicast enabled
+				 */
 				if (PIM_DEBUG_PIM_NHT) {
 					char buf[NEXTHOP_STRLEN];
 
@@ -681,8 +695,6 @@ int pim_parse_nexthop_update(ZAPI_CALLBACK_ARGS)
 						nexthop2str(nexthop, buf,
 							    sizeof(buf)));
 				}
-				nexthop_free(nexthop);
-				continue;
 			}
 
 			if (nhlist_tail) {

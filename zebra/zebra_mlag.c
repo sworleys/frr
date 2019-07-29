@@ -1404,6 +1404,24 @@ int zebra_mlag_protobuf_decode_message(struct stream **s, uint8_t *data,
 			stream_putl(*s, msg->svi_state);
 			zebra_mlag_pim_status_update__free_unpacked(msg, NULL);
 		} break;
+		case ZEBRA_MLAG__HEADER__MESSAGE_TYPE__ZEBRA_MLAG_ZEBRA_STATUS_UPDATE: {
+			ZebraMlagZebraStatusUpdate *msg = NULL;
+
+			msg = zebra_mlag_zebra_status_update__unpack(
+				NULL, hdr->data.len, hdr->data.data);
+			if (msg == NULL) {
+				zebra_mlag__header__free_unpacked(hdr, NULL);
+				return (-1);
+			}
+			/* Payload len */
+			stream_putw(*s, MLAG_FRR_STATUS_MSGSIZE);
+			/* No Batching */
+			stream_putw(*s, MLAG_MSG_NO_BATCH);
+			/* Actual Data */
+			stream_putl(*s, msg->peer_frrstate);
+			zebra_mlag_zebra_status_update__free_unpacked(msg,
+								      NULL);
+		} break;
 		default:
 			break;
 		} /*switch*/

@@ -581,11 +581,27 @@ static int pim_zebra_vxlan_sg_proc(ZAPI_CALLBACK_ARGS)
 	return 0;
 }
 
+static void pim_zebra_vxlan_replay(void)
+{
+	struct stream *s = NULL;
+
+	/* Check socket. */
+	if (!zclient || zclient->sock < 0)
+		return;
+
+	s = zclient->obuf;
+	stream_reset(s);
+
+	zclient_create_header(s, ZEBRA_VXLAN_SG_REPLAY, VRF_DEFAULT);
+	stream_putw_at(s, 0, stream_get_endp(s));
+
+	zclient_send_message(zclient);
+}
+
 void pim_scan_individual_oil(struct channel_oil *c_oil, int in_vif_index)
 {
 	struct in_addr vif_source;
 	int input_iface_vif_index;
-	int old_vif_index;
 
 	pim_rp_set_upstream_addr(c_oil->pim, &vif_source,
 				      c_oil->oil.mfcc_origin,
@@ -685,33 +701,9 @@ void pim_scan_individual_oil(struct channel_oil *c_oil, int in_vif_index)
 	}
 
 	/* update iif vif_index */
-	old_vif_index = c_oil->oil.mfcc_parent;
-	c_oil->oil.mfcc_parent = input_iface_vif_index;
-
-	/* update kernel multicast forwarding cache (MFC) */
-	if (pim_mroute_add(c_oil, __PRETTY_FUNCTION__)) {
-		if (PIM_DEBUG_MROUTE) {
-			/* just log warning */
-			struct interface *old_iif = pim_if_find_by_vif_index(
-				c_oil->pim, old_vif_index);
-			struct interface *new_iif = pim_if_find_by_vif_index(
-				c_oil->pim, input_iface_vif_index);
-			char source_str[INET_ADDRSTRLEN];
-			char group_str[INET_ADDRSTRLEN];
-			pim_inet4_dump("<source?>", c_oil->oil.mfcc_origin,
-				       source_str, sizeof(source_str));
-			pim_inet4_dump("<group?>", c_oil->oil.mfcc_mcastgrp,
-				       group_str, sizeof(group_str));
-			zlog_debug(
-				"%s %s: (S,G)=(%s,%s) failure updating input interface from %s vif_index=%d to %s vif_index=%d",
-				__FILE__, __PRETTY_FUNCTION__, source_str,
-				group_str,
-				old_iif ? old_iif->name : "<old_iif?>",
-				c_oil->oil.mfcc_parent,
-				new_iif ? new_iif->name : "<new_iif?>",
-				input_iface_vif_index);
-		}
-	}
+	pim_channel_oil_change_iif(c_oil->pim, c_oil, input_iface_vif_index,
+				   __PRETTY_FUNCTION__);
+	pim_mroute_add(c_oil, __PRETTY_FUNCTION__);
 }
 
 void pim_scan_oil(struct pim_instance *pim)
@@ -784,6 +776,9 @@ static void pim_zebra_connected(struct zclient *zclient)
 	bfd_client_sendmsg(zclient, ZEBRA_BFD_CLIENT_REGISTER);
 
 	zclient_send_reg_requests(zclient, router->vrf_id);
+
+	/* request for VxLAN BUM group addresses */
+	pim_zebra_vxlan_replay();
 }
 
 static void pim_zebra_capabilities(struct zclient_capabilities *cap)
@@ -1050,10 +1045,12 @@ void igmp_source_forward_start(struct pim_instance *pim,
 				 * Protect IGMP against adding looped MFC
 				 * entries created by both source and receiver
 				 * attached to the same interface. See TODO
-				 * T22.
+				 * T22. Block only when the intf is non DR
+				 * DR must create upstream.
 				 */
-				if (input_iface_vif_index ==
-				    pim_oif->mroute_vif_index) {
+				if ((input_iface_vif_index ==
+				    pim_oif->mroute_vif_index) &&
+				    !(PIM_I_am_DR(pim_oif))) {
 					/* ignore request for looped MFC entry
 					 */
 					if (PIM_DEBUG_IGMP_TRACE) {
@@ -1251,23 +1248,15 @@ void pim_forward_start(struct pim_ifchannel *ch)
 					__FILE__, __PRETTY_FUNCTION__,
 					source_str);
 			}
-			up->channel_oil = pim_channel_oil_add(pim, &up->sg,
-						MAXVIFS, "pim_fwd_no_iif");
+			pim_channel_oil_change_iif(pim, up->channel_oil,
+						   MAXVIFS,
+						   __PRETTY_FUNCTION__);
 		}
 
-		else {
-			up->channel_oil = pim_channel_oil_add(pim, &up->sg,
-							input_iface_vif_index,
-							"pim_fwd_with_iif");
-			if (!up->channel_oil) {
-				if (PIM_DEBUG_PIM_TRACE)
-					zlog_debug(
-					    "%s %s: could not create OIL for channel (S,G)=%s",
-					    __FILE__, __PRETTY_FUNCTION__,
-					    up->sg_str);
-				return;
-			}
-		}
+		else
+			pim_channel_oil_change_iif(pim, up->channel_oil,
+						   input_iface_vif_index,
+						   __PRETTY_FUNCTION__);
 
 		if (PIM_DEBUG_TRACE) {
 			struct interface *in_intf = pim_if_find_by_vif_index(
@@ -1277,17 +1266,6 @@ void pim_forward_start(struct pim_ifchannel *ch)
 				__PRETTY_FUNCTION__,
 				in_intf ? in_intf->name : "Unknown",
 				input_iface_vif_index, up->sg_str);
-		}
-
-		up->channel_oil = pim_channel_oil_add(pim, &up->sg,
-				      input_iface_vif_index, "pim_fwd");
-		if (!up->channel_oil) {
-			if (PIM_DEBUG_PIM_TRACE)
-				zlog_debug(
-					"%s %s: could not create OIL for channel (S,G)=%s",
-					__FILE__, __PRETTY_FUNCTION__,
-					up->sg_str);
-			return;
 		}
 	}
 

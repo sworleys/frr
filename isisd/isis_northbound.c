@@ -66,7 +66,7 @@ static int isis_instance_create(enum nb_event event,
 
 	area = isis_area_create(area_tag);
 	/* save area in dnode to avoid looking it up all the time */
-	yang_dnode_set_entry(dnode, area);
+	nb_running_set_entry(dnode, area);
 
 	return NB_OK;
 }
@@ -74,13 +74,13 @@ static int isis_instance_create(enum nb_event event,
 static int isis_instance_delete(enum nb_event event,
 				const struct lyd_node *dnode)
 {
-	const char *area_tag;
+	struct isis_area *area;
 
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area_tag = yang_dnode_get_string(dnode, "./area-tag");
-	isis_area_destroy(area_tag);
+	area = nb_running_unset_entry(dnode);
+	isis_area_destroy(area->area_tag);
 
 	return NB_OK;
 }
@@ -98,7 +98,7 @@ static int isis_instance_is_type_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	type = yang_dnode_get_enum(dnode, NULL);
 	isis_area_is_type_set(area, type);
 
@@ -149,7 +149,7 @@ static int isis_instance_area_address_create(enum nb_event event,
 		XFREE(MTYPE_ISIS_AREA_ADDR, resource->ptr);
 		break;
 	case NB_EV_APPLY:
-		area = yang_dnode_get_entry(dnode, true);
+		area = nb_running_get_entry(dnode, NULL, true);
 		addrr = resource->ptr;
 
 		if (isis->sysid_set == 0) {
@@ -207,7 +207,7 @@ static int isis_instance_area_address_delete(enum nb_event event,
 	net_title = yang_dnode_get_string(dnode, NULL);
 	addr.addr_len = dotformat2buff(buff, net_title);
 	memcpy(addr.area_addr, buff, (int)addr.addr_len);
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	for (ALL_LIST_ELEMENTS_RO(area->area_addrs, node, addrp)) {
 		if ((addrp->addr_len + ISIS_SYS_ID_LEN + 1) == addr.addr_len
 		    && !memcmp(addrp->area_addr, addr.area_addr, addr.addr_len))
@@ -243,7 +243,7 @@ static int isis_instance_dynamic_hostname_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	isis_area_dynhostname_set(area, yang_dnode_get_bool(dnode, NULL));
 
 	return NB_OK;
@@ -262,7 +262,7 @@ static int isis_instance_attached_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	attached = yang_dnode_get_bool(dnode, NULL);
 	isis_area_attached_bit_set(area, attached);
 
@@ -282,7 +282,7 @@ static int isis_instance_overload_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	overload = yang_dnode_get_bool(dnode, NULL);
 	isis_area_overload_bit_set(area, overload);
 
@@ -303,7 +303,7 @@ static int isis_instance_metric_style_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	old_metric = (metric_style == ISIS_WIDE_METRIC) ? false : true;
 	new_metric = (metric_style == ISIS_NARROW_METRIC) ? false : true;
 	isis_area_metricstyle_set(area, old_metric, new_metric);
@@ -323,7 +323,7 @@ static int isis_instance_purge_originator_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	area->purge_originator = yang_dnode_get_bool(dnode, NULL);
 
 	return NB_OK;
@@ -343,7 +343,7 @@ static int isis_instance_lsp_mtu_modify(enum nb_event event,
 
 	switch (event) {
 	case NB_EV_VALIDATE:
-		area = yang_dnode_get_entry(dnode, false);
+		area = nb_running_get_entry(dnode, NULL, false);
 		if (!area)
 			break;
 		for (ALL_LIST_ELEMENTS_RO(area->circuit_list, node, circuit)) {
@@ -364,7 +364,7 @@ static int isis_instance_lsp_mtu_modify(enum nb_event event,
 	case NB_EV_ABORT:
 		break;
 	case NB_EV_APPLY:
-		area = yang_dnode_get_entry(dnode, true);
+		area = nb_running_get_entry(dnode, NULL, true);
 		isis_area_lsp_mtu_set(area, lsp_mtu);
 		break;
 	}
@@ -387,7 +387,7 @@ isis_instance_lsp_refresh_interval_level_1_modify(enum nb_event event,
 		return NB_OK;
 
 	refr_int = yang_dnode_get_uint16(dnode, NULL);
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	isis_area_lsp_refresh_set(area, IS_LEVEL_1, refr_int);
 
 	return NB_OK;
@@ -408,7 +408,7 @@ isis_instance_lsp_refresh_interval_level_2_modify(enum nb_event event,
 		return NB_OK;
 
 	refr_int = yang_dnode_get_uint16(dnode, NULL);
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	isis_area_lsp_refresh_set(area, IS_LEVEL_2, refr_int);
 
 	return NB_OK;
@@ -429,7 +429,7 @@ isis_instance_lsp_maximum_lifetime_level_1_modify(enum nb_event event,
 		return NB_OK;
 
 	max_lt = yang_dnode_get_uint16(dnode, NULL);
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	isis_area_max_lsp_lifetime_set(area, IS_LEVEL_1, max_lt);
 
 	return NB_OK;
@@ -450,7 +450,7 @@ isis_instance_lsp_maximum_lifetime_level_2_modify(enum nb_event event,
 		return NB_OK;
 
 	max_lt = yang_dnode_get_uint16(dnode, NULL);
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	isis_area_max_lsp_lifetime_set(area, IS_LEVEL_2, max_lt);
 
 	return NB_OK;
@@ -470,7 +470,7 @@ static int isis_instance_lsp_generation_interval_level_1_modify(
 		return NB_OK;
 
 	gen_int = yang_dnode_get_uint16(dnode, NULL);
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	area->lsp_gen_interval[0] = gen_int;
 
 	return NB_OK;
@@ -490,7 +490,7 @@ static int isis_instance_lsp_generation_interval_level_2_modify(
 		return NB_OK;
 
 	gen_int = yang_dnode_get_uint16(dnode, NULL);
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	area->lsp_gen_interval[1] = gen_int;
 
 	return NB_OK;
@@ -506,7 +506,7 @@ static void ietf_backoff_delay_apply_finish(const struct lyd_node *dnode)
 	long long_delay = yang_dnode_get_uint16(dnode, "./long-delay");
 	long holddown = yang_dnode_get_uint16(dnode, "./hold-down");
 	long timetolearn = yang_dnode_get_uint16(dnode, "./time-to-learn");
-	struct isis_area *area = yang_dnode_get_entry(dnode, true);
+	struct isis_area *area = nb_running_get_entry(dnode, NULL, true);
 	size_t bufsiz = strlen(area->area_tag) + sizeof("IS-IS  Lx");
 	char *buf = XCALLOC(MTYPE_TMP, bufsiz);
 
@@ -543,7 +543,7 @@ isis_instance_spf_ietf_backoff_delay_delete(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	spf_backoff_free(area->spf_delay_ietf[0]);
 	spf_backoff_free(area->spf_delay_ietf[1]);
 	area->spf_delay_ietf[0] = NULL;
@@ -620,7 +620,7 @@ isis_instance_spf_minimum_interval_level_1_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	area->min_spf_interval[0] = yang_dnode_get_uint16(dnode, NULL);
 
 	return NB_OK;
@@ -639,7 +639,7 @@ isis_instance_spf_minimum_interval_level_2_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	area->min_spf_interval[1] = yang_dnode_get_uint16(dnode, NULL);
 
 	return NB_OK;
@@ -651,7 +651,7 @@ isis_instance_spf_minimum_interval_level_2_modify(enum nb_event event,
 static void area_password_apply_finish(const struct lyd_node *dnode)
 {
 	const char *password = yang_dnode_get_string(dnode, "./password");
-	struct isis_area *area = yang_dnode_get_entry(dnode, true);
+	struct isis_area *area = nb_running_get_entry(dnode, NULL, true);
 	int pass_type = yang_dnode_get_enum(dnode, "./password-type");
 	uint8_t snp_auth = yang_dnode_get_enum(dnode, "./authenticate-snp");
 
@@ -683,7 +683,7 @@ static int isis_instance_area_password_delete(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	isis_area_passwd_unset(area, IS_LEVEL_1);
 
 	return NB_OK;
@@ -730,7 +730,7 @@ static int isis_instance_area_password_authenticate_snp_modify(
 static void domain_password_apply_finish(const struct lyd_node *dnode)
 {
 	const char *password = yang_dnode_get_string(dnode, "./password");
-	struct isis_area *area = yang_dnode_get_entry(dnode, true);
+	struct isis_area *area = nb_running_get_entry(dnode, NULL, true);
 	int pass_type = yang_dnode_get_enum(dnode, "./password-type");
 	uint8_t snp_auth = yang_dnode_get_enum(dnode, "./authenticate-snp");
 
@@ -762,7 +762,7 @@ static int isis_instance_domain_password_delete(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	isis_area_passwd_unset(area, IS_LEVEL_2);
 
 	return NB_OK;
@@ -812,7 +812,7 @@ static void default_info_origin_apply_finish(const struct lyd_node *dnode,
 	int originate_type = DEFAULT_ORIGINATE;
 	unsigned long metric = 0;
 	const char *routemap = NULL;
-	struct isis_area *area = yang_dnode_get_entry(dnode, true);
+	struct isis_area *area = nb_running_get_entry(dnode, NULL, true);
 	int level = yang_dnode_get_enum(dnode, "./level");
 
 	if (yang_dnode_get_bool(dnode, "./always")) {
@@ -859,7 +859,7 @@ static int isis_instance_default_information_originate_ipv4_delete(
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	level = yang_dnode_get_enum(dnode, "./level");
 	isis_redist_unset(area, level, AF_INET, DEFAULT_ROUTE);
 
@@ -933,7 +933,7 @@ static int isis_instance_default_information_originate_ipv6_delete(
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	level = yang_dnode_get_enum(dnode, "./level");
 	isis_redist_unset(area, level, AF_INET6, DEFAULT_ROUTE);
 
@@ -1000,7 +1000,7 @@ static void redistribute_apply_finish(const struct lyd_node *dnode, int family)
 
 	type = yang_dnode_get_enum(dnode, "./protocol");
 	level = yang_dnode_get_enum(dnode, "./level");
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 
 	if (yang_dnode_exists(dnode, "./metric"))
 		metric = yang_dnode_get_uint32(dnode, "./metric");
@@ -1037,7 +1037,7 @@ static int isis_instance_redistribute_ipv4_delete(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	level = yang_dnode_get_enum(dnode, "./level");
 	type = yang_dnode_get_enum(dnode, "./protocol");
 	isis_redist_unset(area, level, AF_INET, type);
@@ -1105,7 +1105,7 @@ static int isis_instance_redistribute_ipv6_delete(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	level = yang_dnode_get_enum(dnode, "./level");
 	type = yang_dnode_get_enum(dnode, "./protocol");
 	isis_redist_unset(area, level, AF_INET6, type);
@@ -1176,7 +1176,7 @@ static int isis_multi_topology_common(enum nb_event event,
 	case NB_EV_ABORT:
 		break;
 	case NB_EV_APPLY:
-		area = yang_dnode_get_entry(dnode, true);
+		area = nb_running_get_entry(dnode, NULL, true);
 		setting = area_get_mt_setting(area, mtid);
 		setting->enabled = create;
 		lsp_regenerate_schedule(area, IS_LEVEL_1 | IS_LEVEL_2, 0);
@@ -1198,7 +1198,7 @@ static int isis_multi_topology_overload_common(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	setting = area_get_mt_setting(area, mtid);
 	setting->overload = yang_dnode_get_bool(dnode, NULL);
 	if (setting->enabled)
@@ -1387,7 +1387,7 @@ isis_instance_log_adjacency_changes_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	area = yang_dnode_get_entry(dnode, true);
+	area = nb_running_get_entry(dnode, NULL, true);
 	area->log_adj_changes = log ? 1 : 0;
 
 	return NB_OK;
@@ -1546,10 +1546,10 @@ static int lib_interface_isis_create(enum nb_event event,
 		abort();
 	}
 
-	ifp = yang_dnode_get_entry(dnode, true);
+	ifp = nb_running_get_entry(dnode, NULL, true);
 	circuit = isis_circuit_create(area, ifp);
 	assert(circuit->state == C_STATE_CONF || circuit->state == C_STATE_UP);
-	yang_dnode_set_entry(dnode, circuit);
+	nb_running_set_entry(dnode, circuit);
 
 	return NB_OK;
 }
@@ -1562,7 +1562,7 @@ static int lib_interface_isis_delete(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_unset_entry(dnode);
 	if (!circuit)
 		return NB_ERR_INCONSISTENCY;
 	/* delete circuit through csm changes */
@@ -1658,7 +1658,7 @@ static int lib_interface_isis_circuit_type_modify(enum nb_event event,
 	case NB_EV_ABORT:
 		break;
 	case NB_EV_APPLY:
-		circuit = yang_dnode_get_entry(dnode, true);
+		circuit = nb_running_get_entry(dnode, NULL, true);
 		isis_circuit_is_type_set(circuit, circ_type);
 		break;
 	}
@@ -1679,7 +1679,7 @@ static int lib_interface_isis_ipv4_routing_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	ipv4 = yang_dnode_get_bool(dnode, NULL);
 	ipv6 = yang_dnode_get_bool(dnode, "../ipv6-routing");
 	isis_circuit_af_set(circuit, ipv4, ipv6);
@@ -1700,7 +1700,7 @@ static int lib_interface_isis_ipv6_routing_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	ipv4 = yang_dnode_exists(dnode, "../ipv4-routing");
 	ipv6 = yang_dnode_get_bool(dnode, NULL);
 	isis_circuit_af_set(circuit, ipv4, ipv6);
@@ -1721,7 +1721,7 @@ lib_interface_isis_csnp_interval_level_1_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	circuit->csnp_interval[0] = yang_dnode_get_uint16(dnode, NULL);
 
 	return NB_OK;
@@ -1740,7 +1740,7 @@ lib_interface_isis_csnp_interval_level_2_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	circuit->csnp_interval[1] = yang_dnode_get_uint16(dnode, NULL);
 
 	return NB_OK;
@@ -1759,7 +1759,7 @@ lib_interface_isis_psnp_interval_level_1_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	circuit->psnp_interval[0] = yang_dnode_get_uint16(dnode, NULL);
 
 	return NB_OK;
@@ -1778,7 +1778,7 @@ lib_interface_isis_psnp_interval_level_2_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	circuit->psnp_interval[1] = yang_dnode_get_uint16(dnode, NULL);
 
 	return NB_OK;
@@ -1796,7 +1796,7 @@ static int lib_interface_isis_hello_padding_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	circuit->pad_hellos = yang_dnode_get_bool(dnode, NULL);
 
 	return NB_OK;
@@ -1816,7 +1816,7 @@ lib_interface_isis_hello_interval_level_1_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	interval = yang_dnode_get_uint32(dnode, NULL);
 	circuit->hello_interval[0] = interval;
 
@@ -1837,7 +1837,7 @@ lib_interface_isis_hello_interval_level_2_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	interval = yang_dnode_get_uint32(dnode, NULL);
 	circuit->hello_interval[1] = interval;
 
@@ -1858,7 +1858,7 @@ lib_interface_isis_hello_multiplier_level_1_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	multi = yang_dnode_get_uint16(dnode, NULL);
 	circuit->hello_multiplier[0] = multi;
 
@@ -1879,7 +1879,7 @@ lib_interface_isis_hello_multiplier_level_2_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	multi = yang_dnode_get_uint16(dnode, NULL);
 	circuit->hello_multiplier[1] = multi;
 
@@ -1900,7 +1900,7 @@ lib_interface_isis_metric_level_1_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	met = yang_dnode_get_uint32(dnode, NULL);
 	isis_circuit_metric_set(circuit, IS_LEVEL_1, met);
 
@@ -1921,7 +1921,7 @@ lib_interface_isis_metric_level_2_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	met = yang_dnode_get_uint32(dnode, NULL);
 	isis_circuit_metric_set(circuit, IS_LEVEL_2, met);
 
@@ -1941,7 +1941,7 @@ lib_interface_isis_priority_level_1_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	circuit->priority[0] = yang_dnode_get_uint8(dnode, NULL);
 
 	return NB_OK;
@@ -1960,7 +1960,7 @@ lib_interface_isis_priority_level_2_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	circuit->priority[1] = yang_dnode_get_uint8(dnode, NULL);
 
 	return NB_OK;
@@ -1978,7 +1978,7 @@ static int lib_interface_isis_network_type_modify(enum nb_event event,
 
 	switch (event) {
 	case NB_EV_VALIDATE:
-		circuit = yang_dnode_get_entry(dnode, false);
+		circuit = nb_running_get_entry(dnode, NULL, false);
 		if (!circuit)
 			break;
 		if (circuit->circ_type == CIRCUIT_T_LOOPBACK) {
@@ -2000,7 +2000,7 @@ static int lib_interface_isis_network_type_modify(enum nb_event event,
 	case NB_EV_ABORT:
 		break;
 	case NB_EV_APPLY:
-		circuit = yang_dnode_get_entry(dnode, true);
+		circuit = nb_running_get_entry(dnode, NULL, true);
 		isis_circuit_circ_type_set(circuit, net_type);
 		break;
 	}
@@ -2022,7 +2022,7 @@ static int lib_interface_isis_passive_modify(enum nb_event event,
 
 	/* validation only applies if we are setting passive to false */
 	if (!passive && event == NB_EV_VALIDATE) {
-		circuit = yang_dnode_get_entry(dnode, false);
+		circuit = nb_running_get_entry(dnode, NULL, false);
 		if (!circuit)
 			return NB_OK;
 		ifp = circuit->interface;
@@ -2038,7 +2038,7 @@ static int lib_interface_isis_passive_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	if (circuit->state != C_STATE_UP) {
 		circuit->is_passive = passive;
 	} else {
@@ -2069,7 +2069,7 @@ static int lib_interface_isis_password_delete(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	isis_circuit_passwd_unset(circuit);
 
 	return NB_OK;
@@ -2090,7 +2090,7 @@ lib_interface_isis_password_password_modify(enum nb_event event,
 		return NB_OK;
 
 	password = yang_dnode_get_string(dnode, NULL);
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 
 	isis_circuit_passwd_set(circuit, circuit->passwd.type, password);
 
@@ -2112,7 +2112,7 @@ lib_interface_isis_password_password_type_modify(enum nb_event event,
 		return NB_OK;
 
 	pass_type = yang_dnode_get_enum(dnode, NULL);
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	circuit->passwd.type = pass_type;
 
 	return NB_OK;
@@ -2131,7 +2131,7 @@ static int lib_interface_isis_disable_three_way_handshake_modify(
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	circuit = yang_dnode_get_entry(dnode, true);
+	circuit = nb_running_get_entry(dnode, NULL, true);
 	circuit->disable_threeway_adj = yang_dnode_get_bool(dnode, NULL);
 
 	return NB_OK;
@@ -2149,7 +2149,7 @@ static int lib_interface_isis_multi_topology_common(
 
 	switch (event) {
 	case NB_EV_VALIDATE:
-		circuit = yang_dnode_get_entry(dnode, false);
+		circuit = nb_running_get_entry(dnode, NULL, false);
 		if (circuit && circuit->area && circuit->area->oldmetric) {
 			flog_warn(
 				EC_LIB_NB_CB_CONFIG_VALIDATE,
@@ -2161,7 +2161,7 @@ static int lib_interface_isis_multi_topology_common(
 	case NB_EV_ABORT:
 		break;
 	case NB_EV_APPLY:
-		circuit = yang_dnode_get_entry(dnode, true);
+		circuit = nb_running_get_entry(dnode, NULL, true);
 		value = yang_dnode_get_bool(dnode, NULL);
 		isis_circuit_mt_enabled_set(circuit, mtid, value);
 		break;

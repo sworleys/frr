@@ -77,6 +77,13 @@
 /* MLAG mroute rxed from the peer MLAG switch
  */
 #define PIM_UPSTREAM_FLAG_MASK_MLAG_PEER               (1 << 18)
+/*
+ * We are creating a non-joined upstream data structure
+ * for this S,G as that we want to have a channel oil
+ * associated with an upstream
+ */
+#define PIM_UPSTREAM_FLAG_MASK_SRC_NOCACHE             (1 << 19)
+
 #define PIM_UPSTREAM_FLAG_ALL 0xFFFFFFFF
 
 #define PIM_UPSTREAM_FLAG_TEST_DR_JOIN_DESIRED(flags) ((flags) & PIM_UPSTREAM_FLAG_MASK_DR_JOIN_DESIRED)
@@ -100,6 +107,7 @@
 #define PIM_UPSTREAM_FLAG_TEST_MLAG_NON_DF(flags) ((flags) & PIM_UPSTREAM_FLAG_MASK_MLAG_NON_DF)
 #define PIM_UPSTREAM_FLAG_TEST_MLAG_PEER(flags) ((flags) & PIM_UPSTREAM_FLAG_MASK_MLAG_PEER)
 #define PIM_UPSTREAM_FLAG_TEST_CAN_BE_LHR(flags) ((flags) & (PIM_UPSTREAM_FLAG_MASK_SRC_IGMP | PIM_UPSTREAM_FLAG_MASK_SRC_VXLAN_TERM))
+#define PIM_UPSTREAM_FLAG_TEST_SRC_NOCACHE(flags) ((flags) &PIM_UPSTREAM_FLAG_MASK_SRC_NOCACHE)
 
 #define PIM_UPSTREAM_FLAG_SET_DR_JOIN_DESIRED(flags) ((flags) |= PIM_UPSTREAM_FLAG_MASK_DR_JOIN_DESIRED)
 #define PIM_UPSTREAM_FLAG_SET_DR_JOIN_DESIRED_UPDATED(flags) ((flags) |= PIM_UPSTREAM_FLAG_MASK_DR_JOIN_DESIRED_UPDATED)
@@ -140,6 +148,7 @@
 #define PIM_UPSTREAM_FLAG_UNSET_MLAG_VXLAN(flags) ((flags) &= ~PIM_UPSTREAM_FLAG_MASK_MLAG_VXLAN)
 #define PIM_UPSTREAM_FLAG_UNSET_MLAG_NON_DF(flags) ((flags) &= ~PIM_UPSTREAM_FLAG_MASK_MLAG_NON_DF)
 #define PIM_UPSTREAM_FLAG_UNSET_MLAG_PEER(flags) ((flags) &= ~PIM_UPSTREAM_FLAG_MASK_MLAG_PEER)
+#define PIM_UPSTREAM_FLAG_UNSET_SRC_NOCACHE(flags) ((flags) &= ~PIM_UPSTREAM_FLAG_MASK_SRC_NOCACHE)
 
 /* The RPF cost is incremented by 10 if the RPF interface is the peerlink-rif.
  * This is used to force the MLAG switch with the lowest cost to the RPF

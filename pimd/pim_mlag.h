@@ -66,4 +66,7 @@ extern void pim_mlag_up_local_add(struct pim_instance *pim,
 
 extern void pim_mlag_up_local_del(struct pim_instance *pim,
 		struct pim_upstream *upstream);
+
+extern bool pim_mlag_up_df_role_update(struct pim_instance *pim,
+		struct pim_upstream *up, bool is_df, const char *reason);
 #endif

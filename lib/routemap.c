@@ -112,14 +112,14 @@ struct route_map_match_set_hooks {
 						const char *arg,
 						route_map_event_t type);
 
-	/* match ip next hop type */
+	/* match ip next-hop type */
 	int (*match_ip_next_hop_type)(struct vty *vty,
 					     struct route_map_index *index,
 					     const char *command,
 					     const char *arg,
 					     route_map_event_t type);
 
-	/* no match ip next hop type */
+	/* no match ip next-hop type */
 	int (*no_match_ip_next_hop_type)(struct vty *vty,
 						struct route_map_index *index,
 						const char *command,
@@ -160,7 +160,7 @@ struct route_map_match_set_hooks {
 					      const char *arg,
 					      route_map_event_t type);
 
-	/* no match ipv6next-hop type */
+	/* no match ipv6 next-hop type */
 	int (*no_match_ipv6_next_hop_type)(struct vty *vty,
 					   struct route_map_index *index,
 					   const char *command, const char *arg,
@@ -303,7 +303,7 @@ void route_map_no_match_ip_next_hop_prefix_list_hook(int (*func)(
 	rmap_match_set_hook.no_match_ip_next_hop_prefix_list = func;
 }
 
-/* match ip next hop type */
+/* match ip next-hop type */
 void route_map_match_ip_next_hop_type_hook(int (*func)(
 	struct vty *vty, struct route_map_index *index, const char *command,
 	const char *arg, route_map_event_t type))
@@ -311,7 +311,7 @@ void route_map_match_ip_next_hop_type_hook(int (*func)(
 	rmap_match_set_hook.match_ip_next_hop_type = func;
 }
 
-/* no match ip next hop type */
+/* no match ip next-hop type */
 void route_map_no_match_ip_next_hop_type_hook(int (*func)(
 	struct vty *vty, struct route_map_index *index, const char *command,
 	const char *arg, route_map_event_t type))
@@ -960,12 +960,12 @@ static void vty_show_route_map_entry(struct vty *vty, struct route_map *map)
 	struct route_map_rule *rule;
 
 	vty_out(vty, "route-map: %s Invoked: %" PRIu64 "\n",
-		map->name, map->applied);
+		map->name, map->applied - map->applied_clear);
 
 	for (index = map->head; index; index = index->next) {
 		vty_out(vty, " %s, sequence %d Invoked %" PRIu64 "\n",
 			route_map_type_str(index->type), index->pref,
-			index->applied);
+			index->applied - index->applied_clear);
 
 		/* Description */
 		if (index->description)
@@ -2406,7 +2406,7 @@ DEFUN (no_match_ipv6_address_prefix_list,
 DEFUN(match_ipv6_next_hop_type, match_ipv6_next_hop_type_cmd,
       "match ipv6 next-hop type <blackhole>",
       MATCH_STR IPV6_STR
-      "Match address of route\n"
+      "Match next-hop address of route\n"
       "Match entries by type\n"
       "Blackhole\n")
 {
@@ -2928,6 +2928,46 @@ DEFUN (no_rmap_continue,
 	return no_rmap_onmatch_goto(self, vty, argc, argv);
 }
 
+static void clear_route_map_helper(struct route_map *map)
+{
+	struct route_map_index *index;
+
+	map->applied_clear = map->applied;
+	for (index = map->head; index; index = index->next)
+		index->applied_clear = index->applied;
+}
+
+DEFUN (rmap_clear_counters,
+       rmap_clear_counters_cmd,
+       "clear route-map counters [WORD]",
+       CLEAR_STR
+       "route-map information\n"
+       "counters associated with the specified route-map\n"
+       "route-map name\n")
+{
+	int idx_word = 2;
+	struct route_map *map;
+
+	const char *name = (argc == 3 ) ? argv[idx_word]->arg : NULL;
+
+	if (name) {
+		map = route_map_lookup_by_name(name);
+
+		if (map)
+			clear_route_map_helper(map);
+		else {
+			vty_out(vty, "%s: 'route-map %s' not found\n",
+				frr_protonameinst, name);
+			return CMD_SUCCESS;
+		}
+	} else {
+		for (map = route_map_master.head; map; map = map->next)
+			clear_route_map_helper(map);
+	}
+
+	return CMD_SUCCESS;
+
+}
 
 DEFUN (rmap_show_name,
        rmap_show_name_cmd,
@@ -3056,8 +3096,15 @@ static int route_map_config_write(struct vty *vty)
 	struct route_map_rule *rule;
 	int first = 1;
 	int write = 0;
+	struct listnode *ln;
+	struct list *maplist = list_new();
 
 	for (map = route_map_master.head; map; map = map->next)
+		listnode_add(maplist, map);
+
+	list_sort(maplist, sort_route_map);
+
+	for (ALL_LIST_ELEMENTS_RO(maplist, ln, map))
 		for (index = map->head; index; index = index->next) {
 			if (!first)
 				vty_out(vty, "!\n");
@@ -3090,6 +3137,8 @@ static int route_map_config_write(struct vty *vty)
 
 			write++;
 		}
+
+	list_delete(&maplist);
 	return write;
 }
 
@@ -3237,6 +3286,8 @@ void route_map_init(void)
 	install_element(RMAP_NODE, &no_rmap_description_cmd);
 
 	/* Install show command */
+	install_element(ENABLE_NODE, &rmap_clear_counters_cmd);
+
 	install_element(ENABLE_NODE, &rmap_show_name_cmd);
 
 	install_element(ENABLE_NODE, &debug_rmap_cmd);

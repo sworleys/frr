@@ -2234,7 +2234,7 @@ static void pim_show_state(struct pim_instance *pim, struct vty *vty,
 		json = json_object_new_object();
 	} else {
 		vty_out(vty,
-			"Codes: J -> Pim Join, I -> IGMP Report, S -> Source, * -> Inherited from (*,G), V -> VxLAN");
+			"Codes: J -> Pim Join, I -> IGMP Report, S -> Source, * -> Inherited from (*,G), V -> VxLAN, M -> Muted");
 		vty_out(vty,
 			"\nInstalled Source           Group            IIF               OIL\n");
 	}
@@ -2363,25 +2363,7 @@ static void pim_show_state(struct pim_instance *pim, struct vty *vty,
 			} else {
 				if (first_oif) {
 					first_oif = 0;
-					vty_out(vty, "%s(%c%c%c%c)", out_ifname,
-						(c_oil->oif_flags[oif_vif_index]
-						 & PIM_OIF_FLAG_PROTO_IGMP)
-							? 'I'
-							: ' ',
-						(c_oil->oif_flags[oif_vif_index]
-						 & PIM_OIF_FLAG_PROTO_PIM)
-							? 'J'
-							: ' ',
-						(c_oil->oif_flags[oif_vif_index]
-						 & PIM_OIF_FLAG_PROTO_VXLAN)
-							? 'V'
-							: ' ',
-						(c_oil->oif_flags[oif_vif_index]
-						 & PIM_OIF_FLAG_PROTO_STAR)
-							? '*'
-							: ' ');
-				} else
-					vty_out(vty, ", %s(%c%c%c%c)",
+					vty_out(vty, "%s(%c%c%c%c%c)",
 						out_ifname,
 						(c_oil->oif_flags[oif_vif_index]
 						 & PIM_OIF_FLAG_PROTO_IGMP)
@@ -2398,6 +2380,33 @@ static void pim_show_state(struct pim_instance *pim, struct vty *vty,
 						(c_oil->oif_flags[oif_vif_index]
 						 & PIM_OIF_FLAG_PROTO_STAR)
 							? '*'
+							: ' ',
+						(c_oil->oif_flags[oif_vif_index]
+						 & PIM_OIF_FLAG_MUTE)
+							? 'M'
+							: ' ');
+				} else
+					vty_out(vty, ", %s(%c%c%c%c%c)",
+						out_ifname,
+						(c_oil->oif_flags[oif_vif_index]
+						 & PIM_OIF_FLAG_PROTO_IGMP)
+							? 'I'
+							: ' ',
+						(c_oil->oif_flags[oif_vif_index]
+						 & PIM_OIF_FLAG_PROTO_PIM)
+							? 'J'
+							: ' ',
+						(c_oil->oif_flags[oif_vif_index]
+						 & PIM_OIF_FLAG_PROTO_VXLAN)
+							? 'V'
+							: ' ',
+						(c_oil->oif_flags[oif_vif_index]
+						 & PIM_OIF_FLAG_PROTO_STAR)
+							? '*'
+							: ' ',
+						(c_oil->oif_flags[oif_vif_index]
+						 & PIM_OIF_FLAG_MUTE)
+							? 'M'
 							: ' ');
 			}
 		}
@@ -3976,6 +3985,8 @@ DEFUN (show_ip_pim_mlag_summary,
 			json_object_boolean_true_add(json, "mlagConnUp");
 		if (router->mlag_flags & PIM_MLAGF_PEER_CONN_UP)
 			json_object_boolean_true_add(json, "mlagPeerConnUp");
+		if (router->mlag_flags & PIM_MLAGF_PEER_ZEBRA_UP)
+			json_object_boolean_true_add(json, "mlagPeerZebraUp");
 		json_object_string_add(json, "mlagRole",
 				mlag_role2str(router->mlag_role,
 					role_buf, sizeof(role_buf)));
@@ -3985,12 +3996,16 @@ DEFUN (show_ip_pim_mlag_summary,
 		inet_ntop(AF_INET, &router->anycast_vtep_ip,
 				addr_buf, INET_ADDRSTRLEN);
 		json_object_string_add(json, "anycastVtepIp", addr_buf);
+		json_object_string_add(json, "peerlinkRif",
+				router->peerlink_rif);
 
 		json_stat = json_object_new_object();
 		json_object_int_add(json_stat, "mlagConnFlaps",
 				router->mlag_stats.mlagd_session_downs);
 		json_object_int_add(json_stat, "mlagPeerConnFlaps",
 				router->mlag_stats.peer_session_downs);
+		json_object_int_add(json_stat, "mlagPeerZebraFlaps",
+				router->mlag_stats.peer_zebra_downs);
 		json_object_int_add(json_stat, "mrouteAddRx",
 				router->mlag_stats.msg.mroute_add_rx);
 		json_object_int_add(json_stat, "mrouteAddTx",
@@ -4001,6 +4016,8 @@ DEFUN (show_ip_pim_mlag_summary,
 				router->mlag_stats.msg.mroute_del_tx);
 		json_object_int_add(json_stat, "mlagStatusUpdates",
 				router->mlag_stats.msg.mlag_status_updates);
+		json_object_int_add(json_stat, "peerZebraStatusUpdates",
+			router->mlag_stats.msg.peer_zebra_status_updates);
 		json_object_int_add(json_stat, "pimStatusUpdates",
 				router->mlag_stats.msg.pim_status_updates);
 		json_object_int_add(json_stat, "vxlanUpdates",
@@ -4019,6 +4036,9 @@ DEFUN (show_ip_pim_mlag_summary,
 	vty_out(vty, "MLAG peer state: %s\n",
 		(router->mlag_flags & PIM_MLAGF_PEER_CONN_UP)
 			? "up" : "down");
+	vty_out(vty, "Zebra peer state: %s\n",
+		(router->mlag_flags & PIM_MLAGF_PEER_ZEBRA_UP)
+			? "up" : "down");
 	vty_out(vty, "MLAG role: %s\n",
 		mlag_role2str(router->mlag_role, role_buf, sizeof(role_buf)));
 	inet_ntop(AF_INET, &router->local_vtep_ip,
@@ -4027,9 +4047,11 @@ DEFUN (show_ip_pim_mlag_summary,
 	inet_ntop(AF_INET, &router->anycast_vtep_ip,
 			addr_buf, INET_ADDRSTRLEN);
 	vty_out(vty, "Anycast VTEP IP: %s\n", addr_buf);
-	vty_out(vty, "Session flaps: mlagd: %d mlag-peer: %d\n",
+	vty_out(vty, "Peerlink: %s\n", router->peerlink_rif);
+	vty_out(vty, "Session flaps: mlagd: %d mlag-peer: %d zebra-peer: %d\n",
 			router->mlag_stats.mlagd_session_downs,
-			router->mlag_stats.peer_session_downs);
+			router->mlag_stats.peer_session_downs,
+			router->mlag_stats.peer_zebra_downs);
 	vty_out(vty, "Message Statistics:\n");
 	vty_out(vty, "  mroute adds: rx: %d, tx: %d\n",
 			router->mlag_stats.msg.mroute_add_rx,
@@ -4037,8 +4059,8 @@ DEFUN (show_ip_pim_mlag_summary,
 	vty_out(vty, "  mroute dels: rx: %d, tx: %d\n",
 			router->mlag_stats.msg.mroute_del_rx,
 			router->mlag_stats.msg.mroute_del_tx);
-	vty_out(vty, "  MLAG status updates: %d\n",
-			router->mlag_stats.msg.mlag_status_updates);
+	vty_out(vty, "  peer zebra status updates: %d\n",
+			router->mlag_stats.msg.peer_zebra_status_updates);
 	vty_out(vty, "  PIM status updates: %d\n",
 			router->mlag_stats.msg.pim_status_updates);
 	vty_out(vty, "  VxLAN updates: %d\n",
@@ -4590,6 +4612,22 @@ DEFUN(show_ip_pim_mlag_mroute_vrf_all,
 	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
 		pim_show_mlag_membership_for_vrf(vrf, vty, NULL, NULL, NULL,
 						 uj);
+	}
+
+	return CMD_SUCCESS;
+}
+
+DEFUN(show_ip_pim_mlag_up_vrf_all, show_ip_pim_mlag_up_vrf_all_cmd,
+      "show ip pim vrf all mlag upstream [json]",
+      SHOW_STR IP_STR PIM_STR VRF_CMD_HELP_STR
+      "MLAG\n"
+      "upstream\n" JSON_STR)
+{
+	struct vrf *vrf;
+	bool uj = use_json(argc, argv);
+
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
+		pim_show_mlag_up_vrf(vrf, vty, uj);
 	}
 
 	return CMD_SUCCESS;
@@ -5356,6 +5394,11 @@ static void show_mroute(struct pim_instance *pim, struct vty *vty,
 
 			ttl = c_oil->oil.mfcc_ttls[oif_vif_index];
 			if (ttl < 1)
+				continue;
+
+			/* do not display muted OIFs */
+			if (c_oil->oif_flags[oif_vif_index]
+					& PIM_OIF_FLAG_MUTE)
 				continue;
 
 			ifp_out = pim_if_find_by_vif_index(pim, oif_vif_index);
@@ -7399,6 +7442,32 @@ DEFUN (interface_no_ip_pim_drprio,
 	return CMD_SUCCESS;
 }
 
+DEFPY_HIDDEN (interface_ip_igmp_query_generate,
+       interface_ip_igmp_query_generate_cmd,
+       "ip igmp generate-query-once [version (2-3)]",
+       IP_STR
+       IFACE_IGMP_STR
+       "Generate igmp general query once\n"
+       "IGMP version\n"
+       "IGMP version number\n")
+{
+	VTY_DECLVAR_CONTEXT(interface, ifp);
+	int igmp_version = 2;
+
+	if (!ifp->info) {
+		vty_out(vty, "IGMP/PIM is not enabled on the interface %s\n",
+			ifp->name);
+		return CMD_WARNING_CONFIG_FAILED;
+	}
+
+	if (argc > 3)
+		igmp_version = atoi(argv[4]->arg);
+
+	igmp_send_query_on_intf(ifp, igmp_version);
+
+	return CMD_SUCCESS;
+}
+
 static int pim_cmd_interface_add(struct interface *ifp)
 {
 	struct pim_interface *pim_ifp = ifp->info;
@@ -8663,9 +8732,6 @@ DEFUN (no_ip_pim_bfd,
 
 #if HAVE_BFDD > 0
 DEFUN_HIDDEN(
-#else
-DEFUN(
-#endif /* HAVE_BFDD */
        ip_pim_bfd_param,
        ip_pim_bfd_param_cmd,
        "ip pim bfd (2-255) (50-60000) (50-60000)",
@@ -8675,6 +8741,18 @@ DEFUN(
        "Detect Multiplier\n"
        "Required min receive interval\n"
        "Desired min transmit interval\n")
+#else
+DEFUN(
+       ip_pim_bfd_param,
+       ip_pim_bfd_param_cmd,
+       "ip pim bfd (2-255) (50-60000) (50-60000)",
+       IP_STR
+       PIM_STR
+       "Enables BFD support\n"
+       "Detect Multiplier\n"
+       "Required min receive interval\n"
+       "Desired min transmit interval\n")
+#endif /* HAVE_BFDD */
 {
 	VTY_DECLVAR_CONTEXT(interface, ifp);
 	int idx_number = 3;
@@ -9765,7 +9843,7 @@ static void pim_show_vxlan_sg_entry(struct pim_vxlan_sg *vxlan_sg,
 	char src_str[INET_ADDRSTRLEN];
 	char grp_str[INET_ADDRSTRLEN];
 	json_object *json_row;
-	bool installed = (vxlan_sg->up)?TRUE:FALSE;
+	bool installed = (vxlan_sg->up) ? true : false;
 	const char *iif_name = vxlan_sg->iif?vxlan_sg->iif->name:"-";
 	const char *oif_name;
 
@@ -9863,7 +9941,7 @@ static void pim_show_vxlan_sg_match_addr(struct pim_instance *pim,
 
 	cwd.vty = vty;
 	cwd.json = json;
-	cwd.addr_match = TRUE;
+	cwd.addr_match = true;
 	hash_iterate(pim->vxlan.sg_hash, pim_show_vxlan_sg_hash_entry, &cwd);
 
 	if (uj) {
@@ -9904,7 +9982,7 @@ static void pim_show_vxlan_sg_one(struct pim_instance *pim,
 
 	vxlan_sg = pim_vxlan_sg_find(pim, &sg);
 	if (vxlan_sg) {
-		installed = (vxlan_sg->up)?TRUE:FALSE;
+		installed = (vxlan_sg->up) ? true : false;
 		iif_name = vxlan_sg->iif?vxlan_sg->iif->name:"-";
 
 		if (pim_vxlan_is_orig_mroute(vxlan_sg))
@@ -10040,9 +10118,8 @@ DEFUN_HIDDEN (no_ip_pim_mlag,
 	struct in_addr addr;
 
 	addr.s_addr = 0;
-	pim_vxlan_mlag_update(TRUE /*mlag_enable*/,
-			FALSE /*peer_state*/, MLAG_ROLE_NONE,
-			NULL/*peerlink*/, &addr);
+	pim_vxlan_mlag_update(true /*mlag_enable*/, false /*peer_state*/,
+			      MLAG_ROLE_NONE, NULL /*peerlink*/, &addr);
 
 	return CMD_SUCCESS;
 }
@@ -10091,9 +10168,9 @@ DEFUN_HIDDEN (ip_pim_mlag,
 
 	idx += 2;
 	if (!strcmp(argv[idx]->arg, "up")) {
-		peer_state = TRUE;
+		peer_state = true;
 	} else if (strcmp(argv[idx]->arg, "down")) {
-		peer_state = FALSE;
+		peer_state = false;
 	} else {
 		vty_out(vty, "unknown MLAG state %s\n", argv[idx]->arg);
 		return CMD_WARNING;
@@ -10107,7 +10184,7 @@ DEFUN_HIDDEN (ip_pim_mlag,
 			errno, safe_strerror(errno));
 		return CMD_WARNING_CONFIG_FAILED;
 	}
-	pim_vxlan_mlag_update(TRUE, peer_state, role, ifp, &reg_addr);
+	pim_vxlan_mlag_update(true, peer_state, role, ifp, &reg_addr);
 
 	return CMD_SUCCESS;
 }
@@ -10226,6 +10303,7 @@ void pim_cmd_init(void)
 	install_element(INTERFACE_NODE, &interface_no_ip_pim_hello_cmd);
 	install_element(INTERFACE_NODE, &interface_ip_pim_boundary_oil_cmd);
 	install_element(INTERFACE_NODE, &interface_no_ip_pim_boundary_oil_cmd);
+	install_element(INTERFACE_NODE, &interface_ip_igmp_query_generate_cmd);
 
 	// Static mroutes NEB
 	install_element(INTERFACE_NODE, &interface_ip_mroute_cmd);
@@ -10258,6 +10336,7 @@ void pim_cmd_init(void)
 			&show_ip_pim_mlag_mroute_vrf_all_cmd);
 	install_element(VIEW_NODE, &show_ip_pim_mlag_summary_cmd);
 	install_element(VIEW_NODE, &show_ip_pim_mlag_up_cmd);
+	install_element(VIEW_NODE, &show_ip_pim_mlag_up_vrf_all_cmd);
 	install_element(VIEW_NODE, &show_ip_pim_neighbor_cmd);
 	install_element(VIEW_NODE, &show_ip_pim_neighbor_vrf_all_cmd);
 	install_element(VIEW_NODE, &show_ip_pim_rpf_cmd);

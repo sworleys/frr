@@ -65,6 +65,7 @@ func_frr()
     exec_cmd zebra.route vtysh -c "show ip route vrf all"
     exec_cmd zebra.ipv6_route vtysh -c "show ipv6 route vrf all"
     exec_cmd zebra.client vtysh -c "show zebra client"
+    exec_cmd zebra.table_summary vtysh -c "show zebra router table summary"
 
     exec_cmd $jexec pim.upstream vtysh -c "show ip pim vrf all upstream $json"
     exec_cmd $jexec pim.join vtysh -c "show ip pim vrf all join $json"
@@ -73,8 +74,8 @@ func_frr()
     exec_cmd $jexec pim.state vtysh -c "show ip pim vrf all state $json"
     exec_cmd $jexec pim.neighbors vtysh -c "show ip pim vrf all neighbor $json"
     exec_cmd $jexec pim.mlag.summary vtysh -c "show ip pim mlag summary $json"
-    exec_cmd $jexec pim.mlag.upstream vtysh -c "show ip pim mlag upstream $json"
-    exec_cmd $jexec pim.mlag.mroute vtysh -c "show ip pim mlag mroute $json"
+    exec_cmd $jexec pim.mlag.upstream vtysh -c "show ip pim vrf all mlag upstream $json"
+    exec_cmd $jexec pim.mlag.mroute vtysh -c "show ip pim vrf all mlag mroute $json"
     exec_cmd $jexec pim.vxlan.sg vtysh -c "show ip pim vxlan-groups $json"
     exec_cmd $jexec pim.igmp.group vtysh -c "show ip igmp vrf all group $json"
     exec_cmd pim.igmp.join vtysh -c "show ip igmp vrf all join"
@@ -126,6 +127,11 @@ func_frr()
 func_ospftable()
 {
     exec_cmd $jexec ospf.route vtysh -c "show ip ospf vrf all route $json"
+    exec_cmd $jexec ospf.neighbor_detail vtysh -c "show ip ospf vrf all neighbor detail $json"
+    exec_cmd ospf.database.network vtysh -c "show ip ospf vrf all database network"
+    exec_cmd ospf.database.external vtysh -c "show ip ospf vrf all database external"
+    exec_cmd ospf.database.max_age vtysh -c "show ip ospf vrf all database max-age"
+    exec_cmd ospf.interface.traffic vtysh -c "show ip ospf vrf all interface traffic"
 }
 
 func_ospf6table()
@@ -134,6 +140,8 @@ func_ospf6table()
     exec_cmd ospf6.route_detail vtysh -c "show ipv6 ospf6 route detail"
     exec_cmd ospf6.neigbor_detail vtysh -c "show ipv6 ospf6 neighbor detail"
     exec_cmd ospf6.borderrouters_detail  vtysh -c "show ipv6 ospf6 border-routers detail"
+    exec_cmd ospf6.linkstate_detail vtysh -c "show ipv6 ospf6 linkstate detail"
+    exec_cmd ospf6.interface.traffic vtysh -c "show ipv6 ospf6 vrf all interface traffic"
 }
 
 # main

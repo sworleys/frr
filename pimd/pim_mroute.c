@@ -190,8 +190,6 @@ static int pim_mroute_msg_nocache(int fd, struct interface *ifp,
 	sg.grp = msg->im_dst;
 
 	if (!(PIM_I_am_DR(pim_ifp))) {
-		struct channel_oil *c_oil;
-
 		if (PIM_DEBUG_MROUTE_DETAIL)
 			zlog_debug("%s: Interface is not the DR blackholing incoming traffic for %s",
 				   __PRETTY_FUNCTION__, pim_str_sg_dump(&sg));
@@ -202,10 +200,10 @@ static int pim_mroute_msg_nocache(int fd, struct interface *ifp,
 		 * As that they will be coming up to the cpu
 		 * and causing us to consider them.
 		 */
-		c_oil = pim_channel_oil_add(pim_ifp->pim, &sg,
-					    pim_ifp->mroute_vif_index,
-						__func__);
-		pim_mroute_add(c_oil, __PRETTY_FUNCTION__);
+		up = pim_upstream_find_or_add(
+			&sg, ifp, PIM_UPSTREAM_FLAG_MASK_SRC_NOCACHE,
+			__PRETTY_FUNCTION__);
+		pim_mroute_add(up->channel_oil, __PRETTY_FUNCTION__);
 
 		return 0;
 	}
@@ -242,7 +240,8 @@ static int pim_mroute_msg_nocache(int fd, struct interface *ifp,
 		vif_index = pim_if_find_vifindex_by_ifindex(
 			pim_ifp->pim,
 			up->rpf.source_nexthop.interface->ifindex);
-		up->channel_oil->oil.mfcc_parent = vif_index;
+		pim_channel_oil_change_iif(pim_ifp->pim, up->channel_oil,
+					   vif_index, __PRETTY_FUNCTION__);
 	}
 	pim_register_join(up);
 
@@ -457,7 +456,6 @@ static int pim_mroute_msg_wrvifwhole(int fd, struct interface *ifp,
 	struct pim_upstream *up;
 	struct prefix_sg star_g;
 	struct prefix_sg sg;
-	struct channel_oil *oil;
 
 	pim_ifp = ifp->info;
 
@@ -521,11 +519,7 @@ static int pim_mroute_msg_wrvifwhole(int fd, struct interface *ifp,
 						       up->upstream_register);
 				up->sptbit = PIM_UPSTREAM_SPTBIT_TRUE;
 			}
-			if (!up->channel_oil)
-				up->channel_oil = pim_channel_oil_add(
-					pim_ifp->pim, &sg,
-					pim_ifp->mroute_vif_index,
-					"wrvifwhole_1");
+
 			pim_upstream_inherited_olist(pim_ifp->pim, up);
 			if (!up->channel_oil->installed)
 				pim_mroute_add(up->channel_oil,
@@ -550,10 +544,6 @@ static int pim_mroute_msg_wrvifwhole(int fd, struct interface *ifp,
 	}
 
 	pim_ifp = ifp->info;
-	oil = pim_channel_oil_add(pim_ifp->pim, &sg, pim_ifp->mroute_vif_index,
-			"wrvifwhole_2");
-	if (!oil->installed)
-		pim_mroute_add(oil, __PRETTY_FUNCTION__);
 	if (pim_if_connected_to_source(ifp, sg.src)) {
 		up = pim_upstream_add(pim_ifp->pim, &sg, ifp,
 				      PIM_UPSTREAM_FLAG_MASK_FHR,
@@ -568,13 +558,18 @@ static int pim_mroute_msg_wrvifwhole(int fd, struct interface *ifp,
 		PIM_UPSTREAM_FLAG_SET_SRC_STREAM(up->flags);
 		pim_upstream_keep_alive_timer_start(
 			up, pim_ifp->pim->keep_alive_time);
-		up->channel_oil = oil;
 		up->channel_oil->cc.pktcnt++;
 		pim_register_join(up);
 		pim_upstream_inherited_olist(pim_ifp->pim, up);
 
 		// Send the packet to the RP
 		pim_mroute_msg_wholepkt(fd, ifp, buf);
+	} else {
+		up = pim_upstream_add(pim_ifp->pim, &sg, ifp,
+				      PIM_UPSTREAM_FLAG_MASK_SRC_NOCACHE,
+				      __PRETTY_FUNCTION__, NULL);
+		if (!up->channel_oil->installed)
+			pim_mroute_add(up->channel_oil, __PRETTY_FUNCTION__);
 	}
 
 	return 0;
@@ -894,18 +889,28 @@ int pim_mroute_del_vif(struct interface *ifp)
 	return 0;
 }
 
+static inline void pim_mroute_copy(struct mfcctl *oil,
+		struct channel_oil *c_oil)
+{
+	int i;
+
+	oil->mfcc_origin = c_oil->oil.mfcc_origin;
+	oil->mfcc_mcastgrp = c_oil->oil.mfcc_mcastgrp;
+	oil->mfcc_parent = c_oil->oil.mfcc_parent;
+
+	for (i = 0; i < MAXVIFS; ++i) {
+		if (c_oil->oif_flags[i] & PIM_OIF_FLAG_MUTE)
+			oil->mfcc_ttls[i] = 0;
+		else
+			oil->mfcc_ttls[i] = c_oil->oil.mfcc_ttls[i];
+	}
+}
+
 int pim_mroute_add(struct channel_oil *c_oil, const char *name)
 {
 	struct pim_instance *pim = c_oil->pim;
+	struct mfcctl tmp_oil;
 	int err;
-	int orig = 0;
-	int orig_iif_vif = 0;
-	struct pim_interface *pim_reg_ifp = NULL;
-	int orig_pimreg_ttl = 0;
-	bool pimreg_ttl_reset = false;
-	struct pim_interface *vxlan_ifp = NULL;
-	int orig_term_ttl = 0;
-	bool orig_term_ttl_reset = false;
 
 	pim->mroute_add_last = pim_time_monotonic_sec();
 	++pim->mroute_add_events;
@@ -922,48 +927,17 @@ int pim_mroute_add(struct channel_oil *c_oil, const char *name)
 		return -2;
 	}
 
+	/* Copy the oil to a temporary structure to fixup (without need to
+	 * later restore) before sending the mroute add to the dataplane
+	 */
+	pim_mroute_copy(&tmp_oil, c_oil);
+
 	/* The linux kernel *expects* the incoming
 	 * vif to be part of the outgoing list
 	 * in the case of a (*,G).
 	 */
 	if (c_oil->oil.mfcc_origin.s_addr == INADDR_ANY) {
-		orig = c_oil->oil.mfcc_ttls[c_oil->oil.mfcc_parent];
-		c_oil->oil.mfcc_ttls[c_oil->oil.mfcc_parent] = 1;
-	}
-
-	if (c_oil->up) {
-		/* suppress pimreg in the OIL if the mroute is not supposed to
-		 * trigger register encapsulated data
-		 */
-		if (PIM_UPSTREAM_FLAG_TEST_NO_PIMREG_DATA(c_oil->up->flags)) {
-			pim_reg_ifp = pim->regiface->info;
-			orig_pimreg_ttl =
-				c_oil->oil.mfcc_ttls[pim_reg_ifp->mroute_vif_index];
-			c_oil->oil.mfcc_ttls[pim_reg_ifp->mroute_vif_index] = 0;
-			/* remember to flip it back after MFC programming */
-			pimreg_ttl_reset = true;
-		}
-
-		vxlan_ifp = pim_vxlan_get_term_ifp(pim);
-		/* 1. vxlan termination device must never be added to the
-		 * origination mroute (and that can actually happen because
-		 * of XG inheritance from the termination mroute) otherwise
-		 * traffic will end up looping.
-		 * PS: This check has also been extended to non-orig mroutes
-		 * that have a local SIP as such mroutes can move back and
-		 * forth between orig<=>non-orig type.
-		 * 2. vxlan termination device should be removed from the non-DF
-		 * to prevent duplicates to the overlay rxer
-		 */
-		if (vxlan_ifp &&
-			(PIM_UPSTREAM_FLAG_TEST_SRC_VXLAN_ORIG(c_oil->up->flags) ||
-			 PIM_UPSTREAM_FLAG_TEST_MLAG_NON_DF(c_oil->up->flags) ||
-			 pim_vxlan_is_local_sip(c_oil->up))) {
-			orig_term_ttl_reset = true;
-			orig_term_ttl =
-				c_oil->oil.mfcc_ttls[vxlan_ifp->mroute_vif_index];
-			c_oil->oil.mfcc_ttls[vxlan_ifp->mroute_vif_index] = 0;
-		}
+		tmp_oil.mfcc_ttls[c_oil->oil.mfcc_parent] = 1;
 	}
 
 	/*
@@ -975,32 +949,18 @@ int pim_mroute_add(struct channel_oil *c_oil, const char *name)
 	 */
 	if (!c_oil->installed && c_oil->oil.mfcc_origin.s_addr != INADDR_ANY
 	    && c_oil->oil.mfcc_parent != 0) {
-		orig_iif_vif = c_oil->oil.mfcc_parent;
-		c_oil->oil.mfcc_parent = 0;
+		tmp_oil.mfcc_parent = 0;
 	}
 	err = setsockopt(pim->mroute_socket, IPPROTO_IP, MRT_ADD_MFC,
-			 &c_oil->oil, sizeof(c_oil->oil));
+			 &tmp_oil, sizeof(tmp_oil));
 
 	if (!err && !c_oil->installed
 	    && c_oil->oil.mfcc_origin.s_addr != INADDR_ANY
-	    && orig_iif_vif != 0) {
-		c_oil->oil.mfcc_parent = orig_iif_vif;
+	    && c_oil->oil.mfcc_parent != 0) {
+		tmp_oil.mfcc_parent = c_oil->oil.mfcc_parent;
 		err = setsockopt(pim->mroute_socket, IPPROTO_IP, MRT_ADD_MFC,
-				 &c_oil->oil, sizeof(c_oil->oil));
+				 &tmp_oil, sizeof(tmp_oil));
 	}
-
-	if (c_oil->oil.mfcc_origin.s_addr == INADDR_ANY)
-		c_oil->oil.mfcc_ttls[c_oil->oil.mfcc_parent] = orig;
-
-	if (pimreg_ttl_reset) {
-		assert(pim_reg_ifp);
-		c_oil->oil.mfcc_ttls[pim_reg_ifp->mroute_vif_index] =
-			orig_pimreg_ttl;
-	}
-
-	if (orig_term_ttl_reset)
-		c_oil->oil.mfcc_ttls[vxlan_ifp->mroute_vif_index] =
-			orig_term_ttl;
 
 	if (err) {
 		zlog_warn(

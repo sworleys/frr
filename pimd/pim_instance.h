@@ -56,6 +56,7 @@ struct pim_mlag_msg_stats {
 	uint32_t mlag_status_updates;
 	uint32_t pim_status_updates;
 	uint32_t vxlan_updates;
+	uint32_t peer_zebra_status_updates;
 };
 
 struct pim_mlag_stats {
@@ -63,6 +64,7 @@ struct pim_mlag_stats {
 	struct pim_mlag_msg_stats msg;
 	uint32_t mlagd_session_downs;
 	uint32_t peer_session_downs;
+	uint32_t peer_zebra_downs;
 };
 
 enum pim_mlag_flags {
@@ -78,7 +80,9 @@ enum pim_mlag_flags {
 	/* status update rxed from the local daemon */
 	PIM_MLAGF_STATUS_RXED = (1 << 2),
 	/* initial dump of data done post peerlink flap */
-	PIM_MLAGF_PEER_REPLAY_DONE = (1 << 3)
+	PIM_MLAGF_PEER_REPLAY_DONE = (1 << 3),
+	/* zebra is up on the peer */
+	PIM_MLAGF_PEER_ZEBRA_UP = (1 << 4)
 };
 struct pim_router {
 	struct thread_master *master;

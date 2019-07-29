@@ -113,6 +113,8 @@ static int vrrp_zebra_if_del(int command, struct zclient *zclient,
 
 	vrrp_if_del(ifp);
 
+	if_set_index(ifp, IFINDEX_INTERNAL);
+
 	return 0;
 }
 

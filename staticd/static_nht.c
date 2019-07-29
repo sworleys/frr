@@ -37,8 +37,6 @@ void static_nht_update(struct prefix *p, uint32_t nh_num, afi_t afi,
 	struct static_vrf *svrf;
 	struct route_node *rn;
 	struct vrf *vrf;
-	bool orig;
-	bool reinstall;
 
 	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
 		svrf = vrf->info;
@@ -50,7 +48,6 @@ void static_nht_update(struct prefix *p, uint32_t nh_num, afi_t afi,
 			continue;
 
 		for (rn = route_top(stable); rn; rn = route_next(rn)) {
-			reinstall = false;
 			for (si = rn->info; si; si = si->next) {
 				if (si->nh_vrf_id != nh_vrf_id)
 					continue;
@@ -61,7 +58,6 @@ void static_nht_update(struct prefix *p, uint32_t nh_num, afi_t afi,
 				    && si->type != STATIC_IPV6_GATEWAY_IFNAME)
 					continue;
 
-				orig = si->nh_valid;
 				if (p->family == AF_INET
 				    && p->u.prefix4.s_addr
 					       == si->addr.ipv4.s_addr)
@@ -72,15 +68,8 @@ void static_nht_update(struct prefix *p, uint32_t nh_num, afi_t afi,
 					       == 0)
 					si->nh_valid = !!nh_num;
 
-				if (orig != si->nh_valid)
-					reinstall = true;
-
-				if (reinstall) {
-					static_zebra_route_add(
-						rn, si, vrf->vrf_id,
-						SAFI_UNICAST, true);
-					reinstall = false;
-				}
+				static_zebra_route_add(rn, si, vrf->vrf_id,
+						       SAFI_UNICAST, true);
 			}
 		}
 	}

@@ -150,6 +150,9 @@ static inline int zebra2proto(int proto)
 	case ZEBRA_ROUTE_OPENFABRIC:
 		proto = RTPROT_OPENFABRIC;
 		break;
+	case ZEBRA_ROUTE_TABLE:
+		proto = RTPROT_ZEBRA;
+		break;
 	default:
 		/*
 		 * When a user adds a new protocol this will show up
@@ -808,7 +811,9 @@ static int netlink_route_change_read_multicast(struct nlmsghdr *h,
 	}
 
 	if (IS_ZEBRA_DEBUG_KERNEL) {
-		struct interface *ifp;
+		struct interface *ifp = NULL;
+		struct zebra_vrf *zvrf = NULL;
+
 		strlcpy(sbuf, inet_ntoa(m->sg.src), sizeof(sbuf));
 		strlcpy(gbuf, inet_ntoa(m->sg.grp), sizeof(gbuf));
 		for (count = 0; count < oif_count; count++) {
@@ -819,13 +824,14 @@ static int netlink_route_change_read_multicast(struct nlmsghdr *h,
 				oif[count]);
 			strlcat(oif_list, temp, sizeof(oif_list));
 		}
-		struct zebra_vrf *zvrf = zebra_vrf_lookup_by_id(vrf);
+		zvrf = zebra_vrf_lookup_by_id(vrf);
 		ifp = if_lookup_by_index(iif, vrf);
-		zlog_debug("MCAST VRF: %s(%d) %s (%s,%s) IIF: %s(%d) OIF: %s jiffies: %lld",
-			   zvrf->vrf->name, vrf,
-			   nl_msg_type_to_str(h->nlmsg_type),
-			   sbuf, gbuf, ifp ? ifp->name : "Unknown", iif,
-			   oif_list, m->lastused);
+		zlog_debug(
+			"MCAST VRF: %s(%d) %s (%s,%s) IIF: %s(%d) OIF: %s jiffies: %lld",
+			(zvrf ? zvrf->vrf->name : "Unknown"), vrf,
+			nl_msg_type_to_str(h->nlmsg_type), sbuf, gbuf,
+			ifp ? ifp->name : "Unknown", iif, oif_list,
+			m->lastused);
 	}
 	return 0;
 }
@@ -2348,7 +2354,8 @@ static int netlink_macfdb_update(struct interface *ifp, vlanid_t vid,
  * 5549 support, re-install them.
  */
 static void netlink_handle_5549(struct ndmsg *ndm, struct zebra_if *zif,
-				struct interface *ifp, struct ipaddr *ip)
+				struct interface *ifp, struct ipaddr *ip,
+				bool handle_failed)
 {
 	if (ndm->ndm_family != AF_INET)
 		return;
@@ -2358,6 +2365,12 @@ static void netlink_handle_5549(struct ndmsg *ndm, struct zebra_if *zif,
 
 	if (ipv4_ll.s_addr != ip->ip._v4_addr.s_addr)
 		return;
+
+	if (handle_failed && ndm->ndm_state & NUD_FAILED) {
+		zlog_info("Neighbor Entry for %s has entered a failed state, not reinstalling",
+			  ifp->name);
+		return;
+	}
 
 	if_nbr_ipv6ll_to_ipv4ll_neigh_update(ifp, &zif->v6_2_v4_ll_addr6, true);
 }
@@ -2409,7 +2422,7 @@ static int netlink_ipneigh_change(struct nlmsghdr *h, int len, ns_id_t ns_id)
 
 	/* if kernel deletes our rfc5549 neighbor entry, re-install it */
 	if (h->nlmsg_type == RTM_DELNEIGH && (ndm->ndm_state & NUD_PERMANENT)) {
-		netlink_handle_5549(ndm, zif, ifp, &ip);
+		netlink_handle_5549(ndm, zif, ifp, &ip, false);
 		if (IS_ZEBRA_DEBUG_KERNEL)
 			zlog_debug(
 				"\tNeighbor Entry Received is a 5549 entry, finished");
@@ -2418,7 +2431,7 @@ static int netlink_ipneigh_change(struct nlmsghdr *h, int len, ns_id_t ns_id)
 
 	/* if kernel marks our rfc5549 neighbor entry invalid, re-install it */
 	if (h->nlmsg_type == RTM_NEWNEIGH && !(ndm->ndm_state & NUD_VALID))
-		netlink_handle_5549(ndm, zif, ifp, &ip);
+		netlink_handle_5549(ndm, zif, ifp, &ip, true);
 
 	/* The neighbor is present on an SVI. From this, we locate the
 	 * underlying

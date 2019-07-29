@@ -5283,8 +5283,6 @@ static void process_remote_macip_add(vni_t vni,
 			if (ipa_len)
 				SET_FLAG(mac->flags, ZEBRA_MAC_AUTO);
 		} else {
-			const char *mac_type;
-
 			/* When host moves but changes its (MAC,IP)
 			 * binding, BGP may install a MACIP entry that
 			 * corresponds to "older" location of the host
@@ -5293,16 +5291,14 @@ static void process_remote_macip_add(vni_t vni,
 			 * the sequence number and ignore this update
 			 * if appropriate.
 			 */
-			if (CHECK_FLAG(mac->flags, ZEBRA_MAC_LOCAL)) {
+			if (CHECK_FLAG(mac->flags, ZEBRA_MAC_LOCAL))
 				tmp_seq = mac->loc_seq;
-				mac_type = "local";
-			} else {
+			else
 				tmp_seq = mac->rem_seq;
-				mac_type = "remote";
-			}
+
 			if (seq < tmp_seq) {
 				if (IS_ZEBRA_DEBUG_VXLAN)
-					zlog_debug("Ignore remote MACIP ADD VNI %u MAC %s%s%s as existing %s MAC has higher seq %u",
+					zlog_debug("Ignore remote MACIP ADD VNI %u MAC %s%s%s as existing MAC has higher seq %u flags 0x%x",
 					vni,
 					prefix_mac2str(macaddr,
 						       buf, sizeof(buf)),
@@ -5310,8 +5306,7 @@ static void process_remote_macip_add(vni_t vni,
 					ipa_len ?
 					ipaddr2str(ipaddr,
 						   buf1, sizeof(buf1)) : "",
-					mac_type,
-					tmp_seq);
+					tmp_seq, mac->flags);
 				return;
 			}
 		}
@@ -7633,9 +7628,10 @@ int zebra_vxlan_local_mac_del(struct interface *ifp, struct interface *br_if,
 		return 0;
 
 	if (IS_ZEBRA_DEBUG_VXLAN)
-		zlog_debug("DEL MAC %s intf %s(%u) VID %u -> VNI %u flags 0x%x",
+		zlog_debug("DEL MAC %s intf %s(%u) VID %u -> VNI %u seq %u flags 0x%x nbr count %u",
 			   prefix_mac2str(macaddr, buf, sizeof(buf)), ifp->name,
-			   ifp->ifindex, vid, zvni->vni, mac->flags);
+			   ifp->ifindex, vid, zvni->vni, mac->loc_seq,
+			   mac->flags, listcount(mac->neigh_list));
 
 	/* Update all the neigh entries associated with this mac */
 	zvni_process_neigh_on_local_mac_del(zvni, mac);
@@ -9442,14 +9438,18 @@ static int zebra_vxlan_dad_mac_auto_recovery_exp(struct thread *t)
 
 /************************** vxlan SG cache management ************************/
 /* Inform PIM about the mcast group */
-static int zebra_vxlan_sg_send(struct prefix_sg *sg,
-			char *sg_str, uint16_t cmd)
+static int zebra_vxlan_sg_send(struct zebra_vrf *zvrf,
+		struct prefix_sg *sg,
+		char *sg_str, uint16_t cmd)
 {
 	struct zserv *client = NULL;
 	struct stream *s = NULL;
 
 	client = zserv_find_client(ZEBRA_ROUTE_PIM, 0);
 	if (!client)
+		return 0;
+
+	if (!CHECK_FLAG(zvrf->flags, ZEBRA_PIM_SEND_VXLAN_SG))
 		return 0;
 
 	s = stream_new(ZEBRA_MAX_PACKET_SIZ);
@@ -9551,7 +9551,8 @@ static zebra_vxlan_sg_t *zebra_vxlan_sg_add(struct zebra_vrf *zvrf,
 		return vxlan_sg;
 	}
 
-	zebra_vxlan_sg_send(sg, vxlan_sg->sg_str, ZEBRA_VXLAN_SG_ADD);
+	zebra_vxlan_sg_send(zvrf, sg, vxlan_sg->sg_str,
+			ZEBRA_VXLAN_SG_ADD);
 
 	return vxlan_sg;
 }
@@ -9573,8 +9574,8 @@ static void zebra_vxlan_sg_del(zebra_vxlan_sg_t *vxlan_sg)
 		zebra_vxlan_sg_do_deref(zvrf, sip, vxlan_sg->sg.grp);
 	}
 
-	zebra_vxlan_sg_send(&vxlan_sg->sg, vxlan_sg->sg_str,
-		ZEBRA_VXLAN_SG_DEL);
+	zebra_vxlan_sg_send(zvrf, &vxlan_sg->sg,
+			vxlan_sg->sg_str, ZEBRA_VXLAN_SG_DEL);
 
 	hash_release(vxlan_sg->zvrf->vxlan_sg_table, vxlan_sg);
 
@@ -9658,6 +9659,31 @@ static void zebra_vxlan_sg_cleanup(struct hash_backet *backet, void *arg)
 	zebra_vxlan_sg_del(vxlan_sg);
 }
 
+static void zebra_vxlan_sg_replay_send(struct hash_backet *backet, void *arg)
+{
+	zebra_vxlan_sg_t *vxlan_sg = (zebra_vxlan_sg_t *)backet->data;
+
+	zebra_vxlan_sg_send(vxlan_sg->zvrf, &vxlan_sg->sg,
+			vxlan_sg->sg_str, ZEBRA_VXLAN_SG_ADD);
+}
+
+/* Handle message from client to replay vxlan SG entries */
+void zebra_vxlan_sg_replay(ZAPI_HANDLER_ARGS)
+{
+	if (IS_ZEBRA_DEBUG_VXLAN)
+		zlog_debug("VxLAN SG updates to PIM, start");
+
+	SET_FLAG(zvrf->flags, ZEBRA_PIM_SEND_VXLAN_SG);
+
+	if (!EVPN_ENABLED(zvrf)) {
+		zlog_debug("VxLAN SG replay request on unexpected vrf %d",
+			zvrf->vrf->vrf_id);
+		return;
+	}
+
+	hash_iterate(zvrf->vxlan_sg_table, zebra_vxlan_sg_replay_send, NULL);
+}
+
 /************************** EVPN BGP config management ************************/
 /* Notify Local MACs to the clienti, skips GW MAC */
 static void zvni_send_mac_hash_entry_to_client(struct hash_bucket *bucket,
@@ -9733,38 +9759,72 @@ static void zvni_evpn_cfg_cleanup(struct hash_bucket *bucket, void *ctxt)
 	zvni->advertise_svi_macip = 0;
 	zvni->advertise_subnet = 0;
 
-	zvni_neigh_del_all(zvni, 0, 0,
+	zvni_neigh_del_all(zvni, 1, 0,
 			   DEL_REMOTE_NEIGH | DEL_REMOTE_NEIGH_FROM_VTEP);
-	zvni_mac_del_all(zvni, 0, 0,
+	zvni_mac_del_all(zvni, 1, 0,
 			 DEL_REMOTE_MAC | DEL_REMOTE_MAC_FROM_VTEP);
-	zvni_vtep_del_all(zvni, 0);
+	zvni_vtep_del_all(zvni, 1);
 }
 
 /* Cleanup EVPN configuration of a specific VRF */
 static void zebra_evpn_vrf_cfg_cleanup(struct zebra_vrf *zvrf)
 {
+	zebra_l3vni_t *zl3vni = NULL;
+
 	zvrf->advertise_all_vni = 0;
 	zvrf->advertise_gw_macip = 0;
 	zvrf->advertise_svi_macip = 0;
 	zvrf->vxlan_flood_ctrl = VXLAN_FLOOD_HEAD_END_REPL;
 
 	hash_iterate(zvrf->vni_table, zvni_evpn_cfg_cleanup, NULL);
+
+	if (zvrf->l3vni)
+		zl3vni = zl3vni_lookup(zvrf->l3vni);
+	if (zl3vni) {
+		/* delete and uninstall all rmacs */
+		hash_iterate(zl3vni->rmac_table, zl3vni_del_rmac_hash_entry,
+			     zl3vni);
+		/* delete and uninstall all next-hops */
+		hash_iterate(zl3vni->nh_table, zl3vni_del_nh_hash_entry,
+			     zl3vni);
+	}
 }
 
 /* Cleanup BGP EVPN configuration upon client disconnect */
-static int zebra_evpn_cfg_clean_up(struct zserv *client)
+static int zebra_evpn_bgp_cfg_clean_up(struct zserv *client)
 {
 	struct vrf *vrf;
 	struct zebra_vrf *zvrf;
-
-	if (client->proto != ZEBRA_ROUTE_BGP)
-		return 0;
 
 	RB_FOREACH (vrf, vrf_id_head, &vrfs_by_id) {
 		zvrf = vrf->info;
 		if (zvrf)
 			zebra_evpn_vrf_cfg_cleanup(zvrf);
 	}
+
+	return 0;
+}
+
+static int zebra_evpn_pim_cfg_clean_up(struct zserv *client)
+{
+	struct zebra_vrf *zvrf = zebra_vrf_get_evpn();
+
+	if (CHECK_FLAG(zvrf->flags, ZEBRA_PIM_SEND_VXLAN_SG)) {
+		if (IS_ZEBRA_DEBUG_VXLAN)
+			zlog_debug("VxLAN SG updates to PIM, stop");
+		UNSET_FLAG(zvrf->flags, ZEBRA_PIM_SEND_VXLAN_SG);
+	}
+
+	return 0;
+}
+
+static int zebra_evpn_cfg_clean_up(struct zserv *client)
+{
+	if (client->proto == ZEBRA_ROUTE_BGP)
+		return zebra_evpn_bgp_cfg_clean_up(client);
+
+	if (client->proto == ZEBRA_ROUTE_PIM)
+		return zebra_evpn_pim_cfg_clean_up(client);
 
 	return 0;
 }

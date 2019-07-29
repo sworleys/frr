@@ -925,7 +925,7 @@ DEFUN (no_auto_summary,
 /* "router bgp" commands. */
 DEFUN_NOSH (router_bgp,
        router_bgp_cmd,
-       "router bgp [(1-4294967295) [<view|vrf> VIEWVRFNAME]]",
+       "router bgp [(1-4294967295)$instasn [<view|vrf> VIEWVRFNAME]]",
        ROUTER_STR
        BGP_STR
        AS_STR
@@ -979,10 +979,6 @@ DEFUN_NOSH (router_bgp,
 
 		ret = bgp_get(&bgp, &as, name, inst_type);
 		switch (ret) {
-		case BGP_ERR_MULTIPLE_INSTANCE_NOT_SET:
-			vty_out(vty,
-				"Please specify 'bgp multiple-instance' first\n");
-			return CMD_WARNING_CONFIG_FAILED;
 		case BGP_ERR_AS_MISMATCH:
 			vty_out(vty, "BGP is already running; AS is %u\n", as);
 			return CMD_WARNING_CONFIG_FAILED;
@@ -1003,6 +999,8 @@ DEFUN_NOSH (router_bgp,
 		if (is_new_bgp && inst_type == BGP_INSTANCE_TYPE_DEFAULT)
 			vpn_leak_postchange_all();
 
+		if (inst_type == BGP_INSTANCE_TYPE_VRF)
+			bgp_vpn_leak_export(bgp);
 		/* Pending: handle when user tries to change a view to vrf n vv.
 		 */
 	}
@@ -1017,7 +1015,7 @@ DEFUN_NOSH (router_bgp,
 /* "no router bgp" commands. */
 DEFUN (no_router_bgp,
        no_router_bgp_cmd,
-       "no router bgp [(1-4294967295) [<view|vrf> VIEWVRFNAME]]",
+       "no router bgp [(1-4294967295)$instasn [<view|vrf> VIEWVRFNAME]]",
        NO_STR
        ROUTER_STR
        BGP_STR
@@ -1084,6 +1082,9 @@ DEFUN (no_router_bgp,
 			}
 		}
 	}
+
+	if (bgp_vpn_leak_unimport(bgp, vty))
+		return CMD_WARNING_CONFIG_FAILED;
 
 	bgp_delete(bgp);
 
@@ -4802,14 +4803,15 @@ static int peer_default_originate_set_vty(struct vty *vty, const char *peer_str,
 {
 	int ret;
 	struct peer *peer;
-	struct route_map *route_map;
+	struct route_map *route_map = NULL;
 
 	peer = peer_and_group_lookup_vty(vty, peer_str);
 	if (!peer)
 		return CMD_WARNING_CONFIG_FAILED;
 
 	if (set) {
-		route_map = route_map_lookup_warn_noexist(vty, rmap);
+		if (rmap)
+			route_map = route_map_lookup_warn_noexist(vty, rmap);
 		ret = peer_default_originate_set(peer, afi, safi,
 						 rmap, route_map);
 	} else
@@ -11212,15 +11214,19 @@ static int bgp_show_route_leak_vty(struct vty *vty, const char *name,
 				json_object_array_add(json_import_vrfs,
 						json_object_new_string(vname));
 
+			json_object_object_add(json, "importFromVrfs",
+						       json_import_vrfs);
 			dir = BGP_VPN_POLICY_DIR_FROMVPN;
-			ecom_str = ecommunity_ecom2str(
+			if (bgp->vpn_policy[afi].rtlist[dir]) {
+				ecom_str = ecommunity_ecom2str(
 					bgp->vpn_policy[afi].rtlist[dir],
 					ECOMMUNITY_FORMAT_ROUTE_MAP, 0);
-			json_object_object_add(json, "importFromVrfs",
-					       json_import_vrfs);
-			json_object_string_add(json, "importRts", ecom_str);
-
-			XFREE(MTYPE_ECOMMUNITY_STR, ecom_str);
+				json_object_string_add(json, "importRts",
+						       ecom_str);
+				XFREE(MTYPE_ECOMMUNITY_STR, ecom_str);
+			} else
+				json_object_string_add(json, "importRts",
+						       "none");
 		}
 
 		if (!CHECK_FLAG(bgp->af_flags[afi][safi],
@@ -11244,12 +11250,16 @@ static int bgp_show_route_leak_vty(struct vty *vty, const char *name,
 						 buf1, RD_ADDRSTRLEN));
 
 			dir = BGP_VPN_POLICY_DIR_TOVPN;
-			ecom_str = ecommunity_ecom2str(
+			if (bgp->vpn_policy[afi].rtlist[dir]) {
+				ecom_str = ecommunity_ecom2str(
 					       bgp->vpn_policy[afi].rtlist[dir],
 					       ECOMMUNITY_FORMAT_ROUTE_MAP, 0);
-			json_object_string_add(json, "exportRts", ecom_str);
-
-			XFREE(MTYPE_ECOMMUNITY_STR, ecom_str);
+				json_object_string_add(json, "exportRts",
+						       ecom_str);
+				XFREE(MTYPE_ECOMMUNITY_STR, ecom_str);
+			} else
+				json_object_string_add(json, "exportRts",
+						       "none");
 		}
 
 		if (use_json) {
@@ -11282,12 +11292,16 @@ static int bgp_show_route_leak_vty(struct vty *vty, const char *name,
 				vty_out(vty, "  %s\n", vname);
 
 			dir = BGP_VPN_POLICY_DIR_FROMVPN;
-			ecom_str = ecommunity_ecom2str(
+			ecom_str = NULL;
+			if (bgp->vpn_policy[afi].rtlist[dir]) {
+				ecom_str = ecommunity_ecom2str(
 					       bgp->vpn_policy[afi].rtlist[dir],
 					       ECOMMUNITY_FORMAT_ROUTE_MAP, 0);
-			vty_out(vty, "Import RT(s): %s\n", ecom_str);
+				vty_out(vty, "Import RT(s): %s\n", ecom_str);
 
-			XFREE(MTYPE_ECOMMUNITY_STR, ecom_str);
+				XFREE(MTYPE_ECOMMUNITY_STR, ecom_str);
+			} else
+				vty_out(vty, "Import RT(s):\n");
 		}
 
 		if (!CHECK_FLAG(bgp->af_flags[afi][safi],
@@ -11310,11 +11324,14 @@ static int bgp_show_route_leak_vty(struct vty *vty, const char *name,
 					      buf1, RD_ADDRSTRLEN));
 
 			dir = BGP_VPN_POLICY_DIR_TOVPN;
-			ecom_str = ecommunity_ecom2str(
+			if (bgp->vpn_policy[afi].rtlist[dir]) {
+				ecom_str = ecommunity_ecom2str(
 					bgp->vpn_policy[afi].rtlist[dir],
 					ECOMMUNITY_FORMAT_ROUTE_MAP, 0);
-			vty_out(vty, "Export RT: %s\n", ecom_str);
-			XFREE(MTYPE_ECOMMUNITY_STR, ecom_str);
+				vty_out(vty, "Export RT: %s\n", ecom_str);
+				XFREE(MTYPE_ECOMMUNITY_STR, ecom_str);
+			} else
+				vty_out(vty, "Import RT(s):\n");
 		}
 	}
 
@@ -12197,7 +12214,7 @@ ALIAS_HIDDEN(
 
 DEFUN (no_bgp_redistribute_ipv4_ospf,
        no_bgp_redistribute_ipv4_ospf_cmd,
-       "no redistribute <ospf|table> (1-65535) [metric (0-4294967295)] [route-map WORD]",
+       "no redistribute <ospf|table> (1-65535) [{metric (0-4294967295)|route-map WORD}]",
        NO_STR
        "Redistribute information from another routing protocol\n"
        "Open Shortest Path First (OSPFv2)\n"
@@ -12225,7 +12242,7 @@ DEFUN (no_bgp_redistribute_ipv4_ospf,
 
 ALIAS_HIDDEN(
 	no_bgp_redistribute_ipv4_ospf, no_bgp_redistribute_ipv4_ospf_hidden_cmd,
-	"no redistribute <ospf|table> (1-65535) [metric (0-4294967295)] [route-map WORD]",
+	"no redistribute <ospf|table> (1-65535) [{metric (0-4294967295)|route-map WORD}]",
 	NO_STR
 	"Redistribute information from another routing protocol\n"
 	"Open Shortest Path First (OSPFv2)\n"
@@ -12238,7 +12255,7 @@ ALIAS_HIDDEN(
 
 DEFUN (no_bgp_redistribute_ipv4,
        no_bgp_redistribute_ipv4_cmd,
-       "no redistribute " FRR_IP_REDIST_STR_BGPD " [metric (0-4294967295)] [route-map WORD]",
+       "no redistribute " FRR_IP_REDIST_STR_BGPD " [{metric (0-4294967295)|route-map WORD}]",
        NO_STR
        "Redistribute information from another routing protocol\n"
        FRR_IP_REDIST_HELP_STR_BGPD
@@ -12262,7 +12279,7 @@ DEFUN (no_bgp_redistribute_ipv4,
 ALIAS_HIDDEN(
 	no_bgp_redistribute_ipv4, no_bgp_redistribute_ipv4_hidden_cmd,
 	"no redistribute " FRR_IP_REDIST_STR_BGPD
-	" [metric (0-4294967295)] [route-map WORD]",
+	" [{metric (0-4294967295)|route-map WORD}]",
 	NO_STR
 	"Redistribute information from another routing protocol\n" FRR_IP_REDIST_HELP_STR_BGPD
 	"Metric for redistributed routes\n"
@@ -12421,7 +12438,7 @@ DEFUN (bgp_redistribute_ipv6_metric_rmap,
 
 DEFUN (no_bgp_redistribute_ipv6,
        no_bgp_redistribute_ipv6_cmd,
-       "no redistribute " FRR_IP6_REDIST_STR_BGPD " [metric (0-4294967295)] [route-map WORD]",
+       "no redistribute " FRR_IP6_REDIST_STR_BGPD " [{metric (0-4294967295)|route-map WORD}]",
        NO_STR
        "Redistribute information from another routing protocol\n"
        FRR_IP6_REDIST_HELP_STR_BGPD

@@ -3,7 +3,7 @@
 #
 lib_LTLIBRARIES += lib/libfrr.la
 lib_libfrr_la_LDFLAGS = -version-info 0:0:0 -Xlinker -e_libfrr_version
-lib_libfrr_la_LIBADD = @LIBCAP@ $(UNWIND_LIBS) -lyang $(LUA_LIB)
+lib_libfrr_la_LIBADD = $(LIBCAP) $(UNWIND_LIBS) $(LIBYANG_LIBS) $(LUA_LIB)
 
 lib_libfrr_la_SOURCES = \
 	lib/agg_table.c \
@@ -42,6 +42,7 @@ lib_libfrr_la_SOURCES = \
 	lib/libfrr.c \
 	lib/linklist.c \
 	lib/log.c \
+	lib/log_vty.c \
 	lib/md5.c \
 	lib/memory.c \
 	lib/memory_vty.c \
@@ -123,7 +124,7 @@ vtysh_scan += \
 vtysh_scan += $(top_srcdir)/lib/agentx.c
 
 if SQLITE3
-lib_libfrr_la_LIBADD += -lsqlite3
+lib_libfrr_la_LIBADD += $(SQLITE3_LIBS)
 lib_libfrr_la_SOURCES += lib/db.c
 endif
 
@@ -135,6 +136,8 @@ lib/nexthop_group_clippy.c: $(CLIPPY_DEPS)
 lib/nexthop_group.lo: lib/nexthop_group_clippy.c
 lib/northbound_cli_clippy.c: $(CLIPPY_DEPS)
 lib/northbound_cli.lo: lib/northbound_cli_clippy.c
+lib/log_vty_clippy.c: $(CLIPPY_DEPS)
+lib/log_vty.lo: lib/log_vty_clippy.c
 
 pkginclude_HEADERS += \
 	lib/agg_table.h \
@@ -177,6 +180,7 @@ pkginclude_HEADERS += \
 	lib/libospf.h \
 	lib/linklist.h \
 	lib/log.h \
+	lib/log_vty.h \
 	lib/md5.h \
 	lib/memory.h \
 	lib/memory_vty.h \
@@ -186,6 +190,7 @@ pkginclude_HEADERS += \
 	lib/network.h \
 	lib/nexthop.h \
 	lib/nexthop_group.h \
+	lib/nexthop_group_private.h \
 	lib/northbound.h \
 	lib/northbound_cli.h \
 	lib/northbound_db.h \
@@ -279,6 +284,21 @@ lib_libfrrsnmp_la_SOURCES = \
 	# end
 
 #
+# c-ares support
+#
+if CARES
+lib_LTLIBRARIES += lib/libfrrcares.la
+pkginclude_HEADERS += lib/resolver.h
+endif
+
+lib_libfrrcares_la_CFLAGS = $(WERROR) $(CARES_CFLAGS)
+lib_libfrrcares_la_LDFLAGS = -version-info 0:0:0
+lib_libfrrcares_la_LIBADD = $(CARES_LIBS)
+lib_libfrrcares_la_SOURCES = \
+	lib/resolver.c \
+	#end
+
+#
 # ZeroMQ support
 #
 if ZEROMQ
@@ -302,7 +322,7 @@ endif
 
 lib_confd_la_CFLAGS = $(WERROR) $(CONFD_CFLAGS)
 lib_confd_la_LDFLAGS = -avoid-version -module -shared -export-dynamic
-lib_confd_la_LIBADD = lib/libfrr.la -lconfd
+lib_confd_la_LIBADD = lib/libfrr.la $(CONFD_LIBS)
 lib_confd_la_SOURCES = lib/northbound_confd.c
 
 #
@@ -312,10 +332,22 @@ if SYSREPO
 module_LTLIBRARIES += lib/sysrepo.la
 endif
 
-lib_sysrepo_la_CFLAGS = $(WERROR)
+lib_sysrepo_la_CFLAGS = $(WERROR) $(SYSREPO_CFLAGS)
 lib_sysrepo_la_LDFLAGS = -avoid-version -module -shared -export-dynamic
-lib_sysrepo_la_LIBADD = lib/libfrr.la -lsysrepo
+lib_sysrepo_la_LIBADD = lib/libfrr.la $(SYSREPO_LIBS)
 lib_sysrepo_la_SOURCES = lib/northbound_sysrepo.c
+
+#
+# gRPC northbound plugin
+#
+if GRPC
+module_LTLIBRARIES += lib/grpc.la
+endif
+
+lib_grpc_la_CXXFLAGS = $(WERROR) $(GRPC_CFLAGS)
+lib_grpc_la_LDFLAGS = -avoid-version -module -shared -export-dynamic
+lib_grpc_la_LIBADD = lib/libfrr.la grpc/libfrrgrpc_pb.la $(GRPC_LIBS)
+lib_grpc_la_SOURCES = lib/northbound_grpc.cpp
 
 #
 # CLI utilities
@@ -327,8 +359,10 @@ noinst_PROGRAMS += \
 if BUILD_CLIPPY
 noinst_PROGRAMS += lib/clippy
 else
-$(HOSTTOOLS)lib/clippy:
-	@$(MAKE) -C $(top_builddir)/$(HOSTTOOLS) lib/route_types.h lib/clippy
+if HOSTTOOLS_CLIPPY
+$(CLIPPY):
+	@$(MAKE) -C $(top_builddir)/hosttools lib/route_types.h lib/clippy
+endif
 endif
 
 lib_grammar_sandbox_SOURCES = \
@@ -359,13 +393,11 @@ am__v_CLIPPY_ = $(am__v_CLIPPY_$(AM_DEFAULT_VERBOSITY))
 am__v_CLIPPY_0 = @echo "  CLIPPY  " $@;
 am__v_CLIPPY_1 =
 
-CLIPPY_DEPS = $(HOSTTOOLS)lib/clippy $(top_srcdir)/python/clidef.py
+CLIPPY_DEPS = $(CLIPPY) $(top_srcdir)/python/clidef.py
 
-SUFFIXES = _clippy.c .proto .pb-c.c .pb-c.h .pb.h
+SUFFIXES = _clippy.c .proto .pb-c.c .pb-c.h .pb.h .pb.cc .grpc.pb.cc
 .c_clippy.c:
-	@{ test -x $(top_builddir)/$(HOSTTOOLS)lib/clippy || \
-		$(MAKE) -C $(top_builddir)/$(HOSTTOOLS) lib/clippy; }
-	$(AM_V_CLIPPY) $(top_builddir)/$(HOSTTOOLS)lib/clippy $(top_srcdir)/python/clidef.py -o $@ $<
+	$(AM_V_CLIPPY) $(CLIPPY) $(top_srcdir)/python/clidef.py -o $@ $<
 
 ## automake's "ylwrap" is a great piece of GNU software... not.
 .l.c:
@@ -400,11 +432,13 @@ lib/command_lex.h: lib/command_lex.c
 	@if test ! -f $@; then $(MAKE) $(AM_MAKEFLAGS) "lib/command_lex.c"; else :; fi
 lib/command_lex.lo: lib/command_parse.h
 lib/command_parse.lo: lib/command_lex.h
+lib/clippy-command_lex.$(OBJEXT): lib/command_parse.h
+lib/clippy-command_parse.$(OBJEXT): lib/command_lex.h
 lib/lib_clippy-command_lex.$(OBJEXT): lib/command_parse.h
 lib/lib_clippy-command_parse.$(OBJEXT): lib/command_lex.h
 
 lib/route_types.h: $(top_srcdir)/lib/route_types.txt $(top_srcdir)/lib/route_types.pl
-	@PERL@ $(top_srcdir)/lib/route_types.pl < $(top_srcdir)/lib/route_types.txt > $@
+	$(PERL) $(top_srcdir)/lib/route_types.pl < $(top_srcdir)/lib/route_types.txt > $@
 DISTCLEANFILES += lib/route_types.h
 
 if GIT_VERSION
@@ -418,7 +452,7 @@ PHONY_GITVERSION=lib/gitversion.h.tmp
 .SILENT: lib/gitversion.h lib/gitversion.h.tmp
 GITH=lib/gitversion.h
 lib/gitversion.h.tmp: $(top_srcdir)/.git
-	@PERL@ $(top_srcdir)/lib/gitversion.pl $(top_srcdir) > ${GITH}.tmp
+	$(PERL) $(top_srcdir)/lib/gitversion.pl $(top_srcdir) > ${GITH}.tmp
 lib/gitversion.h: lib/gitversion.h.tmp
 	{ test -f ${GITH} && diff -s -q ${GITH}.tmp ${GITH}; } || cp ${GITH}.tmp ${GITH}
 

@@ -27,6 +27,7 @@
 #include "filter.h"
 #include "stream.h"
 #include "jhash.h"
+#include "frrstr.h"
 
 #include "bgpd/bgpd.h"
 #include "bgpd/bgp_community.h"
@@ -695,6 +696,32 @@ int lcommunity_list_match(struct lcommunity *lcom, struct community_list *list)
 	return 0;
 }
 
+
+/* Perform exact matching.  In case of expanded large-community-list, do
+ * same thing as lcommunity_list_match().
+ */
+int lcommunity_list_exact_match(struct lcommunity *lcom,
+			       struct community_list *list)
+{
+	struct community_entry *entry;
+
+	for (entry = list->head; entry; entry = entry->next) {
+		if (entry->any)
+			return entry->direct == COMMUNITY_PERMIT ? 1 : 0;
+
+		if (entry->style == LARGE_COMMUNITY_LIST_STANDARD) {
+			if (lcommunity_cmp(lcom, entry->u.com))
+				return entry->direct == COMMUNITY_PERMIT ? 1
+									 : 0;
+		} else if (entry->style == LARGE_COMMUNITY_LIST_EXPANDED) {
+			if (lcommunity_regexp_match(lcom, entry->reg))
+				return entry->direct == COMMUNITY_PERMIT ? 1
+									 : 0;
+		}
+	}
+	return 0;
+}
+
 int ecommunity_list_match(struct ecommunity *ecom, struct community_list *list)
 {
 	struct community_entry *entry;
@@ -1000,6 +1027,33 @@ struct lcommunity *lcommunity_list_match_delete(struct lcommunity *lcom,
 	return lcom;
 }
 
+/* Helper to check if every octet do not exceed UINT_MAX */
+static int lcommunity_list_valid(const char *community)
+{
+	int octets = 0;
+	char **splits;
+	int num;
+
+	frrstr_split(community, ":", &splits, &num);
+
+	for (int i = 0; i < num; i++) {
+		if (strtoul(splits[i], NULL, 10) > UINT_MAX)
+			return 0;
+
+		if (strlen(splits[i]) == 0)
+			return 0;
+
+		octets++;
+		XFREE(MTYPE_TMP, splits[i]);
+	}
+	XFREE(MTYPE_TMP, splits);
+
+	if (octets < 3)
+		return 0;
+
+	return 1;
+}
+
 /* Set lcommunity-list.  */
 int lcommunity_list_set(struct community_list_handler *ch, const char *name,
 			const char *str, int direct, int style)
@@ -1028,6 +1082,9 @@ int lcommunity_list_set(struct community_list_handler *ch, const char *name,
 	}
 
 	if (str) {
+		if (!lcommunity_list_valid(str))
+			return COMMUNITY_LIST_ERR_MALFORMED_VAL;
+
 		if (style == LARGE_COMMUNITY_LIST_STANDARD)
 			lcom = lcommunity_str2com(str);
 		else

@@ -135,6 +135,7 @@ static int ripd_instance_default_metric_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
+	rip = nb_running_get_entry(dnode, NULL, true);
 	rip->default_metric = yang_dnode_get_uint8(dnode, NULL);
 	/* rip_update_default_metric (); */
 
@@ -175,7 +176,7 @@ static int ripd_instance_distance_source_create(enum nb_event event,
 	/* Get RIP distance node. */
 	rn = route_node_get(rip_distance_table, (struct prefix *)&prefix);
 	rn->info = rip_distance_new();
-	yang_dnode_set_entry(dnode, rn);
+	nb_running_set_entry(dnode, rn);
 
 	return NB_OK;
 }
@@ -189,7 +190,7 @@ static int ripd_instance_distance_source_delete(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	rn = yang_dnode_get_entry(dnode, true);
+	rn = nb_running_unset_entry(dnode);
 	rdistance = rn->info;
 	if (rdistance->access_list)
 		free(rdistance->access_list);
@@ -217,7 +218,7 @@ ripd_instance_distance_source_distance_modify(enum nb_event event,
 		return NB_OK;
 
 	/* Set distance value. */
-	rn = yang_dnode_get_entry(dnode, true);
+	rn = nb_running_get_entry(dnode, NULL, true);
 	distance = yang_dnode_get_uint8(dnode, NULL);
 	rdistance = rn->info;
 	rdistance->distance = distance;
@@ -243,7 +244,7 @@ ripd_instance_distance_source_access_list_modify(enum nb_event event,
 	acl_name = yang_dnode_get_string(dnode, NULL);
 
 	/* Set access-list */
-	rn = yang_dnode_get_entry(dnode, true);
+	rn = nb_running_get_entry(dnode, NULL, true);
 	rdistance = rn->info;
 	if (rdistance->access_list)
 		free(rdistance->access_list);
@@ -263,7 +264,7 @@ ripd_instance_distance_source_access_list_delete(enum nb_event event,
 		return NB_OK;
 
 	/* Reset access-list configuration. */
-	rn = yang_dnode_get_entry(dnode, true);
+	rn = nb_running_get_entry(dnode, NULL, true);
 	rdistance = rn->info;
 	free(rdistance->access_list);
 	rdistance->access_list = NULL;
@@ -383,7 +384,7 @@ static int ripd_instance_offset_list_create(enum nb_event event,
 	ifname = yang_dnode_get_string(dnode, "./interface");
 
 	offset = rip_offset_list_new(ifname);
-	yang_dnode_set_entry(dnode, offset);
+	nb_running_set_entry(dnode, offset);
 
 	return NB_OK;
 }
@@ -399,7 +400,7 @@ static int ripd_instance_offset_list_delete(enum nb_event event,
 
 	direct = yang_dnode_get_enum(dnode, "./direction");
 
-	offset = yang_dnode_get_entry(dnode, true);
+	offset = nb_running_unset_entry(dnode);
 	if (offset->direct[direct].alist_name) {
 		free(offset->direct[direct].alist_name);
 		offset->direct[direct].alist_name = NULL;
@@ -429,7 +430,7 @@ ripd_instance_offset_list_access_list_modify(enum nb_event event,
 	direct = yang_dnode_get_enum(dnode, "../direction");
 	alist_name = yang_dnode_get_string(dnode, NULL);
 
-	offset = yang_dnode_get_entry(dnode, true);
+	offset = nb_running_get_entry(dnode, NULL, true);
 	if (offset->direct[direct].alist_name)
 		free(offset->direct[direct].alist_name);
 	offset->direct[direct].alist_name = strdup(alist_name);
@@ -454,7 +455,7 @@ static int ripd_instance_offset_list_metric_modify(enum nb_event event,
 	direct = yang_dnode_get_enum(dnode, "../direction");
 	metric = yang_dnode_get_uint8(dnode, NULL);
 
-	offset = yang_dnode_get_entry(dnode, true);
+	offset = nb_running_get_entry(dnode, NULL, true);
 	offset->direct[direct].metric = metric;
 
 	return NB_OK;
@@ -795,7 +796,7 @@ static int lib_interface_rip_split_horizon_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	ifp = yang_dnode_get_entry(dnode, true);
+	ifp = nb_running_get_entry(dnode, NULL, true);
 	ri = ifp->info;
 	ri->split_horizon = yang_dnode_get_enum(dnode, NULL);
 
@@ -815,7 +816,7 @@ static int lib_interface_rip_v2_broadcast_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	ifp = yang_dnode_get_entry(dnode, true);
+	ifp = nb_running_get_entry(dnode, NULL, true);
 	ri = ifp->info;
 	ri->v2_broadcast = yang_dnode_get_bool(dnode, NULL);
 
@@ -836,7 +837,7 @@ lib_interface_rip_version_receive_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	ifp = yang_dnode_get_entry(dnode, true);
+	ifp = nb_running_get_entry(dnode, NULL, true);
 	ri = ifp->info;
 	ri->ri_receive = yang_dnode_get_enum(dnode, NULL);
 
@@ -856,7 +857,7 @@ static int lib_interface_rip_version_send_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	ifp = yang_dnode_get_entry(dnode, true);
+	ifp = nb_running_get_entry(dnode, NULL, true);
 	ri = ifp->info;
 	ri->ri_send = yang_dnode_get_enum(dnode, NULL);
 
@@ -876,7 +877,7 @@ static int lib_interface_rip_authentication_scheme_mode_modify(
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	ifp = yang_dnode_get_entry(dnode, true);
+	ifp = nb_running_get_entry(dnode, NULL, true);
 	ri = ifp->info;
 	ri->auth_type = yang_dnode_get_enum(dnode, NULL);
 
@@ -897,7 +898,7 @@ static int lib_interface_rip_authentication_scheme_md5_auth_length_modify(
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	ifp = yang_dnode_get_entry(dnode, true);
+	ifp = nb_running_get_entry(dnode, NULL, true);
 	ri = ifp->info;
 	ri->md5_auth_len = yang_dnode_get_enum(dnode, NULL);
 
@@ -913,7 +914,7 @@ static int lib_interface_rip_authentication_scheme_md5_auth_length_delete(
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	ifp = yang_dnode_get_entry(dnode, true);
+	ifp = nb_running_get_entry(dnode, NULL, true);
 	ri = ifp->info;
 	ri->md5_auth_len = yang_get_default_enum(
 		"%s/authentication-scheme/md5-auth-length", RIP_IFACE);
@@ -935,7 +936,7 @@ lib_interface_rip_authentication_password_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	ifp = yang_dnode_get_entry(dnode, true);
+	ifp = nb_running_get_entry(dnode, NULL, true);
 	ri = ifp->info;
 	XFREE(MTYPE_RIP_INTERFACE_STRING, ri->auth_str);
 	ri->auth_str = XSTRDUP(MTYPE_RIP_INTERFACE_STRING,
@@ -954,7 +955,7 @@ lib_interface_rip_authentication_password_delete(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	ifp = yang_dnode_get_entry(dnode, true);
+	ifp = nb_running_get_entry(dnode, NULL, true);
 	ri = ifp->info;
 	XFREE(MTYPE_RIP_INTERFACE_STRING, ri->auth_str);
 
@@ -975,7 +976,7 @@ lib_interface_rip_authentication_key_chain_modify(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	ifp = yang_dnode_get_entry(dnode, true);
+	ifp = nb_running_get_entry(dnode, NULL, true);
 	ri = ifp->info;
 	XFREE(MTYPE_RIP_INTERFACE_STRING, ri->key_chain);
 	ri->key_chain = XSTRDUP(MTYPE_RIP_INTERFACE_STRING,
@@ -994,7 +995,7 @@ lib_interface_rip_authentication_key_chain_delete(enum nb_event event,
 	if (event != NB_EV_APPLY)
 		return NB_OK;
 
-	ifp = yang_dnode_get_entry(dnode, true);
+	ifp = nb_running_get_entry(dnode, NULL, true);
 	ri = ifp->info;
 	XFREE(MTYPE_RIP_INTERFACE_STRING, ri->key_chain);
 

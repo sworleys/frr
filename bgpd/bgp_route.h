@@ -21,6 +21,9 @@
 #ifndef _QUAGGA_BGP_ROUTE_H
 #define _QUAGGA_BGP_ROUTE_H
 
+#include <stdbool.h>
+
+#include "hook.h"
 #include "queue.h"
 #include "nexthop.h"
 #include "bgp_table.h"
@@ -45,7 +48,9 @@ enum bgp_show_type {
 	bgp_show_type_community_list_exact,
 	bgp_show_type_lcommunity_all,
 	bgp_show_type_lcommunity,
+	bgp_show_type_lcommunity_exact,
 	bgp_show_type_lcommunity_list,
+	bgp_show_type_lcommunity_list_exact,
 	bgp_show_type_flap_statistics,
 	bgp_show_type_flap_neighbor,
 	bgp_show_type_dampend_paths,
@@ -377,6 +382,12 @@ static inline bool is_pi_family_matching(struct bgp_path_info *pi,
 		return true;
 	return false;
 }
+
+/* called before bgp_process() */
+DECLARE_HOOK(bgp_process,
+		(struct bgp *bgp, afi_t afi, safi_t safi,
+			struct bgp_node *bn, struct peer *peer, bool withdraw),
+		(bgp, afi, safi, bn, peer, withdraw))
 
 /* Prototypes. */
 extern void bgp_rib_remove(struct bgp_node *rn, struct bgp_path_info *pi,

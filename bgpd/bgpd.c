@@ -94,6 +94,10 @@ DEFINE_MTYPE_STATIC(BGPD, BGP_EVPN_INFO, "BGP EVPN instance information");
 DEFINE_QOBJ_TYPE(bgp_master)
 DEFINE_QOBJ_TYPE(bgp)
 DEFINE_QOBJ_TYPE(peer)
+DEFINE_HOOK(bgp_inst_delete, (struct bgp *bgp), (bgp))
+DEFINE_HOOK(bgp_inst_config_write,
+		(struct bgp *bgp, struct vty *vty),
+		(bgp, vty))
 
 /* BGP process wide configuration.  */
 static struct bgp_master bgp_master;
@@ -245,9 +249,9 @@ static int bgp_router_id_set(struct bgp *bgp, const struct in_addr *id)
 
 	/* EVPN uses router id in RD, withdraw them */
 	if (is_evpn_enabled())
-		bgp_evpn_handle_router_id_update(bgp, TRUE);
+		bgp_evpn_handle_router_id_update(bgp, true);
 
-	vpn_handle_router_id_update(bgp, TRUE);
+	vpn_handle_router_id_update(bgp, true);
 
 	IPV4_ADDR_COPY(&bgp->router_id, id);
 
@@ -264,9 +268,9 @@ static int bgp_router_id_set(struct bgp *bgp, const struct in_addr *id)
 
 	/* EVPN uses router id in RD, update them */
 	if (is_evpn_enabled())
-		bgp_evpn_handle_router_id_update(bgp, FALSE);
+		bgp_evpn_handle_router_id_update(bgp, false);
 
-	vpn_handle_router_id_update(bgp, FALSE);
+	vpn_handle_router_id_update(bgp, true);
 
 	return 0;
 }
@@ -3117,7 +3121,7 @@ int bgp_handle_socket(struct bgp *bgp, struct vrf *vrf, vrf_id_t old_vrf_id,
 		/*
 		 * suppress vrf socket
 		 */
-		if (create == FALSE) {
+		if (create == false) {
 			bgp_close_vrf_socket(bgp);
 			return 0;
 		}
@@ -3167,7 +3171,7 @@ int bgp_get(struct bgp **bgp_val, as_t *as, const char *name,
 		if (bgp->inst_type != inst_type)
 			return BGP_ERR_INSTANCE_MISMATCH;
 		*bgp_val = bgp;
-		return 0;
+		return BGP_SUCCESS;
 	}
 
 	bgp = bgp_create(as, name, inst_type);
@@ -3201,7 +3205,7 @@ int bgp_get(struct bgp **bgp_val, as_t *as, const char *name,
 		bgp_zebra_instance_register(bgp);
 	}
 
-	return 0;
+	return BGP_SUCCESS;
 }
 
 /*
@@ -3270,6 +3274,9 @@ int bgp_delete(struct bgp *bgp)
 	int i;
 
 	assert(bgp);
+
+	hook_call(bgp_inst_delete, bgp);
+
 	THREAD_OFF(bgp->t_startup);
 	THREAD_OFF(bgp->t_maxmed_onstartup);
 	THREAD_OFF(bgp->t_update_delay);
@@ -6887,8 +6894,8 @@ static void bgp_config_write_peer_global(struct vty *vty, struct bgp *bgp,
 	struct peer *g_peer = NULL;
 	char buf[SU_ADDRSTRLEN];
 	char *addr;
-	int if_pg_printed = FALSE;
-	int if_ras_printed = FALSE;
+	int if_pg_printed = false;
+	int if_ras_printed = false;
 
 	/* Skip dynamic neighbors. */
 	if (peer_dynamic_neighbor(peer))
@@ -6910,16 +6917,16 @@ static void bgp_config_write_peer_global(struct vty *vty, struct bgp *bgp,
 
 		if (peer_group_active(peer)) {
 			vty_out(vty, " peer-group %s", peer->group->name);
-			if_pg_printed = TRUE;
+			if_pg_printed = true;
 		} else if (peer->as_type == AS_SPECIFIED) {
 			vty_out(vty, " remote-as %u", peer->as);
-			if_ras_printed = TRUE;
+			if_ras_printed = true;
 		} else if (peer->as_type == AS_INTERNAL) {
 			vty_out(vty, " remote-as internal");
-			if_ras_printed = TRUE;
+			if_ras_printed = true;
 		} else if (peer->as_type == AS_EXTERNAL) {
 			vty_out(vty, " remote-as external");
-			if_ras_printed = TRUE;
+			if_ras_printed = true;
 		}
 
 		vty_out(vty, "\n");
@@ -7757,6 +7764,8 @@ int bgp_config_write(struct vty *vty)
 		/* EVPN configuration.  */
 		bgp_config_write_family(vty, bgp, AFI_L2VPN, SAFI_EVPN);
 
+		hook_call(bgp_inst_config_write, bgp, vty);
+
 #if ENABLE_BGP_VNC
 		bgp_rfapi_cfg_write(vty, bgp);
 #endif
@@ -7836,8 +7845,31 @@ static void bgp_viewvrf_autocomplete(vector comps, struct cmd_token *token)
 	}
 }
 
+static void bgp_instasn_autocomplete(vector comps, struct cmd_token *token)
+{
+	struct listnode *next, *next2;
+	struct bgp *bgp, *bgp2;
+	char buf[11];
+
+	for (ALL_LIST_ELEMENTS_RO(bm->bgp, next, bgp)) {
+		/* deduplicate */
+		for (ALL_LIST_ELEMENTS_RO(bm->bgp, next2, bgp2)) {
+			if (bgp2->as == bgp->as)
+				break;
+			if (bgp2 == bgp)
+				break;
+		}
+		if (bgp2 != bgp)
+			continue;
+
+		snprintf(buf, sizeof(buf), "%u", bgp->as);
+		vector_set(comps, XSTRDUP(MTYPE_COMPLETION, buf));
+	}
+}
+
 static const struct cmd_variable_handler bgp_viewvrf_var_handlers[] = {
 	{.tokenname = "VIEWVRFNAME", .completions = bgp_viewvrf_autocomplete},
+	{.varname = "instasn", .completions = bgp_instasn_autocomplete},
 	{.completions = NULL},
 };
 
