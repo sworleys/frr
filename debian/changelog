@@ -1,3 +1,15 @@
+frr (4.0+cl3u14) Released; urgency=medium
+
+  * Fixes: CM-25610 bgpd: encode implicit next-hop-self in some vrf route leaking scenarios
+  * Fixes: CM-25723 lib: un-bust `show error ...` command
+  * Fixes: CM-24784 vtysh: mark exit-vrf with end when using vtysh -m
+  * Fixes: CM-24921 tools: add more ospf show cmds to cl-support
+  * Fixes: CM-20095 ospfd: no router ospf crash fix
+  * Fixes: CM-25417 bgpd: Fix nexthop reg for IPv4 route exchange using GUA IPv6 peering
+  * Fixes: CM-25528 ospfd:  fix show ip ospf neigh json
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Mon, 29 Jul 2019 13:43:31 -0700
+
 frr (4.0+cl3u13) Released; urgency=medium
 
   * Fixes: CM-25581 bgpd: fix show evpn route json command
