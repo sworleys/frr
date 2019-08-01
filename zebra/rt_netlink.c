@@ -1873,12 +1873,7 @@ int kernel_get_ipmr_sg_stats(struct zebra_vrf *zvrf, void *in)
 }
 
 /**
- * _netlink_nexthop_build_group() - Build a nexthop_grp struct for a nlmsg
- *
- * @n:			Netlink message header struct
- * @req_size:		Size allocated for this message
- * @z_grp:		Array of nh_grp structs
- * @count:		How many depencies there are
+ * Build a nexthop_grp struct for a nlmsg
  */
 static void _netlink_nexthop_build_group(struct nlmsghdr *n, size_t req_size,
 					 const struct nh_grp *z_grp,
@@ -1898,11 +1893,7 @@ static void _netlink_nexthop_build_group(struct nlmsghdr *n, size_t req_size,
 }
 
 /**
- * netlink_nexthop() - Nexthop change via the netlink interface
- *
- * @ctx:	Dataplane ctx
- *
- * Return:	Result status
+ * Nexthop change via the netlink interface
  */
 static int netlink_nexthop(int cmd, struct zebra_dplane_ctx *ctx)
 {
@@ -2005,12 +1996,8 @@ static int netlink_nexthop(int cmd, struct zebra_dplane_ctx *ctx)
 				 dplane_ctx_get_ns(ctx), 0);
 }
 
-/**
- * kernel_nexthop_update() - Update/delete a nexthop from the kernel
- *
- * @ctx:	Dataplane context
- *
- * Return:	Dataplane result flag
+/*
+ * Update/delete a nexthop from the kernel
  */
 enum zebra_dplane_result kernel_nexthop_update(struct zebra_dplane_ctx *ctx)
 {
@@ -2132,14 +2119,7 @@ enum zebra_dplane_result kernel_route_update(struct zebra_dplane_ctx *ctx)
 }
 
 /**
- * netlink_nexthop_process_nh() - Parse the gatway/if info from a new nexthop
- *
- * @tb:		Netlink RTA data
- * @family:	Address family in the nhmsg
- * @ifp:	Interface connected - this should be NULL, we fill it in
- * @ns_id:	Namspace id
- *
- * Return:	New nexthop
+ * Parse the gatway/if info from a new nexthop
  */
 static struct nexthop netlink_nexthop_process_nh(struct rtattr **tb,
 						 unsigned char family,
@@ -2244,13 +2224,7 @@ static int netlink_nexthop_process_group(struct rtattr **tb,
 }
 
 /**
- * netlink_nexthop_change() - Read in change about nexthops from the kernel
- *
- * @h:		Netlink message header
- * @ns_id:	Namspace id
- * @startup:	Are we reading under startup conditions?
- *
- * Return:	Result status
+ * Read in change about nexthops from the kernel
  */
 int netlink_nexthop_change(struct nlmsghdr *h, ns_id_t ns_id, int startup)
 {
@@ -2355,12 +2329,7 @@ int netlink_nexthop_change(struct nlmsghdr *h, ns_id_t ns_id, int startup)
 }
 
 /**
- * netlink_request_nexthop() - Request nextop information from the kernel
- * @zns:	Zebra namespace
- * @family:	AF_* netlink family
- * @type:	RTM_* route type
- *
- * Return:	Result status
+ * Request nextop information from the kernel
  */
 static int netlink_request_nexthop(struct zebra_ns *zns, int family, int type)
 {
@@ -2380,12 +2349,9 @@ static int netlink_request_nexthop(struct zebra_ns *zns, int family, int type)
 }
 
 /**
- * netlink_nexthop_read() - Nexthop read function using netlink interface
+ * Nexthop read function using netlink interface
  *
- * @zns:	Zebra name space
- *
- * Return:	Result status
- * Only called at bootstrap time.
+ * Only called at startup.
  */
 int netlink_nexthop_read(struct zebra_ns *zns)
 {

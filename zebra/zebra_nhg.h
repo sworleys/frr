@@ -123,6 +123,7 @@ enum nhg_ctx_op_e {
 	NHG_CTX_OP_NONE = 0,
 	NHG_CTX_OP_NEW,
 	NHG_CTX_OP_DEL,
+	NHG_CTX_OP_INSTALL,
 };
 
 enum nhg_ctx_result {

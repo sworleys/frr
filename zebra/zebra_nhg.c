@@ -747,6 +747,25 @@ static int nhg_ctx_process_del(struct nhg_ctx *ctx)
 	return 0;
 }
 
+static int nhg_ctx_process_install(struct nhg_ctx *ctx)
+{
+	struct nhg_hash_entry *nhe = NULL;
+
+	nhe = zebra_nhg_lookup_id(ctx->id);
+
+	if (!nhe) {
+		flog_err(
+			EC_ZEBRA_TABLE_LOOKUP_FAILED,
+			"Zebra failed to lookup a nexthop group ID (%u) that we wanted to install off the workqueue",
+			ctx->id);
+		return -1;
+	}
+
+	zebra_nhg_install_kernel(nhe);
+
+	return 0;
+}
+
 static void nhg_ctx_process_finish(struct nhg_ctx *ctx)
 {
 	/*
@@ -768,6 +787,8 @@ int nhg_ctx_process(struct nhg_ctx *ctx)
 		break;
 	case NHG_CTX_OP_DEL:
 		ret = nhg_ctx_process_del(ctx);
+	case NHG_CTX_OP_INSTALL:
+		ret = nhg_ctx_process_install(ctx);
 	case NHG_CTX_OP_NONE:
 		break;
 	}
@@ -1623,9 +1644,35 @@ done:
 	return i;
 }
 
+/*
+ * Queue up a nhe to be installed via the rib metaq processing.
+ */
+static int zebra_nhg_queue_install(const struct nhg_hash_entry *nhe)
+{
+	struct nhg_ctx *ctx = NULL;
+
+	ctx = nhg_ctx_init(nhe->id, NULL, NULL, 0, 0, 0, 0);
+
+	nhg_ctx_set_op(ctx, NHG_CTX_OP_INSTALL);
+
+	if (queue_add(ctx)) {
+		nhg_ctx_process_finish(ctx);
+		return -1;
+	}
+
+	return 0;
+}
+
+/*
+ * Send a nexthop group to the dataplane.
+ *
+ * If it has a depend that isn't installed,
+ * requeue it to handle later.
+ */
 void zebra_nhg_install_kernel(struct nhg_hash_entry *nhe)
 {
 	struct nhg_connected *rb_node_dep = NULL;
+	bool wait = false;
 
 	/* Resolve it first */
 	nhe = zebra_nhg_resolve(nhe);
@@ -1633,13 +1680,26 @@ void zebra_nhg_install_kernel(struct nhg_hash_entry *nhe)
 	/* Make sure all depends are installed/queued */
 	frr_each (nhg_connected_tree, &nhe->nhg_depends, rb_node_dep) {
 		zebra_nhg_install_kernel(rb_node_dep->nhe);
+		if (!CHECK_FLAG(rb_node_dep->nhe->flags,
+				NEXTHOP_GROUP_INSTALLED))
+			wait = true;
+	}
+
+	if (wait) {
+		/* RE-queue if we have to wait for a depend install */
+		if (zebra_nhg_queue_install(nhe))
+			flog_warn(
+				EC_ZEBRA_WQ_NHG_OPERATION,
+				"Failed to enqueue Nexthop ID (%u) onto the rib workqueue for install",
+				nhe->id);
+		return;
 	}
 
 	if (!CHECK_FLAG(nhe->flags, NEXTHOP_GROUP_INSTALLED)
 	    && !CHECK_FLAG(nhe->flags, NEXTHOP_GROUP_QUEUED)) {
-		int ret = dplane_nexthop_add(nhe);
+		int status = dplane_nexthop_add(nhe);
 
-		switch (ret) {
+		switch (status) {
 		case ZEBRA_DPLANE_REQUEST_QUEUED:
 			SET_FLAG(nhe->flags, NEXTHOP_GROUP_QUEUED);
 			break;
@@ -1656,17 +1716,20 @@ void zebra_nhg_install_kernel(struct nhg_hash_entry *nhe)
 	}
 }
 
+/*
+ * Remove a nexthop group from the dataplane.
+ */
 void zebra_nhg_uninstall_kernel(struct nhg_hash_entry *nhe)
 {
 	/* Release from the non-ID hash'd table so nothing tries to use it */
 	zebra_nhg_release_no_id(nhe);
 
 	if (CHECK_FLAG(nhe->flags, NEXTHOP_GROUP_INSTALLED)) {
-		int ret = dplane_nexthop_delete(nhe);
+		int status = dplane_nexthop_delete(nhe);
 
 		/* Change its type to us since we are installing it */
 		nhe->type = ZEBRA_ROUTE_NHG;
-		switch (ret) {
+		switch (status) {
 		case ZEBRA_DPLANE_REQUEST_QUEUED:
 			SET_FLAG(nhe->flags, NEXTHOP_GROUP_QUEUED);
 			break;

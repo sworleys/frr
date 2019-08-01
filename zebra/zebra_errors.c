@@ -780,6 +780,15 @@ static struct log_ref ferr_zebra_err[] = {
 			"See if the nexthop you are trying to add is already present in the fib."
 	},
 	{
+		.code = EC_ZEBRA_WQ_NHG_OPERATION,
+		.title =
+			"Error handling a queued nexthop group operation",
+		.description =
+			"Zebra ran into an issue trying to queue and handle nexthop group operation on the nhg workqueue.",
+		.suggestion =
+			"Check the flags of the nexthop group you are trying to process and the route that is using it."
+	},
+	{
 		.code = END_FERR,
 	}
 };

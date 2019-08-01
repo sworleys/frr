@@ -516,6 +516,7 @@ void rib_install_kernel(struct route_node *rn, struct route_entry *re,
 	struct zebra_vrf *zvrf = vrf_info_lookup(re->vrf_id);
 	const struct prefix *p, *src_p;
 	enum zebra_dplane_result ret;
+	struct nhg_hash_entry *nhe;
 
 	rib_dest_t *dest = rib_dest_from_rnode(rn);
 
@@ -543,9 +544,23 @@ void rib_install_kernel(struct route_node *rn, struct route_entry *re,
 	}
 
 	/*
-	 * Install the resolved nexthop object first.
+	 * Install the nexthop object first.
+	 *
+	 * If the nexthop object is already installed, re-queue this route node.
+	 *
 	 */
-	zebra_nhg_install_kernel(zebra_nhg_lookup_id(re->nhe_id));
+	nhe = zebra_nhg_lookup_id(re->nhe_id);
+	zebra_nhg_install_kernel(nhe);
+
+	if (!CHECK_FLAG(nhe->flags, NEXTHOP_GROUP_INSTALLED)) {
+		if (IS_ZEBRA_DEBUG_RIB)
+			rnode_debug(
+				rn, re->vrf_id,
+				"rn %p, re %p: Re-queueing this route node to wait for nexthop group to be installed",
+				(void *)rn, (void *)re);
+		rib_queue_add(rn);
+		return;
+	}
 
 	/*
 	 * If this is a replace to a new RE let the originator of the RE

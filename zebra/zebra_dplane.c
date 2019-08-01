@@ -1411,15 +1411,6 @@ static int dplane_ctx_route_init(struct zebra_dplane_ctx *ctx,
 			zebra_nhg_resolve(zebra_nhg_lookup_id(re->nhe_id));
 
 		ctx->u.rinfo.nhe.id = nhe->id;
-		/*
-		 * Check if the nhe is installed/queued before doing anything
-		 * with this route.
-		 */
-		if (!CHECK_FLAG(nhe->flags, NEXTHOP_GROUP_INSTALLED)
-		    && !CHECK_FLAG(nhe->flags, NEXTHOP_GROUP_QUEUED)) {
-			ret = ENOENT;
-			goto done;
-		}
 	}
 #endif /* HAVE_NETLINK */
 
@@ -1435,14 +1426,8 @@ done:
 	return ret;
 }
 
-/**
- * dplane_ctx_nexthop_init() - Initialize a context block for a nexthop update
- *
- * @ctx:	Dataplane context to init
- * @op:		Operation being performed
- * @nhe:	Nexthop group hash entry
- *
- * Return:	Result status
+/*
+ * Initialize a context block for a nexthop update from zebra data structs.
  */
 static int dplane_ctx_nexthop_init(struct zebra_dplane_ctx *ctx,
 				   enum dplane_op_e op,
@@ -1725,11 +1710,8 @@ dplane_route_update_internal(struct route_node *rn,
 	if (ret == AOK)
 		result = ZEBRA_DPLANE_REQUEST_QUEUED;
 	else {
-		if (ret == ENOENT)
-			result = ZEBRA_DPLANE_REQUEST_SUCCESS;
-		else
-			atomic_fetch_add_explicit(&zdplane_info.dg_route_errors,
-						  1, memory_order_relaxed);
+		atomic_fetch_add_explicit(&zdplane_info.dg_route_errors, 1,
+					  memory_order_relaxed);
 		if (ctx)
 			dplane_ctx_free(&ctx);
 	}
@@ -1737,13 +1719,8 @@ dplane_route_update_internal(struct route_node *rn,
 	return result;
 }
 
-/**
- * dplane_nexthop_update_internal() - Helper for enqueuing nexthop changes
- *
- * @nhe:	Nexthop group hash entry where the change occured
- * @op:		The operation to be enqued
- *
- * Return:	Result of the change
+/*
+ * Internal, common handler for nexthop updates.
  */
 static enum zebra_dplane_result
 dplane_nexthop_update_internal(struct nhg_hash_entry *nhe, enum dplane_op_e op)
@@ -2691,12 +2668,8 @@ kernel_dplane_address_update(struct zebra_dplane_ctx *ctx)
 	return res;
 }
 
-/**
- * kernel_dplane_nexthop_update() - Handler for kernel nexthop updates
- *
- * @ctx:	Dataplane context
- *
- * Return:	Dataplane result flag
+/*
+ * Handler for kernel-facing nexthop updates
  */
 static enum zebra_dplane_result
 kernel_dplane_nexthop_update(struct zebra_dplane_ctx *ctx)
