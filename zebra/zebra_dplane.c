@@ -262,6 +262,8 @@ struct zebra_dplane_provider {
 	_Atomic uint32_t dp_out_max;
 	_Atomic uint32_t dp_error_counter;
 
+	bool supports_nh;
+
 	/* Queue of contexts inbound to the provider */
 	struct dplane_ctx_q dp_ctx_in_q;
 
