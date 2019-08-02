@@ -731,6 +731,7 @@ static void zvni_print_neigh(zebra_neigh_t *n, void *ctxt, json_object *json)
 	bool flags_present = false;
 	struct zebra_vrf *zvrf = NULL;
 	struct timeval detect_start_time = {0, 0};
+	char timebuf[MONOTIME_STRLEN];
 
 	zvrf = zebra_vrf_get_evpn();
 	if (!zvrf)
@@ -785,19 +786,17 @@ static void zvni_print_neigh(zebra_neigh_t *n, void *ctxt, json_object *json)
 
 		if (CHECK_FLAG(n->flags, ZEBRA_NEIGH_DUPLICATE)) {
 			vty_out(vty, " Duplicate, detected at %s",
-				time_to_string(n->dad_dup_detect_time));
+				time_to_string(n->dad_dup_detect_time,
+					       timebuf));
 		} else if (n->dad_count) {
 			monotime_since(&n->detect_start_time,
 				       &detect_start_time);
 			if (detect_start_time.tv_sec <= zvrf->dad_time) {
-				char *buf = time_to_string(
-						n->detect_start_time.tv_sec);
-				char tmp_buf[30];
-
-				strlcpy(tmp_buf, buf, sizeof(tmp_buf));
+				time_to_string(n->detect_start_time.tv_sec,
+					       timebuf);
 				vty_out(vty,
 					" Duplicate detection started at %s, detection count %u\n",
-					tmp_buf, n->dad_count);
+					timebuf, n->dad_count);
 			}
 		}
 	} else {
@@ -1178,6 +1177,7 @@ static void zvni_print_mac(zebra_mac_t *mac, void *ctxt, json_object *json)
 	char buf2[INET6_ADDRSTRLEN];
 	struct zebra_vrf *zvrf;
 	struct timeval detect_start_time = {0, 0};
+	char timebuf[MONOTIME_STRLEN];
 
 	zvrf = zebra_vrf_get_evpn();
 	if (!zvrf)
@@ -1308,19 +1308,17 @@ static void zvni_print_mac(zebra_mac_t *mac, void *ctxt, json_object *json)
 
 		if (CHECK_FLAG(mac->flags, ZEBRA_MAC_DUPLICATE)) {
 			vty_out(vty, " Duplicate, detected at %s",
-				time_to_string(mac->dad_dup_detect_time));
+				time_to_string(mac->dad_dup_detect_time,
+					       timebuf));
 		} else if (mac->dad_count) {
 			monotime_since(&mac->detect_start_time,
 			       &detect_start_time);
 			if (detect_start_time.tv_sec <= zvrf->dad_time) {
-				char *buf = time_to_string(
-						mac->detect_start_time.tv_sec);
-				char tmp_buf[30];
-
-				strlcpy(tmp_buf, buf, sizeof(tmp_buf));
+				time_to_string(mac->detect_start_time.tv_sec,
+					       timebuf);
 				vty_out(vty,
 					" Duplicate detection started at %s, detection count %u\n",
-					tmp_buf, mac->dad_count);
+					timebuf, mac->dad_count);
 			}
 		}
 
@@ -3366,6 +3364,39 @@ static int zvni_mac_del(zebra_vni_t *zvni, zebra_mac_t *mac)
 	return 0;
 }
 
+static bool zvni_check_mac_del_from_db(struct mac_walk_ctx *wctx,
+				       zebra_mac_t *mac)
+{
+	if ((wctx->flags & DEL_LOCAL_MAC) &&
+	    (mac->flags & ZEBRA_MAC_LOCAL))
+		return true;
+	else if ((wctx->flags & DEL_REMOTE_MAC) &&
+		 (mac->flags & ZEBRA_MAC_REMOTE))
+		return true;
+	else if ((wctx->flags & DEL_REMOTE_MAC_FROM_VTEP) &&
+		 (mac->flags & ZEBRA_MAC_REMOTE) &&
+		 IPV4_ADDR_SAME(&mac->fwd_info.r_vtep_ip, &wctx->r_vtep_ip))
+		return true;
+	else if ((wctx->flags & DEL_LOCAL_MAC) &&
+		 (mac->flags & ZEBRA_MAC_AUTO) &&
+		 !listcount(mac->neigh_list)) {
+		if (IS_ZEBRA_DEBUG_VXLAN) {
+			char buf[ETHER_ADDR_STRLEN];
+
+			zlog_debug("%s: Del MAC %s flags 0x%x",
+				   __PRETTY_FUNCTION__,
+				   prefix_mac2str(&mac->macaddr,
+						  buf, sizeof(buf)),
+				   mac->flags);
+		}
+		wctx->uninstall = 0;
+
+		return true;
+	}
+
+	return false;
+}
+
 /*
  * Free MAC hash entry (callback)
  */
@@ -3374,18 +3405,11 @@ static void zvni_mac_del_hash_entry(struct hash_bucket *bucket, void *arg)
 	struct mac_walk_ctx *wctx = arg;
 	zebra_mac_t *mac = bucket->data;
 
-	if (((wctx->flags & DEL_LOCAL_MAC) && (mac->flags & ZEBRA_MAC_LOCAL))
-	    || ((wctx->flags & DEL_REMOTE_MAC)
-		&& (mac->flags & ZEBRA_MAC_REMOTE))
-	    || ((wctx->flags & DEL_REMOTE_MAC_FROM_VTEP)
-		&& (mac->flags & ZEBRA_MAC_REMOTE)
-		&& IPV4_ADDR_SAME(&mac->fwd_info.r_vtep_ip,
-				  &wctx->r_vtep_ip))) {
+	if (zvni_check_mac_del_from_db(wctx, mac)) {
 		if (wctx->upd_client && (mac->flags & ZEBRA_MAC_LOCAL)) {
 			zvni_mac_send_del_to_client(wctx->zvni->vni,
 						    &mac->macaddr);
 		}
-
 		if (wctx->uninstall)
 			zvni_mac_uninstall(wctx->zvni, mac);
 
@@ -7218,8 +7242,13 @@ int zebra_vxlan_handle_kernel_neigh_del(struct interface *ifp,
 	 * of a VxLAN bridge.
 	 */
 	zvni = zvni_from_svi(ifp, link_if);
-	if (!zvni)
+	if (!zvni) {
+		if (IS_ZEBRA_DEBUG_VXLAN)
+			zlog_debug("%s: Del neighbor %s VNI is not present for interface %s",
+				   __PRETTY_FUNCTION__,
+				   ipaddr2str(ip, buf, sizeof(buf)), ifp->name);
 		return 0;
+	}
 
 	if (!zvni->vxlan_if) {
 		zlog_debug(
@@ -9676,8 +9705,9 @@ void zebra_vxlan_sg_replay(ZAPI_HANDLER_ARGS)
 	SET_FLAG(zvrf->flags, ZEBRA_PIM_SEND_VXLAN_SG);
 
 	if (!EVPN_ENABLED(zvrf)) {
-		zlog_debug("VxLAN SG replay request on unexpected vrf %d",
-			zvrf->vrf->vrf_id);
+		if (IS_ZEBRA_DEBUG_VXLAN)
+			zlog_debug("VxLAN SG replay request on unexpected vrf %d",
+				   zvrf->vrf->vrf_id);
 		return;
 	}
 

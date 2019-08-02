@@ -1932,7 +1932,7 @@ DEFUNSH(VTYSH_BGPD, rpki_quit, rpki_quit_cmd, "quit",
 	return rpki_exit(self, vty, argc, argv);
 }
 
-DEFUNSH(VTYSH_PIMD|VTYSH_ZEBRA, exit_vrf_config, exit_vrf_config_cmd, "exit-vrf",
+DEFUNSH(VTYSH_VRF, exit_vrf_config, exit_vrf_config_cmd, "exit-vrf",
 	"Exit from VRF configuration mode\n")
 {
 	if (vty->node == VRF_NODE)
@@ -2216,7 +2216,7 @@ DEFUNSH(VTYSH_PBRD | VTYSH_SHARPD, vtysh_exit_nexthop_group, vtysh_exit_nexthop_
 	return vtysh_exit(vty);
 }
 
-DEFUNSH(VTYSH_VRF, vtysh_quit_nexthop_group, vtysh_quit_nexthop_group_cmd,
+DEFUNSH(VTYSH_PBRD | VTYSH_SHARPD, vtysh_quit_nexthop_group, vtysh_quit_nexthop_group_cmd,
 	"quit", "Exit current mode and down to previous mode\n")
 {
 	return vtysh_exit_nexthop_group(self, vty, argc, argv);

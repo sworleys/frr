@@ -1229,7 +1229,8 @@ struct aspath *aspath_replace_specific_asn(struct aspath *aspath,
 }
 
 /* Replace all private ASNs with our own ASN */
-struct aspath *aspath_replace_private_asns(struct aspath *aspath, as_t asn)
+struct aspath *aspath_replace_private_asns(struct aspath *aspath, as_t asn,
+					   as_t peer_asn)
 {
 	struct aspath *new;
 	struct assegment *seg;
@@ -1241,7 +1242,9 @@ struct aspath *aspath_replace_private_asns(struct aspath *aspath, as_t asn)
 		int i;
 
 		for (i = 0; i < seg->length; i++) {
-			if (BGP_AS_IS_PRIVATE(seg->as[i]))
+			/* Don't replace if public ASN or peer's ASN */
+			if (BGP_AS_IS_PRIVATE(seg->as[i])
+			    && (seg->as[i] != peer_asn))
 				seg->as[i] = asn;
 		}
 		seg = seg->next;
@@ -1252,7 +1255,7 @@ struct aspath *aspath_replace_private_asns(struct aspath *aspath, as_t asn)
 }
 
 /* Remove all private ASNs */
-struct aspath *aspath_remove_private_asns(struct aspath *aspath)
+struct aspath *aspath_remove_private_asns(struct aspath *aspath, as_t peer_asn)
 {
 	struct aspath *new;
 	struct assegment *seg;
@@ -1279,16 +1282,9 @@ struct aspath *aspath_remove_private_asns(struct aspath *aspath)
 			}
 		}
 
-		// The entire segment is private so skip it
-		if (!public) {
-			seg = seg->next;
-			continue;
-		}
-
 		// The entire segment is public so copy it
-		else if (public == seg->length) {
+		if (public == seg->length)
 			new_seg = assegment_dup(seg);
-		}
 
 		// The segment is a mix of public and private ASNs. Copy as many
 		// spots as
@@ -1298,8 +1294,9 @@ struct aspath *aspath_remove_private_asns(struct aspath *aspath)
 			new_seg = assegment_new(seg->type, public);
 			j = 0;
 			for (i = 0; i < seg->length; i++) {
-				// ASN is public
-				if (!BGP_AS_IS_PRIVATE(seg->as[i])) {
+				// keep ASN if public or matches peer's ASN
+				if (!BGP_AS_IS_PRIVATE(seg->as[i])
+				    || (seg->as[i] == peer_asn)) {
 					new_seg->as[j] = seg->as[i];
 					j++;
 				}

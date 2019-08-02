@@ -50,7 +50,6 @@ message ZebraMlag_Header {
         ZEBRA_MLAG_DUMP = 6;
         ZEBRA_MLAG_MROUTE_ADD_BULK = 7;
         ZEBRA_MLAG_MROUTE_DEL_BULK = 8;
-        ZEBRA_MLAG_PIM_STATUS_UPDATE = 9;
         ZEBRA_MLAG_PIM_CFG_DUMP = 10;
         ZEBRA_MLAG_VXLAN_UPDATE = 11;
         ZEBRA_MLAG_ZEBRA_STATUS_UPDATE = 12;
@@ -185,28 +184,5 @@ message ZebraMlagMrouteDelBulk {
  * all the data again. mainly for data check-pointing
  * and this mesasdge is again NULL Data
  */
-
-/*
- * ZEBRA_MLAG_PIM_STATUS_UPDATE
- *
- * There were some states which PIM needs to be upoadted to peer PIM,
- * based on these PIMs will update their forwarding tables.
- */
-message ZebraMlagPimStatusUpdate {
-    enum SwitchdState {
-        SWITCHD_STATE_NONE = 0; // No change in previous state
-        SWITCHD_STATE_DOWN =1;
-        SWITCHD_STATE_UP = 2;
-    }
-
-    enum SviState {
-        SVI_STATE_NONE = 0; //No change in previous state
-        SVI_STATE_DOWN =1;
-        SVI_STATE_UP = 2;
-    }
-
-    SwitchdState switchd_state = 1;
-    SviState     svi_state = 2;
-}
 
 // [END messages]

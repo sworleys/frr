@@ -46,18 +46,6 @@ enum mlag_frr_state {
 	MLAG_FRR_STATE_UP,
 };
 
-enum mlag_switchd_state {
-	MLAG_SWITCHD_STATE_NONE,
-	MLAG_SWITCHD_STATE_DOWN,
-	MLAG_SWITCHD_STATE_UP,
-};
-
-enum mlag_svi_state {
-	MLAG_SVI_STATE_NONE,
-	MLAG_SVI_STATE_DOWN,
-	MLAG_SVI_STATE_UP,
-};
-
 enum mlag_owner {
 	MLAG_OWNER_NONE,
 	MLAG_OWNER_INTERFACE,
@@ -78,7 +66,6 @@ enum mlag_msg_type {
 	MLAG_DUMP = 6,
 	MLAG_MROUTE_ADD_BULK = 7,
 	MLAG_MROUTE_DEL_BULK = 8,
-	MLAG_PIM_STATUS_UPDATE = 9,
 	MLAG_PIM_CFG_DUMP = 10,
 	MLAG_VXLAN_UPDATE = 11,
 	MLAG_PEER_FRR_STATUS = 12,
@@ -105,13 +92,6 @@ struct mlag_vxlan {
 };
 
 #define MLAG_VXLAN_MSGSIZE (sizeof(struct mlag_vxlan))
-
-struct mlag_pim_status {
-	enum mlag_switchd_state switchd_state;
-	enum mlag_svi_state svi_state;
-};
-
-#define MLAG_PIM_STATUS_MSGSIZE (sizeof(struct mlag_pim_status))
 
 struct mlag_mroute_add {
 	char vrf_name[VRF_NAMSIZ];
@@ -156,8 +136,6 @@ extern int zebra_mlag_lib_decode_mroute_add(struct stream *s,
 					    struct mlag_mroute_add *msg);
 extern int zebra_mlag_lib_decode_mroute_del(struct stream *s,
 					    struct mlag_mroute_del *msg);
-extern int zebra_mlag_lib_decode_pim_status(struct stream *s,
-					    struct mlag_pim_status *msg);
 extern int zebra_mlag_lib_decode_mlag_status(struct stream *s,
 					     struct mlag_status *msg);
 extern int

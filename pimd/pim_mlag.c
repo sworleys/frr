@@ -970,14 +970,6 @@ static void pim_mlag_process_mroute_del(struct mlag_mroute_del msg)
 	}
 }
 
-static void pim_mlag_process_peer_status_update(struct mlag_pim_status msg)
-{
-	if (PIM_DEBUG_MLAG)
-		zlog_debug("%s: msg dump: switchd_state:%d, svi_state:%d",
-			   __func__, msg.switchd_state, msg.svi_state);
-	++router->mlag_stats.msg.pim_status_updates;
-}
-
 int pim_zebra_mlag_handle_msg(struct stream *s, int len)
 {
 	struct mlag_msg mlag_msg;
@@ -1062,15 +1054,6 @@ int pim_zebra_mlag_handle_msg(struct stream *s, int len)
 			pim_mlag_process_mroute_del(msg);
 		}
 	} break;
-	case MLAG_PIM_STATUS_UPDATE: {
-		struct mlag_pim_status msg;
-
-		rc = zebra_mlag_lib_decode_pim_status(s, &msg);
-		if (rc)
-			return (rc);
-		pim_mlag_process_peer_status_update(msg);
-
-	} break;
 	default:
 		break;
 	}
@@ -1147,7 +1130,6 @@ static int pim_mlag_register_handler(struct thread *thread)
 	SET_FLAG(bit_mask, (1 << MLAG_DUMP));
 	SET_FLAG(bit_mask, (1 << MLAG_MROUTE_ADD_BULK));
 	SET_FLAG(bit_mask, (1 << MLAG_MROUTE_DEL_BULK));
-	SET_FLAG(bit_mask, (1 << MLAG_PIM_STATUS_UPDATE));
 	SET_FLAG(bit_mask, (1 << MLAG_PIM_CFG_DUMP));
 	SET_FLAG(bit_mask, (1 << MLAG_VXLAN_UPDATE));
 	SET_FLAG(bit_mask, (1 << MLAG_PEER_FRR_STATUS));

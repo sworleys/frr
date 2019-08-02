@@ -53,9 +53,6 @@ static void pim_mlag_zebra_fill_header(enum mlag_msg_type msg_type)
 		data_len = MLAG_MROUTE_DEL_MSGSIZE;
 		fill_msg_type = MLAG_MROUTE_DEL_BULK;
 		break;
-	case MLAG_PIM_STATUS_UPDATE:
-		data_len = MLAG_PIM_STATUS_MSGSIZE;
-		break;
 	default:
 		data_len = 0;
 		break;

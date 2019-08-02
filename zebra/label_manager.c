@@ -38,6 +38,7 @@
 #include "zebra/zebra_router.h"
 #include "zebra/label_manager.h"
 #include "zebra/zebra_errors.h"
+#include "zebra/debug.h"
 
 #define CONNECTION_DELAY 5
 
@@ -348,6 +349,10 @@ int release_daemon_label_chunks(struct zserv *client)
 	int count = 0;
 	int ret;
 
+	if (IS_ZEBRA_DEBUG_PACKET)
+		zlog_debug("%s: Releasing chunks for client proto %s, instance %d",
+			   __func__, zebra_route_string(proto), instance);
+
 	for (ALL_LIST_ELEMENTS_RO(lbl_mgr.lc_list, node, lmc)) {
 		if (lmc->proto == proto && lmc->instance == instance
 		    && lmc->keep == 0) {
@@ -358,7 +363,8 @@ int release_daemon_label_chunks(struct zserv *client)
 		}
 	}
 
-	zlog_debug("%s: Released %d label chunks", __func__, count);
+	if (IS_ZEBRA_DEBUG_PACKET)
+		zlog_debug("%s: Released %d label chunks", __func__, count);
 
 	return count;
 }
@@ -458,7 +464,8 @@ int release_label_chunk(uint8_t proto, unsigned short instance, uint32_t start,
 	int ret = -1;
 
 	/* check that size matches */
-	zlog_debug("Releasing label chunk: %u - %u", start, end);
+	if (IS_ZEBRA_DEBUG_PACKET)
+		zlog_debug("Releasing label chunk: %u - %u", start, end);
 	/* find chunk and disown */
 	for (ALL_LIST_ELEMENTS_RO(lbl_mgr.lc_list, node, lmc)) {
 		if (lmc->start != start)

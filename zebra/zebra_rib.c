@@ -193,7 +193,7 @@ int zebra_check_addr(const struct prefix *p)
 /* Add nexthop to the end of a rib node's nexthop list */
 void route_entry_nexthop_add(struct route_entry *re, struct nexthop *nexthop)
 {
-	_nexthop_add(&re->ng.nexthop, nexthop);
+	_nexthop_group_add_sorted(&re->ng, nexthop);
 	re->nexthop_num++;
 }
 
@@ -1127,8 +1127,6 @@ static void rib_process(struct route_node *rn)
 				re->status, re->flags, re->distance,
 				re->metric);
 
-		UNSET_FLAG(re->status, ROUTE_ENTRY_NEXTHOPS_CHANGED);
-
 		/* Currently selected re. */
 		if (CHECK_FLAG(re->flags, ZEBRA_FLAG_SELECTED)) {
 			assert(old_selected == NULL);
@@ -1363,6 +1361,7 @@ static void zebra_rib_fixup_system(struct route_node *rn)
 			continue;
 
 		SET_FLAG(re->status, ROUTE_ENTRY_INSTALLED);
+		UNSET_FLAG(re->status, ROUTE_ENTRY_QUEUED);
 
 		for (ALL_NEXTHOPS(re->ng, nhop)) {
 			if (CHECK_FLAG(nhop->flags, NEXTHOP_FLAG_RECURSIVE))
@@ -1774,7 +1773,7 @@ static void rib_process_result(struct zebra_dplane_ctx *ctx)
 
 				/* Redistribute */
 				redistribute_update(dest_pfx, src_pfx,
-						    re, NULL);
+						    re, old_re);
 			}
 
 			/*
@@ -2966,50 +2965,6 @@ void rib_update_table(struct route_table *table, rib_update_event_t event)
 					   RIB_ROUTE_ANY_QUEUED))
 			continue;
 		switch (event) {
-		case RIB_UPDATE_IF_CHANGE:
-			/* Examine all routes that won't get processed by the
-			 * protocol or
-			 * triggered by nexthop evaluation (NHT). This would be
-			 * system,
-			 * kernel and certain static routes. Note that NHT will
-			 * get
-			 * triggered upon an interface event as connected routes
-			 * always
-			 * get queued for processing.
-			 */
-			RNODE_FOREACH_RE_SAFE (rn, re, next) {
-				struct nexthop *nh;
-
-				if (re->type != ZEBRA_ROUTE_SYSTEM
-				    && re->type != ZEBRA_ROUTE_KERNEL
-				    && re->type != ZEBRA_ROUTE_CONNECT
-				    && re->type != ZEBRA_ROUTE_STATIC)
-					continue;
-
-				if (re->type != ZEBRA_ROUTE_STATIC) {
-					SET_FLAG(re->status,
-						 ROUTE_ENTRY_CHANGED);
-					rib_queue_add(rn);
-					continue;
-				}
-
-				for (nh = re->ng.nexthop; nh; nh = nh->next)
-					if (!(nh->type == NEXTHOP_TYPE_IPV4
-					      || nh->type == NEXTHOP_TYPE_IPV6))
-						break;
-
-				/* If we only have nexthops to a
-				 * gateway, NHT will
-				 * take care.
-				 */
-				if (nh) {
-					SET_FLAG(re->status,
-						 ROUTE_ENTRY_CHANGED);
-					rib_queue_add(rn);
-				}
-			}
-			break;
-
 		case RIB_UPDATE_RMAP_CHANGE:
 		case RIB_UPDATE_OTHER:
 			/* Right now, examine all routes. Can restrict to a

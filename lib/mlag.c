@@ -68,9 +68,6 @@ char *zebra_mlag_lib_msgid_to_str(enum mlag_msg_type msg_type, char *buf,
 	case MLAG_STATUS_UPDATE:
 		snprintf(buf, size, "Mlag Status");
 		break;
-	case MLAG_PIM_STATUS_UPDATE:
-		snprintf(buf, size, "Mlag PIM Status");
-		break;
 	case MLAG_VXLAN_UPDATE:
 		snprintf(buf, size, "Mlag vxlan update");
 		break;
@@ -130,19 +127,6 @@ int zebra_mlag_lib_decode_mroute_del(struct stream *s,
 	STREAM_GETL(s, msg->owner_id);
 	STREAM_GETL(s, msg->vrf_id);
 	STREAM_GET(msg->intf_name, s, INTERFACE_NAMSIZ);
-	return 0;
-stream_failure:
-	return -1;
-}
-
-int zebra_mlag_lib_decode_pim_status(struct stream *s,
-				     struct mlag_pim_status *msg)
-{
-	if (s == NULL || msg == NULL)
-		return -1;
-
-	STREAM_GETL(s, msg->switchd_state);
-	STREAM_GETL(s, msg->svi_state);
 	return 0;
 stream_failure:
 	return -1;

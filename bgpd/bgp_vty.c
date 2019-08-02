@@ -624,17 +624,11 @@ static int bgp_clear(struct vty *vty, struct bgp *bgp, afi_t afi, safi_t safi,
 
 			if (ret < 0)
 				bgp_clear_vty_error(vty, peer, afi, safi, ret);
-			else
-				found = true;
 		}
 
 		/* This is to apply read-only mode on this clear. */
 		if (stype == BGP_CLEAR_SOFT_NONE)
 			bgp->update_delay_over = 0;
-
-		if (!found)
-			vty_out(vty, "%%BGP: No %s peer configured\n",
-				afi_safi_print(afi, safi));
 
 		return CMD_SUCCESS;
 	}
@@ -7264,6 +7258,9 @@ DEFUN (clear_ip_bgp_all,
 	} else if (argv_find(argv, argc, "PGNAME", &idx)) {
 		clr_sort = clear_peer;
 		clr_arg = argv[idx]->arg;
+	} else if (argv_find(argv, argc, "WORD", &idx)) {
+		clr_sort = clear_peer;
+		clr_arg = argv[idx]->arg;
 	} else if (argv_find(argv, argc, "(1-4294967295)", &idx)) {
 		clr_sort = clear_as;
 		clr_arg = argv[idx]->arg;
@@ -13091,20 +13088,44 @@ void bgp_vty_init(void)
 	install_element(BGP_NODE, &no_neighbor_nexthop_self_all_hidden_cmd);
 	install_element(BGP_IPV4_NODE, &neighbor_nexthop_self_force_cmd);
 	install_element(BGP_IPV4_NODE, &no_neighbor_nexthop_self_force_cmd);
+	install_element(BGP_IPV4_NODE, &neighbor_nexthop_self_all_hidden_cmd);
+	install_element(BGP_IPV4_NODE,
+			&no_neighbor_nexthop_self_all_hidden_cmd);
 	install_element(BGP_IPV4M_NODE, &neighbor_nexthop_self_force_cmd);
 	install_element(BGP_IPV4M_NODE, &no_neighbor_nexthop_self_force_cmd);
+	install_element(BGP_IPV4M_NODE, &neighbor_nexthop_self_all_hidden_cmd);
+	install_element(BGP_IPV4M_NODE,
+			&no_neighbor_nexthop_self_all_hidden_cmd);
 	install_element(BGP_IPV4L_NODE, &neighbor_nexthop_self_force_cmd);
 	install_element(BGP_IPV4L_NODE, &no_neighbor_nexthop_self_force_cmd);
+	install_element(BGP_IPV4L_NODE, &neighbor_nexthop_self_all_hidden_cmd);
+	install_element(BGP_IPV4L_NODE,
+			&no_neighbor_nexthop_self_all_hidden_cmd);
 	install_element(BGP_IPV6_NODE, &neighbor_nexthop_self_force_cmd);
 	install_element(BGP_IPV6_NODE, &no_neighbor_nexthop_self_force_cmd);
+	install_element(BGP_IPV6_NODE, &neighbor_nexthop_self_all_hidden_cmd);
+	install_element(BGP_IPV6_NODE,
+			&no_neighbor_nexthop_self_all_hidden_cmd);
 	install_element(BGP_IPV6M_NODE, &neighbor_nexthop_self_force_cmd);
 	install_element(BGP_IPV6M_NODE, &no_neighbor_nexthop_self_force_cmd);
+	install_element(BGP_IPV6M_NODE, &neighbor_nexthop_self_all_hidden_cmd);
+	install_element(BGP_IPV6M_NODE,
+			&no_neighbor_nexthop_self_all_hidden_cmd);
 	install_element(BGP_IPV6L_NODE, &neighbor_nexthop_self_force_cmd);
 	install_element(BGP_IPV6L_NODE, &no_neighbor_nexthop_self_force_cmd);
+	install_element(BGP_IPV6L_NODE, &neighbor_nexthop_self_all_hidden_cmd);
+	install_element(BGP_IPV6L_NODE,
+			&no_neighbor_nexthop_self_all_hidden_cmd);
 	install_element(BGP_VPNV4_NODE, &neighbor_nexthop_self_force_cmd);
 	install_element(BGP_VPNV4_NODE, &no_neighbor_nexthop_self_force_cmd);
+	install_element(BGP_VPNV4_NODE, &neighbor_nexthop_self_all_hidden_cmd);
+	install_element(BGP_VPNV4_NODE,
+			&no_neighbor_nexthop_self_all_hidden_cmd);
 	install_element(BGP_VPNV6_NODE, &neighbor_nexthop_self_force_cmd);
 	install_element(BGP_VPNV6_NODE, &no_neighbor_nexthop_self_force_cmd);
+	install_element(BGP_VPNV6_NODE, &neighbor_nexthop_self_all_hidden_cmd);
+	install_element(BGP_VPNV6_NODE,
+			&no_neighbor_nexthop_self_all_hidden_cmd);
 
 	/* "neighbor as-override" commands. */
 	install_element(BGP_NODE, &neighbor_as_override_hidden_cmd);
