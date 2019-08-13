@@ -407,9 +407,9 @@ bool zebra_nhg_hash_id_equal(const void *arg1, const void *arg2)
 	return nhe1->id == nhe2->id;
 }
 
-static void zebra_nhg_process_grp(struct nexthop_group *nhg,
-				  struct nhg_connected_tree_head *depends,
-				  struct nh_grp *grp, uint8_t count)
+static int zebra_nhg_process_grp(struct nexthop_group *nhg,
+				 struct nhg_connected_tree_head *depends,
+				 struct nh_grp *grp, uint8_t count)
 {
 	nhg_connected_tree_init(depends);
 
@@ -427,7 +427,7 @@ static void zebra_nhg_process_grp(struct nexthop_group *nhg,
 				EC_ZEBRA_NHG_SYNC,
 				"Received Nexthop Group from the kernel with a dependent Nexthop ID (%u) which we do not have in our table",
 				grp[i].id);
-			return;
+			return -1;
 		}
 
 		/*
@@ -439,6 +439,8 @@ static void zebra_nhg_process_grp(struct nexthop_group *nhg,
 
 		copy_nexthops(&nhg->nexthop, depend->nhg->nexthop, NULL);
 	}
+
+	return 0;
 }
 
 static void handle_recursive_depend(struct nhg_connected_tree_head *nhg_depends,
@@ -565,12 +567,12 @@ static uint32_t nhg_ctx_get_id(const struct nhg_ctx *ctx)
 	return ctx->id;
 }
 
-static void nhg_ctx_set_status(struct nhg_ctx *ctx, enum nhg_ctx_result status)
+static void nhg_ctx_set_status(struct nhg_ctx *ctx, enum nhg_ctx_status status)
 {
 	ctx->status = status;
 }
 
-static enum nhg_ctx_result nhg_ctx_get_status(const struct nhg_ctx *ctx)
+static enum nhg_ctx_status nhg_ctx_get_status(const struct nhg_ctx *ctx)
 {
 	return ctx->status;
 }
@@ -741,8 +743,13 @@ static int nhg_ctx_process_new(struct nhg_ctx *ctx)
 
 	if (nhg_ctx_get_count(ctx)) {
 		nhg = nexthop_group_new();
-		zebra_nhg_process_grp(nhg, &nhg_depends, nhg_ctx_get_grp(ctx),
-				      count);
+		if (zebra_nhg_process_grp(nhg, &nhg_depends,
+					  nhg_ctx_get_grp(ctx), count)) {
+			depends_decrement_free(&nhg_depends);
+			nexthop_group_free_delete(&nhg);
+			return ENOENT;
+		}
+
 		if (!zebra_nhg_find(&nhe, id, nhg, &nhg_depends, vrf_id, type,
 				    afi))
 			depends_decrement_free(&nhg_depends);
@@ -838,6 +845,22 @@ done:
 		nhg_ctx_free(ctx);
 }
 
+static int queue_add(struct nhg_ctx *ctx)
+{
+	/* If its queued or already processed do nothing */
+	if (nhg_ctx_get_status(ctx) == NHG_CTX_QUEUED)
+		return 0;
+
+	if (rib_queue_nhg_add(ctx)) {
+		nhg_ctx_set_status(ctx, NHG_CTX_FAILURE);
+		return -1;
+	}
+
+	nhg_ctx_set_status(ctx, NHG_CTX_QUEUED);
+
+	return 0;
+}
+
 int nhg_ctx_process(struct nhg_ctx *ctx)
 {
 	int ret = 0;
@@ -845,6 +868,19 @@ int nhg_ctx_process(struct nhg_ctx *ctx)
 	switch (nhg_ctx_get_op(ctx)) {
 	case NHG_CTX_OP_NEW:
 		ret = nhg_ctx_process_new(ctx);
+		if (nhg_ctx_get_count(ctx) && ret == ENOENT
+		    && nhg_ctx_get_status(ctx) != NHG_CTX_REQUEUED) {
+			/* Depends probably came before group, re-queue.
+			 *
+			 * Only going to retry once, hence just using status
+			 * flag rather than counter.
+			 */
+			nhg_ctx_set_status(ctx, NHG_CTX_NONE);
+			if (queue_add(ctx) == 0) {
+				nhg_ctx_set_status(ctx, NHG_CTX_REQUEUED);
+				return 0;
+			}
+		}
 		break;
 	case NHG_CTX_OP_DEL:
 		ret = nhg_ctx_process_del(ctx);
@@ -857,22 +893,6 @@ int nhg_ctx_process(struct nhg_ctx *ctx)
 	nhg_ctx_process_finish(ctx);
 
 	return ret;
-}
-
-static int queue_add(struct nhg_ctx *ctx)
-{
-	/* If its queued or already processed do nothing */
-	if (nhg_ctx_get_status(ctx))
-		return 0;
-
-	if (rib_queue_nhg_add(ctx)) {
-		nhg_ctx_set_status(ctx, NHG_CTX_FAILURE);
-		return -1;
-	}
-
-	nhg_ctx_set_status(ctx, NHG_CTX_QUEUED);
-
-	return 0;
 }
 
 /* Kernel-side, you either get a single new nexthop or a array of ID's */
@@ -958,7 +978,9 @@ depends_find_add(struct nhg_connected_tree_head *head, struct nexthop *nh,
 	struct nhg_hash_entry *depend = NULL;
 
 	depend = depends_find(nh, afi);
-	depends_add(head, depend);
+
+	if (depend)
+		depends_add(head, depend);
 
 	return depend;
 }
@@ -969,7 +991,9 @@ depends_find_id_add(struct nhg_connected_tree_head *head, uint32_t id)
 	struct nhg_hash_entry *depend = NULL;
 
 	depend = zebra_nhg_lookup_id(id);
-	depends_add(head, depend);
+
+	if (depend)
+		depends_add(head, depend);
 
 	return depend;
 }
