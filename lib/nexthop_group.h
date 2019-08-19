@@ -37,6 +37,7 @@ extern "C" {
  */
 struct nexthop_group {
 	struct nexthop *nexthop;
+	struct nexthop *tail;
 };
 
 struct nexthop_group *nexthop_group_new(void);

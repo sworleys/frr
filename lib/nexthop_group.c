@@ -60,16 +60,6 @@ nexthop_group_cmd_compare(const struct nexthop_group_cmd *nhgc1,
 	return strcmp(nhgc1->name, nhgc2->name);
 }
 
-static struct nexthop *nexthop_group_tail(const struct nexthop_group *nhg)
-{
-	struct nexthop *nexthop = nhg->nexthop;
-
-	while (nexthop && nexthop->next)
-		nexthop = nexthop->next;
-
-	return nexthop;
-}
-
 uint8_t nexthop_group_nexthop_num(const struct nexthop_group *nhg)
 {
 	struct nexthop *nhop;
@@ -139,18 +129,16 @@ void _nexthop_add(struct nexthop **target, struct nexthop *nexthop)
 void _nexthop_group_add_sorted(struct nexthop_group *nhg,
 			       struct nexthop *nexthop)
 {
-	struct nexthop *position, *prev, *tail;
+	struct nexthop *position, *prev;
 
 	/* Try to just append to the end first
-	 * This trust it is already sorted
+	 * This trusts it is already sorted
 	 */
 
-	tail = nexthop_group_tail(nhg);
-
-	if (tail && (nexthop_cmp(tail, nexthop) < 0)) {
-		tail->next = nexthop;
-		nexthop->prev = tail;
-
+	if (nhg->tail && (nexthop_cmp(nhg->tail, nexthop) < 0)) {
+		nhg->tail->next = nexthop;
+		nexthop->prev = nhg->tail;
+		nhg->tail = nexthop;
 		return;
 	}
 
@@ -173,8 +161,10 @@ void _nexthop_group_add_sorted(struct nexthop_group *nhg,
 	nexthop->prev = prev;
 	if (prev)
 		prev->next = nexthop;
-	else
+	else {
 		nhg->nexthop = nexthop;
+		nhg->tail = nexthop;
+	}
 }
 
 /* Delete nexthop from a nexthop list.  */
