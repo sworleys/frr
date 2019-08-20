@@ -1,3 +1,13 @@
+frr (4.0+cl3u15) Released; urgency=medium
+
+  * Fixes: CM-25979 Fix router-id update handling for route-leaking
+  * Fixes: CM-24569 zebra: Readd special flood MAC upon del notification
+  * Fixes: CM-24440 zebra: stop sending invalid nexthops to clients
+  * Fixes: CM-25616 bgpd: simplify json create/free for memleak fix
+  * Fixes: CM-25489 bgpd: stop removing and replacing private asn if it matches the peer
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Tue, 20 Aug 2019 13:43:31 -0700
+
 frr (4.0+cl3u14) Released; urgency=medium
 
   * Fixes: CM-25610 bgpd: encode implicit next-hop-self in some vrf route leaking scenarios
