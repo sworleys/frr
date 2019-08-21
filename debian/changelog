@@ -1,5 +1,6 @@
 frr (4.0+cl3u15) Released; urgency=medium
 
+  * Fixes: CM-26035 pimd: Use generated interface name
   * Fixes: CM-26038 bgpd: convey svi_ip knob to zebra post vni add
   * Fixes: CM-25979 Fix router-id update handling for route-leaking
   * Fixes: CM-24569 zebra: Readd special flood MAC upon del notification
