@@ -7,6 +7,8 @@ frr (4.0+cl3u15) Released; urgency=medium
   * Fixes: CM-24440 zebra: stop sending invalid nexthops to clients
   * Fixes: CM-25616 bgpd: simplify json create/free for memleak fix
   * Fixes: CM-25489 bgpd: stop removing and replacing private asn if it matches the peer
+  * Fixes: CM-26073 tools: Fix watchfrr to only restart failed daemons
+  * Fixes: CM-26119 bgpd: Shut off keepalives as soon as we shutdown a peer
 
  -- dev-support <dev-support@cumulusnetworks.com>  Wed, 21 Aug 2019 13:43:31 -0700
 
