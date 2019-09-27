@@ -39,6 +39,7 @@
 #include "pbr_memory.h"
 #include "pbr_zebra.h"
 #include "pbr_debug.h"
+#include "pbr_vrf.h"
 
 DEFINE_MTYPE_STATIC(PBRD, PBR_INTERFACE, "PBR Interface")
 
@@ -129,6 +130,24 @@ int pbr_ifp_down(struct interface *ifp)
 	       "%s: %s is down", __PRETTY_FUNCTION__, ifp->name);
 
 	pbr_nht_nexthop_interface_update(ifp);
+
+	return 0;
+}
+
+static int interface_vrf_update(ZAPI_CALLBACK_ARGS)
+{
+	struct interface *ifp;
+	vrf_id_t new_vrf_id;
+
+	ifp = zebra_interface_vrf_update_read(zclient->ibuf, vrf_id,
+					      &new_vrf_id);
+
+	DEBUGD(&pbr_dbg_zebra, "%s: %s VRF change %u -> %u", __func__,
+	       ifp->name, vrf_id, new_vrf_id);
+
+	if_update_to_new_vrf(ifp, new_vrf_id);
+
+	pbr_map_interface_vrf_update(ifp);
 
 	return 0;
 }
@@ -421,6 +440,7 @@ void pbr_zebra_init(void)
 	zclient->zebra_connected = zebra_connected;
 	zclient->interface_address_add = interface_address_add;
 	zclient->interface_address_delete = interface_address_delete;
+	zclient->interface_vrf_update = interface_vrf_update;
 	zclient->route_notify_owner = route_notify_owner;
 	zclient->rule_notify_owner = rule_notify_owner;
 	zclient->nexthop_update = pbr_zebra_nexthop_update;
@@ -488,6 +508,8 @@ static void pbr_encode_pbr_map_sequence(struct stream *s,
 					struct interface *ifp)
 {
 	unsigned char family;
+	vrf_id_t vrf_id;
+	struct pbr_vrf *pbr_vrf;
 
 	family = AF_INET;
 	if (pbrms->family)
@@ -501,7 +523,12 @@ static void pbr_encode_pbr_map_sequence(struct stream *s,
 	pbr_encode_pbr_map_sequence_prefix(s, pbrms->dst, family);
 	stream_putw(s, 0);  /* dst port */
 	stream_putl(s, pbrms->mark);
-	if (pbrms->nhgrp_name)
+
+	if (pbrms->vrf_unchanged || pbrms->vrf_lookup) {
+		vrf_id = pbrms->vrf_unchanged ? ifp->vrf_id : pbrms->vrf_id;
+		pbr_vrf = pbr_vrf_lookup_by_id(vrf_id);
+		stream_putl(s, pbr_vrf->vrf->data.l.table_id);
+	} else if (pbrms->nhgrp_name)
 		stream_putl(s, pbr_nht_get_table(pbrms->nhgrp_name));
 	else if (pbrms->nhg)
 		stream_putl(s, pbr_nht_get_table(pbrms->internal_nhg_name));
@@ -509,7 +536,8 @@ static void pbr_encode_pbr_map_sequence(struct stream *s,
 }
 
 void pbr_send_pbr_map(struct pbr_map_sequence *pbrms,
-		      struct pbr_map_interface *pmi, bool install)
+		      struct pbr_map_interface *pmi, bool install,
+		      bool overwrite)
 {
 	struct pbr_map *pbrm = pbrms->parent;
 	struct stream *s;
@@ -525,7 +553,7 @@ void pbr_send_pbr_map(struct pbr_map_sequence *pbrms,
 	 * just return.  If we are not installed and asked
 	 * and asked to delete just return;
 	 */
-	if (install && is_installed)
+	if (install && is_installed && !overwrite)
 		return;
 
 	if (!install && !is_installed)
