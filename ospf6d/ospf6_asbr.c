@@ -1573,7 +1573,7 @@ static struct route_map_rule_cmd ospf6_routemap_rule_set_tag_cmd = {
 	route_map_rule_tag_free,
 };
 
-static int route_map_command_status(struct vty *vty, int ret)
+static int route_map_command_status(struct vty *vty, enum rmap_compile_rets ret)
 {
 	switch (ret) {
 	case RMAP_RULE_MISSING:
@@ -1585,6 +1585,7 @@ static int route_map_command_status(struct vty *vty, int ret)
 		return CMD_WARNING_CONFIG_FAILED;
 		break;
 	case RMAP_COMPILE_SUCCESS:
+	case RMAP_DUPLICATE_RULE:
 		break;
 	}
 
@@ -1602,8 +1603,10 @@ DEFUN (ospf6_routemap_set_metric_type,
 {
 	VTY_DECLVAR_CONTEXT(route_map_index, route_map_index);
 	int idx_external = 2;
-	int ret = route_map_add_set(route_map_index, "metric-type",
-				    argv[idx_external]->arg);
+	enum rmap_compile_rets ret = route_map_add_set(route_map_index,
+						       "metric-type",
+						       argv[idx_external]->arg);
+
 	return route_map_command_status(vty, ret);
 }
 
@@ -1619,7 +1622,9 @@ DEFUN (ospf6_routemap_no_set_metric_type,
 {
 	VTY_DECLVAR_CONTEXT(route_map_index, route_map_index);
 	char *ext = (argc == 4) ? argv[3]->text : NULL;
-	int ret = route_map_delete_set(route_map_index, "metric-type", ext);
+	enum rmap_compile_rets ret = route_map_delete_set(route_map_index,
+							  "metric-type", ext);
+
 	return route_map_command_status(vty, ret);
 }
 
@@ -1633,8 +1638,10 @@ DEFUN (ospf6_routemap_set_forwarding,
 {
 	VTY_DECLVAR_CONTEXT(route_map_index, route_map_index);
 	int idx_ipv6 = 2;
-	int ret = route_map_add_set(route_map_index, "forwarding-address",
-				    argv[idx_ipv6]->arg);
+	enum rmap_compile_rets ret = route_map_add_set(route_map_index,
+						       "forwarding-address",
+						       argv[idx_ipv6]->arg);
+
 	return route_map_command_status(vty, ret);
 }
 
@@ -1649,8 +1656,10 @@ DEFUN (ospf6_routemap_no_set_forwarding,
 {
 	VTY_DECLVAR_CONTEXT(route_map_index, route_map_index);
 	int idx_ipv6 = 3;
-	int ret = route_map_delete_set(route_map_index, "forwarding-address",
-				       argv[idx_ipv6]->arg);
+	enum rmap_compile_rets ret = route_map_delete_set(route_map_index,
+							  "forwarding-address",
+							  argv[idx_ipv6]->arg);
+
 	return route_map_command_status(vty, ret);
 }
 

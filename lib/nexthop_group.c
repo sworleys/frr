@@ -71,6 +71,17 @@ uint8_t nexthop_group_nexthop_num(const struct nexthop_group *nhg)
 	return num;
 }
 
+uint8_t nexthop_group_nexthop_num_no_recurse(const struct nexthop_group *nhg)
+{
+	struct nexthop *nhop;
+	uint8_t num = 0;
+
+	for (nhop = nhg->nexthop; nhop; nhop = nhop->next)
+		num++;
+
+	return num;
+}
+
 uint8_t nexthop_group_active_nexthop_num(const struct nexthop_group *nhg)
 {
 	struct nexthop *nhop;
@@ -84,7 +95,22 @@ uint8_t nexthop_group_active_nexthop_num(const struct nexthop_group *nhg)
 	return num;
 }
 
-struct nexthop *nexthop_exists(struct nexthop_group *nhg, struct nexthop *nh)
+uint8_t
+nexthop_group_active_nexthop_num_no_recurse(const struct nexthop_group *nhg)
+{
+	struct nexthop *nhop;
+	uint8_t num = 0;
+
+	for (nhop = nhg->nexthop; nhop; nhop = nhop->next) {
+		if (CHECK_FLAG(nhop->flags, NEXTHOP_FLAG_ACTIVE))
+			num++;
+	}
+
+	return num;
+}
+
+struct nexthop *nexthop_exists(const struct nexthop_group *nhg,
+			       const struct nexthop *nh)
 {
 	struct nexthop *nexthop;
 
@@ -96,6 +122,74 @@ struct nexthop *nexthop_exists(struct nexthop_group *nhg, struct nexthop *nh)
 	return NULL;
 }
 
+static bool
+nexthop_group_equal_common(const struct nexthop_group *nhg1,
+			   const struct nexthop_group *nhg2,
+			   uint8_t (*nexthop_group_nexthop_num_func)(
+				   const struct nexthop_group *nhg))
+{
+	if (nhg1 && !nhg2)
+		return false;
+
+	if (!nhg1 && nhg2)
+		return false;
+
+	if (nhg1 == nhg2)
+		return true;
+
+	if (nexthop_group_nexthop_num_func(nhg1)
+	    != nexthop_group_nexthop_num_func(nhg2))
+		return false;
+
+	return true;
+}
+
+/* This assumes ordered */
+bool nexthop_group_equal_no_recurse(const struct nexthop_group *nhg1,
+				    const struct nexthop_group *nhg2)
+{
+	struct nexthop *nh1 = NULL;
+	struct nexthop *nh2 = NULL;
+
+	if (!nexthop_group_equal_common(nhg1, nhg2,
+					&nexthop_group_nexthop_num_no_recurse))
+		return false;
+
+	for (nh1 = nhg1->nexthop, nh2 = nhg2->nexthop; nh1 || nh2;
+	     nh1 = nh1->next, nh2 = nh2->next) {
+		if (nh1 && !nh2)
+			return false;
+		if (!nh1 && nh2)
+			return false;
+		if (!nexthop_same(nh1, nh2))
+			return false;
+	}
+
+	return true;
+}
+
+/* This assumes ordered */
+bool nexthop_group_equal(const struct nexthop_group *nhg1,
+			 const struct nexthop_group *nhg2)
+{
+	struct nexthop *nh1 = NULL;
+	struct nexthop *nh2 = NULL;
+
+	if (!nexthop_group_equal_common(nhg1, nhg2, &nexthop_group_nexthop_num))
+		return false;
+
+	for (nh1 = nhg1->nexthop, nh2 = nhg2->nexthop; nh1 || nh2;
+	     nh1 = nexthop_next(nh1), nh2 = nexthop_next(nh2)) {
+		if (nh1 && !nh2)
+			return false;
+		if (!nh1 && nh2)
+			return false;
+		if (!nexthop_same(nh1, nh2))
+			return false;
+	}
+
+	return true;
+}
 struct nexthop_group *nexthop_group_new(void)
 {
 	return XCALLOC(MTYPE_NEXTHOP_GROUP, sizeof(struct nexthop_group));
@@ -110,6 +204,13 @@ void nexthop_group_copy(struct nexthop_group *to, struct nexthop_group *from)
 void nexthop_group_delete(struct nexthop_group **nhg)
 {
 	XFREE(MTYPE_NEXTHOP_GROUP, *nhg);
+}
+
+void nexthop_group_free_delete(struct nexthop_group **nhg)
+{
+	if ((*nhg)->nexthop)
+		nexthops_free((*nhg)->nexthop);
+	nexthop_group_delete(nhg);
 }
 
 /* Add nexthop to the end of a nexthop list.  */
@@ -194,7 +295,7 @@ void copy_nexthops(struct nexthop **tnh, const struct nexthop *nh,
 	}
 }
 
-uint32_t nexthop_group_hash(const struct nexthop_group *nhg)
+uint32_t nexthop_group_hash_no_recurse(const struct nexthop_group *nhg)
 {
 	struct nexthop *nh;
 	uint32_t key = 0;
@@ -207,6 +308,35 @@ uint32_t nexthop_group_hash(const struct nexthop_group *nhg)
 		key = jhash_1word(nexthop_hash(nh), key);
 
 	return key;
+}
+
+uint32_t nexthop_group_hash(const struct nexthop_group *nhg)
+{
+	struct nexthop *nh;
+	uint32_t key = 0;
+
+	for (ALL_NEXTHOPS_PTR(nhg, nh))
+		key = jhash_1word(nexthop_hash(nh), key);
+
+	return key;
+}
+
+void nexthop_group_mark_duplicates(struct nexthop_group *nhg)
+{
+	struct nexthop *nexthop, *prev;
+
+	for (ALL_NEXTHOPS_PTR(nhg, nexthop)) {
+		UNSET_FLAG(nexthop->flags, NEXTHOP_FLAG_DUPLICATE);
+		for (ALL_NEXTHOPS_PTR(nhg, prev)) {
+			if (prev == nexthop)
+				break;
+			if (nexthop_same_firsthop(nexthop, prev)) {
+				SET_FLAG(nexthop->flags,
+					 NEXTHOP_FLAG_DUPLICATE);
+				break;
+			}
+		}
+	}
 }
 
 static void nhgc_delete_nexthops(struct nexthop_group_cmd *nhgc)

@@ -27,6 +27,7 @@
 #include <linux/mpls_iptunnel.h>
 #include <linux/neighbour.h>
 #include <linux/rtnetlink.h>
+#include <linux/nexthop.h>
 
 /* Hack for GNU libc version 2. */
 #ifndef MSG_TRUNC
@@ -49,6 +50,7 @@
 #include "vty.h"
 #include "mpls.h"
 #include "vxlan.h"
+#include "printfrr.h"
 
 #include "zebra/zapi_msg.h"
 #include "zebra/zebra_ns.h"
@@ -62,6 +64,7 @@
 #include "zebra/zebra_mpls.h"
 #include "zebra/kernel_netlink.h"
 #include "zebra/rt_netlink.h"
+#include "zebra/zebra_nhg.h"
 #include "zebra/zebra_mroute.h"
 #include "zebra/zebra_vxlan.h"
 #include "zebra/zebra_errors.h"
@@ -71,6 +74,8 @@
 #endif
 
 static vlanid_t filter_vlan = 0;
+
+static bool supports_nh;
 
 struct gw_family_t {
 	uint16_t filler;
@@ -151,6 +156,7 @@ static inline int zebra2proto(int proto)
 		proto = RTPROT_OPENFABRIC;
 		break;
 	case ZEBRA_ROUTE_TABLE:
+	case ZEBRA_ROUTE_NHG:
 		proto = RTPROT_ZEBRA;
 		break;
 	default:
@@ -170,7 +176,7 @@ static inline int zebra2proto(int proto)
 	return proto;
 }
 
-static inline int proto2zebra(int proto, int family)
+static inline int proto2zebra(int proto, int family, bool is_nexthop)
 {
 	switch (proto) {
 	case RTPROT_BABEL:
@@ -214,6 +220,12 @@ static inline int proto2zebra(int proto, int family)
 	case RTPROT_OPENFABRIC:
 		proto = ZEBRA_ROUTE_OPENFABRIC;
 		break;
+	case RTPROT_ZEBRA:
+		if (is_nexthop) {
+			proto = ZEBRA_ROUTE_NHG;
+			break;
+		}
+		/* Intentional fall thru */
 	default:
 		/*
 		 * When a user adds a new protocol this will show up
@@ -284,6 +296,172 @@ static int parse_encap_mpls(struct rtattr *tb, mpls_label_t *labels)
 	return num_labels;
 }
 
+static struct nexthop
+parse_nexthop_unicast(ns_id_t ns_id, struct rtmsg *rtm, struct rtattr **tb,
+		      enum blackhole_type bh_type, int index, void *prefsrc,
+		      void *gate, afi_t afi, vrf_id_t vrf_id)
+{
+	struct interface *ifp = NULL;
+	struct nexthop nh = {0};
+	mpls_label_t labels[MPLS_MAX_LABELS] = {0};
+	int num_labels = 0;
+
+	vrf_id_t nh_vrf_id = vrf_id;
+	size_t sz = (afi == AFI_IP) ? 4 : 16;
+
+	if (bh_type == BLACKHOLE_UNSPEC) {
+		if (index && !gate)
+			nh.type = NEXTHOP_TYPE_IFINDEX;
+		else if (index && gate)
+			nh.type = (afi == AFI_IP) ? NEXTHOP_TYPE_IPV4_IFINDEX
+						  : NEXTHOP_TYPE_IPV6_IFINDEX;
+		else if (!index && gate)
+			nh.type = (afi == AFI_IP) ? NEXTHOP_TYPE_IPV4
+						  : NEXTHOP_TYPE_IPV6;
+		else {
+			nh.type = NEXTHOP_TYPE_BLACKHOLE;
+			nh.bh_type = bh_type;
+		}
+	} else {
+		nh.type = NEXTHOP_TYPE_BLACKHOLE;
+		nh.bh_type = bh_type;
+	}
+	nh.ifindex = index;
+	if (prefsrc)
+		memcpy(&nh.src, prefsrc, sz);
+	if (gate)
+		memcpy(&nh.gate, gate, sz);
+
+	if (index) {
+		ifp = if_lookup_by_index_per_ns(zebra_ns_lookup(ns_id), index);
+		if (ifp)
+			nh_vrf_id = ifp->vrf_id;
+	}
+	nh.vrf_id = nh_vrf_id;
+
+	if (tb[RTA_ENCAP] && tb[RTA_ENCAP_TYPE]
+	    && *(uint16_t *)RTA_DATA(tb[RTA_ENCAP_TYPE])
+		       == LWTUNNEL_ENCAP_MPLS) {
+		num_labels = parse_encap_mpls(tb[RTA_ENCAP], labels);
+	}
+
+	if (rtm->rtm_flags & RTNH_F_ONLINK)
+		SET_FLAG(nh.flags, NEXTHOP_FLAG_ONLINK);
+
+	if (num_labels)
+		nexthop_add_labels(&nh, ZEBRA_LSP_STATIC, num_labels, labels);
+
+	return nh;
+}
+
+static uint8_t parse_multipath_nexthops_unicast(ns_id_t ns_id,
+						struct route_entry *re,
+						struct rtmsg *rtm,
+						struct rtnexthop *rtnh,
+						struct rtattr **tb,
+						void *prefsrc, vrf_id_t vrf_id)
+{
+	void *gate = NULL;
+	struct interface *ifp = NULL;
+	int index = 0;
+	/* MPLS labels */
+	mpls_label_t labels[MPLS_MAX_LABELS] = {0};
+	int num_labels = 0;
+	struct rtattr *rtnh_tb[RTA_MAX + 1] = {};
+
+	int len = RTA_PAYLOAD(tb[RTA_MULTIPATH]);
+	vrf_id_t nh_vrf_id = vrf_id;
+
+	re->ng = nexthop_group_new();
+
+	for (;;) {
+		struct nexthop *nh = NULL;
+
+		if (len < (int)sizeof(*rtnh) || rtnh->rtnh_len > len)
+			break;
+
+		index = rtnh->rtnh_ifindex;
+		if (index) {
+			/*
+			 * Yes we are looking this up
+			 * for every nexthop and just
+			 * using the last one looked
+			 * up right now
+			 */
+			ifp = if_lookup_by_index_per_ns(zebra_ns_lookup(ns_id),
+							index);
+			if (ifp)
+				nh_vrf_id = ifp->vrf_id;
+			else {
+				flog_warn(
+					EC_ZEBRA_UNKNOWN_INTERFACE,
+					"%s: Unknown interface %u specified, defaulting to VRF_DEFAULT",
+					__PRETTY_FUNCTION__, index);
+				nh_vrf_id = VRF_DEFAULT;
+			}
+		} else
+			nh_vrf_id = vrf_id;
+
+		if (rtnh->rtnh_len > sizeof(*rtnh)) {
+			memset(rtnh_tb, 0, sizeof(rtnh_tb));
+
+			netlink_parse_rtattr(rtnh_tb, RTA_MAX, RTNH_DATA(rtnh),
+					     rtnh->rtnh_len - sizeof(*rtnh));
+			if (rtnh_tb[RTA_GATEWAY])
+				gate = RTA_DATA(rtnh_tb[RTA_GATEWAY]);
+			if (rtnh_tb[RTA_ENCAP] && rtnh_tb[RTA_ENCAP_TYPE]
+			    && *(uint16_t *)RTA_DATA(rtnh_tb[RTA_ENCAP_TYPE])
+				       == LWTUNNEL_ENCAP_MPLS) {
+				num_labels = parse_encap_mpls(
+					rtnh_tb[RTA_ENCAP], labels);
+			}
+		}
+
+		if (gate) {
+			if (rtm->rtm_family == AF_INET) {
+				if (index)
+					nh = route_entry_nexthop_ipv4_ifindex_add(
+						re, gate, prefsrc, index,
+						nh_vrf_id);
+				else
+					nh = route_entry_nexthop_ipv4_add(
+						re, gate, prefsrc, nh_vrf_id);
+			} else if (rtm->rtm_family == AF_INET6) {
+				if (index)
+					nh = route_entry_nexthop_ipv6_ifindex_add(
+						re, gate, index, nh_vrf_id);
+				else
+					nh = route_entry_nexthop_ipv6_add(
+						re, gate, nh_vrf_id);
+			}
+		} else
+			nh = route_entry_nexthop_ifindex_add(re, index,
+							     nh_vrf_id);
+
+		if (nh) {
+			if (num_labels)
+				nexthop_add_labels(nh, ZEBRA_LSP_STATIC,
+						   num_labels, labels);
+
+			if (rtnh->rtnh_flags & RTNH_F_ONLINK)
+				SET_FLAG(nh->flags, NEXTHOP_FLAG_ONLINK);
+		}
+
+		if (rtnh->rtnh_len == 0)
+			break;
+
+		len -= NLMSG_ALIGN(rtnh->rtnh_len);
+		rtnh = RTNH_NEXT(rtnh);
+	}
+
+	uint8_t nhop_num = nexthop_group_nexthop_num(re->ng);
+
+	if (!nhop_num)
+		nexthop_group_delete(&re->ng);
+
+	return nhop_num;
+}
+
 /* Looking up routing table by netlink interface. */
 static int netlink_route_change_read_unicast(struct nlmsghdr *h, ns_id_t ns_id,
 					     int startup)
@@ -305,16 +483,13 @@ static int netlink_route_change_read_unicast(struct nlmsghdr *h, ns_id_t ns_id,
 	uint32_t mtu = 0;
 	uint8_t distance = 0;
 	route_tag_t tag = 0;
+	uint32_t nhe_id = 0;
 
 	void *dest = NULL;
 	void *gate = NULL;
 	void *prefsrc = NULL; /* IPv4 preferred source host address */
 	void *src = NULL;     /* IPv6 srcdest   source prefix */
 	enum blackhole_type bh_type = BLACKHOLE_UNSPEC;
-
-	/* MPLS labels */
-	mpls_label_t labels[MPLS_MAX_LABELS] = {0};
-	int num_labels = 0;
 
 	rtm = NLMSG_DATA(h);
 
@@ -388,7 +563,7 @@ static int netlink_route_change_read_unicast(struct nlmsghdr *h, ns_id_t ns_id,
 	/* Route which inserted by Zebra. */
 	if (is_selfroute(rtm->rtm_protocol)) {
 		flags |= ZEBRA_FLAG_SELFROUTE;
-		proto = proto2zebra(rtm->rtm_protocol, rtm->rtm_family);
+		proto = proto2zebra(rtm->rtm_protocol, rtm->rtm_family, false);
 	}
 	if (tb[RTA_OIF])
 		index = *(int *)RTA_DATA(tb[RTA_OIF]);
@@ -408,6 +583,9 @@ static int netlink_route_change_read_unicast(struct nlmsghdr *h, ns_id_t ns_id,
 
 	if (tb[RTA_GATEWAY])
 		gate = RTA_DATA(tb[RTA_GATEWAY]);
+
+	if (tb[RTA_NH_ID])
+		nhe_id = *(uint32_t *)RTA_DATA(tb[RTA_NH_ID]);
 
 	if (tb[RTA_PRIORITY])
 		metric = *(int *)RTA_DATA(tb[RTA_PRIORITY]);
@@ -512,74 +690,23 @@ static int netlink_route_change_read_unicast(struct nlmsghdr *h, ns_id_t ns_id,
 		afi = AFI_IP6;
 
 	if (h->nlmsg_type == RTM_NEWROUTE) {
-		struct interface *ifp;
-		vrf_id_t nh_vrf_id = vrf_id;
 
 		if (!tb[RTA_MULTIPATH]) {
-			struct nexthop nh;
-			size_t sz = (afi == AFI_IP) ? 4 : 16;
+			struct nexthop nh = {0};
 
-			memset(&nh, 0, sizeof(nh));
-
-			if (bh_type == BLACKHOLE_UNSPEC) {
-				if (index && !gate)
-					nh.type = NEXTHOP_TYPE_IFINDEX;
-				else if (index && gate)
-					nh.type =
-						(afi == AFI_IP)
-							? NEXTHOP_TYPE_IPV4_IFINDEX
-							: NEXTHOP_TYPE_IPV6_IFINDEX;
-				else if (!index && gate)
-					nh.type = (afi == AFI_IP)
-							  ? NEXTHOP_TYPE_IPV4
-							  : NEXTHOP_TYPE_IPV6;
-				else {
-					nh.type = NEXTHOP_TYPE_BLACKHOLE;
-					nh.bh_type = bh_type;
-				}
-			} else {
-				nh.type = NEXTHOP_TYPE_BLACKHOLE;
-				nh.bh_type = bh_type;
+			if (!nhe_id) {
+				nh = parse_nexthop_unicast(
+					ns_id, rtm, tb, bh_type, index, prefsrc,
+					gate, afi, vrf_id);
 			}
-			nh.ifindex = index;
-			if (prefsrc)
-				memcpy(&nh.src, prefsrc, sz);
-			if (gate)
-				memcpy(&nh.gate, gate, sz);
-
-			if (index) {
-				ifp = if_lookup_by_index_per_ns(
-						zebra_ns_lookup(ns_id),
-						index);
-				if (ifp)
-					nh_vrf_id = ifp->vrf_id;
-			}
-			nh.vrf_id = nh_vrf_id;
-
-			if (tb[RTA_ENCAP] && tb[RTA_ENCAP_TYPE]
-			    && *(uint16_t *)RTA_DATA(tb[RTA_ENCAP_TYPE])
-				       == LWTUNNEL_ENCAP_MPLS) {
-				num_labels =
-					parse_encap_mpls(tb[RTA_ENCAP], labels);
-			}
-
-			if (rtm->rtm_flags & RTNH_F_ONLINK)
-				SET_FLAG(nh.flags, NEXTHOP_FLAG_ONLINK);
-
-			if (num_labels)
-				nexthop_add_labels(&nh, ZEBRA_LSP_STATIC,
-						   num_labels, labels);
-
 			rib_add(afi, SAFI_UNICAST, vrf_id, proto, 0, flags, &p,
-				&src_p, &nh, table, metric, mtu, distance, tag);
+				&src_p, &nh, nhe_id, table, metric, mtu,
+				distance, tag);
 		} else {
 			/* This is a multipath route */
-
 			struct route_entry *re;
 			struct rtnexthop *rtnh =
 				(struct rtnexthop *)RTA_DATA(tb[RTA_MULTIPATH]);
-
-			len = RTA_PAYLOAD(tb[RTA_MULTIPATH]);
 
 			re = XCALLOC(MTYPE_RE, sizeof(struct route_entry));
 			re->type = proto;
@@ -589,148 +716,73 @@ static int netlink_route_change_read_unicast(struct nlmsghdr *h, ns_id_t ns_id,
 			re->mtu = mtu;
 			re->vrf_id = vrf_id;
 			re->table = table;
-			re->nexthop_num = 0;
 			re->uptime = monotime(NULL);
 			re->tag = tag;
+			re->nhe_id = nhe_id;
 
-			for (;;) {
-				struct nexthop *nh = NULL;
+			if (!nhe_id) {
+				uint8_t nhop_num =
+					parse_multipath_nexthops_unicast(
+						ns_id, re, rtm, rtnh, tb,
+						prefsrc, vrf_id);
 
-				if (len < (int)sizeof(*rtnh)
-				    || rtnh->rtnh_len > len)
-					break;
-
-				index = rtnh->rtnh_ifindex;
-				if (index) {
-					/*
-					 * Yes we are looking this up
-					 * for every nexthop and just
-					 * using the last one looked
-					 * up right now
-					 */
-					ifp = if_lookup_by_index_per_ns(
-							zebra_ns_lookup(ns_id),
-							index);
-					if (ifp)
-						nh_vrf_id = ifp->vrf_id;
-					else {
-						flog_warn(
-							EC_ZEBRA_UNKNOWN_INTERFACE,
-							"%s: Unknown interface %u specified, defaulting to VRF_DEFAULT",
-							__PRETTY_FUNCTION__,
-							index);
-						nh_vrf_id = VRF_DEFAULT;
-					}
-				} else
-					nh_vrf_id = vrf_id;
-
-				gate = 0;
-				if (rtnh->rtnh_len > sizeof(*rtnh)) {
-					memset(tb, 0, sizeof(tb));
-					netlink_parse_rtattr(
-						tb, RTA_MAX, RTNH_DATA(rtnh),
-						rtnh->rtnh_len - sizeof(*rtnh));
-					if (tb[RTA_GATEWAY])
-						gate = RTA_DATA(
-							tb[RTA_GATEWAY]);
-					if (tb[RTA_ENCAP] && tb[RTA_ENCAP_TYPE]
-					    && *(uint16_t *)RTA_DATA(
-						       tb[RTA_ENCAP_TYPE])
-						       == LWTUNNEL_ENCAP_MPLS) {
-						num_labels = parse_encap_mpls(
-							tb[RTA_ENCAP], labels);
-					}
-				}
-
-				if (gate) {
-					if (rtm->rtm_family == AF_INET) {
-						if (index)
-							nh = route_entry_nexthop_ipv4_ifindex_add(
-								re, gate,
-								prefsrc, index,
-								nh_vrf_id);
-						else
-							nh = route_entry_nexthop_ipv4_add(
-								re, gate,
-								prefsrc,
-								nh_vrf_id);
-					} else if (rtm->rtm_family
-						   == AF_INET6) {
-						if (index)
-							nh = route_entry_nexthop_ipv6_ifindex_add(
-								re, gate, index,
-								nh_vrf_id);
-						else
-							nh = route_entry_nexthop_ipv6_add(
-								re, gate,
-								nh_vrf_id);
-					}
-				} else
-					nh = route_entry_nexthop_ifindex_add(
-						re, index, nh_vrf_id);
-
-				if (nh && num_labels)
-					nexthop_add_labels(nh, ZEBRA_LSP_STATIC,
-							   num_labels, labels);
-
-				if (nh && (rtnh->rtnh_flags & RTNH_F_ONLINK))
-					SET_FLAG(nh->flags,
-						 NEXTHOP_FLAG_ONLINK);
-
-				if (rtnh->rtnh_len == 0)
-					break;
-
-				len -= NLMSG_ALIGN(rtnh->rtnh_len);
-				rtnh = RTNH_NEXT(rtnh);
+				zserv_nexthop_num_warn(
+					__func__, (const struct prefix *)&p,
+					nhop_num);
 			}
 
-			zserv_nexthop_num_warn(__func__,
-					       (const struct prefix *)&p,
-					       re->nexthop_num);
-			if (re->nexthop_num == 0)
-				XFREE(MTYPE_RE, re);
-			else
+			if (nhe_id || re->ng)
 				rib_add_multipath(afi, SAFI_UNICAST, &p,
 						  &src_p, re);
+			else
+				XFREE(MTYPE_RE, re);
 		}
 	} else {
-		if (!tb[RTA_MULTIPATH]) {
-			struct nexthop nh;
-			size_t sz = (afi == AFI_IP) ? 4 : 16;
-
-			memset(&nh, 0, sizeof(nh));
-			if (bh_type == BLACKHOLE_UNSPEC) {
-				if (index && !gate)
-					nh.type = NEXTHOP_TYPE_IFINDEX;
-				else if (index && gate)
-					nh.type =
-						(afi == AFI_IP)
-							? NEXTHOP_TYPE_IPV4_IFINDEX
-							: NEXTHOP_TYPE_IPV6_IFINDEX;
-				else if (!index && gate)
-					nh.type = (afi == AFI_IP)
-							  ? NEXTHOP_TYPE_IPV4
-							  : NEXTHOP_TYPE_IPV6;
-				else {
-					nh.type = NEXTHOP_TYPE_BLACKHOLE;
-					nh.bh_type = BLACKHOLE_UNSPEC;
-				}
-			} else {
-				nh.type = NEXTHOP_TYPE_BLACKHOLE;
-				nh.bh_type = bh_type;
-			}
-			nh.ifindex = index;
-			if (gate)
-				memcpy(&nh.gate, gate, sz);
+		if (nhe_id) {
 			rib_delete(afi, SAFI_UNICAST, vrf_id, proto, 0, flags,
-				   &p, &src_p, &nh, table, metric, distance,
-				   true);
+				   &p, &src_p, NULL, nhe_id, table, metric,
+				   distance, true);
 		} else {
-			/* XXX: need to compare the entire list of nexthops
-			 * here for NLM_F_APPEND stupidity */
-			rib_delete(afi, SAFI_UNICAST, vrf_id, proto, 0, flags,
-				   &p, &src_p, NULL, table, metric, distance,
-				   true);
+			if (!tb[RTA_MULTIPATH]) {
+				struct nexthop nh;
+				size_t sz = (afi == AFI_IP) ? 4 : 16;
+
+				memset(&nh, 0, sizeof(nh));
+				if (bh_type == BLACKHOLE_UNSPEC) {
+					if (index && !gate)
+						nh.type = NEXTHOP_TYPE_IFINDEX;
+					else if (index && gate)
+						nh.type =
+							(afi == AFI_IP)
+								? NEXTHOP_TYPE_IPV4_IFINDEX
+								: NEXTHOP_TYPE_IPV6_IFINDEX;
+					else if (!index && gate)
+						nh.type =
+							(afi == AFI_IP)
+								? NEXTHOP_TYPE_IPV4
+								: NEXTHOP_TYPE_IPV6;
+					else {
+						nh.type =
+							NEXTHOP_TYPE_BLACKHOLE;
+						nh.bh_type = BLACKHOLE_UNSPEC;
+					}
+				} else {
+					nh.type = NEXTHOP_TYPE_BLACKHOLE;
+					nh.bh_type = bh_type;
+				}
+				nh.ifindex = index;
+				if (gate)
+					memcpy(&nh.gate, gate, sz);
+				rib_delete(afi, SAFI_UNICAST, vrf_id, proto, 0,
+					   flags, &p, &src_p, &nh, 0, table,
+					   metric, distance, true);
+			} else {
+				/* XXX: need to compare the entire list of
+				 * nexthops here for NLM_F_APPEND stupidity */
+				rib_delete(afi, SAFI_UNICAST, vrf_id, proto, 0,
+					   flags, &p, &src_p, NULL, 0, table,
+					   metric, distance, true);
+			}
 		}
 	}
 
@@ -988,6 +1040,35 @@ static void _netlink_route_rta_add_gateway_info(uint8_t route_family,
 	}
 }
 
+static int build_label_stack(struct mpls_label_stack *nh_label,
+			     mpls_lse_t *out_lse, char *label_buf,
+			     size_t label_buf_size)
+{
+	char label_buf1[20];
+	int num_labels = 0;
+
+	for (int i = 0; nh_label && i < nh_label->num_labels; i++) {
+		if (nh_label->label[i] == MPLS_LABEL_IMPLICIT_NULL)
+			continue;
+
+		if (IS_ZEBRA_DEBUG_KERNEL) {
+			if (!num_labels)
+				sprintf(label_buf, "label %u",
+					nh_label->label[i]);
+			else {
+				sprintf(label_buf1, "/%u", nh_label->label[i]);
+				strlcat(label_buf, label_buf1, label_buf_size);
+			}
+		}
+
+		out_lse[num_labels] =
+			mpls_lse_encode(nh_label->label[i], 0, 0, 0);
+		num_labels++;
+	}
+
+	return num_labels;
+}
+
 /* This function takes a nexthop as argument and adds
  * the appropriate netlink attributes to an existing
  * netlink message.
@@ -1005,10 +1086,12 @@ static void _netlink_route_build_singlepath(const char *routedesc, int bytelen,
 					    struct rtmsg *rtmsg,
 					    size_t req_size, int cmd)
 {
-	struct mpls_label_stack *nh_label;
+
 	mpls_lse_t out_lse[MPLS_MAX_LABELS];
-	int num_labels = 0;
 	char label_buf[256];
+	int num_labels = 0;
+
+	assert(nexthop);
 
 	/*
 	 * label_buf is *only* currently used within debugging.
@@ -1018,35 +1101,8 @@ static void _netlink_route_build_singlepath(const char *routedesc, int bytelen,
 	 */
 	label_buf[0] = '\0';
 
-	assert(nexthop);
-	for (const struct nexthop *nh = nexthop; nh; nh = nh->rparent) {
-		char label_buf1[20];
-
-		nh_label = nh->nh_label;
-		if (!nh_label || !nh_label->num_labels)
-			continue;
-
-		for (int i = 0; i < nh_label->num_labels; i++) {
-			if (nh_label->label[i] == MPLS_LABEL_IMPLICIT_NULL)
-				continue;
-
-			if (IS_ZEBRA_DEBUG_KERNEL) {
-				if (!num_labels)
-					sprintf(label_buf, "label %u",
-						nh_label->label[i]);
-				else {
-					sprintf(label_buf1, "/%u",
-						nh_label->label[i]);
-					strlcat(label_buf, label_buf1,
-						sizeof(label_buf));
-				}
-			}
-
-			out_lse[num_labels] =
-				mpls_lse_encode(nh_label->label[i], 0, 0, 0);
-			num_labels++;
-		}
-	}
+	num_labels = build_label_stack(nexthop->nh_label, out_lse, label_buf,
+				       sizeof(label_buf));
 
 	if (num_labels) {
 		/* Set the BoS bit */
@@ -1191,15 +1247,16 @@ static void _netlink_route_build_multipath(const char *routedesc, int bytelen,
 					   struct rtmsg *rtmsg,
 					   const union g_addr **src)
 {
-	struct mpls_label_stack *nh_label;
 	mpls_lse_t out_lse[MPLS_MAX_LABELS];
-	int num_labels = 0;
 	char label_buf[256];
+	int num_labels = 0;
 
 	rtnh->rtnh_len = sizeof(*rtnh);
 	rtnh->rtnh_flags = 0;
 	rtnh->rtnh_hops = 0;
 	rta->rta_len += rtnh->rtnh_len;
+
+	assert(nexthop);
 
 	/*
 	 * label_buf is *only* currently used within debugging.
@@ -1209,35 +1266,8 @@ static void _netlink_route_build_multipath(const char *routedesc, int bytelen,
 	 */
 	label_buf[0] = '\0';
 
-	assert(nexthop);
-	for (const struct nexthop *nh = nexthop; nh; nh = nh->rparent) {
-		char label_buf1[20];
-
-		nh_label = nh->nh_label;
-		if (!nh_label || !nh_label->num_labels)
-			continue;
-
-		for (int i = 0; i < nh_label->num_labels; i++) {
-			if (nh_label->label[i] == MPLS_LABEL_IMPLICIT_NULL)
-				continue;
-
-			if (IS_ZEBRA_DEBUG_KERNEL) {
-				if (!num_labels)
-					sprintf(label_buf, "label %u",
-						nh_label->label[i]);
-				else {
-					sprintf(label_buf1, "/%u",
-						nh_label->label[i]);
-					strlcat(label_buf, label_buf1,
-						sizeof(label_buf));
-				}
-			}
-
-			out_lse[num_labels] =
-				mpls_lse_encode(nh_label->label[i], 0, 0, 0);
-			num_labels++;
-		}
-	}
+	num_labels = build_label_stack(nexthop->nh_label, out_lse, label_buf,
+				       sizeof(label_buf));
 
 	if (num_labels) {
 		/* Set the BoS bit */
@@ -1405,6 +1435,13 @@ static void _netlink_route_debug(int cmd, const struct prefix *p,
 	}
 }
 
+static void _netlink_nexthop_debug(int cmd, uint32_t id)
+{
+	if (IS_ZEBRA_DEBUG_KERNEL)
+		zlog_debug("netlink_nexthop(): %s, id=%u",
+			   nl_msg_type_to_str(cmd), id);
+}
+
 static void _netlink_mpls_debug(int cmd, uint32_t label, const char *routedesc)
 {
 	if (IS_ZEBRA_DEBUG_KERNEL)
@@ -1565,6 +1602,13 @@ static int netlink_route_multipath(int cmd, struct zebra_dplane_ctx *ctx)
 			      RTAX_MTU, &mtu, sizeof(mtu));
 		addattr_l(&req.n, NL_PKT_BUF_SIZE, RTA_METRICS, RTA_DATA(rta),
 			  RTA_PAYLOAD(rta));
+	}
+
+	if (supports_nh) {
+		/* Kernel supports nexthop objects */
+		addattr32(&req.n, sizeof(req), RTA_NH_ID,
+			  dplane_ctx_get_nhe_id(ctx));
+		goto skip;
 	}
 
 	/* Count overall nexthops so we can decide whether to use singlepath
@@ -1814,6 +1858,255 @@ int kernel_get_ipmr_sg_stats(struct zebra_vrf *zvrf, void *in)
 	return suc;
 }
 
+/* Char length to debug ID with */
+#define ID_LENGTH 10
+
+static void _netlink_nexthop_build_group(struct nlmsghdr *n, size_t req_size,
+					 uint32_t id,
+					 const struct nh_grp *z_grp,
+					 const uint8_t count)
+{
+	struct nexthop_grp grp[count];
+	/* Need space for max group size, "/", and null term */
+	char buf[(MULTIPATH_NUM * (ID_LENGTH + 1)) + 1];
+	char buf1[ID_LENGTH + 2];
+
+	buf[0] = '\0';
+
+	memset(grp, 0, sizeof(grp));
+
+	if (count) {
+		for (int i = 0; i < count; i++) {
+			grp[i].id = z_grp[i].id;
+			grp[i].weight = z_grp[i].weight;
+
+			if (IS_ZEBRA_DEBUG_KERNEL) {
+				if (i == 0)
+					snprintf(buf, sizeof(buf1), "group %u",
+						 grp[i].id);
+				else {
+					snprintf(buf1, sizeof(buf1), "/%u",
+						 grp[i].id);
+					strlcat(buf, buf1, sizeof(buf));
+				}
+			}
+		}
+		addattr_l(n, req_size, NHA_GROUP, grp, count * sizeof(*grp));
+	}
+
+	if (IS_ZEBRA_DEBUG_KERNEL)
+		zlog_debug("%s: ID (%u): %s", __func__, id, buf);
+}
+
+/**
+ * netlink_nexthop() - Nexthop change via the netlink interface
+ *
+ * @ctx:	Dataplane ctx
+ *
+ * Return:	Result status
+ */
+static int netlink_nexthop(int cmd, struct zebra_dplane_ctx *ctx)
+{
+	struct {
+		struct nlmsghdr n;
+		struct nhmsg nhm;
+		char buf[NL_PKT_BUF_SIZE];
+	} req;
+
+	mpls_lse_t out_lse[MPLS_MAX_LABELS];
+	char label_buf[256];
+	int num_labels = 0;
+	size_t req_size = sizeof(req);
+
+	/* Nothing to do if the kernel doesn't support nexthop objects */
+	if (!supports_nh)
+		return 0;
+
+	label_buf[0] = '\0';
+
+	memset(&req, 0, req_size);
+
+	req.n.nlmsg_len = NLMSG_LENGTH(sizeof(struct nhmsg));
+	req.n.nlmsg_flags = NLM_F_CREATE | NLM_F_REQUEST;
+
+	if (cmd == RTM_NEWNEXTHOP)
+		req.n.nlmsg_flags |= NLM_F_REPLACE;
+
+	req.n.nlmsg_type = cmd;
+	req.n.nlmsg_pid = dplane_ctx_get_ns(ctx)->nls.snl.nl_pid;
+
+	req.nhm.nh_family = AF_UNSPEC;
+	/* TODO: Scope? */
+
+	uint32_t id = dplane_ctx_get_nhe_id(ctx);
+
+	if (!id) {
+		flog_err(
+			EC_ZEBRA_NHG_FIB_UPDATE,
+			"Failed trying to update a nexthop group in the kernel that does not have an ID");
+		return -1;
+	}
+
+	addattr32(&req.n, req_size, NHA_ID, id);
+
+	if (cmd == RTM_NEWNEXTHOP) {
+		if (dplane_ctx_get_nhe_nh_grp_count(ctx))
+			_netlink_nexthop_build_group(
+				&req.n, req_size, id,
+				dplane_ctx_get_nhe_nh_grp(ctx),
+				dplane_ctx_get_nhe_nh_grp_count(ctx));
+		else {
+			const struct nexthop *nh =
+				dplane_ctx_get_nhe_ng(ctx)->nexthop;
+			afi_t afi = dplane_ctx_get_nhe_afi(ctx);
+
+			if (afi == AFI_IP)
+				req.nhm.nh_family = AF_INET;
+			else if (afi == AFI_IP6)
+				req.nhm.nh_family = AF_INET6;
+
+			switch (nh->type) {
+			case NEXTHOP_TYPE_IPV4:
+			case NEXTHOP_TYPE_IPV4_IFINDEX:
+				addattr_l(&req.n, req_size, NHA_GATEWAY,
+					  &nh->gate.ipv4, IPV4_MAX_BYTELEN);
+				break;
+			case NEXTHOP_TYPE_IPV6:
+			case NEXTHOP_TYPE_IPV6_IFINDEX:
+				addattr_l(&req.n, req_size, NHA_GATEWAY,
+					  &nh->gate.ipv6, IPV6_MAX_BYTELEN);
+				break;
+			case NEXTHOP_TYPE_BLACKHOLE:
+				addattr_l(&req.n, req_size, NHA_BLACKHOLE, NULL,
+					  0);
+				/* Blackhole shouldn't have anymore attributes
+				 */
+				goto nexthop_done;
+			case NEXTHOP_TYPE_IFINDEX:
+				/* Don't need anymore info for this */
+				break;
+			}
+
+			if (!nh->ifindex) {
+				flog_err(
+					EC_ZEBRA_NHG_FIB_UPDATE,
+					"Context received for kernel nexthop update without an interface");
+				return -1;
+			}
+
+			addattr32(&req.n, req_size, NHA_OIF, nh->ifindex);
+
+			num_labels =
+				build_label_stack(nh->nh_label, out_lse,
+						  label_buf, sizeof(label_buf));
+
+			if (num_labels) {
+				/* Set the BoS bit */
+				out_lse[num_labels - 1] |=
+					htonl(1 << MPLS_LS_S_SHIFT);
+
+				/*
+				 * TODO: MPLS unsupported for now in kernel.
+				 */
+				if (req.nhm.nh_family == AF_MPLS)
+					goto nexthop_done;
+#if 0
+					addattr_l(&req.n, req_size, NHA_NEWDST,
+						  &out_lse,
+						  num_labels
+							  * sizeof(mpls_lse_t));
+#endif
+				else {
+					struct rtattr *nest;
+					uint16_t encap = LWTUNNEL_ENCAP_MPLS;
+
+					addattr_l(&req.n, req_size,
+						  NHA_ENCAP_TYPE, &encap,
+						  sizeof(uint16_t));
+					nest = addattr_nest(&req.n, req_size,
+							    NHA_ENCAP);
+					addattr_l(&req.n, req_size,
+						  MPLS_IPTUNNEL_DST, &out_lse,
+						  num_labels
+							  * sizeof(mpls_lse_t));
+					addattr_nest_end(&req.n, nest);
+				}
+			}
+
+		nexthop_done:
+			if (IS_ZEBRA_DEBUG_KERNEL) {
+				char buf[NEXTHOP_STRLEN];
+
+				snprintfrr(buf, sizeof(buf), "%pNHv", nh);
+				zlog_debug("%s: ID (%u): %s (%u) %s ", __func__,
+					   id, buf, nh->vrf_id, label_buf);
+			}
+		}
+
+		req.nhm.nh_protocol = zebra2proto(dplane_ctx_get_nhe_type(ctx));
+
+	} else if (cmd != RTM_DELNEXTHOP) {
+		flog_err(
+			EC_ZEBRA_NHG_FIB_UPDATE,
+			"Nexthop group kernel update command (%d) does not exist",
+			cmd);
+		return -1;
+	}
+
+	_netlink_nexthop_debug(cmd, id);
+
+	return netlink_talk_info(netlink_talk_filter, &req.n,
+				 dplane_ctx_get_ns(ctx), 0);
+}
+
+/**
+ * kernel_nexthop_update() - Update/delete a nexthop from the kernel
+ *
+ * @ctx:	Dataplane context
+ *
+ * Return:	Dataplane result flag
+ */
+enum zebra_dplane_result kernel_nexthop_update(struct zebra_dplane_ctx *ctx)
+{
+	int cmd = 0;
+	int ret = 0;
+
+	switch (dplane_ctx_get_op(ctx)) {
+	case DPLANE_OP_NH_DELETE:
+		cmd = RTM_DELNEXTHOP;
+		break;
+	case DPLANE_OP_NH_INSTALL:
+	case DPLANE_OP_NH_UPDATE:
+		cmd = RTM_NEWNEXTHOP;
+		break;
+	case DPLANE_OP_ROUTE_INSTALL:
+	case DPLANE_OP_ROUTE_UPDATE:
+	case DPLANE_OP_ROUTE_DELETE:
+	case DPLANE_OP_ROUTE_NOTIFY:
+	case DPLANE_OP_LSP_INSTALL:
+	case DPLANE_OP_LSP_UPDATE:
+	case DPLANE_OP_LSP_DELETE:
+	case DPLANE_OP_LSP_NOTIFY:
+	case DPLANE_OP_PW_INSTALL:
+	case DPLANE_OP_PW_UNINSTALL:
+	case DPLANE_OP_SYS_ROUTE_ADD:
+	case DPLANE_OP_SYS_ROUTE_DELETE:
+	case DPLANE_OP_ADDR_INSTALL:
+	case DPLANE_OP_ADDR_UNINSTALL:
+	case DPLANE_OP_NONE:
+		flog_err(
+			EC_ZEBRA_NHG_FIB_UPDATE,
+			"Context received for kernel nexthop update with incorrect OP code (%u)",
+			dplane_ctx_get_op(ctx));
+		return ZEBRA_DPLANE_REQUEST_FAILURE;
+	}
+
+	ret = netlink_nexthop(cmd, ctx);
+
+	return (ret == 0 ? ZEBRA_DPLANE_REQUEST_SUCCESS
+			 : ZEBRA_DPLANE_REQUEST_FAILURE);
+}
+
 /*
  * Update or delete a prefix from the kernel,
  * using info from a dataplane context.
@@ -1891,6 +2184,297 @@ enum zebra_dplane_result kernel_route_update(struct zebra_dplane_ctx *ctx)
 		ZEBRA_DPLANE_REQUEST_SUCCESS : ZEBRA_DPLANE_REQUEST_FAILURE);
 }
 
+/**
+ * netlink_nexthop_process_nh() - Parse the gatway/if info from a new nexthop
+ *
+ * @tb:		Netlink RTA data
+ * @family:	Address family in the nhmsg
+ * @ifp:	Interface connected - this should be NULL, we fill it in
+ * @ns_id:	Namspace id
+ *
+ * Return:	New nexthop
+ */
+static struct nexthop netlink_nexthop_process_nh(struct rtattr **tb,
+						 unsigned char family,
+						 struct interface **ifp,
+						 ns_id_t ns_id)
+{
+	struct nexthop nh = {};
+	void *gate = NULL;
+	enum nexthop_types_t type = 0;
+	int if_index = 0;
+	size_t sz = 0;
+
+	if_index = *(int *)RTA_DATA(tb[NHA_OIF]);
+
+
+	if (tb[NHA_GATEWAY]) {
+		switch (family) {
+		case AF_INET:
+			type = NEXTHOP_TYPE_IPV4_IFINDEX;
+			sz = 4;
+			break;
+		case AF_INET6:
+			type = NEXTHOP_TYPE_IPV6_IFINDEX;
+			sz = 16;
+			break;
+		default:
+			flog_warn(
+				EC_ZEBRA_BAD_NHG_MESSAGE,
+				"Nexthop gateway with bad address family (%d) received from kernel",
+				family);
+			return nh;
+		}
+		gate = RTA_DATA(tb[NHA_GATEWAY]);
+	} else
+		type = NEXTHOP_TYPE_IFINDEX;
+
+	if (type)
+		nh.type = type;
+
+	if (gate)
+		memcpy(&(nh.gate), gate, sz);
+
+	if (if_index)
+		nh.ifindex = if_index;
+
+	*ifp = if_lookup_by_index_per_ns(zebra_ns_lookup(ns_id), nh.ifindex);
+	if (ifp)
+		nh.vrf_id = (*ifp)->vrf_id;
+	else {
+		flog_warn(
+			EC_ZEBRA_UNKNOWN_INTERFACE,
+			"%s: Unknown nexthop interface %u received, defaulting to VRF_DEFAULT",
+			__PRETTY_FUNCTION__, nh.ifindex);
+
+		nh.vrf_id = VRF_DEFAULT;
+	}
+
+	if (tb[NHA_ENCAP] && tb[NHA_ENCAP_TYPE]) {
+		uint16_t encap_type = *(uint16_t *)RTA_DATA(tb[NHA_ENCAP_TYPE]);
+		int num_labels = 0;
+
+		mpls_label_t labels[MPLS_MAX_LABELS] = {0};
+
+		if (encap_type == LWTUNNEL_ENCAP_MPLS)
+			num_labels = parse_encap_mpls(tb[NHA_ENCAP], labels);
+
+		if (num_labels)
+			nexthop_add_labels(&nh, ZEBRA_LSP_STATIC, num_labels,
+					   labels);
+	}
+
+	return nh;
+}
+
+static int netlink_nexthop_process_group(struct rtattr **tb,
+					 struct nh_grp *z_grp)
+{
+	uint8_t count = 0;
+	/* linux/nexthop.h group struct */
+	struct nexthop_grp *n_grp = NULL;
+
+	n_grp = (struct nexthop_grp *)RTA_DATA(tb[NHA_GROUP]);
+	count = (RTA_PAYLOAD(tb[NHA_GROUP]) / sizeof(*n_grp));
+
+	if (!count || (count * sizeof(*n_grp)) != RTA_PAYLOAD(tb[NHA_GROUP])) {
+		flog_warn(EC_ZEBRA_BAD_NHG_MESSAGE,
+			  "Invalid nexthop group received from the kernel");
+		return count;
+	}
+
+#if 0
+	// TODO: Need type for something?
+	zlog_debug("Nexthop group type: %d",
+		   *((uint16_t *)RTA_DATA(tb[NHA_GROUP_TYPE])));
+
+#endif
+
+	for (int i = 0; i < count; i++) {
+		z_grp[i].id = n_grp[i].id;
+		z_grp[i].weight = n_grp[i].weight;
+	}
+	return count;
+}
+
+/**
+ * netlink_nexthop_change() - Read in change about nexthops from the kernel
+ *
+ * @h:		Netlink message header
+ * @ns_id:	Namspace id
+ * @startup:	Are we reading under startup conditions?
+ *
+ * Return:	Result status
+ */
+int netlink_nexthop_change(struct nlmsghdr *h, ns_id_t ns_id, int startup)
+{
+	int len;
+	/* nexthop group id */
+	uint32_t id;
+	unsigned char family;
+	int type;
+	afi_t afi = AFI_UNSPEC;
+	vrf_id_t vrf_id = 0;
+	struct interface *ifp = NULL;
+	struct nhmsg *nhm = NULL;
+	struct nexthop nh = {};
+	struct nh_grp grp[MULTIPATH_NUM] = {};
+	/* Count of nexthops in group array */
+	uint8_t grp_count = 0;
+	struct rtattr *tb[NHA_MAX + 1] = {};
+
+	nhm = NLMSG_DATA(h);
+
+	if (startup && h->nlmsg_type != RTM_NEWNEXTHOP)
+		return 0;
+
+	len = h->nlmsg_len - NLMSG_LENGTH(sizeof(struct nhmsg));
+	if (len < 0) {
+		zlog_warn(
+			"%s: Message received from netlink is of a broken size %d %zu",
+			__PRETTY_FUNCTION__, h->nlmsg_len,
+			(size_t)NLMSG_LENGTH(sizeof(struct nhmsg)));
+		return -1;
+	}
+
+	netlink_parse_rtattr(tb, NHA_MAX, RTM_NHA(nhm), len);
+
+
+	if (!tb[NHA_ID]) {
+		flog_warn(
+			EC_ZEBRA_BAD_NHG_MESSAGE,
+			"Nexthop group without an ID received from the kernel");
+		return -1;
+	}
+
+	/* We use the ID key'd nhg table for kernel updates */
+	id = *((uint32_t *)RTA_DATA(tb[NHA_ID]));
+
+	family = nhm->nh_family;
+	afi = family2afi(family);
+
+	type = proto2zebra(nhm->nh_protocol, 0, true);
+
+	if (IS_ZEBRA_DEBUG_KERNEL)
+		zlog_debug("%s ID (%u) %s NS %u",
+			   nl_msg_type_to_str(h->nlmsg_type), id,
+			   nl_family_to_str(family), ns_id);
+
+
+	if (h->nlmsg_type == RTM_NEWNEXTHOP) {
+		if (tb[NHA_GROUP]) {
+			/**
+			 * If this is a group message its only going to have
+			 * an array of nexthop IDs associated with it
+			 */
+			grp_count = netlink_nexthop_process_group(tb, grp);
+		} else {
+			if (tb[NHA_BLACKHOLE]) {
+				/**
+				 * This nexthop is just for blackhole-ing
+				 * traffic, it should not have an OIF, GATEWAY,
+				 * or ENCAP
+				 */
+				nh.type = NEXTHOP_TYPE_BLACKHOLE;
+				nh.bh_type = BLACKHOLE_UNSPEC;
+			} else if (tb[NHA_OIF])
+				/**
+				 * This is a true new nexthop, so we need
+				 * to parse the gateway and device info
+				 */
+				nh = netlink_nexthop_process_nh(tb, family,
+								&ifp, ns_id);
+			else {
+
+				flog_warn(
+					EC_ZEBRA_BAD_NHG_MESSAGE,
+					"Invalid Nexthop message received from the kernel with ID (%u)",
+					id);
+				return -1;
+			}
+			SET_FLAG(nh.flags, NEXTHOP_FLAG_ACTIVE);
+			if (nhm->nh_flags & RTNH_F_ONLINK)
+				SET_FLAG(nh.flags, NEXTHOP_FLAG_ONLINK);
+			vrf_id = nh.vrf_id;
+		}
+
+		if (zebra_nhg_kernel_find(id, &nh, grp, grp_count, vrf_id, afi,
+					  type, startup))
+			return -1;
+
+	} else if (h->nlmsg_type == RTM_DELNEXTHOP)
+		zebra_nhg_kernel_del(id);
+
+	return 0;
+}
+
+#if 0 /* Force off kernel nexthop group installs for now */
+/**
+ * netlink_request_nexthop() - Request nextop information from the kernel
+ * @zns:	Zebra namespace
+ * @family:	AF_* netlink family
+ * @type:	RTM_* route type
+ *
+ * Return:	Result status
+ */
+static int netlink_request_nexthop(struct zebra_ns *zns, int family, int type)
+{
+	struct {
+		struct nlmsghdr n;
+		struct nhmsg nhm;
+	} req;
+
+	/* Form the request, specifying filter (rtattr) if needed. */
+	memset(&req, 0, sizeof(req));
+	req.n.nlmsg_type = type;
+	req.n.nlmsg_flags = NLM_F_ROOT | NLM_F_MATCH | NLM_F_REQUEST;
+	req.n.nlmsg_len = NLMSG_LENGTH(sizeof(struct nhmsg));
+	req.nhm.nh_family = family;
+
+	return netlink_request(&zns->netlink_cmd, &req.n);
+}
+
+
+/**
+ * netlink_nexthop_read() - Nexthop read function using netlink interface
+ *
+ * @zns:	Zebra name space
+ *
+ * Return:	Result status
+ * Only called at bootstrap time.
+ */
+int netlink_nexthop_read(struct zebra_ns *zns)
+{
+	int ret;
+	struct zebra_dplane_info dp_info;
+
+	zebra_dplane_info_from_zns(&dp_info, zns, true /*is_cmd*/);
+
+	/* Get nexthop objects */
+	ret = netlink_request_nexthop(zns, AF_UNSPEC, RTM_GETNEXTHOP);
+	if (ret < 0)
+		return ret;
+	ret = netlink_parse_info(netlink_nexthop_change, &zns->netlink_cmd,
+				 &dp_info, 0, 1);
+
+	if (!ret)
+		/* If we succesfully read in nexthop objects,
+		 * this kernel must support them.
+		 */
+		supports_nh = true;
+	else if (IS_ZEBRA_DEBUG_KERNEL)
+		zlog_debug("Nexthop objects not supported on this kernel");
+
+	return ret;
+}
+#else
+int netlink_nexthop_read(struct zebra_ns *zns)
+{
+	return 0;
+}
+#endif
+
+
 int kernel_neigh_update(int add, int ifindex, uint32_t addr, char *lla,
 			int llalen, ns_id_t ns_id)
 {
@@ -1924,7 +2508,7 @@ static int netlink_vxlan_flood_list_update(struct interface *ifp,
 	req.n.nlmsg_type = cmd;
 	req.ndm.ndm_family = PF_BRIDGE;
 	req.ndm.ndm_state = NUD_NOARP | NUD_PERMANENT;
-	req.ndm.ndm_flags |= NTF_SELF; // Handle by "self", not "master"
+	req.ndm.ndm_flags |= NTF_SELF; /* Handle by "self", not "master" */
 
 
 	addattr_l(&req.n, sizeof(req), NDA_LLADDR, &dst_mac, 6);
@@ -1977,7 +2561,7 @@ static int netlink_macfdb_change(struct nlmsghdr *h, int len, ns_id_t ns_id)
 	struct interface *br_if;
 	struct ethaddr mac;
 	vlanid_t vid = 0;
-	struct prefix vtep_ip;
+	struct in_addr vtep_ip;
 	int vid_present = 0, dst_present = 0;
 	char buf[ETHER_ADDR_STRLEN];
 	char vid_buf[20];
@@ -1990,66 +2574,25 @@ static int netlink_macfdb_change(struct nlmsghdr *h, int len, ns_id_t ns_id)
 	if (!is_evpn_enabled())
 		return 0;
 
-	/* The interface should exist. */
-	ifp = if_lookup_by_index_per_ns(zebra_ns_lookup(ns_id),
-					ndm->ndm_ifindex);
-	if (!ifp || !ifp->info) {
-		if (IS_ZEBRA_DEBUG_KERNEL)
-			zlog_debug("\t%s without associated interface: %u",
-				   __PRETTY_FUNCTION__, ndm->ndm_ifindex);
-		return 0;
-	}
-
-	/* The interface should be something we're interested in. */
-	if (!IS_ZEBRA_IF_BRIDGE_SLAVE(ifp)) {
-		if (IS_ZEBRA_DEBUG_KERNEL)
-			zlog_debug("\t%s Not interested in %s, not a slave",
-				   __PRETTY_FUNCTION__, ifp->name);
-		return 0;
-	}
-
-	/* Drop "permanent" entries. */
-	if (ndm->ndm_state & NUD_PERMANENT) {
-		if (IS_ZEBRA_DEBUG_KERNEL)
-			zlog_debug("\t%s Entry is PERMANENT, dropping",
-				   __PRETTY_FUNCTION__);
-		return 0;
-	}
-
-	zif = (struct zebra_if *)ifp->info;
-	if ((br_if = zif->brslave_info.br_if) == NULL) {
-		if (IS_ZEBRA_DEBUG_KERNEL)
-			zlog_debug(
-				"%s family %s IF %s(%u) brIF %u - no bridge master",
-				nl_msg_type_to_str(h->nlmsg_type),
-				nl_family_to_str(ndm->ndm_family), ifp->name,
-				ndm->ndm_ifindex,
-				zif->brslave_info.bridge_ifindex);
-		return 0;
-	}
-
-	/* Parse attributes and extract fields of interest. */
+	/* Parse attributes and extract fields of interest. Do basic
+	 * validation of the fields.
+	 */
 	memset(tb, 0, sizeof tb);
 	netlink_parse_rtattr(tb, NDA_MAX, NDA_RTA(ndm), len);
 
 	if (!tb[NDA_LLADDR]) {
 		if (IS_ZEBRA_DEBUG_KERNEL)
-			zlog_debug("%s family %s IF %s(%u) brIF %u - no LLADDR",
+			zlog_debug("%s AF_BRIDGE IF %u - no LLADDR",
 				   nl_msg_type_to_str(h->nlmsg_type),
-				   nl_family_to_str(ndm->ndm_family), ifp->name,
-				   ndm->ndm_ifindex,
-				   zif->brslave_info.bridge_ifindex);
+				   ndm->ndm_ifindex);
 		return 0;
 	}
 
 	if (RTA_PAYLOAD(tb[NDA_LLADDR]) != ETH_ALEN) {
 		if (IS_ZEBRA_DEBUG_KERNEL)
 			zlog_debug(
-				"%s family %s IF %s(%u) brIF %u - LLADDR is not MAC, len %lu",
-				nl_msg_type_to_str(h->nlmsg_type),
-				nl_family_to_str(ndm->ndm_family), ifp->name,
-				ndm->ndm_ifindex,
-				zif->brslave_info.bridge_ifindex,
+				"%s AF_BRIDGE IF %u - LLADDR is not MAC, len %lu",
+				nl_msg_type_to_str(h->nlmsg_type), ndm->ndm_ifindex,
 				(unsigned long)RTA_PAYLOAD(tb[NDA_LLADDR]));
 		return 0;
 	}
@@ -2065,23 +2608,39 @@ static int netlink_macfdb_change(struct nlmsghdr *h, int len, ns_id_t ns_id)
 	if (tb[NDA_DST]) {
 		/* TODO: Only IPv4 supported now. */
 		dst_present = 1;
-		vtep_ip.family = AF_INET;
-		vtep_ip.prefixlen = IPV4_MAX_BITLEN;
-		memcpy(&(vtep_ip.u.prefix4.s_addr), RTA_DATA(tb[NDA_DST]),
+		memcpy(&vtep_ip.s_addr, RTA_DATA(tb[NDA_DST]),
 		       IPV4_MAX_BYTELEN);
-		sprintf(dst_buf, " dst %s", inet_ntoa(vtep_ip.u.prefix4));
+		sprintf(dst_buf, " dst %s", inet_ntoa(vtep_ip));
+	}
+
+	if (IS_ZEBRA_DEBUG_KERNEL)
+		zlog_debug("Rx %s AF_BRIDGE IF %u%s st 0x%x fl 0x%x MAC %s%s",
+			   nl_msg_type_to_str(h->nlmsg_type),
+			   ndm->ndm_ifindex, vid_present ? vid_buf : "",
+			   ndm->ndm_state, ndm->ndm_flags,
+			   prefix_mac2str(&mac, buf, sizeof(buf)),
+			   dst_present ? dst_buf : "");
+
+	/* The interface should exist. */
+	ifp = if_lookup_by_index_per_ns(zebra_ns_lookup(ns_id),
+					ndm->ndm_ifindex);
+	if (!ifp || !ifp->info)
+		return 0;
+
+	/* The interface should be something we're interested in. */
+	if (!IS_ZEBRA_IF_BRIDGE_SLAVE(ifp))
+		return 0;
+
+	zif = (struct zebra_if *)ifp->info;
+	if ((br_if = zif->brslave_info.br_if) == NULL) {
+		zlog_debug("%s AF_BRIDGE IF %s(%u) brIF %u - no bridge master",
+			   nl_msg_type_to_str(h->nlmsg_type),
+			   ifp->name, ndm->ndm_ifindex,
+			   zif->brslave_info.bridge_ifindex);
+		return 0;
 	}
 
 	sticky = !!(ndm->ndm_state & NUD_NOARP);
-
-	if (IS_ZEBRA_DEBUG_KERNEL)
-		zlog_debug("Rx %s family %s IF %s(%u)%s %sMAC %s%s",
-			   nl_msg_type_to_str(h->nlmsg_type),
-			   nl_family_to_str(ndm->ndm_family), ifp->name,
-			   ndm->ndm_ifindex, vid_present ? vid_buf : "",
-			   sticky ? "sticky " : "",
-			   prefix_mac2str(&mac, buf, sizeof(buf)),
-			   dst_present ? dst_buf : "");
 
 	if (filter_vlan && vid != filter_vlan) {
 		if (IS_ZEBRA_DEBUG_KERNEL)
@@ -2096,6 +2655,10 @@ static int netlink_macfdb_change(struct nlmsghdr *h, int len, ns_id_t ns_id)
 	 * so perform an implicit delete of any local entry (if it exists).
 	 */
 	if (h->nlmsg_type == RTM_NEWNEIGH) {
+                /* Drop "permanent" entries. */
+                if (ndm->ndm_state & NUD_PERMANENT)
+                        return 0;
+
 		if (IS_ZEBRA_IF_VXLAN(ifp))
 			return zebra_vxlan_check_del_local_mac(ifp, br_if, &mac,
 							       vid);
@@ -2105,16 +2668,20 @@ static int netlink_macfdb_change(struct nlmsghdr *h, int len, ns_id_t ns_id)
 	}
 
 	/* This is a delete notification.
+	 * Ignore the notification with IP dest as it may just signify that the
+	 * MAC has moved from remote to local. The exception is the special
+	 * all-zeros MAC that represents the BUM flooding entry; we may have
+	 * to readd it. Otherwise,
 	 *  1. For a MAC over VxLan, check if it needs to be refreshed(readded)
 	 *  2. For a MAC over "local" interface, delete the mac
 	 * Note: We will get notifications from both bridge driver and VxLAN
 	 * driver.
-	 * Ignore the notification from VxLan driver as it is also generated
-	 * when mac moves from remote to local.
 	 */
 	if (dst_present) {
-		if (IS_ZEBRA_DEBUG_KERNEL)
-			zlog_debug("\tNo Destination Present");
+		u_char zero_mac[6] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
+
+		if (!memcmp(zero_mac, mac.octet, ETH_ALEN))
+			return zebra_vxlan_check_readd_vtep(ifp, vtep_ip);
 		return 0;
 	}
 

@@ -2408,10 +2408,18 @@ static void bgp_process_main_one(struct bgp *bgp, struct bgp_node *rn,
 				if (new_select->type == ZEBRA_ROUTE_BGP
 				    && (new_select->sub_type == BGP_ROUTE_NORMAL
 					|| new_select->sub_type
-						   == BGP_ROUTE_IMPORTED))
+						   == BGP_ROUTE_IMPORTED)) {
 
+					/* For EVPN-based routes, need to del
+					 * followed by add, to clear entries
+					 * related to neighbor and RMAC.
+					 */
+					if (is_route_parent_evpn(old_select))
+						bgp_zebra_withdraw(p,
+							old_select, bgp, safi);
 					bgp_zebra_announce(rn, p, old_select,
 							   bgp, afi, safi);
+				}
 			}
 		}
 		UNSET_FLAG(old_select->flags, BGP_PATH_MULTIPATH_CHG);
@@ -2499,9 +2507,9 @@ static void bgp_process_main_one(struct bgp *bgp, struct bgp_node *rn,
 			|| new_select->sub_type == BGP_ROUTE_AGGREGATE
 			|| new_select->sub_type == BGP_ROUTE_IMPORTED)) {
 
-			/* if this is an evpn imported type-5 prefix,
-			 * we need to withdraw the route first to clear
-			 * the nh neigh and the RMAC entry.
+			/* For EVPN-based routes, need to del
+			 * followed by add, to clear entries
+			 * related to neighbor and RMAC.
 			 */
 			if (old_select &&
 			    is_route_parent_evpn(old_select))
@@ -2726,7 +2734,7 @@ int bgp_maximum_prefix_overflow(struct peer *peer, afi_t afi, safi_t safi,
 		zlog_info(
 			"%%MAXPFXEXCEED: No. of %s prefix received from %s %ld exceed, "
 			"limit %ld",
-			afi_safi_print(afi, safi), peer->host,
+			get_afi_safi_str(afi, safi, false), peer->host,
 			peer->pcount[afi][safi], peer->pmax[afi][safi]);
 		SET_FLAG(peer->af_sflags[afi][safi], PEER_STATUS_PREFIX_LIMIT);
 
@@ -2787,7 +2795,7 @@ int bgp_maximum_prefix_overflow(struct peer *peer, afi_t afi, safi_t safi,
 
 		zlog_info(
 			"%%MAXPFX: No. of %s prefix received from %s reaches %ld, max %ld",
-			afi_safi_print(afi, safi), peer->host,
+			get_afi_safi_str(afi, safi, false), peer->host,
 			peer->pcount[afi][safi], peer->pmax[afi][safi]);
 		SET_FLAG(peer->af_sflags[afi][safi],
 			 PEER_STATUS_PREFIX_THRESHOLD);
@@ -7845,20 +7853,25 @@ void route_vty_out_detail(struct vty *vty, struct bgp *bgp,
 		json_nexthop_global = json_object_new_object();
 	}
 
-	if (!json_paths && safi == SAFI_EVPN) {
+	if (!json_paths && path->extra) {
 		char tag_buf[30];
 
-		bgp_evpn_route2str((struct prefix_evpn *)&bn->p,
-				   buf2, sizeof(buf2));
-		vty_out(vty, "  Route %s", buf2);
+		buf2[0] = '\0';
 		tag_buf[0] = '\0';
 		if (path->extra && path->extra->num_labels) {
 			bgp_evpn_label2str(path->extra->label,
 					   path->extra->num_labels, tag_buf,
 					   sizeof(tag_buf));
-			vty_out(vty, " VNI %s", tag_buf);
 		}
-		vty_out(vty, "\n");
+		if (safi == SAFI_EVPN) {
+			bgp_evpn_route2str((struct prefix_evpn *)&bn->p,
+					   buf2, sizeof(buf2));
+			vty_out(vty, "  Route %s", buf2);
+			if (tag_buf[0] != '\0')
+				vty_out(vty, " VNI %s", tag_buf);
+			vty_out(vty, "\n");
+		}
+
 		if (path->extra && path->extra->parent) {
 			struct bgp_path_info *parent_ri;
 			struct bgp_node *rn, *prn;
@@ -7867,11 +7880,14 @@ void route_vty_out_detail(struct vty *vty, struct bgp *bgp,
 			rn = parent_ri->net;
 			if (rn && rn->prn) {
 				prn = rn->prn;
-				vty_out(vty, "  Imported from %s:%s\n",
-					prefix_rd2str(
-						(struct prefix_rd *)&prn->p,
-						buf1, sizeof(buf1)),
-					buf2);
+				prefix_rd2str((struct prefix_rd *)&prn->p,
+					      buf1, sizeof(buf1));
+				if (is_pi_family_evpn(parent_ri)) {
+					bgp_evpn_route2str((struct prefix_evpn *)&rn->p,
+							   buf2, sizeof(buf2));
+					vty_out(vty, "  Imported from %s:%s, VNI %s\n", buf1, buf2, tag_buf);
+				} else
+					vty_out(vty, "  Imported from %s:%s\n", buf1, buf2);
 			}
 		}
 	}
@@ -8406,11 +8422,8 @@ void route_vty_out_detail(struct vty *vty, struct bgp *bgp,
 						       bgp_path_selection_reason2str(bn->reason));
 			} else {
 				vty_out(vty, ", best");
-				/* Once internal testing is cleared up
-				 * remove this comment
-				 * vty_out(vty, " (%s)",
-				 * bgp_path_selection_reason2str(bn->reason));
-				 */
+				vty_out(vty, " (%s)",
+					bgp_path_selection_reason2str(bn->reason));
 			}
 		}
 
@@ -10155,63 +10168,6 @@ static int bgp_show_prefix_longer(struct vty *vty, struct bgp *bgp,
 	return ret;
 }
 
-static struct peer *peer_lookup_in_view(struct vty *vty, struct bgp *bgp,
-					const char *ip_str, bool use_json)
-{
-	int ret;
-	struct peer *peer;
-	union sockunion su;
-
-	/* Get peer sockunion. */
-	ret = str2sockunion(ip_str, &su);
-	if (ret < 0) {
-		peer = peer_lookup_by_conf_if(bgp, ip_str);
-		if (!peer) {
-			peer = peer_lookup_by_hostname(bgp, ip_str);
-
-			if (!peer) {
-				if (use_json) {
-					json_object *json_no = NULL;
-					json_no = json_object_new_object();
-					json_object_string_add(
-						json_no,
-						"malformedAddressOrName",
-						ip_str);
-					vty_out(vty, "%s\n",
-						json_object_to_json_string_ext(
-							json_no,
-							JSON_C_TO_STRING_PRETTY));
-					json_object_free(json_no);
-				} else
-					vty_out(vty,
-						"%% Malformed address or name: %s\n",
-						ip_str);
-				return NULL;
-			}
-		}
-		return peer;
-	}
-
-	/* Peer structure lookup. */
-	peer = peer_lookup(bgp, &su);
-	if (!peer) {
-		if (use_json) {
-			json_object *json_no = NULL;
-			json_no = json_object_new_object();
-			json_object_string_add(json_no, "warning",
-					       "No such neighbor in this view/vrf");
-			vty_out(vty, "%s\n",
-				json_object_to_json_string_ext(
-					json_no, JSON_C_TO_STRING_PRETTY));
-			json_object_free(json_no);
-		} else
-			vty_out(vty, "No such neighbor in this view/vrf\n");
-		return NULL;
-	}
-
-	return peer;
-}
-
 enum bgp_stats {
 	BGP_STATS_MAXBITLEN = 0,
 	BGP_STATS_RIB,
@@ -10400,7 +10356,7 @@ static int bgp_table_stats(struct vty *vty, struct bgp *bgp, afi_t afi,
 		return CMD_WARNING;
 	}
 
-	vty_out(vty, "BGP %s RIB statistics\n", afi_safi_print(afi, safi));
+	vty_out(vty, "BGP %s RIB statistics\n", get_afi_safi_str(afi, safi, false));
 
 	/* labeled-unicast routes live in the unicast table */
 	if (safi == SAFI_LABELED_UNICAST)
@@ -10599,7 +10555,7 @@ static int bgp_peer_counts(struct vty *vty, struct peer *peer, afi_t afi,
 	if (use_json) {
 		json_object_string_add(json, "prefixCountsFor", peer->host);
 		json_object_string_add(json, "multiProtocol",
-				       afi_safi_print(afi, safi));
+				       get_afi_safi_str(afi, safi, true));
 		json_object_int_add(json, "pfxCounter",
 				    peer->pcount[afi][safi]);
 
@@ -10625,10 +10581,10 @@ static int bgp_peer_counts(struct vty *vty, struct peer *peer, afi_t afi,
 		    && bgp_flag_check(peer->bgp, BGP_FLAG_SHOW_HOSTNAME)) {
 			vty_out(vty, "Prefix counts for %s/%s, %s\n",
 				peer->hostname, peer->host,
-				afi_safi_print(afi, safi));
+				get_afi_safi_str(afi, safi, false));
 		} else {
 			vty_out(vty, "Prefix counts for %s, %s\n", peer->host,
-				afi_safi_print(afi, safi));
+				get_afi_safi_str(afi, safi, false));
 		}
 
 		vty_out(vty, "PfxCt: %ld\n", peer->pcount[afi][safi]);
@@ -11256,7 +11212,7 @@ DEFUN (show_ip_bgp_neighbor_received_prefix_filter,
 	if (count) {
 		if (!uj)
 			vty_out(vty, "Address Family: %s\n",
-				afi_safi_print(afi, safi));
+				get_afi_safi_str(afi, safi, false));
 		prefix_bgp_show_prefix_list(vty, afi, name, uj);
 	} else {
 		if (uj)

@@ -130,7 +130,7 @@ static int ospf_auth_type(struct ospf_interface *oi)
 	return auth_type;
 }
 
-struct ospf_packet *ospf_packet_new(size_t size)
+static struct ospf_packet *ospf_packet_new(size_t size)
 {
 	struct ospf_packet *new;
 
@@ -229,22 +229,8 @@ void ospf_fifo_free(struct ospf_fifo *fifo)
 	XFREE(MTYPE_OSPF_FIFO, fifo);
 }
 
-void ospf_packet_add(struct ospf_interface *oi, struct ospf_packet *op)
+static void ospf_packet_add(struct ospf_interface *oi, struct ospf_packet *op)
 {
-	if (!oi->obuf) {
-		flog_err(
-			EC_OSPF_PKT_PROCESS,
-			"ospf_packet_add(interface %s in state %d [%s], packet type %s, "
-			"destination %s) called with NULL obuf, ignoring "
-			"(please report this bug)!\n",
-			IF_NAME(oi), oi->state,
-			lookup_msg(ospf_ism_state_msg, oi->state, NULL),
-			lookup_msg(ospf_packet_type_str,
-				   stream_getc_from(op->s, 1), NULL),
-			inet_ntoa(op->dst));
-		return;
-	}
-
 	/* Add packet to end of queue. */
 	ospf_fifo_push(oi->obuf, op);
 
@@ -255,20 +241,6 @@ void ospf_packet_add(struct ospf_interface *oi, struct ospf_packet *op)
 static void ospf_packet_add_top(struct ospf_interface *oi,
 				struct ospf_packet *op)
 {
-	if (!oi->obuf) {
-		flog_err(
-			EC_OSPF_PKT_PROCESS,
-			"ospf_packet_add(interface %s in state %d [%s], packet type %s, "
-			"destination %s) called with NULL obuf, ignoring "
-			"(please report this bug)!\n",
-			IF_NAME(oi), oi->state,
-			lookup_msg(ospf_ism_state_msg, oi->state, NULL),
-			lookup_msg(ospf_packet_type_str,
-				   stream_getc_from(op->s, 1), NULL),
-			inet_ntoa(op->dst));
-		return;
-	}
-
 	/* Add packet to head of queue. */
 	ospf_fifo_push_head(oi->obuf, op);
 
@@ -276,7 +248,7 @@ static void ospf_packet_add_top(struct ospf_interface *oi,
 	/* ospf_fifo_debug (oi->obuf); */
 }
 
-void ospf_packet_delete(struct ospf_interface *oi)
+static void ospf_packet_delete(struct ospf_interface *oi)
 {
 	struct ospf_packet *op;
 
@@ -286,7 +258,7 @@ void ospf_packet_delete(struct ospf_interface *oi)
 		ospf_packet_free(op);
 }
 
-struct ospf_packet *ospf_packet_dup(struct ospf_packet *op)
+static struct ospf_packet *ospf_packet_dup(struct ospf_packet *op)
 {
 	struct ospf_packet *new;
 
@@ -668,12 +640,9 @@ static int ospf_write(struct thread *thread)
 		return -1;
 	}
 
-	ospf->t_write = NULL;
-
 	node = listhead(ospf->oi_write_q);
 	assert(node);
 	oi = listgetdata(node);
-	assert(oi);
 
 #ifdef WANT_OSPF_WRITE_FRAGMENT
 	/* seed ipid static with low order bits of time */
@@ -876,9 +845,7 @@ static int ospf_write(struct thread *thread)
 		/* Setup to service from the head of the queue again */
 		if (!list_isempty(ospf->oi_write_q)) {
 			node = listhead(ospf->oi_write_q);
-			assert(node);
 			oi = listgetdata(node);
-			assert(oi);
 		}
 	}
 
@@ -1365,11 +1332,12 @@ static void ospf_db_desc(struct ip *iph, struct ospf_header *ospfh,
 	case NSM_Down:
 	case NSM_Attempt:
 	case NSM_TwoWay:
-		flog_warn(
-			EC_OSPF_PACKET,
-			"Packet[DD]: Neighbor %s state is %s, packet discarded.",
-			inet_ntoa(nbr->router_id),
-			lookup_msg(ospf_nsm_state_msg, nbr->state, NULL));
+		if (CHECK_FLAG(oi->ospf->config, OSPF_LOG_ADJACENCY_DETAIL))
+			zlog_info(
+				"Packet[DD]: Neighbor %s state is %s, packet discarded.",
+				inet_ntoa(nbr->router_id),
+				lookup_msg(ospf_nsm_state_msg, nbr->state,
+					   NULL));
 		break;
 	case NSM_Init:
 		OSPF_NSM_EVENT_EXECUTE(nbr, NSM_TwoWayReceived);
@@ -4016,6 +3984,23 @@ static void ospf_ls_upd_queue_send(struct ospf_interface *oi,
 			oi->on_write_q = 1;
 		}
 		ospf_write(&os_packet_thd);
+		/*
+		 * We are fake calling ospf_write with a fake
+		 * thread.  Imagine that we have oi_a already
+		 * enqueued and we have turned on the write
+		 * thread(t_write).
+		 * Now this function calls this for oi_b
+		 * so the on_write_q has oi_a and oi_b on
+		 * it, ospf_write runs and clears the packets
+		 * for both oi_a and oi_b.  Removing them from
+		 * the on_write_q.  After this thread of execution
+		 * finishes we will execute the t_write thread
+		 * with nothing in the on_write_q causing an
+		 * assert.  So just make sure that the t_write
+		 * is actually turned off.
+		 */
+		if (list_isempty(oi->ospf->oi_write_q))
+			OSPF_TIMER_OFF(oi->ospf->t_write);
 	} else {
 		/* Hook thread to write packet. */
 		OSPF_ISM_WRITE_ON(oi->ospf);

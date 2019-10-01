@@ -66,6 +66,7 @@
 #include "zebra/zebra_ptm.h"
 #include "zebra/zebra_mpls.h"
 #include "zebra/kernel_netlink.h"
+#include "zebra/rt_netlink.h"
 #include "zebra/if_netlink.h"
 #include "zebra/zebra_errors.h"
 #include "zebra/zebra_vxlan.h"
@@ -590,7 +591,7 @@ static int netlink_interface(struct nlmsghdr *h, ns_id_t ns_id, int startup)
 	char *kind = NULL;
 	char *desc = NULL;
 	char *slave_kind = NULL;
-	struct zebra_ns *zns;
+	struct zebra_ns *zns = NULL;
 	vrf_id_t vrf_id = VRF_DEFAULT;
 	zebra_iftype_t zif_type = ZEBRA_IF_OTHER;
 	zebra_slave_iftype_t zif_slave_type = ZEBRA_IF_SLAVE_NONE;
@@ -598,6 +599,7 @@ static int netlink_interface(struct nlmsghdr *h, ns_id_t ns_id, int startup)
 	ifindex_t link_ifindex = IFINDEX_INTERNAL;
 	ifindex_t bond_ifindex = IFINDEX_INTERNAL;
 	struct zebra_if *zif;
+	struct vrf *vrf = NULL;
 
 	zns = zebra_ns_lookup(ns_id);
 	ifi = NLMSG_DATA(h);
@@ -681,9 +683,17 @@ static int netlink_interface(struct nlmsghdr *h, ns_id_t ns_id, int startup)
 	if (tb[IFLA_LINK])
 		link_ifindex = *(ifindex_t *)RTA_DATA(tb[IFLA_LINK]);
 
-	/* Add interface. */
-	ifp = if_get_by_name(name, vrf_id);
-	set_ifindex(ifp, ifi->ifi_index, zns);
+	vrf = vrf_get(vrf_id, NULL);
+	/* Add interface.
+	 * We add by index first because in some cases such as the master
+	 * interface, we have the index before we have the name. Fixing
+	 * back references on the slave interfaces is painful if not done
+	 * this way, i.e. by creating by ifindex.
+	 */
+	ifp = if_get_by_ifindex(ifi->ifi_index, vrf_id);
+	set_ifindex(ifp, ifi->ifi_index, zns); /* add it to ns struct */
+	strlcpy(ifp->name, name, sizeof(ifp->name));
+	IFNAME_RB_INSERT(vrf, ifp);
 	ifp->flags = ifi->ifi_flags & 0x0000fffff;
 	ifp->mtu6 = ifp->mtu = *(uint32_t *)RTA_DATA(tb[IFLA_MTU]);
 	ifp->metric = 0;
@@ -791,6 +801,23 @@ int interface_lookup_netlink(struct zebra_ns *zns)
 
 	/* fixup linkages */
 	zebra_if_update_all_links();
+	return 0;
+}
+
+/**
+ * interface_addr_lookup_netlink() - Look up interface addresses
+ *
+ * @zns:	Zebra netlink socket
+ * Return:	Result status
+ */
+static int interface_addr_lookup_netlink(struct zebra_ns *zns)
+{
+	int ret;
+	struct zebra_dplane_info dp_info;
+	struct nlsock *netlink_cmd = &zns->netlink_cmd;
+
+	/* Capture key info from ns struct */
+	zebra_dplane_info_from_zns(&dp_info, zns, true /*is_cmd*/);
 
 	/* Get IPv4 address of the interfaces. */
 	ret = netlink_request_intf_addr(netlink_cmd, AF_INET, RTM_GETADDR, 0);
@@ -1432,6 +1459,13 @@ int netlink_protodown(struct interface *ifp, bool down)
 void interface_list(struct zebra_ns *zns)
 {
 	interface_lookup_netlink(zns);
+	/* We add routes for interface address,
+	 * so we need to get the nexthop info
+	 * from the kernel before we can do that
+	 */
+	netlink_nexthop_read(zns);
+
+	interface_addr_lookup_netlink(zns);
 }
 
 #endif /* GNU_LINUX */

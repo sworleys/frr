@@ -3021,7 +3021,7 @@ static int bgp_route_match_add(struct vty *vty, const char *command,
 {
 	VTY_DECLVAR_CONTEXT(route_map_index, index);
 	int retval = CMD_SUCCESS;
-	int ret;
+	enum rmap_compile_rets ret;
 
 	ret = route_map_add_match(index, command, arg, type);
 	switch (ret) {
@@ -3038,6 +3038,11 @@ static int bgp_route_match_add(struct vty *vty, const char *command,
 			route_map_upd8_dependency(type, arg, index->map->name);
 		}
 		break;
+	case RMAP_DUPLICATE_RULE:
+		/*
+		 * Intentionally doing nothing here.
+		 */
+		break;
 	}
 
 	return retval;
@@ -3048,7 +3053,7 @@ static int bgp_route_match_delete(struct vty *vty, const char *command,
 				  const char *arg, route_map_event_t type)
 {
 	VTY_DECLVAR_CONTEXT(route_map_index, index);
-	int ret;
+	enum rmap_compile_rets ret;
 	int retval = CMD_SUCCESS;
 	char *dep_name = NULL;
 	const char *tmpstr;
@@ -3080,6 +3085,11 @@ static int bgp_route_match_delete(struct vty *vty, const char *command,
 	case RMAP_COMPILE_SUCCESS:
 		if (type != RMAP_EVENT_MATCH_DELETED && dep_name)
 			route_map_upd8_dependency(type, dep_name, rmap_name);
+		break;
+	case RMAP_DUPLICATE_RULE:
+		/*
+		 * Nothing to do here
+		 */
 		break;
 	}
 
@@ -4104,6 +4114,18 @@ DEFUN (no_set_aspath_prepend,
 	return ret;
 }
 
+DEFUN (no_set_aspath_prepend_lastas,
+       no_set_aspath_prepend_lastas_cmd,
+       "no set as-path prepend last-as [(1-10)]",
+       NO_STR
+       SET_STR
+       "Transform BGP AS_PATH attribute\n"
+       "Prepend to the as-path\n"
+       "Use the peers AS-number\n"
+       "Number of times to insert\n")
+{
+	return no_set_aspath_prepend(self, vty, argc, argv);
+}
 
 DEFUN (set_aspath_exclude,
        set_aspath_exclude_cmd,
@@ -4291,9 +4313,12 @@ DEFUN (set_community_delete,
        "Delete matching communities\n")
 {
 	int idx_comm_list = 2;
+	char *args;
 
+	args = argv_concat(argv, argc, idx_comm_list);
 	generic_set_add(vty, VTY_GET_CONTEXT(route_map_index), "comm-list",
-			argv[idx_comm_list]->arg);
+			args);
+	XFREE(MTYPE_TMP, args);
 
 	return CMD_SUCCESS;
 }
@@ -4383,8 +4408,13 @@ DEFUN (set_lcommunity_delete,
        "Large Community-list name\n"
        "Delete matching large communities\n")
 {
+	int idx_lcomm_list = 2;
+	char *args;
+
+	args = argv_concat(argv, argc, idx_lcomm_list);
 	generic_set_add(vty, VTY_GET_CONTEXT(route_map_index),
-			"large-comm-list", argv[2]->arg);
+			"large-comm-list", args);
+	XFREE(MTYPE_TMP, args);
 
 	return CMD_SUCCESS;
 }
@@ -5061,6 +5091,7 @@ void bgp_route_map_init(void)
 	install_element(RMAP_NODE, &set_aspath_prepend_lastas_cmd);
 	install_element(RMAP_NODE, &set_aspath_exclude_cmd);
 	install_element(RMAP_NODE, &no_set_aspath_prepend_cmd);
+	install_element(RMAP_NODE, &no_set_aspath_prepend_lastas_cmd);
 	install_element(RMAP_NODE, &no_set_aspath_exclude_cmd);
 	install_element(RMAP_NODE, &no_set_aspath_exclude_all_cmd);
 	install_element(RMAP_NODE, &set_origin_cmd);

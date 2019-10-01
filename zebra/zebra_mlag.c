@@ -29,6 +29,7 @@
 #include "zebra/zebra_mlag.h"
 #include "zebra/zebra_mlag_private.h"
 #include "zebra/zebra_router.h"
+#include "zebra/zebra_memory.h"
 #include "zebra/zapi_msg.h"
 #include "zebra/debug.h"
 
@@ -909,6 +910,8 @@ void zebra_mlag_terminate(void)
 
 #ifdef HAVE_PROTOBUF
 
+DEFINE_MTYPE_STATIC(ZEBRA, MLAG_PBUF, "ZEBRA MLAG PROTOBUF")
+
 int zebra_mlag_protobuf_encode_client_data(struct stream *s, uint32_t *msg_type)
 {
 	ZebraMlagHeader hdr = ZEBRA_MLAG__HEADER__INIT;
@@ -948,9 +951,7 @@ int zebra_mlag_protobuf_encode_client_data(struct stream *s, uint32_t *msg_type)
 		if (rc)
 			return rc;
 		vrf_name_len = strlen(msg.vrf_name);
-		pay_load.vrf_name = malloc(vrf_name_len);
-		if (pay_load.vrf_name == NULL)
-			return -1;
+		pay_load.vrf_name = XMALLOC(MTYPE_MLAG_PBUF, vrf_name_len);
 		strncpy(pay_load.vrf_name, msg.vrf_name, vrf_name_len);
 		pay_load.source_ip = msg.source_ip;
 		pay_load.group_ip = msg.group_ip;
@@ -962,15 +963,16 @@ int zebra_mlag_protobuf_encode_client_data(struct stream *s, uint32_t *msg_type)
 
 		if (msg.owner_id == MLAG_OWNER_INTERFACE) {
 			vrf_name_len = strlen(msg.intf_name);
-			pay_load.intf_name = malloc(vrf_name_len);
+			pay_load.intf_name =
+				XMALLOC(MTYPE_MLAG_PBUF, vrf_name_len);
 			strncpy(pay_load.intf_name, msg.intf_name,
 				vrf_name_len);
 		}
 
 		len = zebra_mlag_mroute_add__pack(&pay_load, tmp_buf);
-		free(pay_load.vrf_name);
+		XFREE(MTYPE_MLAG_PBUF, pay_load.vrf_name);
 		if (msg.owner_id == MLAG_OWNER_INTERFACE)
-			free(pay_load.intf_name);
+			XFREE(MTYPE_MLAG_PBUF, pay_load.intf_name);
 	} break;
 	case MLAG_MROUTE_DEL: {
 		struct mlag_mroute_del msg;
@@ -981,9 +983,7 @@ int zebra_mlag_protobuf_encode_client_data(struct stream *s, uint32_t *msg_type)
 		if (rc)
 			return rc;
 		vrf_name_len = strlen(msg.vrf_name);
-		pay_load.vrf_name = malloc(vrf_name_len);
-		if (pay_load.vrf_name == NULL)
-			return -1;
+		pay_load.vrf_name = XMALLOC(MTYPE_MLAG_PBUF, vrf_name_len);
 		strncpy(pay_load.vrf_name, msg.vrf_name, vrf_name_len);
 		pay_load.source_ip = msg.source_ip;
 		pay_load.group_ip = msg.group_ip;
@@ -992,15 +992,16 @@ int zebra_mlag_protobuf_encode_client_data(struct stream *s, uint32_t *msg_type)
 
 		if (msg.owner_id == MLAG_OWNER_INTERFACE) {
 			vrf_name_len = strlen(msg.intf_name);
-			pay_load.intf_name = malloc(vrf_name_len);
+			pay_load.intf_name =
+				XMALLOC(MTYPE_MLAG_PBUF, vrf_name_len);
 			strncpy(pay_load.intf_name, msg.intf_name,
 				vrf_name_len);
 		}
 
 		len = zebra_mlag_mroute_del__pack(&pay_load, tmp_buf);
-		free(pay_load.vrf_name);
+		XFREE(MTYPE_MLAG_PBUF, pay_load.vrf_name);
 		if (msg.owner_id == MLAG_OWNER_INTERFACE)
-			free(pay_load.intf_name);
+			XFREE(MTYPE_MLAG_PBUF, pay_load.intf_name);
 	} break;
 	case MLAG_MROUTE_ADD_BULK: {
 		struct mlag_mroute_add msg;
@@ -1008,30 +1009,29 @@ int zebra_mlag_protobuf_encode_client_data(struct stream *s, uint32_t *msg_type)
 			ZEBRA_MLAG_MROUTE_ADD_BULK__INIT;
 		ZebraMlagMrouteAdd **pay_load = NULL;
 		int i = 0;
+		bool cleanup = false;
 
 		Bulk_msg.n_mroute_add = mlag_msg.msg_cnt;
-		pay_load = malloc(sizeof(ZebraMlagMrouteAdd *)
-				  * Bulk_msg.n_mroute_add);
+		pay_load = XMALLOC(MTYPE_MLAG_PBUF,
+				   sizeof(ZebraMlagMrouteAdd *)
+					   * Bulk_msg.n_mroute_add);
 
-		if (pay_load == NULL)
-			return -1;
 		for (i = 0; i < mlag_msg.msg_cnt; i++) {
 
 			uint32_t vrf_name_len = 0;
 
 			rc = zebra_mlag_lib_decode_mroute_add(s, &msg);
-			if (rc)
-				return rc;
-			pay_load[i] = malloc(sizeof(ZebraMlagMrouteAdd));
-			if (pay_load[i] == NULL)
-				return -1;
+			if (rc) {
+				cleanup = true;
+				break;
+			}
+			pay_load[i] = XMALLOC(MTYPE_MLAG_PBUF,
+					      sizeof(ZebraMlagMrouteAdd));
 			zebra_mlag_mroute_add__init(pay_load[i]);
 
 			vrf_name_len = strlen(msg.vrf_name);
-			pay_load[i]->vrf_name = malloc(vrf_name_len);
-			if (pay_load[i]->vrf_name == NULL)
-				return -1;
-
+			pay_load[i]->vrf_name =
+				XMALLOC(MTYPE_MLAG_PBUF, vrf_name_len);
 			strncpy(pay_load[i]->vrf_name, msg.vrf_name,
 				vrf_name_len);
 			pay_load[i]->source_ip = msg.source_ip;
@@ -1043,22 +1043,31 @@ int zebra_mlag_protobuf_encode_client_data(struct stream *s, uint32_t *msg_type)
 			pay_load[i]->vrf_id = msg.vrf_id;
 			if (msg.owner_id == MLAG_OWNER_INTERFACE) {
 				vrf_name_len = strlen(msg.intf_name);
-				pay_load[i]->intf_name = malloc(vrf_name_len);
+				pay_load[i]->intf_name =
+					XMALLOC(MTYPE_MLAG_PBUF, vrf_name_len);
 
 				strncpy(pay_load[i]->intf_name, msg.intf_name,
 					vrf_name_len);
 			}
 		}
-		Bulk_msg.mroute_add = pay_load;
-		len = zebra_mlag_mroute_add_bulk__pack(&Bulk_msg, tmp_buf);
+		if (cleanup == false) {
+			Bulk_msg.mroute_add = pay_load;
+			len = zebra_mlag_mroute_add_bulk__pack(&Bulk_msg,
+							       tmp_buf);
+		}
 
 		for (i = 0; i < mlag_msg.msg_cnt; i++) {
-			free(pay_load[i]->vrf_name);
-			if (pay_load[i]->owner_id == MLAG_OWNER_INTERFACE)
-				free(pay_load[i]->intf_name);
-			free(pay_load[i]);
+			if (pay_load[i]->vrf_name)
+				XFREE(MTYPE_MLAG_PBUF, pay_load[i]->vrf_name);
+			if (pay_load[i]->owner_id == MLAG_OWNER_INTERFACE
+			    && pay_load[i]->intf_name)
+				XFREE(MTYPE_MLAG_PBUF, pay_load[i]->intf_name);
+			if (pay_load[i])
+				XFREE(MTYPE_MLAG_PBUF, pay_load[i]);
 		}
-		free(pay_load);
+		XFREE(MTYPE_MLAG_PBUF, pay_load);
+		if (cleanup == true)
+			return -1;
 	} break;
 	case MLAG_MROUTE_DEL_BULK: {
 		struct mlag_mroute_del msg;
@@ -1066,29 +1075,30 @@ int zebra_mlag_protobuf_encode_client_data(struct stream *s, uint32_t *msg_type)
 			ZEBRA_MLAG_MROUTE_DEL_BULK__INIT;
 		ZebraMlagMrouteDel **pay_load = NULL;
 		int i = 0;
+		bool cleanup = false;
 
 		Bulk_msg.n_mroute_del = mlag_msg.msg_cnt;
-		pay_load = malloc(sizeof(ZebraMlagMrouteDel *)
-				  * Bulk_msg.n_mroute_del);
+		pay_load = XMALLOC(MTYPE_MLAG_PBUF,
+				   sizeof(ZebraMlagMrouteDel *)
+					   * Bulk_msg.n_mroute_del);
 
-		if (pay_load == NULL)
-			return -1;
 		for (i = 0; i < mlag_msg.msg_cnt; i++) {
 
 			uint32_t vrf_name_len = 0;
 
 			rc = zebra_mlag_lib_decode_mroute_del(s, &msg);
-			if (rc)
-				return rc;
-			pay_load[i] = malloc(sizeof(ZebraMlagMrouteDel));
-			if (pay_load[i] == NULL)
-				return -1;
+			if (rc) {
+				cleanup = true;
+				break;
+			}
+
+			pay_load[i] = XMALLOC(MTYPE_MLAG_PBUF,
+					      sizeof(ZebraMlagMrouteDel));
 			zebra_mlag_mroute_del__init(pay_load[i]);
 
 			vrf_name_len = strlen(msg.vrf_name);
-			pay_load[i]->vrf_name = malloc(vrf_name_len);
-			if (pay_load[i]->vrf_name == NULL)
-				return -1;
+			pay_load[i]->vrf_name =
+				XMALLOC(MTYPE_MLAG_PBUF, vrf_name_len);
 
 			strncpy(pay_load[i]->vrf_name, msg.vrf_name,
 				vrf_name_len);
@@ -1098,22 +1108,31 @@ int zebra_mlag_protobuf_encode_client_data(struct stream *s, uint32_t *msg_type)
 			pay_load[i]->vrf_id = msg.vrf_id;
 			if (msg.owner_id == MLAG_OWNER_INTERFACE) {
 				vrf_name_len = strlen(msg.intf_name);
-				pay_load[i]->intf_name = malloc(vrf_name_len);
+				pay_load[i]->intf_name =
+					XMALLOC(MTYPE_MLAG_PBUF, vrf_name_len);
 
 				strncpy(pay_load[i]->intf_name, msg.intf_name,
 					vrf_name_len);
 			}
 		}
-		Bulk_msg.mroute_del = pay_load;
-		len = zebra_mlag_mroute_del_bulk__pack(&Bulk_msg, tmp_buf);
+		if (cleanup == false) {
+			Bulk_msg.mroute_del = pay_load;
+			len = zebra_mlag_mroute_del_bulk__pack(&Bulk_msg,
+							       tmp_buf);
+		}
 
 		for (i = 0; i < mlag_msg.msg_cnt; i++) {
-			free(pay_load[i]->vrf_name);
-			if (pay_load[i]->owner_id == MLAG_OWNER_INTERFACE)
-				free(pay_load[i]->intf_name);
-			free(pay_load[i]);
+			if (pay_load[i]->vrf_name)
+				XFREE(MTYPE_MLAG_PBUF, pay_load[i]->vrf_name);
+			if (pay_load[i]->owner_id == MLAG_OWNER_INTERFACE
+			    && pay_load[i]->intf_name)
+				XFREE(MTYPE_MLAG_PBUF, pay_load[i]->intf_name);
+			if (pay_load[i])
+				XFREE(MTYPE_MLAG_PBUF, pay_load[i]);
 		}
-		free(pay_load);
+		XFREE(MTYPE_MLAG_PBUF, pay_load);
+		if (cleanup == true)
+			return -1;
 	} break;
 	default:
 		break;
@@ -1128,7 +1147,7 @@ int zebra_mlag_protobuf_encode_client_data(struct stream *s, uint32_t *msg_type)
 	hdr.type = (ZebraMlagHeader__MessageType)mlag_msg.msg_type;
 	if (len != 0) {
 		hdr.data.len = len;
-		hdr.data.data = malloc(len);
+		hdr.data.data = XMALLOC(MTYPE_MLAG_PBUF, len);
 		if (hdr.data.data == NULL)
 			return -1;
 		memcpy(hdr.data.data, tmp_buf, len);
@@ -1158,7 +1177,7 @@ int zebra_mlag_protobuf_encode_client_data(struct stream *s, uint32_t *msg_type)
 			zebra_mlag_lib_msgid_to_str(mlag_msg.msg_type, buf, 80),
 			len);
 	if (hdr.data.data)
-		free(hdr.data.data);
+		XFREE(MTYPE_MLAG_PBUF, hdr.data.data);
 
 	if (IS_ZEBRA_DEBUG_MLAG)
 		zlog_debug("%s: Exiting..", __func__);

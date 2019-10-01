@@ -123,6 +123,8 @@ struct zebra_l3vni_t_ {
 	/* SVI interface corresponding to the l3vni */
 	struct interface *svi_if;
 
+	struct interface *mac_vlan_if;
+
 	/* list of L2 VNIs associated with the L3 VNI */
 	struct list *l2vnis;
 
@@ -213,7 +215,8 @@ static inline vrf_id_t zl3vni_vrf_id(zebra_l3vni_t *zl3vni)
 	return zl3vni->vrf_id;
 }
 
-static inline void zl3vni_get_rmac(zebra_l3vni_t *zl3vni, struct ethaddr *rmac)
+static inline void zl3vni_get_svi_rmac(zebra_l3vni_t *zl3vni,
+				       struct ethaddr *rmac)
 {
 	if (!zl3vni)
 		return;
@@ -361,6 +364,7 @@ struct zebra_neigh_t_ {
 #define ZEBRA_NEIGH_DEF_GW    0x08
 #define ZEBRA_NEIGH_ROUTER_FLAG 0x10
 #define ZEBRA_NEIGH_DUPLICATE 0x20
+#define ZEBRA_NEIGH_SVI_IP 0x40
 
 	enum zebra_neigh_state state;
 
@@ -428,6 +432,7 @@ struct nh_walk_ctx {
 	struct json_object *json;
 };
 
+extern struct interface *zl3vni_map_to_mac_vlan_if(zebra_l3vni_t *zl3vni);
 /*
  * Multicast hash table.
  *

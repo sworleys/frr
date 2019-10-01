@@ -156,6 +156,12 @@ struct zebra_router {
 	 * Time for when we sweep the rib from old routes
 	 */
 	time_t startup_time;
+
+	/*
+	 * The hash of nexthop groups associated with this router
+	 */
+	struct hash *nhgs;
+	struct hash *nhgs_id;
 };
 
 #define GRACEFUL_RESTART_TIME 60
@@ -163,6 +169,7 @@ struct zebra_router {
 extern struct zebra_router zrouter;
 
 extern void zebra_router_init(void);
+extern void zebra_router_cleanup(void);
 extern void zebra_router_terminate(void);
 
 extern struct route_table *zebra_router_find_table(struct zebra_vrf *zvrf,
@@ -177,6 +184,7 @@ extern void zebra_router_release_table(struct zebra_vrf *zvrf, uint32_t tableid,
 extern int zebra_router_config_write(struct vty *vty);
 
 extern void zebra_router_sweep_route(void);
+extern void zebra_router_sweep_nhgs(void);
 
 extern uint32_t zebra_router_get_next_sequence(void);
 

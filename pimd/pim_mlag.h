@@ -41,14 +41,6 @@ extern int pim_zebra_mlag_process_down(void);
 
 extern int pim_zebra_mlag_handle_msg(struct stream *msg, int len);
 
-extern void pim_mlag_add_entry_to_peer(struct pim_ifchannel *ch);
-
-extern void pim_mlag_del_entry_to_peer(struct pim_ifchannel *ch);
-
-extern void pim_mlag_update_cost_to_rp_to_peer(struct pim_upstream *up);
-
-extern void pim_mlag_update_dr_state_to_peer(struct interface *ifp);
-
 /* pm_zpthread.c */
 
 extern int pim_mlag_signal_zpthread(void);

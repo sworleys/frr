@@ -270,7 +270,7 @@ static int bgp_router_id_set(struct bgp *bgp, const struct in_addr *id)
 	if (is_evpn_enabled())
 		bgp_evpn_handle_router_id_update(bgp, false);
 
-	vpn_handle_router_id_update(bgp, true);
+	vpn_handle_router_id_update(bgp, false);
 
 	return 0;
 }
@@ -2208,10 +2208,12 @@ int peer_delete(struct peer *peer)
 	bgp = peer->bgp;
 	accept_peer = CHECK_FLAG(peer->sflags, PEER_STATUS_ACCEPT_PEER);
 
+	bgp_keepalives_off(peer);
 	bgp_reads_off(peer);
 	bgp_writes_off(peer);
 	assert(!CHECK_FLAG(peer->thread_flags, PEER_THREAD_WRITES_ON));
 	assert(!CHECK_FLAG(peer->thread_flags, PEER_THREAD_READS_ON));
+	assert(!CHECK_FLAG(peer->thread_flags, PEER_THREAD_KEEPALIVES_ON));
 
 	if (CHECK_FLAG(peer->sflags, PEER_STATUS_NSF_WAIT))
 		peer_nsf_stop(peer);
@@ -4030,6 +4032,9 @@ static int peer_flag_modify(struct peer *peer, uint32_t flag, int set)
 		/* Update flag override state accordingly. */
 		COND_FLAG(peer->flags_override, flag, set != invert);
 
+		if (set && flag == PEER_FLAG_CAPABILITY_ENHE)
+			bgp_nht_register_enhe_capability_interfaces(peer);
+
 		/* Execute flag action on peer. */
 		if (action.type == peer_change_reset)
 			peer_flag_modify_action(peer, flag);
@@ -4037,9 +4042,6 @@ static int peer_flag_modify(struct peer *peer, uint32_t flag, int set)
 		/* Skip peer-group mechanics for regular peers. */
 		return 0;
 	}
-
-	if (set && flag == PEER_FLAG_CAPABILITY_ENHE)
-		bgp_nht_register_enhe_capability_interfaces(peer);
 
 	/*
 	 * Update peer-group members, unless they are explicitely overriding
@@ -8005,3 +8007,61 @@ void bgp_terminate(void)
 
 	bgp_mac_finish();
 }
+
+struct peer *peer_lookup_in_view(struct vty *vty, struct bgp *bgp,
+				 const char *ip_str, bool use_json)
+{
+	int ret;
+	struct peer *peer;
+	union sockunion su;
+
+	/* Get peer sockunion. */
+	ret = str2sockunion(ip_str, &su);
+	if (ret < 0) {
+		peer = peer_lookup_by_conf_if(bgp, ip_str);
+		if (!peer) {
+			peer = peer_lookup_by_hostname(bgp, ip_str);
+
+			if (!peer) {
+				if (use_json) {
+					json_object *json_no = NULL;
+					json_no = json_object_new_object();
+					json_object_string_add(
+						json_no,
+						"malformedAddressOrName",
+						ip_str);
+					vty_out(vty, "%s\n",
+						json_object_to_json_string_ext(
+							json_no,
+							JSON_C_TO_STRING_PRETTY));
+					json_object_free(json_no);
+				} else
+					vty_out(vty,
+						"%% Malformed address or name: %s\n",
+						ip_str);
+				return NULL;
+			}
+		}
+		return peer;
+	}
+
+	/* Peer structure lookup. */
+	peer = peer_lookup(bgp, &su);
+	if (!peer) {
+		if (use_json) {
+			json_object *json_no = NULL;
+			json_no = json_object_new_object();
+			json_object_string_add(json_no, "warning",
+					       "No such neighbor in this view/vrf");
+			vty_out(vty, "%s\n",
+				json_object_to_json_string_ext(
+					json_no, JSON_C_TO_STRING_PRETTY));
+			json_object_free(json_no);
+		} else
+			vty_out(vty, "No such neighbor in this view/vrf\n");
+		return NULL;
+	}
+
+	return peer;
+}
+

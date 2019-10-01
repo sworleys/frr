@@ -177,6 +177,8 @@ extern int zebra_vxlan_check_readd_remote_mac(struct interface *ifp,
 extern int zebra_vxlan_check_del_local_mac(struct interface *ifp,
 					   struct interface *br_if,
 					   struct ethaddr *mac, vlanid_t vid);
+extern int zebra_vxlan_check_readd_vtep(struct interface *ifp,
+					struct in_addr vtep_ip);
 extern int zebra_vxlan_if_up(struct interface *ifp);
 extern int zebra_vxlan_if_down(struct interface *ifp);
 extern int zebra_vxlan_if_add(struct interface *ifp);
@@ -210,5 +212,7 @@ extern int zebra_vxlan_clear_dup_detect_vni(struct vty *vty,
 					    struct zebra_vrf *zvrf,
 					    vni_t vni);
 extern void zebra_evpn_init(void);
+extern void zebra_vxlan_macvlan_up(struct interface *ifp);
+extern void zebra_vxlan_macvlan_down(struct interface *ifp);
 
 #endif /* _ZEBRA_VXLAN_H */

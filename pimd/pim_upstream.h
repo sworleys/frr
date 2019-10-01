@@ -83,7 +83,18 @@
  * associated with an upstream
  */
 #define PIM_UPSTREAM_FLAG_MASK_SRC_NOCACHE             (1 << 19)
-
+/* By default as SG entry will use the SPT for forwarding traffic
+ * unless it was setup as a result of a Prune(S,G,rpt) from a
+ * downstream router and has JoinDesired(S,G) as False.
+ * This flag is only relevant for (S,G) entries.
+ */
+#define PIM_UPSTREAM_FLAG_MASK_USE_RPT                 (1 << 20)
+/*
+ * PIM Syncs upstream entries to peer Nodes via MLAG in 2 cases.
+ * one is to support plain PIM Redundancy and another one is to support
+ * PIM REdundancy.
+ */
+#define PIM_UPSTREAM_FLAG_MASK_MLAG_INTERFACE (1 << 21)
 #define PIM_UPSTREAM_FLAG_ALL 0xFFFFFFFF
 
 #define PIM_UPSTREAM_FLAG_TEST_DR_JOIN_DESIRED(flags) ((flags) & PIM_UPSTREAM_FLAG_MASK_DR_JOIN_DESIRED)
@@ -108,6 +119,7 @@
 #define PIM_UPSTREAM_FLAG_TEST_MLAG_PEER(flags) ((flags) & PIM_UPSTREAM_FLAG_MASK_MLAG_PEER)
 #define PIM_UPSTREAM_FLAG_TEST_CAN_BE_LHR(flags) ((flags) & (PIM_UPSTREAM_FLAG_MASK_SRC_IGMP | PIM_UPSTREAM_FLAG_MASK_SRC_VXLAN_TERM))
 #define PIM_UPSTREAM_FLAG_TEST_SRC_NOCACHE(flags) ((flags) &PIM_UPSTREAM_FLAG_MASK_SRC_NOCACHE)
+#define PIM_UPSTREAM_FLAG_TEST_USE_RPT(flags) ((flags) & PIM_UPSTREAM_FLAG_MASK_USE_RPT)
 
 #define PIM_UPSTREAM_FLAG_SET_DR_JOIN_DESIRED(flags) ((flags) |= PIM_UPSTREAM_FLAG_MASK_DR_JOIN_DESIRED)
 #define PIM_UPSTREAM_FLAG_SET_DR_JOIN_DESIRED_UPDATED(flags) ((flags) |= PIM_UPSTREAM_FLAG_MASK_DR_JOIN_DESIRED_UPDATED)
@@ -128,6 +140,7 @@
 #define PIM_UPSTREAM_FLAG_SET_MLAG_VXLAN(flags) ((flags) |= PIM_UPSTREAM_FLAG_MASK_MLAG_VXLAN)
 #define PIM_UPSTREAM_FLAG_SET_MLAG_NON_DF(flags) ((flags) |= PIM_UPSTREAM_FLAG_MASK_MLAG_NON_DF)
 #define PIM_UPSTREAM_FLAG_SET_MLAG_PEER(flags) ((flags) |= PIM_UPSTREAM_FLAG_MASK_MLAG_PEER)
+#define PIM_UPSTREAM_FLAG_SET_USE_RPT(flags) ((flags) |= PIM_UPSTREAM_FLAG_MASK_USE_RPT)
 
 #define PIM_UPSTREAM_FLAG_UNSET_DR_JOIN_DESIRED(flags) ((flags) &= ~PIM_UPSTREAM_FLAG_MASK_DR_JOIN_DESIRED)
 #define PIM_UPSTREAM_FLAG_UNSET_DR_JOIN_DESIRED_UPDATED(flags) ((flags) &= ~PIM_UPSTREAM_FLAG_MASK_DR_JOIN_DESIRED_UPDATED)
@@ -149,6 +162,14 @@
 #define PIM_UPSTREAM_FLAG_UNSET_MLAG_NON_DF(flags) ((flags) &= ~PIM_UPSTREAM_FLAG_MASK_MLAG_NON_DF)
 #define PIM_UPSTREAM_FLAG_UNSET_MLAG_PEER(flags) ((flags) &= ~PIM_UPSTREAM_FLAG_MASK_MLAG_PEER)
 #define PIM_UPSTREAM_FLAG_UNSET_SRC_NOCACHE(flags) ((flags) &= ~PIM_UPSTREAM_FLAG_MASK_SRC_NOCACHE)
+#define PIM_UPSTREAM_FLAG_UNSET_USE_RPT(flags) ((flags) &= ~PIM_UPSTREAM_FLAG_MASK_USE_RPT)
+
+#define PIM_UPSTREAM_FLAG_SET_MLAG_INTERFACE(flags)                            \
+	((flags) |= PIM_UPSTREAM_FLAG_MASK_MLAG_INTERFACE)
+#define PIM_UPSTREAM_FLAG_UNSET_MLAG_INTERFACE(flags)                          \
+	((flags) &= ~PIM_UPSTREAM_FLAG_MASK_MLAG_INTERFACE)
+#define PIM_UPSTREAM_FLAG_TEST_MLAG_INTERFACE(flags)                           \
+	((flags)&PIM_UPSTREAM_FLAG_MASK_MLAG_INTERFACE)
 
 /* The RPF cost is incremented by 10 if the RPF interface is the peerlink-rif.
  * This is used to force the MLAG switch with the lowest cost to the RPF
@@ -207,6 +228,7 @@ struct pim_up_mlag {
 
 */
 struct pim_upstream {
+	struct pim_instance *pim;
 	struct pim_upstream *parent;
 	struct in_addr upstream_addr;     /* Who we are talking to */
 	struct in_addr upstream_register; /*Who we received a register from*/
@@ -263,6 +285,11 @@ static inline bool pim_up_mlag_is_local(struct pim_upstream *up)
 	return (up->flags & PIM_UPSTREAM_FLAG_MASK_MLAG_VXLAN);
 }
 
+static inline bool pim_upstream_is_kat_running(struct pim_upstream *up)
+{
+	return (up->t_ka_timer != NULL);
+}
+
 struct pim_upstream *pim_upstream_find(struct pim_instance *pim,
 				       struct prefix_sg *sg);
 struct pim_upstream *pim_upstream_find_or_add(struct prefix_sg *sg,
@@ -282,6 +309,9 @@ struct pim_upstream *pim_upstream_del(struct pim_instance *pim,
 int pim_upstream_evaluate_join_desired(struct pim_instance *pim,
 				       struct pim_upstream *up);
 int pim_upstream_evaluate_join_desired_interface(struct pim_upstream *up,
+						 struct pim_ifchannel *ch,
+						 struct pim_ifchannel *starch);
+int pim_upstream_eval_inherit_if(struct pim_upstream *up,
 						 struct pim_ifchannel *ch,
 						 struct pim_ifchannel *starch);
 void pim_upstream_update_join_desired(struct pim_instance *pim,
@@ -306,9 +336,9 @@ void pim_upstream_update_my_assert_metric(struct pim_upstream *up);
 void pim_upstream_keep_alive_timer_start(struct pim_upstream *up,
 					 uint32_t time);
 
-int pim_upstream_switch_to_spt_desired(struct pim_instance *pim,
+int pim_upstream_switch_to_spt_desired_on_rp(struct pim_instance *pim,
 				       struct prefix_sg *sg);
-#define SwitchToSptDesired(pim, sg) pim_upstream_switch_to_spt_desired (pim, sg)
+#define SwitchToSptDesiredOnRp(pim, sg) pim_upstream_switch_to_spt_desired_on_rp (pim, sg)
 int pim_upstream_is_sg_rpt(struct pim_upstream *up);
 
 void pim_upstream_set_sptbit(struct pim_upstream *up,
@@ -359,4 +389,7 @@ void pim_upstream_fill_static_iif(struct pim_upstream *up,
 uint32_t pim_up_mlag_local_cost(struct pim_instance *pim,
 		struct pim_upstream *up);
 uint32_t pim_up_mlag_peer_cost(struct pim_upstream *up);
+void pim_upstream_update_use_rpt(struct pim_upstream *up,
+			bool update_mroute);
+void pim_upstream_reeval_use_rpt(struct pim_instance *pim);
 #endif /* PIM_UPSTREAM_H */

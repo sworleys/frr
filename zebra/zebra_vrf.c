@@ -477,7 +477,11 @@ static int vrf_config_write(struct vty *vty)
 
 		if (zvrf_id(zvrf) == VRF_DEFAULT) {
 			if (zvrf->l3vni)
-				vty_out(vty, "vni %u\n", zvrf->l3vni);
+				vty_out(vty, "vni %u%s\n", zvrf->l3vni,
+					is_l3vni_for_prefix_routes_only(
+						zvrf->l3vni)
+						? " prefix-routes-only"
+						: "");
 		} else {
 			vty_frame(vty, "vrf %s\n", zvrf_name(zvrf));
 			if (zvrf->l3vni)
