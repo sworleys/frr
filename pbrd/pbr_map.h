@@ -169,7 +169,11 @@ extern void pbr_map_delete_vrf(struct pbr_map_sequence *pbrms);
 extern void pbr_map_add_interface(struct pbr_map *pbrm, struct interface *ifp);
 extern void pbr_map_interface_delete(struct pbr_map *pbrm,
 				     struct interface *ifp);
-extern void pbr_map_interface_vrf_update(const struct interface *ifp);
+
+/* Update maps installed on interface */
+extern void pbr_map_policy_interface_update(const struct interface *ifp);
+extern void pbr_map_policy_interface_vrf_update(const struct interface *ifp);
+
 extern void pbr_map_final_interface_deletion(struct pbr_map *pbrm,
 					     struct pbr_map_interface *pmi);
 

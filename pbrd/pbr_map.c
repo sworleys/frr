@@ -196,8 +196,31 @@ void pbr_map_add_interface(struct pbr_map *pbrm, struct interface *ifp_add)
 		pbr_map_install(pbrm);
 }
 
-/* Vrf changed on a pbr interface */
-void pbr_map_interface_vrf_update(const struct interface *ifp)
+static int
+pbr_map_policy_interface_update_common(const struct interface *ifp,
+				       struct pbr_interface **pbr_ifp,
+				       struct pbr_map **pbrm)
+{
+	if (!ifp->info) {
+		DEBUGD(&pbr_dbg_map, "%s: %s has no pbr_interface info",
+		       __func__, ifp->name);
+		return -1;
+	}
+
+	*pbr_ifp = ifp->info;
+
+	*pbrm = pbrm_find((*pbr_ifp)->mapname);
+
+	if (!*pbrm) {
+		DEBUGD(&pbr_dbg_map, "%s: applied PBR-MAP(%s) does not exist?",
+		       __func__, (*pbr_ifp)->mapname);
+		return -1;
+	}
+
+	return 0;
+}
+
+void pbr_map_policy_interface_update(const struct interface *ifp)
 {
 	struct pbr_interface *pbr_ifp;
 	struct pbr_map_sequence *pbrms;
@@ -205,21 +228,42 @@ void pbr_map_interface_vrf_update(const struct interface *ifp)
 	struct listnode *node, *inode;
 	struct pbr_map_interface *pmi;
 
-	if (!ifp->info) {
-		DEBUGD(&pbr_dbg_map, "%s: %s has no pbr_interface info",
-		       __func__, ifp->name);
+	bool is_up = if_is_up(ifp);
+
+	if (pbr_map_policy_interface_update_common(ifp, &pbr_ifp, &pbrm))
 		return;
+
+	DEBUGD(&pbr_dbg_map, "%s: %s %s rules on interface %s", __func__,
+	       pbr_ifp->mapname, (is_up ? "installing" : "removing"),
+	       ifp->name);
+
+	/*
+	 * Walk the list and install/remove maps on the interface.
+	 */
+	for (ALL_LIST_ELEMENTS_RO(pbrm->seqnumbers, node, pbrms)) {
+		for (ALL_LIST_ELEMENTS_RO(pbrm->incoming, inode, pmi))
+			if (pmi->ifp == ifp) {
+				if (is_up)
+					pbr_send_pbr_map(pbrms, pmi, true,
+							 true);
+				else
+					pbr_send_pbr_map(pbrms, pmi, false,
+							 true);
+			}
 	}
+}
 
-	pbr_ifp = ifp->info;
+/* Vrf changed on a pbr interface */
+void pbr_map_policy_interface_vrf_update(const struct interface *ifp)
+{
+	struct pbr_interface *pbr_ifp;
+	struct pbr_map_sequence *pbrms;
+	struct pbr_map *pbrm;
+	struct listnode *node, *inode;
+	struct pbr_map_interface *pmi;
 
-	pbrm = pbrm_find(pbr_ifp->mapname);
-
-	if (!pbrm) {
-		DEBUGD(&pbr_dbg_map, "%s: applied PBR-MAP(%s) does not exist?",
-		       __func__, pbr_ifp->mapname);
+	if (!pbr_map_policy_interface_update_common(ifp, &pbr_ifp, &pbrm))
 		return;
-	}
 
 	if (!pbr_map_check_valid_internal(pbrm))
 		return;

@@ -119,7 +119,11 @@ int pbr_ifp_up(struct interface *ifp)
 	DEBUGD(&pbr_dbg_zebra,
 	       "%s: %s is up", __PRETTY_FUNCTION__, ifp->name);
 
+	/* Update nexthops tracked from a `set nexthop` command */
 	pbr_nht_nexthop_interface_update(ifp);
+
+	/* Update rules installed after puting map on interface */
+	pbr_map_policy_interface_update(ifp);
 
 	return 0;
 }
@@ -129,7 +133,11 @@ int pbr_ifp_down(struct interface *ifp)
 	DEBUGD(&pbr_dbg_zebra,
 	       "%s: %s is down", __PRETTY_FUNCTION__, ifp->name);
 
+	/* Update nexthops tracked from a `set nexthop` command */
 	pbr_nht_nexthop_interface_update(ifp);
+
+	/* Update rules installed after puting map on interface */
+	pbr_map_policy_interface_update(ifp);
 
 	return 0;
 }
@@ -147,7 +155,7 @@ static int interface_vrf_update(ZAPI_CALLBACK_ARGS)
 
 	if_update_to_new_vrf(ifp, new_vrf_id);
 
-	pbr_map_interface_vrf_update(ifp);
+	pbr_map_policy_interface_vrf_update(ifp);
 
 	return 0;
 }
