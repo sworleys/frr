@@ -171,7 +171,8 @@ extern void pbr_map_interface_delete(struct pbr_map *pbrm,
 				     struct interface *ifp);
 
 /* Update maps installed on interface */
-extern void pbr_map_policy_interface_update(const struct interface *ifp);
+extern void pbr_map_policy_interface_update(const struct interface *ifp,
+					    bool state_up);
 extern void pbr_map_policy_interface_vrf_update(const struct interface *ifp);
 
 extern void pbr_map_final_interface_deletion(struct pbr_map *pbrm,

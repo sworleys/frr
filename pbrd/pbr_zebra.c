@@ -123,7 +123,7 @@ int pbr_ifp_up(struct interface *ifp)
 	pbr_nht_nexthop_interface_update(ifp);
 
 	/* Update rules installed after puting map on interface */
-	pbr_map_policy_interface_update(ifp);
+	pbr_map_policy_interface_update(ifp, true);
 
 	return 0;
 }
@@ -137,7 +137,7 @@ int pbr_ifp_down(struct interface *ifp)
 	pbr_nht_nexthop_interface_update(ifp);
 
 	/* Update rules installed after puting map on interface */
-	pbr_map_policy_interface_update(ifp);
+	pbr_map_policy_interface_update(ifp, false);
 
 	return 0;
 }

@@ -220,7 +220,7 @@ pbr_map_policy_interface_update_common(const struct interface *ifp,
 	return 0;
 }
 
-void pbr_map_policy_interface_update(const struct interface *ifp)
+void pbr_map_policy_interface_update(const struct interface *ifp, bool state_up)
 {
 	struct pbr_interface *pbr_ifp;
 	struct pbr_map_sequence *pbrms;
@@ -228,13 +228,11 @@ void pbr_map_policy_interface_update(const struct interface *ifp)
 	struct listnode *node, *inode;
 	struct pbr_map_interface *pmi;
 
-	bool is_up = if_is_up(ifp);
-
 	if (pbr_map_policy_interface_update_common(ifp, &pbr_ifp, &pbrm))
 		return;
 
 	DEBUGD(&pbr_dbg_map, "%s: %s %s rules on interface %s", __func__,
-	       pbr_ifp->mapname, (is_up ? "installing" : "removing"),
+	       pbr_ifp->mapname, (state_up ? "installing" : "removing"),
 	       ifp->name);
 
 	/*
@@ -243,7 +241,7 @@ void pbr_map_policy_interface_update(const struct interface *ifp)
 	for (ALL_LIST_ELEMENTS_RO(pbrm->seqnumbers, node, pbrms)) {
 		for (ALL_LIST_ELEMENTS_RO(pbrm->incoming, inode, pmi))
 			if (pmi->ifp == ifp) {
-				if (is_up)
+				if (state_up)
 					pbr_send_pbr_map(pbrms, pmi, true,
 							 true);
 				else
@@ -256,13 +254,15 @@ void pbr_map_policy_interface_update(const struct interface *ifp)
 /* Vrf changed on a pbr interface */
 void pbr_map_policy_interface_vrf_update(const struct interface *ifp)
 {
+	return;
+#if 0
 	struct pbr_interface *pbr_ifp;
 	struct pbr_map_sequence *pbrms;
 	struct pbr_map *pbrm;
 	struct listnode *node, *inode;
 	struct pbr_map_interface *pmi;
 
-	if (!pbr_map_policy_interface_update_common(ifp, &pbr_ifp, &pbrm))
+	if (pbr_map_policy_interface_update_common(ifp, &pbr_ifp, &pbrm))
 		return;
 
 	if (!pbr_map_check_valid_internal(pbrm))
@@ -283,6 +283,7 @@ void pbr_map_policy_interface_vrf_update(const struct interface *ifp)
 							 true);
 		}
 	}
+#endif
 }
 
 /* Vrf enabled/disabled */
