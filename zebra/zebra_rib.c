@@ -2419,7 +2419,7 @@ void rib_unlink(struct route_node *rn, struct route_entry *re)
 		if (nhe)
 			zebra_nhg_decrement_ref(nhe);
 	} else if (re->ng)
-		nexthop_group_free_delete(&re->ng);
+		nexthop_group_delete(&re->ng);
 
 	nexthops_free(re->fib_ng.nexthop);
 
@@ -2655,7 +2655,7 @@ int rib_add_multipath(afi_t afi, safi_t safi, struct prefix *p,
 	table = zebra_vrf_table_with_table_id(afi, safi, re->vrf_id, re->table);
 	if (!table) {
 		if (re->ng)
-			nexthop_group_free_delete(&re->ng);
+			nexthop_group_delete(&re->ng);
 		XFREE(MTYPE_RE, re);
 		return 0;
 	}
@@ -2678,7 +2678,7 @@ int rib_add_multipath(afi_t afi, safi_t safi, struct prefix *p,
 		 * The nexthops got copied over into an nhe,
 		 * so free them now.
 		 */
-		nexthop_group_free_delete(&re->ng);
+		nexthop_group_delete(&re->ng);
 
 		if (!nhe) {
 			char buf[PREFIX_STRLEN] = "";
@@ -3277,6 +3277,7 @@ static int rib_process_dplane_results(struct thread *thread)
 {
 	struct zebra_dplane_ctx *ctx;
 	struct dplane_ctx_q ctxlist;
+	bool shut_p = false;
 
 	/* Dequeue a list of completed updates with one lock/unlock cycle */
 
@@ -3297,6 +3298,21 @@ static int rib_process_dplane_results(struct thread *thread)
 		/* If we've emptied the results queue, we're done */
 		if (ctx == NULL)
 			break;
+
+		/* If zebra is shutting down, avoid processing results,
+		 * just drain the results queue.
+		 */
+		shut_p = atomic_load_explicit(&zrouter.in_shutdown,
+					      memory_order_relaxed);
+		if (shut_p) {
+			while (ctx) {
+				dplane_ctx_fini(&ctx);
+
+				ctx = dplane_ctx_dequeue(&ctxlist);
+			}
+
+			continue;
+		}
 
 		while (ctx) {
 			switch (dplane_ctx_get_op(ctx)) {

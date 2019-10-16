@@ -4422,6 +4422,17 @@ static void pim_show_mlag_up_vrf(struct vrf *vrf, struct vty *vty, bool uj)
 	}
 }
 
+static void pim_show_mlag_help_string(struct vty *vty, bool uj)
+{
+	if (!uj) {
+		vty_out(vty, "Owner codes:\n");
+		vty_out(vty,
+			"L: EVPN-MLAG Entry, I:PIM-MLAG Entry, "
+			"P: Peer Entry\n");
+	}
+}
+
+
 DEFUN(show_ip_pim_mlag_up, show_ip_pim_mlag_up_cmd,
       "show ip pim [vrf NAME] mlag upstream [A.B.C.D [A.B.C.D]] [json]",
       SHOW_STR
@@ -4453,6 +4464,8 @@ DEFUN(show_ip_pim_mlag_up, show_ip_pim_mlag_up_cmd,
 			group = argv[idx + 1]->arg;
 	}
 
+	pim_show_mlag_help_string(vty, uj);
+
 	if (src_or_group || group)
 		pim_show_mlag_up_detail(vrf, vty, src_or_group, group, uj);
 	else
@@ -4471,6 +4484,7 @@ DEFUN(show_ip_pim_mlag_up_vrf_all, show_ip_pim_mlag_up_vrf_all_cmd,
 	struct vrf *vrf;
 	bool uj = use_json(argc, argv);
 
+	pim_show_mlag_help_string(vty, uj);
 	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
 		pim_show_mlag_up_vrf(vrf, vty, uj);
 	}

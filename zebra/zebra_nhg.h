@@ -41,6 +41,11 @@ struct nh_grp {
 
 PREDECL_RBTREE_UNIQ(nhg_connected_tree);
 
+
+/*
+ * Hashtables contiaining entries found in `zebra_router`.
+ */
+
 struct nhg_hash_entry {
 	uint32_t id;
 	afi_t afi;
@@ -164,9 +169,6 @@ struct nhg_ctx {
 };
 
 
-void zebra_nhg_init(void);
-void zebra_nhg_terminate(void);
-
 extern void nhg_connected_free(struct nhg_connected *dep);
 extern struct nhg_connected *nhg_connected_new(struct nhg_hash_entry *nhe);
 
@@ -257,8 +259,6 @@ extern uint8_t zebra_nhg_nhe2grp(struct nh_grp *grp, struct nhg_hash_entry *nhe,
 
 void zebra_nhg_install_kernel(struct nhg_hash_entry *nhe);
 void zebra_nhg_uninstall_kernel(struct nhg_hash_entry *nhe);
-
-void zebra_nhg_cleanup_tables(struct hash *hash);
 
 /* Forward ref of dplane update context type */
 struct zebra_dplane_ctx;
