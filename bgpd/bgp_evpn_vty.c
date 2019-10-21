@@ -373,9 +373,6 @@ static void display_l3vni(struct vty *vty, struct bgp *bgp_vrf,
 		json_object_string_add(json, "rmac",
 				prefix_mac2str(&bgp_vrf->rmac,
 					       buf2, sizeof(buf2)));
-		json_object_string_add(json, "advertiseSviMacip", "n/a");
-		json_object_to_json_string_ext(json,
-					       JSON_C_TO_STRING_NOSLASHESCAPE);
 	} else {
 		vty_out(vty, "VNI: %d", bgp_vrf->l3vni);
 		vty_out(vty, " (known to the kernel)");

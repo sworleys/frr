@@ -938,10 +938,6 @@ void pim_if_configure_mlag_dualactive(struct pim_interface *pim_ifp)
 	if (!pim_ifp || pim_ifp->activeactive == true)
 		return;
 
-	if (PIM_DEBUG_MLAG)
-		zlog_debug("%s: Configuring active-active on Interface: %s",
-			   __func__, "NULL");
-
 	pim_ifp->activeactive = true;
 	if (pim_ifp->pim)
 		pim_ifp->pim->inst_mlag_intf_cnt++;
@@ -966,10 +962,6 @@ void pim_if_unconfigure_mlag_dualactive(struct pim_interface *pim_ifp)
 {
 	if (!pim_ifp || pim_ifp->activeactive == false)
 		return;
-
-	if (PIM_DEBUG_MLAG)
-		zlog_debug("%s: UnConfiguring active-active on Interface: %s",
-			   __func__, "NULL");
 
 	pim_ifp->activeactive = false;
 	if (pim_ifp->pim)

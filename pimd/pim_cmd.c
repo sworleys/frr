@@ -908,7 +908,7 @@ static void igmp_show_interface_join(struct pim_instance *pim, struct vty *vty)
 
 static void pim_show_interfaces_single(struct pim_instance *pim,
 				       struct vty *vty, const char *ifname,
-				       bool uj)
+				       bool mlag, bool uj)
 {
 	struct in_addr ifaddr;
 	struct interface *ifp;
@@ -950,6 +950,9 @@ static void pim_show_interfaces_single(struct pim_instance *pim,
 		pim_ifp = ifp->info;
 
 		if (!pim_ifp)
+			continue;
+
+		if (mlag == true && pim_ifp->activeactive == false)
 			continue;
 
 		if (strcmp(ifname, "detail") && strcmp(ifname, ifp->name))
@@ -1382,7 +1385,7 @@ static void igmp_show_statistics(struct pim_instance *pim, struct vty *vty,
 }
 
 static void pim_show_interfaces(struct pim_instance *pim, struct vty *vty,
-				bool uj)
+				bool mlag, bool uj)
 {
 	struct interface *ifp;
 	struct listnode *upnode;
@@ -1401,6 +1404,9 @@ static void pim_show_interfaces(struct pim_instance *pim, struct vty *vty,
 		pim_ifp = ifp->info;
 
 		if (!pim_ifp)
+			continue;
+
+		if (mlag == true && pim_ifp->activeactive == false)
 			continue;
 
 		pim_nbrs = pim_ifp->pim_neighbor_list->count;
@@ -3974,10 +3980,11 @@ DEFUN (show_ip_pim_assert_winner_metric,
 
 DEFUN (show_ip_pim_interface,
        show_ip_pim_interface_cmd,
-       "show ip pim [vrf NAME] interface [detail|WORD] [json]",
+       "show ip pim [mlag] [vrf NAME] interface [detail|WORD] [json]",
        SHOW_STR
        IP_STR
        PIM_STR
+       "MLAG\n"
        VRF_CMD_HELP_STR
        "PIM interface information\n"
        "Detailed output\n"
@@ -3987,36 +3994,47 @@ DEFUN (show_ip_pim_interface,
 	int idx = 2;
 	struct vrf *vrf = pim_cmd_lookup_vrf(vty, argv, argc, &idx);
 	bool uj = use_json(argc, argv);
+	bool mlag = false;
 
 	if (!vrf)
 		return CMD_WARNING;
 
+	if (argv_find(argv, argc, "mlag", &idx))
+		mlag = true;
+
 	if (argv_find(argv, argc, "WORD", &idx)
 	    || argv_find(argv, argc, "detail", &idx))
-		pim_show_interfaces_single(vrf->info, vty, argv[idx]->arg, uj);
+		pim_show_interfaces_single(vrf->info, vty, argv[idx]->arg, mlag,
+					   uj);
 	else
-		pim_show_interfaces(vrf->info, vty, uj);
+		pim_show_interfaces(vrf->info, vty, mlag, uj);
 
 	return CMD_SUCCESS;
 }
 
 DEFUN (show_ip_pim_interface_vrf_all,
        show_ip_pim_interface_vrf_all_cmd,
-       "show ip pim vrf all interface [detail|WORD] [json]",
+       "show ip pim [mlag] vrf all interface [detail|WORD] [json]",
        SHOW_STR
        IP_STR
        PIM_STR
+       "MLAG\n"
        VRF_CMD_HELP_STR
        "PIM interface information\n"
        "Detailed output\n"
        "interface name\n"
        JSON_STR)
 {
-	int idx = 6;
+	int idx = 2;
 	bool uj = use_json(argc, argv);
 	struct vrf *vrf;
 	bool first = true;
+	bool mlag = false;
 
+	if (argv_find(argv, argc, "mlag", &idx))
+		mlag = true;
+
+	idx = 6;
 	if (uj)
 		vty_out(vty, "{ ");
 	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name) {
@@ -4030,9 +4048,9 @@ DEFUN (show_ip_pim_interface_vrf_all,
 		if (argv_find(argv, argc, "WORD", &idx)
 		    || argv_find(argv, argc, "detail", &idx))
 			pim_show_interfaces_single(vrf->info, vty,
-						   argv[idx]->arg, uj);
+						   argv[idx]->arg, mlag, uj);
 		else
-			pim_show_interfaces(vrf->info, vty, uj);
+			pim_show_interfaces(vrf->info, vty, mlag, uj);
 	}
 	if (uj)
 		vty_out(vty, "}\n");
@@ -7436,6 +7454,11 @@ DEFPY(interface_ip_pim_activeactive, interface_ip_pim_activeactive_cmd,
 			"Could not enable PIM SM active-active on interface\n");
 		return CMD_WARNING_CONFIG_FAILED;
 	}
+
+
+        if (PIM_DEBUG_MLAG)
+                zlog_debug("%sConfiguring PIM active-active on Interface: %s",
+                           no ? "Un-":" ", ifp->name);
 
 	pim_ifp = ifp->info;
 	if (no)
