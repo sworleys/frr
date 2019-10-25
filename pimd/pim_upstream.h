@@ -282,7 +282,9 @@ static inline bool pim_up_mlag_is_local(struct pim_upstream *up)
 	/* XXX: extend this to also return true if the channel-oil has
 	 * any AA devices
 	 */
-	return (up->flags & PIM_UPSTREAM_FLAG_MASK_MLAG_VXLAN);
+	return (up->flags
+		& (PIM_UPSTREAM_FLAG_MASK_MLAG_VXLAN
+		   | PIM_UPSTREAM_FLAG_MASK_MLAG_INTERFACE));
 }
 
 static inline bool pim_upstream_is_kat_running(struct pim_upstream *up)

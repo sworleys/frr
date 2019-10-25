@@ -504,29 +504,29 @@ static void bgp_evpn_get_rmac_nexthop(struct bgpevpn *vpn,
 	if (!bgp_vrf)
 		return;
 
-	if (p->prefix.route_type == BGP_EVPN_MAC_IP_ROUTE) {
-		/* Copy sys (pip) RMAC and PIP IP as nexthop
-		 * in case of route is self MAC-IP,
-		 * advertise-pip and advertise-svi-ip features
-		 * are enabled.
-		 * Otherwise, for all host MAC-IP route's
-		 * copy anycast RMAC
-		 */
-		if (CHECK_FLAG(flags, BGP_EVPN_MACIP_TYPE_SVI_IP)
-		    && bgp_evpn_is_svi_macip_enabled(vpn)) {
-			/* copy sys rmac */
-			memcpy(&attr->rmac, &bgp_vrf->evpn_info->pip_rmac,
-			       ETH_ALEN);
-			if (bgp_vrf->evpn_info->advertise_pip &&
-			    bgp_vrf->evpn_info->is_anycast_mac) {
-				attr->nexthop = bgp_vrf->evpn_info->pip_ip;
-				attr->mp_nexthop_global_in =
-					bgp_vrf->evpn_info->pip_ip;
-			}
-		} else
-			memcpy(&attr->rmac, &bgp_vrf->rmac, ETH_ALEN);
-	}
+	if (p->prefix.route_type != BGP_EVPN_MAC_IP_ROUTE)
+		return;
+
+	/* Copy sys (pip) RMAC and PIP IP as nexthop
+	 * in case of route is self MAC-IP,
+	 * advertise-pip and advertise-svi-ip features
+	 * are enabled.
+	 * Otherwise, for all host MAC-IP route's
+	 * copy anycast RMAC
+	 */
+	if (CHECK_FLAG(flags, BGP_EVPN_MACIP_TYPE_SVI_IP)
+	    && bgp_vrf->evpn_info->advertise_pip &&
+	    bgp_vrf->evpn_info->is_anycast_mac) {
+		/* copy sys rmac */
+		memcpy(&attr->rmac, &bgp_vrf->evpn_info->pip_rmac,
+		       ETH_ALEN);
+		attr->nexthop = bgp_vrf->evpn_info->pip_ip;
+		attr->mp_nexthop_global_in =
+			bgp_vrf->evpn_info->pip_ip;
+	} else
+		memcpy(&attr->rmac, &bgp_vrf->rmac, ETH_ALEN);
 }
+
 /*
  * Create RT extended community automatically from passed information:
  * of the form AS:VNI.
@@ -4729,23 +4729,12 @@ void bgp_evpn_handle_router_id_update(struct bgp *bgp, int withdraw)
 				if (bgp_vrf->evpn_info->advertise_pip &&
 				    (bgp_vrf->evpn_info->pip_ip_static.s_addr
 				     == INADDR_ANY)) {
-					struct listnode *node = NULL;
-					struct bgpevpn *vpn = NULL;
-
 					bgp_vrf->evpn_info->pip_ip =
 						bgp->router_id;
 					/* advertise type-5 routes with
 					 * new nexthop
 					 */
 					update_advertise_vrf_routes(bgp_vrf);
-					/* Update (svi) type-2 routes */
-					for (ALL_LIST_ELEMENTS_RO(
-						bgp_vrf->l2vnis, node, vpn)) {
-						if (!bgp_evpn_is_svi_macip_enabled(vpn))
-							continue;
-						update_routes_for_vni(bgp, vpn);
-					}
-
 				}
 			}
 		}

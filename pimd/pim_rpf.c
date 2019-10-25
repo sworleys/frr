@@ -218,8 +218,7 @@ static void pim_rpf_cost_change(struct pim_instance *pim,
 			rpf->source_nexthop.mrib_route_metric,
 			up->dualactive_ifchannel_count);
 
-	if (pim_up_mlag_is_local(up)
-	    || PIM_UPSTREAM_FLAG_TEST_MLAG_INTERFACE(up->flags))
+	if (pim_up_mlag_is_local(up))
 		pim_mlag_up_local_add(pim, up);
 }
 

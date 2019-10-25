@@ -57,6 +57,7 @@
 static void join_timer_stop(struct pim_upstream *up);
 static void
 pim_upstream_update_assert_tracking_desired(struct pim_upstream *up);
+static bool pim_upstream_sg_running_proc(struct pim_upstream *up);
 
 /*
  * A (*,G) or a (*,*) is going away
@@ -142,18 +143,6 @@ static struct pim_upstream *pim_upstream_find_parent(struct pim_instance *pim,
 
 		if (up)
 			listnode_add(up->sources, child);
-
-		/*
-		 * In case parent is MLAG entry copy the data to child
-		 */
-		if (up && PIM_UPSTREAM_FLAG_TEST_MLAG_INTERFACE(up->flags)) {
-			PIM_UPSTREAM_FLAG_SET_MLAG_INTERFACE(child->flags);
-			if (PIM_UPSTREAM_FLAG_TEST_MLAG_NON_DF(up->flags))
-				PIM_UPSTREAM_FLAG_SET_MLAG_NON_DF(child->flags);
-			else
-				PIM_UPSTREAM_FLAG_UNSET_MLAG_NON_DF(
-					child->flags);
-		}
 
 		return up;
 	}
@@ -923,8 +912,7 @@ static struct pim_upstream *pim_upstream_new(struct pim_instance *pim,
 	/* XXX - duplicate send is possible here if pim_rpf_update
 	 * successfully resolved the nexthop
 	 */
-	if (pim_up_mlag_is_local(up)
-	    || PIM_UPSTREAM_FLAG_TEST_MLAG_INTERFACE(up->flags))
+	if (pim_up_mlag_is_local(up))
 		pim_mlag_up_local_add(pim, up);
 
 	if (PIM_DEBUG_TRACE) {
@@ -940,8 +928,7 @@ static struct pim_upstream *pim_upstream_new(struct pim_instance *pim,
 uint32_t pim_up_mlag_local_cost(struct pim_instance *pim,
 		struct pim_upstream *up)
 {
-	if (!(pim_up_mlag_is_local(up))
-	    && !(up->flags & PIM_UPSTREAM_FLAG_MASK_MLAG_INTERFACE))
+	if (!pim_up_mlag_is_local(up))
 		return router->infinite_assert_metric.route_metric;
 
 	if ((up->rpf.source_nexthop.interface == pim->vxlan.peerlink_rif) &&
@@ -1468,6 +1455,11 @@ static int pim_upstream_keep_alive_timer(struct thread *t)
 
 	up = THREAD_ARG(t);
 
+	/* pull the stats and re-check */
+	if (pim_upstream_sg_running_proc(up))
+		/* kat was restarted because of new activity */
+		return 0;
+
 	pim_upstream_keep_alive_timer_proc(up);
 	return 0;
 }
@@ -1781,7 +1773,6 @@ int pim_upstream_inherited_olist_decide(struct pim_instance *pim,
 				   __PRETTY_FUNCTION__, up->sg_str);
 
 	FOR_ALL_INTERFACES (pim->vrf, ifp) {
-		struct pim_interface *pim_ifp;
 		if (!ifp->info)
 			continue;
 
@@ -1795,12 +1786,6 @@ int pim_upstream_inherited_olist_decide(struct pim_instance *pim,
 		if (!ch && !starch)
 			continue;
 
-		pim_ifp = ifp->info;
-		if (PIM_I_am_DualActive(pim_ifp)
-		    && PIM_UPSTREAM_FLAG_TEST_MLAG_INTERFACE(up->flags)
-		    && (PIM_UPSTREAM_FLAG_TEST_MLAG_NON_DF(up->flags)
-			|| !PIM_UPSTREAM_FLAG_TEST_MLAG_PEER(up->flags)))
-			continue;
 		if (pim_upstream_evaluate_join_desired_interface(up, ch,
 								 starch)) {
 			int flag = PIM_OIF_FLAG_PROTO_PIM;
@@ -1988,6 +1973,61 @@ static bool pim_upstream_kat_start_ok(struct pim_upstream *up)
 	return false;
 }
 
+static bool pim_upstream_sg_running_proc(struct pim_upstream *up)
+{
+	bool rv = false;
+	struct pim_instance *pim = up->pim;
+
+	if (!up->channel_oil->installed) {
+		return rv;
+	}
+
+	pim_mroute_update_counters(up->channel_oil);
+
+	// Have we seen packets?
+	if ((up->channel_oil->cc.oldpktcnt >= up->channel_oil->cc.pktcnt)
+	    && (up->channel_oil->cc.lastused / 100 > 30)) {
+		if (PIM_DEBUG_TRACE) {
+			zlog_debug(
+				"%s[%s]: %s old packet count is equal or lastused is greater than 30, (%ld,%ld,%lld)",
+				__PRETTY_FUNCTION__, up->sg_str, pim->vrf->name,
+				up->channel_oil->cc.oldpktcnt,
+				up->channel_oil->cc.pktcnt,
+				up->channel_oil->cc.lastused / 100);
+		}
+		return rv;
+	}
+
+	if (pim_upstream_kat_start_ok(up)) {
+		/* Add a source reference to the stream if
+		 * one doesn't already exist */
+		if (!PIM_UPSTREAM_FLAG_TEST_SRC_STREAM(up->flags)) {
+			if (PIM_DEBUG_TRACE)
+				zlog_debug(
+					"source reference created on kat restart %s[%s]",
+					up->sg_str, pim->vrf->name);
+
+			pim_upstream_ref(pim, up,
+					PIM_UPSTREAM_FLAG_MASK_SRC_STREAM,
+					__PRETTY_FUNCTION__);
+			PIM_UPSTREAM_FLAG_SET_SRC_STREAM(up->flags);
+			pim_upstream_fhr_kat_start(up);
+		}
+		pim_upstream_keep_alive_timer_start(up, pim->keep_alive_time);
+		rv = true;
+	} else if (PIM_UPSTREAM_FLAG_TEST_SRC_LHR(up->flags)) {
+		pim_upstream_keep_alive_timer_start(up, pim->keep_alive_time);
+		rv = true;
+	}
+
+	if ((up->sptbit != PIM_UPSTREAM_SPTBIT_TRUE) &&
+	    (up->rpf.source_nexthop.interface)) {
+		pim_upstream_set_sptbit(up, up->rpf.source_nexthop.interface);
+	}
+
+	return rv;
+}
+
 /*
  * Code to check and see if we've received packets on a S,G mroute
  * and if so to set the SPT bit appropriately
@@ -2023,46 +2063,8 @@ static void pim_upstream_sg_running(void *arg)
 		pim_upstream_inherited_olist_decide(pim, up);
 		up->channel_oil->oil_inherited_rescan = 0;
 	}
-	pim_mroute_update_counters(up->channel_oil);
 
-	// Have we seen packets?
-	if ((up->channel_oil->cc.oldpktcnt >= up->channel_oil->cc.pktcnt)
-	    && (up->channel_oil->cc.lastused / 100 > 30)) {
-		if (PIM_DEBUG_TRACE) {
-			zlog_debug(
-				"%s[%s]: %s old packet count is equal or lastused is greater than 30, (%ld,%ld,%lld)",
-				__PRETTY_FUNCTION__, up->sg_str, pim->vrf->name,
-				up->channel_oil->cc.oldpktcnt,
-				up->channel_oil->cc.pktcnt,
-				up->channel_oil->cc.lastused / 100);
-		}
-		return;
-	}
-
-	if (pim_upstream_kat_start_ok(up)) {
-		/* Add a source reference to the stream if
-		 * one doesn't already exist */
-		if (!PIM_UPSTREAM_FLAG_TEST_SRC_STREAM(up->flags)) {
-			if (PIM_DEBUG_TRACE)
-				zlog_debug(
-					"source reference created on kat restart %s[%s]",
-					up->sg_str, pim->vrf->name);
-
-			pim_upstream_ref(pim, up,
-					PIM_UPSTREAM_FLAG_MASK_SRC_STREAM,
-					__PRETTY_FUNCTION__);
-			PIM_UPSTREAM_FLAG_SET_SRC_STREAM(up->flags);
-			pim_upstream_fhr_kat_start(up);
-		}
-		pim_upstream_keep_alive_timer_start(up, pim->keep_alive_time);
-	} else if (PIM_UPSTREAM_FLAG_TEST_SRC_LHR(up->flags))
-		pim_upstream_keep_alive_timer_start(up, pim->keep_alive_time);
-
-	if ((up->sptbit != PIM_UPSTREAM_SPTBIT_TRUE) &&
-	    (up->rpf.source_nexthop.interface)) {
-		pim_upstream_set_sptbit(up, up->rpf.source_nexthop.interface);
-	}
-	return;
+	pim_upstream_sg_running_proc(up);
 }
 
 void pim_upstream_add_lhr_star_pimreg(struct pim_instance *pim)
