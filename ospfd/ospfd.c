@@ -1365,6 +1365,7 @@ void ospf_if_update(struct ospf *ospf, struct interface *ifp)
 
 	/* Update connected redistribute. */
 	update_redistributed(ospf, 1);
+
 }
 
 void ospf_remove_vls_through_area(struct ospf *ospf, struct ospf_area *area)

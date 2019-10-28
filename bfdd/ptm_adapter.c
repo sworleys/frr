@@ -579,6 +579,7 @@ static void bfdd_zebra_connected(struct zclient *zc)
 	zclient_send_message(zclient);
 }
 
+
 void bfdd_zclient_init(struct zebra_privs_t *bfdd_priv)
 {
 	zclient = zclient_new(master, &zclient_options_default);

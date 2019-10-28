@@ -31,6 +31,7 @@
 #include "vrrp_debug.h"
 #include "vrrp_memory.h"
 #include "vrrp_vty.h"
+#include "vrrp_zebra.h"
 #ifndef VTYSH_EXTRACT_PL
 #include "vrrpd/vrrp_vty_clippy.c"
 #endif

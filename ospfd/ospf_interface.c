@@ -50,6 +50,8 @@
 DEFINE_QOBJ_TYPE(ospf_interface)
 DEFINE_HOOK(ospf_vl_add, (struct ospf_vl_data * vd), (vd))
 DEFINE_HOOK(ospf_vl_delete, (struct ospf_vl_data * vd), (vd))
+DEFINE_HOOK(ospf_if_update, (struct interface * ifp), (ifp))
+DEFINE_HOOK(ospf_if_delete, (struct interface * ifp), (ifp))
 
 int ospf_interface_neighbor_count(struct ospf_interface *oi)
 {
@@ -634,8 +636,12 @@ void ospf_if_update_params(struct interface *ifp, struct in_addr addr)
 int ospf_if_new_hook(struct interface *ifp)
 {
 	int rc = 0;
+	struct ospf_if_info *oii;
 
 	ifp->info = XCALLOC(MTYPE_OSPF_IF_INFO, sizeof(struct ospf_if_info));
+
+	oii = ifp->info;
+	oii->curr_mtu = ifp->mtu;
 
 	IF_OIFS(ifp) = route_table_init();
 	IF_OIFS_PARAMS(ifp) = route_table_init();
@@ -1218,8 +1224,123 @@ uint8_t ospf_default_iftype(struct interface *ifp)
 		return OSPF_IFTYPE_BROADCAST;
 }
 
+void ospf_if_interface(struct interface *ifp)
+{
+	hook_call(ospf_if_update, ifp);
+}
+
+static int ospf_ifp_create(struct interface *ifp)
+{
+	struct ospf *ospf = NULL;
+
+	if (IS_DEBUG_OSPF(zebra, ZEBRA_INTERFACE))
+		zlog_debug(
+			"Zebra: interface add %s vrf %s[%u] index %d flags %llx metric %d mtu %d speed %u",
+			ifp->name, ospf_vrf_id_to_name(ifp->vrf_id),
+			ifp->vrf_id, ifp->ifindex,
+			(unsigned long long)ifp->flags, ifp->metric, ifp->mtu,
+			ifp->speed);
+
+	assert(ifp->info);
+
+	if (IF_DEF_PARAMS(ifp)
+	    && !OSPF_IF_PARAM_CONFIGURED(IF_DEF_PARAMS(ifp), type)) {
+		SET_IF_PARAM(IF_DEF_PARAMS(ifp), type);
+		IF_DEF_PARAMS(ifp)->type = ospf_default_iftype(ifp);
+	}
+
+	ospf = ospf_lookup_by_vrf_id(ifp->vrf_id);
+	if (!ospf)
+		return 0;
+
+	ospf_if_recalculate_output_cost(ifp);
+
+	ospf_if_update(ospf, ifp);
+
+	hook_call(ospf_if_update, ifp);
+
+	return 0;
+}
+
+static int ospf_ifp_up(struct interface *ifp)
+{
+	struct ospf_interface *oi;
+	struct route_node *rn;
+	struct ospf_if_info *oii = ifp->info;
+
+	ospf_if_recalculate_output_cost(ifp);
+
+	if (oii && oii->curr_mtu != ifp->mtu) {
+		if (IS_DEBUG_OSPF(zebra, ZEBRA_INTERFACE))
+			zlog_debug(
+				"Zebra: Interface[%s] MTU change %u -> %u.",
+				ifp->name, oii->curr_mtu, ifp->mtu);
+
+		oii->curr_mtu = ifp->mtu;
+		/* Must reset the interface (simulate down/up) when MTU
+		 * changes. */
+		ospf_if_reset(ifp);
+
+		return 0;
+	}
+
+	if (IS_DEBUG_OSPF(zebra, ZEBRA_INTERFACE))
+		zlog_debug("Zebra: Interface[%s] state change to up.",
+			   ifp->name);
+
+	for (rn = route_top(IF_OIFS(ifp)); rn; rn = route_next(rn)) {
+		if ((oi = rn->info) == NULL)
+			continue;
+
+		ospf_if_up(oi);
+	}
+
+	return 0;
+}
+
+static int ospf_ifp_down(struct interface *ifp)
+{
+	struct ospf_interface *oi;
+	struct route_node *node;
+
+	if (IS_DEBUG_OSPF(zebra, ZEBRA_INTERFACE))
+		zlog_debug("Zebra: Interface[%s] state change to down.",
+			   ifp->name);
+
+	for (node = route_top(IF_OIFS(ifp)); node; node = route_next(node)) {
+		if ((oi = node->info) == NULL)
+			continue;
+		ospf_if_down(oi);
+	}
+
+	return 0;
+}
+
+static int ospf_ifp_destroy(struct interface *ifp)
+{
+	struct route_node *rn;
+
+	if (IS_DEBUG_OSPF(zebra, ZEBRA_INTERFACE))
+		zlog_debug(
+			"Zebra: interface delete %s vrf %s[%u] index %d flags %llx metric %d mtu %d",
+			ifp->name, ospf_vrf_id_to_name(ifp->vrf_id),
+			ifp->vrf_id, ifp->ifindex,
+			(unsigned long long)ifp->flags, ifp->metric, ifp->mtu);
+
+	hook_call(ospf_if_delete, ifp);
+
+	for (rn = route_top(IF_OIFS(ifp)); rn; rn = route_next(rn))
+		if (rn->info)
+			ospf_if_free((struct ospf_interface *)rn->info);
+
+	return 0;
+}
+
 void ospf_if_init(void)
 {
+	if_zapi_callbacks(ospf_ifp_create, ospf_ifp_up,
+			  ospf_ifp_down, ospf_ifp_destroy);
+
 	/* Initialize Zebra interface data structure. */
 	hook_register_prio(if_add, 0, ospf_if_new_hook);
 	hook_register_prio(if_del, 0, ospf_if_delete_hook);

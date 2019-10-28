@@ -67,6 +67,11 @@ static void delete_evpn_route_entry(struct bgp *bgp, afi_t afi, safi_t safi,
 				    struct bgp_path_info **pi);
 static int delete_all_vni_routes(struct bgp *bgp, struct bgpevpn *vpn);
 
+static int bgp_evpn_update_vpn_route_attribute(struct bgp *bgp,
+			struct bgpevpn *vpn, struct bgp_node *rn,
+			struct prefix_evpn *evp, struct bgp_path_info *pi,
+			struct bgp_path_info **new_pi);
+
 /*
  * Private functions.
  */
@@ -512,7 +517,7 @@ static void bgp_evpn_get_rmac_nexthop(struct bgpevpn *vpn,
 	 * advertise-pip and advertise-svi-ip features
 	 * are enabled.
 	 * Otherwise, for all host MAC-IP route's
-	 * copy anycast RMAC
+	 * copy anycast RMAC.
 	 */
 	if (CHECK_FLAG(flags, BGP_EVPN_MACIP_TYPE_SVI_IP)
 	    && bgp_vrf->evpn_info->advertise_pip &&
@@ -1577,18 +1582,19 @@ static int update_evpn_type5_route(struct bgp *bgp_vrf, struct prefix_evpn *evp,
 		bgp_attr_default_set(&attr, BGP_ORIGIN_IGP);
 	}
 
-	/* copy sys rmac */
-	memcpy(&attr.rmac, &bgp_vrf->evpn_info->pip_rmac, ETH_ALEN);
 	/* Advertise Primary IP (PIP) is enabled, send individual
 	 * IP (default instance router-id) as nexthop.
 	 * PIP is disabled or vrr interface is not present
-	 * use anycast-IP as nexthop.
+	 * use anycast-IP as nexthop and anycast RMAC.
 	 */
 	if (!bgp_vrf->evpn_info->advertise_pip ||
 	    (!bgp_vrf->evpn_info->is_anycast_mac)) {
 		attr.nexthop = bgp_vrf->originator_ip;
 		attr.mp_nexthop_global_in = bgp_vrf->originator_ip;
+		memcpy(&attr.rmac, &bgp_vrf->rmac, ETH_ALEN);
 	} else {
+		/* copy sys rmac */
+		memcpy(&attr.rmac, &bgp_vrf->evpn_info->pip_rmac, ETH_ALEN);
 		if (bgp_vrf->evpn_info->pip_ip.s_addr != INADDR_ANY) {
 			attr.nexthop = bgp_vrf->evpn_info->pip_ip;
 			attr.mp_nexthop_global_in = bgp_vrf->evpn_info->pip_ip;
@@ -3700,7 +3706,7 @@ static int update_advertise_vni_routes(struct bgp *bgp, struct bgpevpn *vpn)
 {
 	struct prefix_evpn p;
 	struct bgp_node *rn, *global_rn;
-	struct bgp_path_info *pi, *global_pi;
+	struct bgp_path_info *pi, *global_pi, *tmp_pi;
 	struct attr *attr;
 	afi_t afi = AFI_L2VPN;
 	safi_t safi = SAFI_EVPN;
@@ -3759,6 +3765,17 @@ static int update_advertise_vni_routes(struct bgp *bgp, struct bgpevpn *vpn)
 		 * attribute.
 		 */
 		attr = pi->attr;
+
+		/* For Self type-2 route build nexthop field due to router-id
+		 * change.
+		 */
+		if (CHECK_FLAG(pi->extra->af_flags,
+			       BGP_EVPN_MACIP_TYPE_SVI_IP)) {
+			bgp_evpn_update_vpn_route_attribute(bgp, vpn, rn, evp,
+							    pi, &tmp_pi);
+			attr = tmp_pi->attr;
+		}
+
 		global_rn = bgp_afi_node_get(bgp->rib[afi][safi], afi, safi,
 					     (struct prefix *)evp, &vpn->prd);
 		assert(global_rn);
@@ -6190,4 +6207,70 @@ void bgp_evpn_init(struct bgp *bgp)
 void bgp_evpn_vrf_delete(struct bgp *bgp_vrf)
 {
 	bgp_evpn_unmap_vrf_from_its_rts(bgp_vrf);
+}
+
+static int bgp_evpn_update_vpn_route_attribute(struct bgp *bgp,
+					       struct bgpevpn *vpn,
+					       struct bgp_node *rn,
+					       struct prefix_evpn *evp,
+					       struct bgp_path_info *pi,
+					       struct bgp_path_info **new_pi)
+{
+	struct attr attr_new;
+	uint32_t seq;
+	int add_l3_ecomm = 0;
+	afi_t afi = AFI_L2VPN;
+	safi_t safi = SAFI_EVPN;
+	int route_changed;
+
+	bgp_attr_default_set(&attr_new, BGP_ORIGIN_IGP);
+	attr_new.nexthop = vpn->originator_ip;
+	attr_new.mp_nexthop_global_in = vpn->originator_ip;
+	attr_new.mp_nexthop_len = BGP_ATTR_NHLEN_IPV4;
+	bgp_evpn_get_rmac_nexthop(vpn, evp, &attr_new,
+				  pi->extra->af_flags);
+
+	if (evpn_route_is_sticky(bgp, rn))
+		attr_new.sticky = 1;
+	else if (evpn_route_is_def_gw(bgp, rn)) {
+		attr_new.default_gw = 1;
+		if (is_evpn_prefix_ipaddr_v6(evp))
+			attr_new.router_flag = 1;
+	}
+
+	/* Add L3 VNI RTs and RMAC for non IPv6 link-local if
+	 * using L3 VNI for type-2 routes also.
+	 */
+	if ((is_evpn_prefix_ipaddr_v4(evp) ||
+	     !IN6_IS_ADDR_LINKLOCAL(
+				    &evp->prefix.macip_addr.ip.ipaddr_v6)) &&
+	    CHECK_FLAG(vpn->flags, VNI_FLAG_USE_TWO_LABELS) &&
+	    bgpevpn_get_l3vni(vpn))
+		add_l3_ecomm = 1;
+
+	/* Set up extended community. */
+	build_evpn_route_extcomm(vpn, &attr_new, add_l3_ecomm);
+
+	seq = mac_mobility_seqnum(pi->attr);
+
+	/* Update the route entry. */
+	route_changed = update_evpn_route_entry(bgp, vpn, afi, safi, rn,
+						&attr_new, 0, new_pi, 0, seq);
+
+	/* Unintern temporary. */
+	aspath_unintern(&attr_new.aspath);
+
+	if (bgp_debug_zebra(NULL)) {
+		char buf[ETHER_ADDR_STRLEN];
+		char buf1[PREFIX_STRLEN];
+
+		zlog_debug("vni %u evp %s RMAC %s nexthop %s",
+			   vpn->vni,
+			   prefix2str(evp, buf1, sizeof(buf1)),
+			   prefix_mac2str(&((*new_pi)->attr->rmac),
+					  buf, sizeof(buf)),
+			   inet_ntoa((*new_pi)->attr->mp_nexthop_global_in));
+	}
+
+	return route_changed;
 }
