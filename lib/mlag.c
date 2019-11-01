@@ -82,23 +82,34 @@ char *zebra_mlag_lib_msgid_to_str(enum mlag_msg_type msg_type, char *buf,
 }
 
 
-int zebra_mlag_lib_decode_mlag_hdr(struct stream *s, struct mlag_msg *msg)
+int zebra_mlag_lib_decode_mlag_hdr(struct stream *s, struct mlag_msg *msg,
+				   size_t *length)
 {
-	if (s == NULL || msg == NULL)
+#define LIB_MLAG_HDR_LENGTH 8
+	*length = stream_get_endp(s);
+
+	if (s == NULL || msg == NULL || *length < LIB_MLAG_HDR_LENGTH)
 		return -1;
+
+	*length -= LIB_MLAG_HDR_LENGTH;
 
 	STREAM_GETL(s, msg->msg_type);
 	STREAM_GETW(s, msg->data_len);
 	STREAM_GETW(s, msg->msg_cnt);
+
 	return 0;
 stream_failure:
 	return -1;
 }
 
+#define MLAG_MROUTE_ADD_LENGTH                                                 \
+	(VRF_NAMSIZ + INTERFACE_NAMSIZ + 4 + 4 + 4 + 4 + 1 + 1 + 4)
+
 int zebra_mlag_lib_decode_mroute_add(struct stream *s,
-				     struct mlag_mroute_add *msg)
+				     struct mlag_mroute_add *msg,
+				     size_t *length)
 {
-	if (s == NULL || msg == NULL)
+	if (s == NULL || msg == NULL || *length < MLAG_MROUTE_ADD_LENGTH)
 		return -1;
 
 	STREAM_GET(msg->vrf_name, s, VRF_NAMSIZ);
@@ -110,15 +121,19 @@ int zebra_mlag_lib_decode_mroute_add(struct stream *s,
 	STREAM_GETC(s, msg->am_i_dual_active);
 	STREAM_GETL(s, msg->vrf_id);
 	STREAM_GET(msg->intf_name, s, INTERFACE_NAMSIZ);
+
 	return 0;
 stream_failure:
 	return -1;
 }
 
+#define MLAG_MROUTE_DEL_LENGTH (VRF_NAMSIZ + INTERFACE_NAMSIZ + 4 + 4 + 4 + 4)
+
 int zebra_mlag_lib_decode_mroute_del(struct stream *s,
-				     struct mlag_mroute_del *msg)
+				     struct mlag_mroute_del *msg,
+				     size_t *length)
 {
-	if (s == NULL || msg == NULL)
+	if (s == NULL || msg == NULL || *length < MLAG_MROUTE_DEL_LENGTH)
 		return -1;
 
 	STREAM_GET(msg->vrf_name, s, VRF_NAMSIZ);
@@ -127,6 +142,7 @@ int zebra_mlag_lib_decode_mroute_del(struct stream *s,
 	STREAM_GETL(s, msg->owner_id);
 	STREAM_GETL(s, msg->vrf_id);
 	STREAM_GET(msg->intf_name, s, INTERFACE_NAMSIZ);
+
 	return 0;
 stream_failure:
 	return -1;

@@ -783,8 +783,9 @@ int pim_zebra_mlag_handle_msg(struct stream *s, int len)
 	struct mlag_msg mlag_msg;
 	char buf[80];
 	int rc = 0;
+	size_t length;
 
-	rc = zebra_mlag_lib_decode_mlag_hdr(s, &mlag_msg);
+	rc = zebra_mlag_lib_decode_mlag_hdr(s, &mlag_msg, &length);
 	if (rc)
 		return (rc);
 
@@ -825,7 +826,7 @@ int pim_zebra_mlag_handle_msg(struct stream *s, int len)
 	case MLAG_MROUTE_ADD: {
 		struct mlag_mroute_add msg;
 
-		rc = zebra_mlag_lib_decode_mroute_add(s, &msg);
+		rc = zebra_mlag_lib_decode_mroute_add(s, &msg, &length);
 		if (rc)
 			return (rc);
 		pim_mlag_process_mroute_add(msg);
@@ -833,7 +834,7 @@ int pim_zebra_mlag_handle_msg(struct stream *s, int len)
 	case MLAG_MROUTE_DEL: {
 		struct mlag_mroute_del msg;
 
-		rc = zebra_mlag_lib_decode_mroute_del(s, &msg);
+		rc = zebra_mlag_lib_decode_mroute_del(s, &msg, &length);
 		if (rc)
 			return (rc);
 		pim_mlag_process_mroute_del(msg);
@@ -844,7 +845,7 @@ int pim_zebra_mlag_handle_msg(struct stream *s, int len)
 
 		for (i = 0; i < mlag_msg.msg_cnt; i++) {
 
-			rc = zebra_mlag_lib_decode_mroute_add(s, &msg);
+			rc = zebra_mlag_lib_decode_mroute_add(s, &msg, &length);
 			if (rc)
 				return (rc);
 			pim_mlag_process_mroute_add(msg);
@@ -856,7 +857,7 @@ int pim_zebra_mlag_handle_msg(struct stream *s, int len)
 
 		for (i = 0; i < mlag_msg.msg_cnt; i++) {
 
-			rc = zebra_mlag_lib_decode_mroute_del(s, &msg);
+			rc = zebra_mlag_lib_decode_mroute_del(s, &msg, &length);
 			if (rc)
 				return (rc);
 			pim_mlag_process_mroute_del(msg);
