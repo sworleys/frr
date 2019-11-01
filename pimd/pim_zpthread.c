@@ -168,11 +168,7 @@ static int pim_mlag_zthread_handler(struct thread *event)
 				   __func__);
 			break;
 		}
-
 		STREAM_GETL(read_s, curr_msg_type);
-		pim_mlag_zebra_check_for_buffer_flush(curr_msg_type,
-						      prev_msg_type);
-
 		/*
 		 * Check for Buffer Overflow,
 		 * MLAG Can't process more than 'PIM_MLAG_BUF_LIMIT' bytes
@@ -180,6 +176,9 @@ static int pim_mlag_zthread_handler(struct thread *event)
 		if (router->mlag_stream->endp + read_s->endp + ZEBRA_HEADER_SIZE
 		    > MLAG_BUF_LIMIT)
 			pim_mlag_zebra_flush_buffer();
+
+		pim_mlag_zebra_check_for_buffer_flush(curr_msg_type,
+						      prev_msg_type);
 
 		/*
 		 * First message to Buffer, fill the Header
