@@ -151,7 +151,10 @@ static int interface_vrf_update(ZAPI_CALLBACK_ARGS)
 					      &new_vrf_id);
 
 	DEBUGD(&pbr_dbg_zebra, "%s: %s VRF change %u -> %u", __func__,
-	       ifp->name, vrf_id, new_vrf_id);
+	       (ifp ? ifp->name : "Unknown"), vrf_id, (ifp ? new_vrf_id : -1));
+
+	if (!ifp)
+		return 0;
 
 	if_update_to_new_vrf(ifp, new_vrf_id);
 

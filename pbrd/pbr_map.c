@@ -109,7 +109,7 @@ static void pbr_map_pbrms_update_common(struct pbr_map_sequence *pbrms,
 
 	pbrm = pbrms->parent;
 
-	if (pbrm->valid && pbrms->nhs_installed && pbrm->incoming->count) {
+	if (pbrms->nhs_installed && pbrm->incoming->count) {
 		for (ALL_LIST_ELEMENTS_RO(pbrm->incoming, node, pmi))
 			pbr_send_pbr_map(pbrms, pmi, install, false);
 	}
@@ -238,17 +238,10 @@ void pbr_map_policy_interface_update(const struct interface *ifp, bool state_up)
 	/*
 	 * Walk the list and install/remove maps on the interface.
 	 */
-	for (ALL_LIST_ELEMENTS_RO(pbrm->seqnumbers, node, pbrms)) {
+	for (ALL_LIST_ELEMENTS_RO(pbrm->seqnumbers, node, pbrms))
 		for (ALL_LIST_ELEMENTS_RO(pbrm->incoming, inode, pmi))
-			if (pmi->ifp == ifp) {
-				if (state_up)
-					pbr_send_pbr_map(pbrms, pmi, true,
-							 true);
-				else
-					pbr_send_pbr_map(pbrms, pmi, false,
-							 true);
-			}
-	}
+			if (pmi->ifp == ifp)
+				pbr_send_pbr_map(pbrms, pmi, state_up, true);
 }
 
 /* Vrf changed on a pbr interface */
@@ -293,11 +286,14 @@ void pbr_map_vrf_update(const struct pbr_vrf *pbr_vrf)
 	struct pbr_map_sequence *pbrms;
 	struct listnode *node;
 
+	if (!pbr_vrf)
+		return;
+
 	vrf_id_t vrf_id = pbr_vrf->vrf->vrf_id;
 	bool enabled = pbr_vrf_is_enabled(pbr_vrf);
 
-	DEBUGD(&pbr_dbg_map, "%s: %u %s, updating pbr maps", __func__, vrf_id,
-	       enabled ? "enabled" : "disabled");
+	DEBUGD(&pbr_dbg_map, "%s: %s (%u) %s, updating pbr maps", __func__,
+	       pbr_vrf->vrf->name, vrf_id, enabled ? "enabled" : "disabled");
 
 	RB_FOREACH (pbrm, pbr_map_entry_head, &pbr_maps) {
 		DEBUGD(&pbr_dbg_map, "%s: Looking at %s", __PRETTY_FUNCTION__,
@@ -305,8 +301,9 @@ void pbr_map_vrf_update(const struct pbr_vrf *pbr_vrf)
 		for (ALL_LIST_ELEMENTS_RO(pbrm->seqnumbers, node, pbrms)) {
 			if (pbrms->vrf_lookup && (pbrms->vrf_id == vrf_id)) {
 				DEBUGD(&pbr_dbg_map,
-				       "\tSeq %u uses vrf %u, updating map",
-				       pbrms->seqno, vrf_id);
+				       "\tSeq %u uses vrf %s (%u), updating map",
+				       pbrms->seqno, pbr_vrf->vrf->name,
+				       vrf_id);
 
 				pbr_map_check(pbrms);
 			}
