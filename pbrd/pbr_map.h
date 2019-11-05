@@ -111,7 +111,7 @@ struct pbr_map_sequence {
 	/*
 	 * VRF for lookup.
 	 */
-	vrf_id_t vrf_id;
+	char vrf_name[VRF_NAMSIZ + 1];
 
 	/*
 	 * The nexthop group we auto create

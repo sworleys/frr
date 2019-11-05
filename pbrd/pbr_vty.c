@@ -399,49 +399,49 @@ DEFPY(pbr_map_vrf, pbr_map_vrf_cmd,
       "Use the interface's VRF for lookup\n")
 {
 	struct pbr_map_sequence *pbrms = VTY_GET_CONTEXT(pbr_map_sequence);
-	struct pbr_vrf *pbr_vrf;
-	uint32_t vrf_id = 0;
-
-	if (pbrms->nhgrp_name || pbrms->nhg) {
-		vty_out(vty,
-			"A `set nexthop/nexthop-group XX` command already exits, please remove that first\n");
-		return CMD_WARNING_CONFIG_FAILED;
-	}
-
-	if (!no && (pbrms->vrf_lookup || pbrms->vrf_unchanged)) {
-		vty_out(vty, SET_VRF_EXISTS_STR);
-		return CMD_WARNING_CONFIG_FAILED;
-	}
-
-	if (name) {
-		pbr_vrf = pbr_vrf_lookup_by_name(name);
-
-		if (!pbr_vrf) {
-			vty_out(vty, "Specified: %s is non-existent\n", name);
-			return CMD_WARNING_CONFIG_FAILED;
-		}
-		vrf_id = pbr_vrf->vrf->vrf_id;
-	}
+	int ret = CMD_SUCCESS;
 
 	if (no) {
 		pbr_map_delete_vrf(pbrms);
 
 		/* Reset all data */
 		pbrms->nhs_installed = false;
-		pbrms->vrf_id = 0;
+		pbrms->vrf_name[0] = '\0';
 		pbrms->vrf_lookup = false;
 		pbrms->vrf_unchanged = false;
-	} else {
-		pbrms->vrf_id = vrf_id;
-		if (name)
-			pbrms->vrf_lookup = true;
-		else
-			pbrms->vrf_unchanged = true;
 
-		pbr_map_check(pbrms);
+		goto done;
 	}
 
-	return CMD_SUCCESS;
+	if (pbrms->nhgrp_name || pbrms->nhg) {
+		vty_out(vty,
+			"A `set nexthop/nexthop-group XX` command already exits, please remove that first\n");
+		ret = CMD_WARNING_CONFIG_FAILED;
+		goto done;
+	}
+
+	if (pbrms->vrf_lookup || pbrms->vrf_unchanged) {
+		vty_out(vty, SET_VRF_EXISTS_STR);
+		ret = CMD_WARNING_CONFIG_FAILED;
+		goto done;
+	}
+
+	if (name) {
+		if (!pbr_vrf_lookup_by_name(name)) {
+			vty_out(vty, "Specified: %s is non-existent\n", name);
+			ret = CMD_WARNING_CONFIG_FAILED;
+			goto done;
+		}
+
+		pbrms->vrf_lookup = true;
+		strlcpy(pbrms->vrf_name, name, sizeof(pbrms->vrf_name));
+	} else
+		pbrms->vrf_unchanged = true;
+
+	pbr_map_check(pbrms);
+
+done:
+	return ret;
 }
 
 DEFPY (pbr_policy,
@@ -577,7 +577,7 @@ DEFPY (show_pbr_map,
 					"\tVRF Unchanged (use interface vrf)\n");
 			} else if (pbrms->vrf_lookup) {
 				vty_out(vty, "\tVRF Lookup: %s\n",
-					pbr_vrf_id_to_name(pbrms->vrf_id));
+					pbrms->vrf_name);
 			} else {
 				vty_out(vty,
 					"\tNexthop-Group: Unknown Installed: 0(0)\n");
@@ -744,8 +744,7 @@ static int pbr_vty_map_config_write_sequence(struct vty *vty,
 		vty_out(vty, " set vrf unchanged\n");
 
 	if (pbrms->vrf_lookup)
-		vty_out(vty, " set vrf %s\n",
-			pbr_vrf_id_to_name(pbrms->vrf_id));
+		vty_out(vty, " set vrf %s\n", pbrms->vrf_name);
 
 	if (pbrms->nhgrp_name)
 		vty_out(vty, " set nexthop-group %s\n", pbrms->nhgrp_name);

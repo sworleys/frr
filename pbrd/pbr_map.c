@@ -244,39 +244,19 @@ void pbr_map_policy_interface_update(const struct interface *ifp, bool state_up)
 				pbr_send_pbr_map(pbrms, pmi, state_up, true);
 }
 
-/* Vrf changed on a pbr interface */
-void pbr_map_policy_interface_vrf_update(const struct interface *ifp)
+static void pbrms_vrf_update(struct pbr_map_sequence *pbrms,
+			     const struct pbr_vrf *pbr_vrf)
 {
-	return;
-#if 0
-	struct pbr_interface *pbr_ifp;
-	struct pbr_map_sequence *pbrms;
-	struct pbr_map *pbrm;
-	struct listnode *node, *inode;
-	struct pbr_map_interface *pmi;
+	const char *vrf_name = pbr_vrf_name(pbr_vrf);
 
-	if (pbr_map_policy_interface_update_common(ifp, &pbr_ifp, &pbrm))
-		return;
+	if (pbrms->vrf_lookup
+	    && (strncmp(vrf_name, pbrms->vrf_name, sizeof(pbrms->vrf_name))
+		== 0)) {
+		DEBUGD(&pbr_dbg_map, "\tSeq %u uses vrf %s (%u), updating map",
+		       pbrms->seqno, vrf_name, pbr_vrf_id(pbr_vrf));
 
-	if (!pbr_map_check_valid_internal(pbrm))
-		return;
-
-	DEBUGD(&pbr_dbg_map, "%s: %s updating `set vrf unchanged` rules",
-	       __func__, pbr_ifp->mapname);
-
-	/*
-	 * Walk the list and only update `vrf unchanged` rules for that
-	 * interface's MAP.
-	 */
-	for (ALL_LIST_ELEMENTS_RO(pbrm->seqnumbers, node, pbrms)) {
-		if (pbrms->vrf_unchanged) {
-			for (ALL_LIST_ELEMENTS_RO(pbrm->incoming, inode, pmi))
-				if (pmi->ifp == ifp)
-					pbr_send_pbr_map(pbrms, pmi, true,
-							 true);
-		}
+		pbr_map_check(pbrms);
 	}
-#endif
 }
 
 /* Vrf enabled/disabled */
@@ -289,25 +269,17 @@ void pbr_map_vrf_update(const struct pbr_vrf *pbr_vrf)
 	if (!pbr_vrf)
 		return;
 
-	vrf_id_t vrf_id = pbr_vrf->vrf->vrf_id;
 	bool enabled = pbr_vrf_is_enabled(pbr_vrf);
 
 	DEBUGD(&pbr_dbg_map, "%s: %s (%u) %s, updating pbr maps", __func__,
-	       pbr_vrf->vrf->name, vrf_id, enabled ? "enabled" : "disabled");
+	       pbr_vrf_name(pbr_vrf), pbr_vrf_id(pbr_vrf),
+	       enabled ? "enabled" : "disabled");
 
 	RB_FOREACH (pbrm, pbr_map_entry_head, &pbr_maps) {
 		DEBUGD(&pbr_dbg_map, "%s: Looking at %s", __PRETTY_FUNCTION__,
 		       pbrm->name);
-		for (ALL_LIST_ELEMENTS_RO(pbrm->seqnumbers, node, pbrms)) {
-			if (pbrms->vrf_lookup && (pbrms->vrf_id == vrf_id)) {
-				DEBUGD(&pbr_dbg_map,
-				       "\tSeq %u uses vrf %s (%u), updating map",
-				       pbrms->seqno, pbr_vrf->vrf->name,
-				       vrf_id);
-
-				pbr_map_check(pbrms);
-			}
-		}
+		for (ALL_LIST_ELEMENTS_RO(pbrm->seqnumbers, node, pbrms))
+			pbrms_vrf_update(pbrms, pbr_vrf);
 	}
 }
 
@@ -466,6 +438,7 @@ struct pbr_map_sequence *pbrms_get(const char *name, uint32_t seqno)
 		pbrms->reason =
 			PBR_MAP_INVALID_EMPTY |
 			PBR_MAP_INVALID_NO_NEXTHOPS;
+		pbrms->vrf_name[0] = '\0';
 
 		QOBJ_REG(pbrms, pbr_map_sequence);
 		listnode_add_sort(pbrm->seqnumbers, pbrms);
@@ -493,7 +466,8 @@ pbr_map_sequence_check_nexthops_valid(struct pbr_map_sequence *pbrms)
 		pbrms->nhs_installed = true;
 
 	if (pbrms->vrf_lookup) {
-		struct pbr_vrf *pbr_vrf = pbr_vrf_lookup_by_id(pbrms->vrf_id);
+		struct pbr_vrf *pbr_vrf =
+			pbr_vrf_lookup_by_name(pbrms->vrf_name);
 
 		if (pbr_vrf && pbr_vrf_is_valid(pbr_vrf))
 			pbrms->nhs_installed = true;

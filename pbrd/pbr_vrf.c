@@ -127,11 +127,6 @@ bool pbr_vrf_is_valid(const struct pbr_vrf *pbr_vrf)
 	return pbr_vrf_is_enabled(pbr_vrf);
 }
 
-const char *pbr_vrf_id_to_name(vrf_id_t vrf_id)
-{
-	return vrf_id_to_name(vrf_id);
-}
-
 void pbr_vrf_init(void)
 {
 	vrf_init(pbr_vrf_new, pbr_vrf_enable, pbr_vrf_disable, pbr_vrf_delete,

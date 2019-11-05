@@ -158,8 +158,6 @@ static int interface_vrf_update(ZAPI_CALLBACK_ARGS)
 
 	if_update_to_new_vrf(ifp, new_vrf_id);
 
-	pbr_map_policy_interface_vrf_update(ifp);
-
 	return 0;
 }
 
@@ -514,13 +512,31 @@ static void pbr_encode_pbr_map_sequence_prefix(struct stream *s,
 	stream_put(s, &p->u.prefix, prefix_blen(p));
 }
 
+static void
+pbr_encode_pbr_map_sequence_vrf(struct stream *s,
+				const struct pbr_map_sequence *pbrms,
+				const struct interface *ifp)
+{
+	struct pbr_vrf *pbr_vrf;
+
+	if (pbrms->vrf_unchanged)
+		pbr_vrf = pbr_vrf_lookup_by_id(ifp->vrf_id);
+	else
+		pbr_vrf = pbr_vrf_lookup_by_name(pbrms->vrf_name);
+
+	if (!pbr_vrf) {
+		DEBUGD(&pbr_dbg_zebra, "%s: VRF not found", __func__);
+		return;
+	}
+
+	stream_putl(s, pbr_vrf->vrf->data.l.table_id);
+}
+
 static void pbr_encode_pbr_map_sequence(struct stream *s,
 					struct pbr_map_sequence *pbrms,
 					struct interface *ifp)
 {
 	unsigned char family;
-	vrf_id_t vrf_id;
-	struct pbr_vrf *pbr_vrf;
 
 	family = AF_INET;
 	if (pbrms->family)
@@ -535,14 +551,13 @@ static void pbr_encode_pbr_map_sequence(struct stream *s,
 	stream_putw(s, 0);  /* dst port */
 	stream_putl(s, pbrms->mark);
 
-	if (pbrms->vrf_unchanged || pbrms->vrf_lookup) {
-		vrf_id = pbrms->vrf_unchanged ? ifp->vrf_id : pbrms->vrf_id;
-		pbr_vrf = pbr_vrf_lookup_by_id(vrf_id);
-		stream_putl(s, pbr_vrf->vrf->data.l.table_id);
-	} else if (pbrms->nhgrp_name)
+	if (pbrms->vrf_unchanged || pbrms->vrf_lookup)
+		pbr_encode_pbr_map_sequence_vrf(s, pbrms, ifp);
+	else if (pbrms->nhgrp_name)
 		stream_putl(s, pbr_nht_get_table(pbrms->nhgrp_name));
 	else if (pbrms->nhg)
 		stream_putl(s, pbr_nht_get_table(pbrms->internal_nhg_name));
+
 	stream_putl(s, ifp->ifindex);
 }
 
