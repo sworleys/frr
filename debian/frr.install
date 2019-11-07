@@ -17,6 +17,5 @@ usr/share/doc/frr/examples
 usr/share/man/
 usr/share/yang/
 tools/frr-reload usr/lib/frr/
-tools/cumulus-limits-override.conf etc/frr
 tools/usr/share/cumulus/* usr/share/cumulus/
 debian/frr.conf usr/lib/tmpfiles.d

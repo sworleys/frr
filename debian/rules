@@ -4,7 +4,6 @@
 
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 
-
 ifneq (,$(filter terse,$(DEB_BUILD_OPTIONS)))
   MAKE_SILENT="V=0"
   export DH_VERBOSE=0
@@ -29,13 +28,6 @@ else
   DH_WITH_SYSTEMD=
   CONF_SYSTEMD=--enable-systemd=no
 endif
-
-ifneq (,$(filter sanitizer,$(DEB_BUILD_OPTIONS)))
-  CONF_ASAN=--enable-address-sanitizer
-else
-  CONF_ASAN=--disable-address-sanitizer
-endif
-
 
 export PYTHON=python3
 
@@ -73,7 +65,6 @@ override_dh_auto_configure:
 		--enable-configfile-mask=0640 \
 		--enable-logfile-mask=0640 \
 		\
-		$(CONF_ASAN) \
 		--enable-protobuf \
 		--enable-cumulus=yes \
 		--enable-datacenter=yes \
