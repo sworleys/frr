@@ -44,6 +44,7 @@ struct graceful_restart_af {
 #define CAPABILITY_CODE_MP              1 /* Multiprotocol Extensions */
 #define CAPABILITY_CODE_REFRESH         2 /* Route Refresh Capability */
 #define CAPABILITY_CODE_ORF             3 /* Cooperative Route Filtering Capability */
+#define CAPABILITY_CODE_AS_NAME        63 /* Advertise AS name capability */
 #define CAPABILITY_CODE_RESTART        64 /* Graceful Restart Capability */
 #define CAPABILITY_CODE_AS4            65 /* 4-octet AS number Capability */
 #define CAPABILITY_CODE_DYNAMIC_OLD    66 /* Dynamic Capability, deprecated since 2003 */
@@ -64,6 +65,7 @@ struct graceful_restart_af {
 #define CAPABILITY_CODE_ENHE_LEN        6 /* NRLI AFI = 2, SAFI = 2, Nexthop AFI = 2 */
 #define CAPABILITY_CODE_MIN_FQDN_LEN    2
 #define CAPABILITY_CODE_ORF_LEN         5
+#define CAPABILITY_CODE_MIN_AS_NAME_LEN 1
 
 /* Cooperative Route Filtering Capability.  */
 

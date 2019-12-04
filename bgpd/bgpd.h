@@ -44,6 +44,8 @@
 #include "bgp_addpath_types.h"
 
 #define BGP_MAX_HOSTNAME 64	/* Linux max, is larger than most other sys */
+#define BGP_MAX_AS_NAME                                                        \
+	BGP_MAX_HOSTNAME /* Just setting as hostname max for now */
 #define BGP_PEER_MAX_HASH_SIZE 16384
 
 /* Default interval for IPv6 RAs when triggered by BGP unnumbered neighbor. */
@@ -237,6 +239,9 @@ struct bgp {
 	/* AS number of this BGP instance.  */
 	as_t as;
 
+	/* AS name of this BGP instance.  */
+	char *as_name;
+
 	/* Name of this BGP instance.  */
 	char *name;
 	char *name_pretty;	/* printable "VRF|VIEW name|default" */
@@ -367,6 +372,7 @@ struct bgp {
 #define BGP_FLAG_GR_PRESERVE_FWD          (1 << 20)
 #define BGP_FLAG_GRACEFUL_SHUTDOWN        (1 << 21)
 #define BGP_FLAG_DELETE_IN_PROGRESS       (1 << 22)
+#define BGP_FLAG_SHOW_AS_NAME             (1 << 23)
 
 	/* BGP Per AF flags */
 	uint16_t af_flags[AFI_MAX][SAFI_MAX];
@@ -846,6 +852,8 @@ struct peer {
 #define PEER_CAP_ENHE_RCV                   (1 << 14) /* Extended nexthop received */
 #define PEER_CAP_HOSTNAME_ADV               (1 << 15) /* hostname advertised */
 #define PEER_CAP_HOSTNAME_RCV               (1 << 16) /* hostname received */
+#define PEER_CAP_AS_NAME_ADV                (1 << 16) /* AS name advertised */
+#define PEER_CAP_AS_NAME_RCV                (1 << 17) /* AS name received */
 
 	/* Capability flags (reset in bgp_stop) */
 	uint32_t af_cap[AFI_MAX][SAFI_MAX];
@@ -1232,6 +1240,9 @@ struct peer {
 	/* hostname and domainname advertised by host */
 	char *hostname;
 	char *domainname;
+
+	/* AS name advertised by peer */
+	char *as_name;
 
 	/* Sender side AS path loop detection. */
 	bool as_path_loop_detection;

@@ -1220,6 +1220,37 @@ DEFPY (no_bgp_router_id,
 	return CMD_SUCCESS;
 }
 
+/* BGP router set AS name.  */
+
+DEFPY (bgp_as_name,
+       bgp_as_name_cmd,
+       "bgp AS-name WORD$name",
+       BGP_STR
+       "set AS-name\n"
+       "AS Name\n")
+{
+	VTY_DECLVAR_CONTEXT(bgp, bgp);
+
+	bgp->as_name = XCALLOC(MTYPE_BGP_PEER_AS_NAME, BGP_MAX_AS_NAME);
+	strlcpy(bgp->as_name, name, sizeof(bgp->as_name));
+
+	return CMD_SUCCESS;
+}
+
+DEFPY (no_bgp_as_name,
+       no_bgp_as_name_cmd,
+       "no bgp AS-name WORD$name",
+       NO_STR
+       BGP_STR
+       "set AS-name\n"
+       "AS Name\n")
+{
+	VTY_DECLVAR_CONTEXT(bgp, bgp);
+
+	XFREE(MTYPE_BGP_PEER_AS_NAME, bgp->as_name);
+
+	return CMD_SUCCESS;
+}
 
 /* BGP Cluster ID.  */
 DEFUN (bgp_cluster_id,
@@ -2473,6 +2504,32 @@ DEFUN (no_bgp_default_show_hostname,
 {
 	VTY_DECLVAR_CONTEXT(bgp, bgp);
 	bgp_flag_unset(bgp, BGP_FLAG_SHOW_HOSTNAME);
+	return CMD_SUCCESS;
+}
+
+/* Display AS name in certain command outputs */
+DEFUN (bgp_default_show_as_name,
+       bgp_default_show_as_name_cmd,
+       "bgp default show-AS-name",
+       "BGP specific commands\n"
+       "Configure BGP defaults\n"
+       "Show AS name in certain command outputs\n")
+{
+	VTY_DECLVAR_CONTEXT(bgp, bgp);
+	bgp_flag_set(bgp, BGP_FLAG_SHOW_AS_NAME);
+	return CMD_SUCCESS;
+}
+
+DEFUN (no_bgp_default_show_as_name,
+       no_bgp_default_show_as_name_cmd,
+       "no bgp default show-AS-name",
+       NO_STR
+       "BGP specific commands\n"
+       "Configure BGP defaults\n"
+       "Show AS name in certain command outputs\n")
+{
+	VTY_DECLVAR_CONTEXT(bgp, bgp);
+	bgp_flag_unset(bgp, BGP_FLAG_SHOW_AS_NAME);
 	return CMD_SUCCESS;
 }
 
@@ -8079,9 +8136,12 @@ static int bgp_show_summary(struct vty *vty, struct bgp *bgp, int afi, int safi,
 	unsigned int count = 0, dn_count = 0;
 	char timebuf[BGP_UPTIME_LEN], dn_flag[2];
 	char neighbor_buf[VTY_BUFSIZ];
+	char as_buf[VTY_BUFSIZ];
 	int neighbor_col_default_width = 16;
+	int as_col_default_width = 10;
 	int len, failed_count = 0;
 	int max_neighbor_width = 0;
+	int max_as_width = 0;
 	int pfx_rcd_safi;
 	json_object *json = NULL;
 	json_object *json_peer = NULL;
@@ -8118,7 +8178,7 @@ static int bgp_show_summary(struct vty *vty, struct bgp *bgp, int afi, int safi,
 	} else {
 		/* Loop over all neighbors that will be displayed to determine
 		 * how many
-		 * characters are needed for the Neighbor column
+		 * characters are needed for the Neighbor & AS column
 		 */
 		for (ALL_LIST_ELEMENTS(bgp->peer, node, nnode, peer)) {
 			if (!CHECK_FLAG(peer->flags, PEER_FLAG_CONFIG_NODE))
@@ -8144,6 +8204,19 @@ static int bgp_show_summary(struct vty *vty, struct bgp *bgp, int afi, int safi,
 				if (len > max_neighbor_width)
 					max_neighbor_width = len;
 
+				if (peer->as_name
+				    && bgp_flag_check(bgp,
+						      BGP_FLAG_SHOW_AS_NAME))
+					sprintf(as_buf, "%s(%d) ",
+						peer->as_name, peer->as);
+				else
+					sprintf(as_buf, "%d ", peer->as);
+
+				len = strlen(as_buf);
+
+				if (len > max_as_width)
+					max_as_width = len;
+
 				/* See if we have at least a single failed peer */
 				if (bgp_has_peer_failed(peer, afi, safi))
 					failed_count++;
@@ -8156,6 +8229,9 @@ static int bgp_show_summary(struct vty *vty, struct bgp *bgp, int afi, int safi,
 		 */
 		if (max_neighbor_width < neighbor_col_default_width)
 			max_neighbor_width = neighbor_col_default_width;
+
+		if (max_as_width < as_col_default_width)
+			max_as_width = as_col_default_width;
 	}
 
 	if (show_failed && !failed_count) {
@@ -8380,7 +8456,7 @@ static int bgp_show_summary(struct vty *vty, struct bgp *bgp, int afi, int safi,
 					vty_out(vty, "EstdCnt DropCnt ResetTime Reason\n");
 				else
 					vty_out(vty,
-					"V         AS MsgRcvd MsgSent   TblVer  InQ OutQ  Up/Down State/PfxRcd\n");
+					"V         AS       MsgRcvd MsgSent   TblVer  InQ OutQ  Up/Down State/PfxRcd\n");
 			}
 		}
 
@@ -8503,10 +8579,27 @@ static int bgp_show_summary(struct vty *vty, struct bgp *bgp, int afi, int safi,
 					vty_out(vty, "%*s", max_neighbor_width - len,
 						" ");
 
-				vty_out(vty, "4 %10u %7u %7u %8" PRIu64 " %4d %4zd %8s",
-					peer->as, PEER_TOTAL_RX(peer),
-					PEER_TOTAL_TX(peer), peer->version[afi][safi],
-					0, peer->obuf->count,
+				vty_out(vty, "4 ");
+
+				if (peer->as_name
+				    && bgp_flag_check(bgp,
+						      BGP_FLAG_SHOW_AS_NAME))
+					vty_out(vty, "%s(%u)", peer->as_name,
+						peer->as);
+				else
+					len = vty_out(vty, "%u", peer->as);
+
+				/* pad the as column with spaces */
+				if (len < max_as_width)
+					vty_out(vty, "%*s", max_as_width - len,
+						" ");
+
+				vty_out(vty,
+					"%7u %7u %8" PRIu64 " %4d %4zd %8s",
+					PEER_TOTAL_RX(peer),
+					PEER_TOTAL_TX(peer),
+					peer->version[afi][safi], 0,
+					peer->obuf->count,
 					peer_uptime(peer->uptime, timebuf,
 						    BGP_UPTIME_LEN, 0, NULL));
 
@@ -9496,9 +9589,13 @@ static void bgp_show_peer(struct vty *vty, struct peer *p, bool use_json,
 						     "localAsReplaceAs");
 	} else {
 		if ((p->as_type == AS_SPECIFIED) || (p->as_type == AS_EXTERNAL)
-		    || (p->as_type == AS_INTERNAL))
-			vty_out(vty, "remote AS %u, ", p->as);
-		else
+		    || (p->as_type == AS_INTERNAL)) {
+			if (bgp_flag_check(bgp, BGP_FLAG_SHOW_AS_NAME))
+				vty_out(vty, "remote AS %s(%u), ", p->as_name,
+					p->as);
+			else
+				vty_out(vty, "remote AS %u, ", p->as);
+		} else
 			vty_out(vty, "remote AS Unspecified, ");
 		vty_out(vty, "local AS %u%s%s, ",
 			p->change_local_as ? p->change_local_as : p->local_as,
@@ -10536,6 +10633,26 @@ static void bgp_show_peer(struct vty *vty, struct peer *p, bool use_json,
 				} else {
 					vty_out(vty, " not received");
 				}
+
+				vty_out(vty, "\n");
+
+				/* AS name capability */
+				vty_out(vty, "    AS name Capability:");
+
+				if (CHECK_FLAG(p->cap, PEER_CAP_AS_NAME_ADV))
+					vty_out(vty,
+						" advertised (AS name: %s)",
+						bgp->as_name ? bgp->as_name
+							     : "n/a");
+				else
+					vty_out(vty, " not advertised");
+
+				if (CHECK_FLAG(p->cap, PEER_CAP_HOSTNAME_RCV))
+					vty_out(vty, " received (AS name: %s)",
+						p->as_name ? p->as_name
+							   : "n/a");
+				else
+					vty_out(vty, " not received");
 
 				vty_out(vty, "\n");
 
@@ -13104,6 +13221,10 @@ void bgp_vty_init(void)
 	/* "no router bgp" commands. */
 	install_element(CONFIG_NODE, &no_router_bgp_cmd);
 
+	/* "bgp AS-name" commands. */
+	install_element(BGP_NODE, &bgp_as_name_cmd);
+	install_element(BGP_NODE, &no_bgp_as_name_cmd);
+
 	/* "bgp router-id" commands. */
 	install_element(BGP_NODE, &bgp_router_id_cmd);
 	install_element(BGP_NODE, &no_bgp_router_id_cmd);
@@ -13253,6 +13374,10 @@ void bgp_vty_init(void)
 	/* bgp default show-hostname */
 	install_element(BGP_NODE, &bgp_default_show_hostname_cmd);
 	install_element(BGP_NODE, &no_bgp_default_show_hostname_cmd);
+
+	/* bgp default show-AS-name */
+	install_element(BGP_NODE, &bgp_default_show_as_name_cmd);
+	install_element(BGP_NODE, &no_bgp_default_show_as_name_cmd);
 
 	/* "bgp default subgroup-pkt-queue-max" commands. */
 	install_element(BGP_NODE, &bgp_default_subgroup_pkt_queue_max_cmd);
