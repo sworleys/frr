@@ -38,8 +38,6 @@
 
 static void pim_instance_terminate(struct pim_instance *pim)
 {
-	THREAD_OFF(pim->rp_re_eval);
-
 	pim_vxlan_exit(pim);
 
 	if (pim->ssm_info) {

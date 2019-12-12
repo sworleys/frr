@@ -1411,21 +1411,3 @@ void pim_resolve_rp_nh(struct pim_instance *pim, struct pim_neighbor *nbr)
 		}
 	}
 }
-
-static int pim_rp_re_eval(struct thread *thread)
-{
-	struct pim_instance *pim;
-
-	pim = THREAD_ARG(thread);
-
-	pim_rp_setup(pim);
-	pim_i_am_rp_re_evaluate(pim);
-
-	return 0;
-}
-
-void pim_rp_schedule_re_eval(struct pim_instance *pim)
-{
-	thread_add_event(router->master, pim_rp_re_eval, pim, 0,
-			 &pim->rp_re_eval);
-}
