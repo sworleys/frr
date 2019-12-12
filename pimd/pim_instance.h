@@ -116,6 +116,7 @@ struct pim_instance {
 	 */
 	struct list *rp_list;
 	struct route_table *rp_table;
+	struct thread *rp_re_eval;
 
 	int iface_vif_index[MAXVIFS];
 

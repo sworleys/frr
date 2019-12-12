@@ -801,8 +801,7 @@ void pim_if_addr_del_all(struct interface *ifp)
 		pim_if_addr_del(ifc, 1 /* force_prim_as_any=true */);
 	}
 
-	pim_rp_setup(pim);
-	pim_i_am_rp_re_evaluate(pim);
+	pim_rp_schedule_re_eval(pim);
 }
 
 void pim_if_addr_del_all_igmp(struct interface *ifp)

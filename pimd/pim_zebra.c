@@ -230,8 +230,7 @@ static int pim_zebra_if_address_del(ZAPI_CALLBACK_ARGS)
 		}
 
 		pim_if_addr_del(c, 0);
-		pim_rp_setup(pim);
-		pim_i_am_rp_re_evaluate(pim);
+		pim_rp_schedule_re_eval(pim);
 	}
 
 	connected_free(&c);
