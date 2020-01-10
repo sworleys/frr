@@ -1668,12 +1668,27 @@ int nexthop_active_update(struct route_node *rn, struct route_entry *re)
 {
 	struct nexthop_group new_grp = {};
 	struct nexthop *nexthop;
+	struct zebra_vrf *re_vrf;
 	union g_addr prev_src;
 	unsigned int prev_active, new_active;
 	ifindex_t prev_index;
 	uint8_t curr_active = 0;
+	bool proto_af_has_rmap;
 
 	afi_t rt_afi = family2afi(rn->p.family);
+
+	re_zvrf = zebra_vrf_lookup_by_id(re->vrf_id);
+
+	/* If route map applied on AFI/Proto, can't short
+	 * circuit and have to do full resolution per route.
+	 */
+	proto_af_has_rmap = (re_zvrf && PROTO_RM_MAP(re_zvrf, afi, re->type))
+				    ? true
+				    : false;
+
+	if (!proto_af_has_rmap
+	    && CHECK_FLAGS(re->nhe->flags, NEXHOP_GROUP_VALID))
+		goto done;
 
 	UNSET_FLAG(re->status, ROUTE_ENTRY_CHANGED);
 
