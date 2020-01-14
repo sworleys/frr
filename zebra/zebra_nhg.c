@@ -353,8 +353,8 @@ uint32_t zebra_nhg_hash_key(const void *arg)
 
 	uint32_t key = 0x5a351234;
 
-	key = jhash_3words(nhe->vrf_id, nhe->afi, nexthop_group_hash(nhe->nhg),
-			   key);
+	key = jhash_3words(nhe->vrf_id, nhe->afi,
+			   nexthop_group_hash_no_recurse(nhe->nhg), key);
 
 	return key;
 }
@@ -417,9 +417,14 @@ bool zebra_nhg_hash_equal(const void *arg1, const void *arg2)
 		 * the same group and both have 1.1.1.1 dummy1 marked inactive.
 		 *
 		 */
+
+		//
+		// Gonna need to think about this one ):
+#if 0
 		if (CHECK_FLAG(nexthop1->flags, NEXTHOP_FLAG_ACTIVE)
 		    != CHECK_FLAG(nexthop2->flags, NEXTHOP_FLAG_ACTIVE))
 			return false;
+#endif
 
 		if (!nexthop_same(nexthop1, nexthop2))
 			return false;
@@ -1171,6 +1176,19 @@ void zebra_nhg_increment_ref(struct nhg_hash_entry *nhe)
 		nhg_connected_tree_increment_ref(&nhe->nhg_depends);
 }
 
+#if 0
+/**
+ * We believe something has changed in the state of the ->resolved
+ * nexthop pointers for this NHE, so we need to recreate the
+ * depends tree to account for this.
+ */
+static void zebra_nhg_refresh_resolved_depends(struct nhg_hash_entry *nhe)
+{
+	/* If it was already resolved cache old tree for comparison */
+	if (
+}
+#endif
+
 static void nexthop_set_resolved(afi_t afi, const struct nexthop *newhop,
 				 struct nexthop *nexthop)
 {
@@ -1657,6 +1675,142 @@ static unsigned nexthop_active_check(struct route_node *rn,
 	return CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_ACTIVE);
 }
 
+static void nexthop_active_update_iter(struct route_node *rn,
+				       struct route_entry *re,
+				       struct nexthop *nexthop,
+				       unsigned int *curr_active)
+{
+	union g_addr prev_src;
+	unsigned int prev_active, new_active;
+	ifindex_t prev_index;
+
+	/* No protocol daemon provides src and so we're skipping
+	 * tracking it */
+	prev_src = nexthop->rmap_src;
+	prev_active = CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_ACTIVE);
+	prev_index = nexthop->ifindex;
+	/*
+	 * We need to respect the multipath_num here
+	 * as that what we should be able to install from
+	 * a multipath perpsective should not be a data plane
+	 * decision point.
+	 */
+	new_active = nexthop_active_check(rn, re, nexthop);
+
+	if (new_active && ((*curr_active) >= zrouter.multipath_num)) {
+		struct nexthop *nh;
+
+		/* Set it and its resolved nexthop as inactive. */
+		for (nh = nexthop; nh; nh = nh->resolved)
+			UNSET_FLAG(nh->flags, NEXTHOP_FLAG_ACTIVE);
+
+		new_active = 0;
+	}
+
+	if (new_active)
+		(*curr_active)++;
+
+	/* Don't allow src setting on IPv6 addr for now */
+	if (prev_active != new_active || prev_index != nexthop->ifindex
+	    || ((nexthop->type >= NEXTHOP_TYPE_IFINDEX
+		 && nexthop->type < NEXTHOP_TYPE_IPV6)
+		&& prev_src.ipv4.s_addr != nexthop->rmap_src.ipv4.s_addr)
+	    || ((nexthop->type >= NEXTHOP_TYPE_IPV6
+		 && nexthop->type < NEXTHOP_TYPE_BLACKHOLE)
+		&& !(IPV6_ADDR_SAME(&prev_src.ipv6, &nexthop->rmap_src.ipv6)))
+	    || CHECK_FLAG(re->status, ROUTE_ENTRY_LABELS_CHANGED))
+		SET_FLAG(re->status, ROUTE_ENTRY_CHANGED);
+}
+
+/* If a route's nexthop might get modified (because of a route map), let's
+ * just special case that so we can speed up all other nexthop
+ * resolutions.
+ */
+static int nexthop_group_active_update_with_rmap(struct route_node *rn,
+					   struct route_entry *re)
+{
+	struct nexthop_group new_grp = {};
+	struct nexthop *nexthop;
+	unsigned int curr_active = 0;
+
+	/* Copy over the nexthops in current state.
+	 *
+	 * Route map code can't be allowed to arbitrarily change the nexthop
+	 * struct in use or else our already indexed hashes break.
+	 *
+	 */
+	nexthop_group_copy(&new_grp, re->nhe->nhg);
+
+	for (nexthop = new_grp.nexthop; nexthop; nexthop = nexthop->next)
+		nexthop_active_update_iter(rn, re, nexthop, &curr_active);
+
+
+	if (CHECK_FLAG(re->status, ROUTE_ENTRY_CHANGED)) {
+		struct nhg_hash_entry *new_nhe = NULL;
+		afi_t rt_afi = family2afi(rn->p.family);
+
+		new_nhe = zebra_nhg_rib_find(0, &new_grp, rt_afi);
+
+		route_entry_update_nhe(re, new_nhe);
+	}
+
+	/*
+	 * Do not need these nexthops anymore since they
+	 * were either copied over into an nhe or not
+	 * used at all.
+	 */
+	nexthops_free(new_grp.nexthop);
+
+	return curr_active;
+}
+
+/* No proto route map path, nexthop hashed data SHOULD NOT be directly modified,
+ * hence we can safely change the nexthop directly without copying to new
+ * group before hand.
+ */
+static int nexthop_group_active_update(struct route_node *rn,
+				       struct route_entry *re)
+{
+	struct nexthop *nexthop;
+	unsigned int curr_active = 0;
+	//uint32_t old_nhg_hash = nexthop_group_hash(re->nhe->nhg);
+
+	for (nexthop = re->nhe->nhg->nexthop; nexthop; nexthop = nexthop->next)
+		nexthop_active_update_iter(rn, re, nexthop, &curr_active);
+
+	/* If the hash has changed, one of the nexthop's resolution has
+	 * probably changed.
+	 */
+
+#if 0
+	if (CHECK_FLAG(re->status, ROUTE_ENTRY_CHANGED)
+	    && (nexthop_group_hash(re->nhe->nhg) != old_nhg_hash)) {
+
+		// Udpate resolved here. Need to create new resolved NHE
+		// and point to it?
+		//
+		// this will require quite a bit of code changes
+		// in the zebra_nhg_find() path...
+		//
+		// Can't hash on ifindex, labels, or resolved now?
+		//
+		// Solution for index is probably to make it recursively
+		// resolved?
+		//
+		// And could probably say fuck the labels and make them do the
+		// slow way like route maps.
+		//
+
+		if (nexthop_group_num_no_recurse(re->nhe->nhg)) {
+			for_each 
+		}
+		zebra_nhg_refresh_resolved_depends(re->nhe);
+	}
+#endif
+
+	return curr_active;
+}
+
 /*
  * Iterate over all nexthops of the given RIB entry and refresh their
  * ACTIVE flag.  If any nexthop is found to toggle the ACTIVE flag,
@@ -1666,106 +1820,42 @@ static unsigned nexthop_active_check(struct route_node *rn,
  */
 int nexthop_active_update(struct route_node *rn, struct route_entry *re)
 {
-	struct nexthop_group new_grp = {};
-	struct nexthop *nexthop;
-	struct zebra_vrf *re_vrf;
-	union g_addr prev_src;
-	unsigned int prev_active, new_active;
-	ifindex_t prev_index;
-	uint8_t curr_active = 0;
-	bool proto_af_has_rmap;
-
+	struct zebra_vrf *re_zvrf;
+	unsigned int curr_active = 0;
 	afi_t rt_afi = family2afi(rn->p.family);
+	bool proto_af_has_rmap;
+	char buf[SRCDEST2STR_BUFFER];
 
 	re_zvrf = zebra_vrf_lookup_by_id(re->vrf_id);
 
 	/* If route map applied on AFI/Proto, can't short
 	 * circuit and have to do full resolution per route.
 	 */
-	proto_af_has_rmap = (re_zvrf && PROTO_RM_MAP(re_zvrf, afi, re->type))
+	proto_af_has_rmap = (re_zvrf && PROTO_RM_MAP(re_zvrf, rt_afi, re->type))
 				    ? true
 				    : false;
 
 	if (!proto_af_has_rmap
-	    && CHECK_FLAGS(re->nhe->flags, NEXHOP_GROUP_VALID))
+	    && CHECK_FLAG(re->nhe->flags, NEXTHOP_GROUP_VALID)) {
+		if (IS_ZEBRA_DEBUG_RIB_DETAILED) {
+			srcdest_rnode2str(rn, buf, sizeof(buf));
+			zlog_debug("%u:%s: short circuited nexthop resolution",
+				   re->vrf_id, buf);
+		}
+		curr_active = 1;
 		goto done;
+	}
 
 	UNSET_FLAG(re->status, ROUTE_ENTRY_CHANGED);
 
-	/* Copy over the nexthops in current state */
-	nexthop_group_copy(&new_grp, re->nhe->nhg);
+	if (proto_af_has_rmap)
+		curr_active = nexthop_group_active_update_with_rmap(rn, re);
+	else
+		curr_active = nexthop_group_active_update(rn, re);
 
-	for (nexthop = new_grp.nexthop; nexthop; nexthop = nexthop->next) {
-
-		/* No protocol daemon provides src and so we're skipping
-		 * tracking it */
-		prev_src = nexthop->rmap_src;
-		prev_active = CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_ACTIVE);
-		prev_index = nexthop->ifindex;
-		/*
-		 * We need to respect the multipath_num here
-		 * as that what we should be able to install from
-		 * a multipath perpsective should not be a data plane
-		 * decision point.
-		 */
-		new_active =
-			nexthop_active_check(rn, re, nexthop);
-
-		if (new_active && curr_active >= zrouter.multipath_num) {
-			struct nexthop *nh;
-
-			/* Set it and its resolved nexthop as inactive. */
-			for (nh = nexthop; nh; nh = nh->resolved)
-				UNSET_FLAG(nh->flags, NEXTHOP_FLAG_ACTIVE);
-
-			new_active = 0;
-		}
-
-		if (new_active)
-			curr_active++;
-
-		/* Don't allow src setting on IPv6 addr for now */
-		if (prev_active != new_active || prev_index != nexthop->ifindex
-		    || ((nexthop->type >= NEXTHOP_TYPE_IFINDEX
-			 && nexthop->type < NEXTHOP_TYPE_IPV6)
-			&& prev_src.ipv4.s_addr
-				   != nexthop->rmap_src.ipv4.s_addr)
-		    || ((nexthop->type >= NEXTHOP_TYPE_IPV6
-			 && nexthop->type < NEXTHOP_TYPE_BLACKHOLE)
-			&& !(IPV6_ADDR_SAME(&prev_src.ipv6,
-					    &nexthop->rmap_src.ipv6)))
-		    || CHECK_FLAG(re->status, ROUTE_ENTRY_LABELS_CHANGED))
-			SET_FLAG(re->status, ROUTE_ENTRY_CHANGED);
-	}
-
-	if (CHECK_FLAG(re->status, ROUTE_ENTRY_CHANGED)) {
-		struct nhg_hash_entry *new_nhe = NULL;
-
-		new_nhe = zebra_nhg_rib_find(0, &new_grp, rt_afi);
-
-		route_entry_update_nhe(re, new_nhe);
-	}
-
-	if (curr_active) {
-		struct nhg_hash_entry *nhe = NULL;
-
-		nhe = zebra_nhg_lookup_id(re->nhe_id);
-
-		if (nhe)
-			SET_FLAG(nhe->flags, NEXTHOP_GROUP_VALID);
-		else
-			flog_err(
-				EC_ZEBRA_TABLE_LOOKUP_FAILED,
-				"Active update on NHE id=%u that we do not have in our tables",
-				re->nhe_id);
-	}
-
-	/*
-	 * Do not need these nexthops anymore since they
-	 * were either copied over into an nhe or not
-	 * used at all.
-	 */
-	nexthops_free(new_grp.nexthop);
+	if (curr_active)
+		SET_FLAG(re->nhe->flags, NEXTHOP_GROUP_VALID);
+done:
 	return curr_active;
 }
 
