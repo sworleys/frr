@@ -393,20 +393,33 @@ struct route_entry *rib_lookup_ipv4(struct prefix_ipv4 *p, vrf_id_t vrf_id)
 	return NULL;
 }
 
+static int rib_nexthop_label_check_walker(struct nexthop *nexthop, void *ret)
+{
+	if (!nexthop_has_labels(nexthop)) {
+		*((bool *)ret) = false;
+		return NHG_WALK_ABORT;
+	}
+
+	return NHG_WALK_CONTINUE;
+}
+
 /*
  * Is this RIB labeled-unicast? It must be of type BGP and all paths
  * (nexthops) must have a label.
  */
 int zebra_rib_labeled_unicast(struct route_entry *re)
 {
-	struct nexthop *nexthop = NULL;
+	bool have_labels = true;
 
 	if (re->type != ZEBRA_ROUTE_BGP)
 		return 0;
 
-	for (ALL_NEXTHOPS_PTR(re->nhe->nhg, nexthop))
-		if (!nexthop->nh_label || !nexthop->nh_label->num_labels)
-			return 0;
+	/* may just need to walk fully resolved nexthops here */
+	zebra_nhg_depends_walk_nexthops(
+		re->nhe, &rib_nexthop_label_check_walker, &have_labels);
+
+	if (!have_labels)
+		return 0;
 
 	return 1;
 }
@@ -417,7 +430,6 @@ int zebra_rib_labeled_unicast(struct route_entry *re)
 void rib_install_kernel(struct route_node *rn, struct route_entry *re,
 			struct route_entry *old)
 {
-	struct nexthop *nexthop;
 	rib_table_info_t *info = srcdest_rnode_table_info(rn);
 	struct zebra_vrf *zvrf = vrf_info_lookup(re->vrf_id);
 	const struct prefix *p, *src_p;
@@ -428,8 +440,8 @@ void rib_install_kernel(struct route_node *rn, struct route_entry *re,
 	srcdest_rnode_prefixes(rn, &p, &src_p);
 
 	if (info->safi != SAFI_UNICAST) {
-		for (ALL_NEXTHOPS_PTR(re->nhe->nhg, nexthop))
-			SET_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB);
+		zebra_nhg_depends_set_all_nexthops_flag(re->nhe,
+							NEXTHOP_FLAG_FIB);
 		return;
 	}
 
@@ -500,14 +512,13 @@ void rib_install_kernel(struct route_node *rn, struct route_entry *re,
 /* Uninstall the route from kernel. */
 void rib_uninstall_kernel(struct route_node *rn, struct route_entry *re)
 {
-	struct nexthop *nexthop;
 	rib_table_info_t *info = srcdest_rnode_table_info(rn);
 	struct zebra_vrf *zvrf = vrf_info_lookup(re->vrf_id);
 
 	if (info->safi != SAFI_UNICAST) {
 		UNSET_FLAG(re->status, ROUTE_ENTRY_INSTALLED);
-		for (ALL_NEXTHOPS_PTR(re->nhe->nhg, nexthop))
-			UNSET_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB);
+		zebra_nhg_depends_unset_all_nexthops_flag(re->nhe,
+							  NEXTHOP_FLAG_FIB);
 		return;
 	}
 
@@ -546,7 +557,6 @@ static void rib_uninstall(struct route_node *rn, struct route_entry *re)
 {
 	rib_table_info_t *info = srcdest_rnode_table_info(rn);
 	rib_dest_t *dest = rib_dest_from_rnode(rn);
-	struct nexthop *nexthop;
 
 	if (dest && dest->selected_fib == re) {
 		if (info->safi == SAFI_UNICAST)
@@ -566,8 +576,8 @@ static void rib_uninstall(struct route_node *rn, struct route_entry *re)
 			re->fib_ng.nexthop = NULL;
 		}
 
-		for (ALL_NEXTHOPS_PTR(re->nhe->nhg, nexthop))
-			UNSET_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB);
+		zebra_nhg_depends_unset_all_nexthops_flag(re->nhe,
+							  NEXTHOP_FLAG_FIB);
 	}
 
 	if (CHECK_FLAG(re->flags, ZEBRA_FLAG_SELECTED)) {
@@ -903,6 +913,31 @@ static void rib_process_update_fib(struct zebra_vrf *zvrf,
 	UNSET_FLAG(new->status, ROUTE_ENTRY_CHANGED);
 }
 
+static int connected_is_loopback_or_vrf_walker(struct nhg_hash_entry *nhe,
+					       void *loopback_or_vrf)
+{
+	if (nhe->ifp && if_is_loopback(nhe->ifp)) {
+		*((bool *)loopback_or_vrf) = true;
+		return NHG_WALK_ABORT;
+	}
+
+	return NHG_WALK_CONTINUE;
+}
+
+static bool connected_route_is_loopback_or_vrf(struct route_entry *re)
+{
+	bool loopback_or_vrf;
+
+	/* Pretty sure this is always a resolved singleton nexthop
+	 * so walking is unnecessary?
+	 */
+	loopback_or_vrf = false;
+	zebra_nhg_depends_walk(re->nhe, &connected_is_loopback_or_vrf_walker,
+			       &loopback_or_vrf);
+
+	return loopback_or_vrf;
+}
+
 /* Check if 'alternate' RIB entry is better than 'current'. */
 static struct route_entry *rib_choose_best(struct route_entry *current,
 					   struct route_entry *alternate)
@@ -927,23 +962,12 @@ static struct route_entry *rib_choose_best(struct route_entry *current,
 			return alternate;
 
 		/* both are connected.  are either loop or vrf? */
-		struct nexthop *nexthop = NULL;
 
-		for (ALL_NEXTHOPS_PTR(alternate->nhe->nhg, nexthop)) {
-			struct interface *ifp = if_lookup_by_index(
-				nexthop->ifindex, alternate->vrf_id);
+		if (connected_route_is_loopback_or_vrf(alternate))
+			return alternate;
 
-			if (ifp && if_is_loopback_or_vrf(ifp))
-				return alternate;
-		}
-
-		for (ALL_NEXTHOPS_PTR(current->nhe->nhg, nexthop)) {
-			struct interface *ifp = if_lookup_by_index(
-				nexthop->ifindex, current->vrf_id);
-
-			if (ifp && if_is_loopback_or_vrf(ifp))
-				return current;
-		}
+		if (connected_route_is_loopback_or_vrf(current))
+			return current;
 
 		/* Neither are loop or vrf so pick best metric  */
 		if (alternate->metric <= current->metric)
@@ -1257,8 +1281,6 @@ static void zebra_rib_fixup_system(struct route_node *rn)
 	struct route_entry *re;
 
 	RNODE_FOREACH_RE(rn, re) {
-		struct nexthop *nhop;
-
 		if (!RIB_SYSTEM_ROUTE(re))
 			continue;
 
@@ -1268,12 +1290,8 @@ static void zebra_rib_fixup_system(struct route_node *rn)
 		SET_FLAG(re->status, ROUTE_ENTRY_INSTALLED);
 		UNSET_FLAG(re->status, ROUTE_ENTRY_QUEUED);
 
-		for (ALL_NEXTHOPS_PTR(re->nhe->nhg, nhop)) {
-			if (CHECK_FLAG(nhop->flags, NEXTHOP_FLAG_RECURSIVE))
-				continue;
-
-			SET_FLAG(nhop->flags, NEXTHOP_FLAG_FIB);
-		}
+		zebra_nhg_depends_set_all_resolved_nexthops_flag(
+			re->nhe, NEXTHOP_FLAG_FIB);
 	}
 }
 
@@ -3183,7 +3201,6 @@ void rib_sweep_table(struct route_table *table)
 	struct route_node *rn;
 	struct route_entry *re;
 	struct route_entry *next;
-	struct nexthop *nexthop;
 
 	if (!table)
 		return;
@@ -3227,8 +3244,8 @@ void rib_sweep_table(struct route_table *table)
 			 * this decision needs to be revisited
 			 */
 			SET_FLAG(re->status, ROUTE_ENTRY_INSTALLED);
-			for (ALL_NEXTHOPS_PTR(re->nhe->nhg, nexthop))
-				SET_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB);
+			zebra_nhg_depends_set_all_nexthops_flag(
+				re->nhe, NEXTHOP_FLAG_FIB);
 
 			rib_uninstall_kernel(rn, re);
 			rib_delnode(rn, re);
