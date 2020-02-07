@@ -1295,24 +1295,104 @@ static void zebra_rib_fixup_system(struct route_node *rn)
 	}
 }
 
+struct update_re {
+	const struct nexthop *ctx_nexthop_start;
+	bool *matched;
+	bool *changed_p;
+};
+
+/* FIB nexthop matched, set flags appropriately */
+static void handle_ctx_nexthop_matched(struct nexthop *re_nexthop,
+				       const struct nexthop *ctx_nexthop,
+				       struct update_re *update_re)
+{
+	if (CHECK_FLAG(ctx_nexthop->flags, NEXTHOP_FLAG_FIB)) {
+		if (!CHECK_FLAG(re_nexthop->flags, NEXTHOP_FLAG_FIB))
+			*update_re->changed_p = true;
+
+		SET_FLAG(re_nexthop->flags, NEXTHOP_FLAG_FIB);
+	} else {
+		if (CHECK_FLAG(re_nexthop->flags, NEXTHOP_FLAG_FIB))
+			*update_re->changed_p = true;
+
+		UNSET_FLAG(re_nexthop->flags, NEXTHOP_FLAG_FIB);
+	}
+}
+
+/* FIB nexthop not matched, set flags appropriately */
+static void handle_ctx_nexthop_not_matched(struct nexthop *re_nexthop,
+					   struct update_re *update_re)
+{
+	char nh_str[NEXTHOP_STRLEN];
+
+	/* If the FIB doesn't have the nexthop, it's not installed. */
+	if (IS_ZEBRA_DEBUG_RIB_DETAILED) {
+		nexthop2str(re_nexthop, nh_str, sizeof(nh_str));
+		zlog_debug("update_from_ctx: no notif match for rib nh %s",
+			   nh_str);
+	}
+	*update_re->matched = false;
+
+	if (CHECK_FLAG(re_nexthop->flags, NEXTHOP_FLAG_FIB))
+		*update_re->changed_p = true;
+
+	UNSET_FLAG(re_nexthop->flags, NEXTHOP_FLAG_FIB);
+}
+
+static int rib_update_re_nexthops_from_ctx_walker(struct nexthop *re_nexthop,
+						  void *arg)
+{
+	struct update_re *update_re = arg;
+
+	/* Should only walk resolved nexthops but still check active flag */
+	if (!CHECK_FLAG(re_nexthop->flags, NEXTHOP_FLAG_ACTIVE))
+		goto done;
+
+	/* Check for a FIB nexthop corresponding to the RIB nexthop.
+	 *
+	 * Only care about active and resolved ctx_nexthops.
+	 */
+	for (const struct nexthop *ctx_nexthop = update_re->ctx_nexthop_start;
+	     ctx_nexthop;
+	     ctx_nexthop = nexthop_next_active_resolved(ctx_nexthop)) {
+		if (nexthop_same(ctx_nexthop, re_nexthop) == true) {
+			/* Matching ctx_nexthop found */
+			handle_ctx_nexthop_matched(re_nexthop, ctx_nexthop,
+						   update_re);
+			goto done;
+		}
+	}
+
+	/* Matching ctx_nexthop not found */
+	handle_ctx_nexthop_not_matched(re_nexthop, update_re);
+
+done:
+	return NHG_WALK_CONTINUE;
+}
+
 /*
  * Update a route from a dplane context. This consolidates common code
  * that can be used in processing of results from FIB updates, and in
  * async notification processing.
  * The return is 'true' if the installed nexthops changed; 'false' otherwise.
+ *
+ * TODO: SWORLEY: some optimizations could be done here if a route knows whether
+ * its nexthop was installed separately into the dataplane. Then we wouldn't
+ * have to do this for every route installation. It can be based on nexthop
+ * installation.
  */
 static bool rib_update_re_from_ctx(struct route_entry *re,
 				   struct route_node *rn,
 				   struct zebra_dplane_ctx *ctx)
 {
 	char dest_str[PREFIX_STRLEN] = "";
-	char nh_str[NEXTHOP_STRLEN];
 	struct nexthop *nexthop, *ctx_nexthop;
 	bool matched;
 	const struct nexthop_group *ctxnhg;
 	bool is_selected = false; /* Is 're' currently the selected re? */
 	bool changed_p = false; /* Change to nexthops? */
 	rib_dest_t *dest;
+	struct update_re update_re = {};
 
 	/* Note well: only capturing the prefix string if debug is enabled here;
 	 * unconditional log messages will have to generate the string.
@@ -1395,58 +1475,22 @@ static bool rib_update_re_from_ctx(struct route_entry *re,
 		goto no_nexthops;
 	}
 
-	/* Get the first `installed` one to check against.
-	 * If the dataplane doesn't set these to be what was actually installed,
-	 * it will just be whatever was in re->nhe->nhg?
-	 */
+	/* Get the first `installed` one to check against. */
 	if (CHECK_FLAG(ctx_nexthop->flags, NEXTHOP_FLAG_RECURSIVE)
 	    || !CHECK_FLAG(ctx_nexthop->flags, NEXTHOP_FLAG_ACTIVE))
 		ctx_nexthop = nexthop_next_active_resolved(ctx_nexthop);
 
-	for (ALL_NEXTHOPS_PTR(re->nhe->nhg, nexthop)) {
+	/* Set the walker data */
+	update_re.ctx_nexthop_start = ctx_nexthop;
+	update_re.matched = &matched;
+	update_re.changed_p = &changed_p;
 
-		if (CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_RECURSIVE))
-			continue;
+	/* Walk RIB's depend's nexthops to find corresponding FIB nexthop
+	 * and update the RIB's nexthop approiately */
+	zebra_nhg_depends_walk_resolved_nexthops(
+		re->nhe, &rib_update_re_nexthops_from_ctx_walker, &update_re);
 
-		if (!CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_ACTIVE))
-			continue;
-
-		/* Check for a FIB nexthop corresponding to the RIB nexthop */
-		if (nexthop_same(ctx_nexthop, nexthop) == false) {
-			/* If the FIB doesn't know about the nexthop,
-			 * it's not installed
-			 */
-			if (IS_ZEBRA_DEBUG_RIB_DETAILED) {
-				nexthop2str(nexthop, nh_str, sizeof(nh_str));
-				zlog_debug(
-					"update_from_ctx: no notif match for rib nh %s",
-					nh_str);
-			}
-			matched = false;
-
-			if (CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB))
-				changed_p = true;
-
-			UNSET_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB);
-
-			/* Keep checking nexthops */
-			continue;
-		}
-
-		if (CHECK_FLAG(ctx_nexthop->flags, NEXTHOP_FLAG_FIB)) {
-			if (!CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB))
-				changed_p = true;
-
-			SET_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB);
-		} else {
-			if (CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB))
-				changed_p = true;
-
-			UNSET_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB);
-		}
-
-		ctx_nexthop = nexthop_next_active_resolved(ctx_nexthop);
-	}
+	/* matched and changed_p bools set in walker */
 
 	/* If all nexthops were processed, we're done */
 	if (matched) {
@@ -1752,6 +1796,16 @@ done:
 	dplane_ctx_fini(&ctx);
 }
 
+static unsigned int re_fib_nexthop_num(struct route_entry *re)
+{
+	if (re_has_fib_ng(re))
+		return nexthop_group_nexthop_num_has_flag(re_fib_ng(re),
+							  NEXTHOP_FLAG_FIB);
+
+	return zebra_nhg_depends_nexthop_num_has_flag(re->nhe,
+						      NEXTHOP_FLAG_FIB);
+}
+
 /*
  * Handle notification from async dataplane: the dataplane has detected
  * some change to a route, and notifies zebra so that the control plane
@@ -1767,7 +1821,7 @@ static void rib_process_dplane_notify(struct zebra_dplane_ctx *ctx)
 	rib_dest_t *dest;
 	bool fib_changed = false;
 	bool debug_p = IS_ZEBRA_DEBUG_DPLANE | IS_ZEBRA_DEBUG_RIB;
-	int start_count, end_count;
+	unsigned int start_count, end_count;
 	dest_pfx = dplane_ctx_get_dest(ctx);
 
 	/* Note well: only capturing the prefix string if debug is enabled here;
@@ -1859,12 +1913,8 @@ static void rib_process_dplane_notify(struct zebra_dplane_ctx *ctx)
 	 */
 	start_count = 0;
 
-	if (CHECK_FLAG(re->status, ROUTE_ENTRY_INSTALLED)) {
-		for (ALL_NEXTHOPS_PTR(rib_active_nhg(re), nexthop)) {
-			if (CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB))
-				start_count++;
-		}
-	}
+	if (CHECK_FLAG(re->status, ROUTE_ENTRY_INSTALLED))
+		start_count = re_fib_nexthop_num(re);
 
 	/* Update zebra's nexthop FIB flags based on the context struct's
 	 * nexthops.
@@ -1882,11 +1932,7 @@ static void rib_process_dplane_notify(struct zebra_dplane_ctx *ctx)
 	 * changed.
 	 */
 
-	end_count = 0;
-	for (ALL_NEXTHOPS_PTR(rib_active_nhg(re), nexthop)) {
-		if (CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_FIB))
-			end_count++;
-	}
+	end_count = re_fib_nexthop_num(re);
 
 	/* Various fib transitions: changed nexthops; from installed to
 	 * not-installed; or not-installed to installed.

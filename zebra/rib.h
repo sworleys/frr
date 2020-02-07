@@ -507,6 +507,13 @@ static inline void rib_tables_iter_cleanup(rib_tables_iter_t *iter)
 DECLARE_HOOK(rib_update, (struct route_node * rn, const char *reason),
 	     (rn, reason))
 
+//***********************************
+//
+// TODO:
+//
+// REMOVE THIS
+//
+//
 /*
  * Access active nexthop-group, either RIB or FIB version
  */
@@ -516,6 +523,24 @@ static inline struct nexthop_group *rib_active_nhg(struct route_entry *re)
 		return &(re->fib_ng);
 	else
 		return re->nhe->nhg;
+}
+
+/* Has the FIB nexthop group been set? */
+static inline bool re_has_fib_ng(const struct route_entry *re)
+{
+	if (re->fib_ng.nexthop)
+		return true;
+
+	return false;
+}
+
+/* Accessor for FIB nexthop group */
+static inline struct nexthop_group *re_fib_ng(struct route_entry *re)
+{
+	if (re_has_fib_ng(re))
+		return &(re->fib_ng);
+
+	return NULL;
 }
 
 extern void zebra_vty_init(void);
