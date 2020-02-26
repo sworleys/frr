@@ -131,12 +131,12 @@ fi
 
 if [ -z "$TOPOTEST_BUILDCACHE" ]; then
 	TOPOTEST_BUILDCACHE=topotest-buildcache
-	docker volume inspect "${TOPOTEST_BUILDCACHE}" &> /dev/null \
-		|| docker volume create "${TOPOTEST_BUILDCACHE}"
+	podman volume inspect "${TOPOTEST_BUILDCACHE}" &> /dev/null \
+		|| podman volume create "${TOPOTEST_BUILDCACHE}"
 fi
 
 if [ "${TOPOTEST_PULL:-1}" = "1" ]; then
-	docker pull frrouting/topotests:latest
+	podman pull frrouting/topotests:latest
 fi
 
 set -- --rm -i \
@@ -155,4 +155,4 @@ if [ -t 0 ]; then
 	set -- -t "$@"
 fi
 
-exec docker run "$@"
+exec podman run "$@"

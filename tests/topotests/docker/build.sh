@@ -24,7 +24,7 @@
 
 cd "$(dirname "$0")"/..
 
-exec docker build --pull \
+exec podman build --pull \
 		  --compress \
 		  -t frrouting/topotests:latest \
 		  .
