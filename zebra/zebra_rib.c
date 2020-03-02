@@ -787,14 +787,7 @@ static void rib_process_del_fib(struct zebra_vrf *zvrf, struct route_node *rn,
 	rib_uninstall_kernel(rn, old);
 
 	/* Update nexthop for route, reset changed flag. */
-	/* Note: this code also handles the Linux case when an interface goes
-	 * down, causing the kernel to delete routes without sending DELROUTE
-	 * notifications
-	 */
-	if (RIB_KERNEL_ROUTE(old))
-		SET_FLAG(old->status, ROUTE_ENTRY_REMOVED);
-	else
-		UNSET_FLAG(old->status, ROUTE_ENTRY_CHANGED);
+	UNSET_FLAG(old->status, ROUTE_ENTRY_CHANGED);
 }
 
 static void rib_process_update_fib(struct zebra_vrf *zvrf,
@@ -1071,7 +1064,9 @@ static void rib_process(struct route_node *rn)
 				} else
 					SET_FLAG(re->status,
 						 ROUTE_ENTRY_REMOVED);
-			}
+			} else if ((re->type == ZEBRA_ROUTE_KERNEL
+				    || re->type == ZEBRA_ROUTE_SYSTEM))
+				SET_FLAG(re->status, ROUTE_ENTRY_REMOVED);
 
 			continue;
 		}
