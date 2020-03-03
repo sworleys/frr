@@ -1,6 +1,43 @@
 frr (7.0+cl4u2) RELEASED; urgency=medium
 
-  * New Enabled: New Work
+  * New Enabled: zebra: knob to make ra retransmit interval rfc compliant
+  * New Enabled: zebra: add all ipv6 global addresses to RA messages
+  * New Enabled: pbrd: Add `set vrf NAME` and `set vrf unchanged`
+  * New Enabled: vrrpd: Enable namespace support
+  * New Enabled: bgpd: Allow link bandwidth to set nexthop weight
+  * New Enabled: pimd: mlag support
+  * Fixes: CM-26983 pimd: metric values are uint32_t not a int32_t
+  * Fixes: CM-27247 pimd: Ignore igmp queries from itself
+  * Fixes: CM-27233 tools: stop repeating lines to delete for multiple bfd timer changes
+  * Fixes: CM-26898 bgpd: fix memory leak in vin table for evpn routes
+  * Fixes: CM-26838 bgpd: fix memory leak in vin table for evpn routes
+  * Fixes: CM-27169 bgpd: fix memory leak in vin table for evpn routes
+  * Fixes: CM-27233 tools: resolve issue with bfd timer change fix in frr-relaod.py
+  * Fixes: CM-27446 pimd: eval use_rpt on new upstream post IIF setup but before MFC programming
+  * Fixes: CM-27466 pimd: Skip nexthop lookup for register source in some cases
+  * Fixes: CM-27537 bgpd: Fix memory leak in json output of show commands
+  * Fixes: CM-24114 bgpd: Handle possible non-selection of local route
+  * Fixes: CM-27061 zebra: send RA lifetime of 0 before ceasing to advertise RAs
+  * Fixes: CM-26399 zebra: Correct /32 addr del with broadcast set
+  * Fixes: CM-27660 zebra: return on v6 RR semantics
+  * Fixes: CM-27729 pimd: There is nothing to do with a WRVIFWHOLE for iifp of pimreg
+  * Fixes: CM-27200 staticd: Make blackhole keyword errors more straightforward
+  * Fixes: CM-27230 zebra: dplane cancel update thread from correct pthread
+  * Fixes: CM-27456 pbrd: don't set rule removed on fail
+  * Fixes: CM-27457 pbrd: don't silently fail on atomic match IP change attempts
+  * Fixes: CM-26514 pbrd: make show pbr map detail actually work
+  * Fixes: CM-27047 bgpd: Remove misleading 'NOTIFICATION' string from End-of-RIB log
+  * Fixes: CM-27294 zebra: default ns-info should be default zebra_ns
+  * Fixes: CM-27733 zebra: fix debug in macvlan down event
+  * Fixes: CM-27956 tools: improve frr-reload delete performance for some commands
+  * Fixes: CM-28018 tools: Add additional missing data from pim to cl-support data gathering
+  * Fixes: CM-26239 pimd: PIM hangs when vrf_id is not found for zapi message
+  * Fixes: CM-27752 zebra: remote vtep delete handling
+  * Fixes: CM-28328 bgpd: Add fields to bgp evpn vni json cmd
+  * Fixes: CM-26518 pbrd: unconfigure table range
+  * Fixes: CM-28331 bgpd: Allow EVPN advertise route-map to modify attributes
+  * Fixes: CM-28237 bgpd: Allow generating EVPN type-5 routes with existing extended community
+  * Fixes: CM-28636 bgpd: Refine 'no' command for bandwidth handling
 
  -- dev-support <dev-support@cumulusnetworks.com>  Mon, 23 Dec 2019 09:18:19 -0400
 
