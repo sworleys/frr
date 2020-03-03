@@ -432,10 +432,10 @@ static int static_route_leak(
 		    || strncasecmp(ifname, "blackhole", strlen(ifname)) == 0) {
 			if (vty)
 				vty_out(vty,
-					"%% Nexthop interface cannot be Null0, reject or blackhole\n");
+					"%% Nexthop interface name can not be from reserved keywords (Null0, reject, blackhole)\n");
 			else
 				zlog_warn(
-					"%s: Nexthop interface cannot be Null0, reject or blackhole for %s",
+					"%s: %s: Nexthop interface name can not be from reserved keywords (Null0, reject, blackhole)",
 					__PRETTY_FUNCTION__, dest_str);
 			return CMD_WARNING_CONFIG_FAILED;
 		}

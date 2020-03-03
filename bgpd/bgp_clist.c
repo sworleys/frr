@@ -1195,9 +1195,11 @@ int extcommunity_list_set(struct community_list_handler *ch, const char *name,
 		}
 	}
 
-	if (style == EXTCOMMUNITY_LIST_STANDARD)
+	if (style == EXTCOMMUNITY_LIST_STANDARD) {
 		ecom = ecommunity_str2com(str, 0, 1);
-	else
+		if (!ecom)
+			return COMMUNITY_LIST_ERR_MALFORMED_TOKEN;
+	} else
 		regex = bgp_regcomp(str);
 
 	if (!ecom && !regex)

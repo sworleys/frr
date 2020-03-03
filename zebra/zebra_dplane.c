@@ -156,7 +156,7 @@ struct dplane_intf_info {
 #define DPLANE_INTF_CONNECTED   (1 << 0) /* Connected peer, p2p */
 #define DPLANE_INTF_SECONDARY   (1 << 1)
 #define DPLANE_INTF_BROADCAST   (1 << 2)
-#define DPLANE_INTF_HAS_DEST    (1 << 3)
+#define DPLANE_INTF_HAS_DEST    DPLANE_INTF_CONNECTED
 #define DPLANE_INTF_HAS_LABEL   (1 << 4)
 
 	/* Interface address/prefix */
@@ -1722,7 +1722,7 @@ dplane_route_update_internal(struct route_node *rn,
 			 * We'll need these to do per-nexthop deletes.
 			 */
 			copy_nexthops(&(ctx->u.rinfo.zd_old_ng.nexthop),
-				      old_re->ng.nexthop, NULL);
+				      old_re->ng->nexthop, NULL);
 #endif	/* !HAVE_NETLINK */
 		}
 
@@ -2232,9 +2232,6 @@ static enum zebra_dplane_result intf_addr_update_internal(
 		ctx->u.intf.dest_prefix = *(ifc->destination);
 		ctx->u.intf.flags |=
 			(DPLANE_INTF_CONNECTED | DPLANE_INTF_HAS_DEST);
-	} else if (ifc->destination) {
-		ctx->u.intf.dest_prefix = *(ifc->destination);
-		ctx->u.intf.flags |= DPLANE_INTF_HAS_DEST;
 	}
 
 	if (CHECK_FLAG(ifc->flags, ZEBRA_IFA_SECONDARY))
@@ -3271,7 +3268,9 @@ void zebra_dplane_shutdown(void)
 
 	zdplane_info.dg_run = false;
 
-	THREAD_OFF(zdplane_info.dg_t_update);
+	if (zdplane_info.dg_t_update)
+		thread_cancel_async(zdplane_info.dg_t_update->master,
+				    &zdplane_info.dg_t_update, NULL);
 
 	frr_pthread_stop(zdplane_info.dg_pthread, NULL);
 

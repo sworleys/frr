@@ -74,40 +74,65 @@ static void ecommunity_hash_free(struct ecommunity *ecom)
    Attribute structure.  When the value is already exists in the
    structure, we don't add the value.  Newly added value is sorted by
    numerical order.  When the value is added to the structure return 1
-   else return 0.  */
-int ecommunity_add_val(struct ecommunity *ecom, struct ecommunity_val *eval)
+   else return 0.
+   The additional parameters 'unique' and 'overwrite' ensure a particular
+   extended community (based on type and sub-type) is present only
+   once and whether the new value should replace what is existing or
+   not.
+*/
+int ecommunity_add_val(struct ecommunity *ecom, struct ecommunity_val *eval,
+		       bool unique, bool overwrite)
 {
-	uint8_t *p;
-	int ret;
-	int c;
+	int c, ins_idx;
 
-	/* When this is fist value, just add it.  */
+	/* When this is fist value, just add it. */
 	if (ecom->val == NULL) {
-		ecom->size++;
-		ecom->val = XMALLOC(MTYPE_ECOMMUNITY_VAL, ecom_length(ecom));
+		ecom->size = 1;
+		ecom->val = XCALLOC(MTYPE_ECOMMUNITY_VAL, ECOMMUNITY_SIZE);
 		memcpy(ecom->val, eval->val, ECOMMUNITY_SIZE);
 		return 1;
 	}
 
 	/* If the value already exists in the structure return 0.  */
+	/* check also if the extended community itself exists. */
 	c = 0;
-	for (p = ecom->val; c < ecom->size; p += ECOMMUNITY_SIZE, c++) {
-		ret = memcmp(p, eval->val, ECOMMUNITY_SIZE);
+	ins_idx = -1;
+	for (uint8_t *p = ecom->val; c < ecom->size;
+	     p += ECOMMUNITY_SIZE, c++) {
+		if (unique) {
+			if (p[0] == eval->val[0] &&
+			    p[1] == eval->val[1]) {
+				if (overwrite) {
+					memcpy(p, eval->val, ECOMMUNITY_SIZE);
+					return 1;
+				}
+				return 0;
+			}
+		}
+		int ret = memcmp(p, eval->val, ECOMMUNITY_SIZE);
 		if (ret == 0)
 			return 0;
-		if (ret > 0)
-			break;
+		if (ret > 0) {
+			if (!unique)
+				break;
+			if (ins_idx == -1)
+				ins_idx = c;
+		}
 	}
+
+	if (ins_idx == -1)
+		ins_idx = c;
 
 	/* Add the value to the structure with numerical sorting.  */
 	ecom->size++;
-	ecom->val =
-		XREALLOC(MTYPE_ECOMMUNITY_VAL, ecom->val, ecom_length(ecom));
+	ecom->val = XREALLOC(MTYPE_ECOMMUNITY_VAL, ecom->val,
+			     ecom->size * ECOMMUNITY_SIZE);
 
-	memmove(ecom->val + (c + 1) * ECOMMUNITY_SIZE,
-		ecom->val + c * ECOMMUNITY_SIZE,
-		(ecom->size - 1 - c) * ECOMMUNITY_SIZE);
-	memcpy(ecom->val + c * ECOMMUNITY_SIZE, eval->val, ECOMMUNITY_SIZE);
+	memmove(ecom->val + ((ins_idx + 1) * ECOMMUNITY_SIZE),
+		ecom->val + (ins_idx * ECOMMUNITY_SIZE),
+		(ecom->size - 1 - ins_idx) * ECOMMUNITY_SIZE);
+	memcpy(ecom->val + (ins_idx * ECOMMUNITY_SIZE),
+	       eval->val, ECOMMUNITY_SIZE);
 
 	return 1;
 }
@@ -129,7 +154,7 @@ struct ecommunity *ecommunity_uniq_sort(struct ecommunity *ecom)
 	for (i = 0; i < ecom->size; i++) {
 		eval = (struct ecommunity_val *)(ecom->val
 						 + (i * ECOMMUNITY_SIZE));
-		ecommunity_add_val(new, eval);
+		ecommunity_add_val(new, eval, false, false);
 	}
 	return new;
 }
@@ -544,7 +569,7 @@ struct ecommunity *ecommunity_str2com(const char *str, int type,
 			if (ecom == NULL)
 				ecom = ecommunity_new();
 			eval.val[1] = type;
-			ecommunity_add_val(ecom, &eval);
+			ecommunity_add_val(ecom, &eval, false, false);
 			break;
 		case ecommunity_token_unknown:
 		default:
@@ -556,8 +581,8 @@ struct ecommunity *ecommunity_str2com(const char *str, int type,
 	return ecom;
 }
 
-static int ecommunity_rt_soo_str(char *buf, uint8_t *pnt, int type,
-				 int sub_type, int format)
+static int ecommunity_rt_soo_str(char *buf, size_t bufsz, uint8_t *pnt,
+				 int type, int sub_type, int format)
 {
 	int len = 0;
 	const char *prefix;
@@ -589,24 +614,53 @@ static int ecommunity_rt_soo_str(char *buf, uint8_t *pnt, int type,
 		eas.val = (*pnt++ << 8);
 		eas.val |= (*pnt++);
 
-		len = sprintf(buf, "%s%u:%u", prefix, eas.as, eas.val);
+		len = snprintf(buf, bufsz, "%s%u:%u", prefix, eas.as, eas.val);
 	} else if (type == ECOMMUNITY_ENCODE_AS) {
 		eas.as = (*pnt++ << 8);
 		eas.as |= (*pnt++);
 		pnt = ptr_get_be32(pnt, &eas.val);
 
-		len = sprintf(buf, "%s%u:%u", prefix, eas.as, eas.val);
+		len = snprintf(buf, bufsz, "%s%u:%u", prefix, eas.as, eas.val);
 	} else if (type == ECOMMUNITY_ENCODE_IP) {
 		memcpy(&eip.ip, pnt, 4);
 		pnt += 4;
 		eip.val = (*pnt++ << 8);
 		eip.val |= (*pnt++);
 
-		len = sprintf(buf, "%s%s:%u", prefix, inet_ntoa(eip.ip),
-			      eip.val);
+		len = snprintf(buf, bufsz, "%s%s:%u", prefix, inet_ntoa(eip.ip),
+			       eip.val);
 	}
-	(void)pnt; /* consume value */
 
+	/* consume value */
+	(void)pnt;
+
+	return len;
+}
+
+static int ecommunity_lb_str(char *buf, size_t bufsz, uint8_t *pnt)
+{
+	int len = 0;
+	as_t as;
+	uint32_t bw;
+	char bps_buf[20] = {0};
+
+#define ONE_GBPS_BYTES (1024 * 1024 * 1024 / 8)
+#define ONE_MBPS_BYTES (1024 * 1024 / 8)
+#define ONE_KBPS_BYTES (1024 / 8)
+
+	as = (*pnt++ << 8);
+	as |= (*pnt++);
+	pnt = ptr_get_be32(pnt, &bw);
+	if (bw >= ONE_GBPS_BYTES)
+		sprintf(bps_buf, "%.3f Gbps", (float)(bw/ONE_GBPS_BYTES));
+	else if (bw >= ONE_MBPS_BYTES)
+		sprintf(bps_buf, "%.3f Mbps", (float)(bw/ONE_MBPS_BYTES));
+	else if (bw >= ONE_KBPS_BYTES)
+		sprintf(bps_buf, "%.3f Kbps", (float)(bw/ONE_KBPS_BYTES));
+	else
+		sprintf(bps_buf, "%u bps", bw * 8);
+
+	len = snprintf(buf, bufsz, "LB:%u:%u (%s)", as, bw, bps_buf);
 	return len;
 }
 
@@ -640,44 +694,31 @@ char *ecommunity_ecom2str(struct ecommunity *ecom, int format, int filter)
 	uint8_t *pnt;
 	uint8_t type = 0;
 	uint8_t sub_type = 0;
-#define ECOMMUNITY_STR_DEFAULT_LEN  64
+#define ECOMMUNITY_STRLEN 64
 	int str_size;
-	int str_pnt;
 	char *str_buf;
-	int len = 0;
-	int first = 1;
 
-	if (ecom->size == 0) {
-		str_buf = XMALLOC(MTYPE_ECOMMUNITY_STR, 1);
-		str_buf[0] = '\0';
-		return str_buf;
-	}
+	if (ecom->size == 0)
+		return XCALLOC(MTYPE_ECOMMUNITY_STR, 1);
 
-	/* Prepare buffer.  */
-	str_buf = XMALLOC(MTYPE_ECOMMUNITY_STR, ECOMMUNITY_STR_DEFAULT_LEN + 1);
-	str_size = ECOMMUNITY_STR_DEFAULT_LEN + 1;
-	str_buf[0] = '\0';
-	str_pnt = 0;
+	/* ecom strlen + space + null term */
+	str_size = (ecom->size * (ECOMMUNITY_STRLEN + 1)) + 1;
+	str_buf = XCALLOC(MTYPE_ECOMMUNITY_STR, str_size);
+
+	char encbuf[128];
 
 	for (i = 0; i < ecom->size; i++) {
 		int unk_ecom = 0;
-
-		/* Make it sure size is enough.  */
-		while (str_pnt + ECOMMUNITY_STR_DEFAULT_LEN >= str_size) {
-			str_size *= 2;
-			str_buf = XREALLOC(MTYPE_ECOMMUNITY_STR, str_buf,
-					   str_size);
-		}
+		memset(encbuf, 0x00, sizeof(encbuf));
 
 		/* Space between each value.  */
-		if (!first) {
-			str_buf[str_pnt++] = ' ';
-			len++;
-		}
+		if (i > 0)
+			strlcat(str_buf, " ", str_size);
 
+		/* Retrieve value field */
 		pnt = ecom->val + (i * 8);
 
-		/* High-order octet of type. */
+		/* High-order octet is the type */
 		type = *pnt++;
 
 		if (type == ECOMMUNITY_ENCODE_AS || type == ECOMMUNITY_ENCODE_IP
@@ -696,15 +737,20 @@ char *ecommunity_ecom2str(struct ecommunity *ecom, int format, int filter)
 					inet_ntop(AF_INET, ipv4,
 						  ipv4str,
 						  INET_ADDRSTRLEN);
-					len = sprintf(str_buf + str_pnt,
-						      "NH:%s:%d",
-						      ipv4str, pnt[5]);
+					snprintf(encbuf, sizeof(encbuf),
+						 "NH:%s:%d", ipv4str, pnt[5]);
+				} else if (sub_type ==
+					   ECOMMUNITY_LINK_BANDWIDTH &&
+					   type == ECOMMUNITY_ENCODE_AS) {
+					ecommunity_lb_str(encbuf,
+						sizeof(encbuf), pnt);
 				} else
 					unk_ecom = 1;
-			} else
-				len = ecommunity_rt_soo_str(str_buf + str_pnt,
-							    pnt, type, sub_type,
-							    format);
+			} else {
+				ecommunity_rt_soo_str(encbuf, sizeof(encbuf),
+						      pnt, type, sub_type,
+						      format);
+			}
 		} else if (type == ECOMMUNITY_ENCODE_OPAQUE) {
 			if (filter == ECOMMUNITY_ROUTE_TARGET)
 				continue;
@@ -712,13 +758,15 @@ char *ecommunity_ecom2str(struct ecommunity *ecom, int format, int filter)
 				uint16_t tunneltype;
 				memcpy(&tunneltype, pnt + 5, 2);
 				tunneltype = ntohs(tunneltype);
-				len = sprintf(str_buf + str_pnt, "ET:%d",
-					      tunneltype);
+
+				snprintf(encbuf, sizeof(encbuf), "ET:%d",
+					 tunneltype);
 			} else if (*pnt == ECOMMUNITY_EVPN_SUBTYPE_DEF_GW) {
-				len = sprintf(str_buf + str_pnt,
-					      "Default Gateway");
-			} else
+				strlcpy(encbuf, "Default Gateway",
+					sizeof(encbuf));
+			} else {
 				unk_ecom = 1;
+			}
 		} else if (type == ECOMMUNITY_ENCODE_EVPN) {
 			if (filter == ECOMMUNITY_ROUTE_TARGET)
 				continue;
@@ -726,15 +774,15 @@ char *ecommunity_ecom2str(struct ecommunity *ecom, int format, int filter)
 				struct ethaddr rmac;
 				pnt++;
 				memcpy(&rmac, pnt, ETH_ALEN);
-				len = sprintf(
-					str_buf + str_pnt,
-					"Rmac:%02x:%02x:%02x:%02x:%02x:%02x",
-					(uint8_t)rmac.octet[0],
-					(uint8_t)rmac.octet[1],
-					(uint8_t)rmac.octet[2],
-					(uint8_t)rmac.octet[3],
-					(uint8_t)rmac.octet[4],
-					(uint8_t)rmac.octet[5]);
+
+				snprintf(encbuf, sizeof(encbuf),
+					 "Rmac:%02x:%02x:%02x:%02x:%02x:%02x",
+					 (uint8_t)rmac.octet[0],
+					 (uint8_t)rmac.octet[1],
+					 (uint8_t)rmac.octet[2],
+					 (uint8_t)rmac.octet[3],
+					 (uint8_t)rmac.octet[4],
+					 (uint8_t)rmac.octet[5]);
 			} else if (*pnt
 				   == ECOMMUNITY_EVPN_SUBTYPE_MACMOBILITY) {
 				uint32_t seqnum;
@@ -742,29 +790,30 @@ char *ecommunity_ecom2str(struct ecommunity *ecom, int format, int filter)
 
 				memcpy(&seqnum, pnt + 2, 4);
 				seqnum = ntohl(seqnum);
-				if (flags
-				    & ECOMMUNITY_EVPN_SUBTYPE_MACMOBILITY_FLAG_STICKY)
-					len = sprintf(str_buf + str_pnt,
-						      "MM:%u, sticky MAC",
-						      seqnum);
-				else
-					len = sprintf(str_buf + str_pnt,
-						      "MM:%u", seqnum);
+
+				snprintf(encbuf, sizeof(encbuf), "MM:%u",
+					 seqnum);
+
+				if (CHECK_FLAG(
+					    flags,
+					    ECOMMUNITY_EVPN_SUBTYPE_MACMOBILITY_FLAG_STICKY))
+					strlcat(encbuf, ", sticky MAC",
+						sizeof(encbuf));
 			} else if (*pnt == ECOMMUNITY_EVPN_SUBTYPE_ND) {
 				uint8_t flags = *++pnt;
 
-				if (flags
-				    & ECOMMUNITY_EVPN_SUBTYPE_ND_ROUTER_FLAG)
-					len = sprintf(str_buf + str_pnt,
-						      "ND:Router Flag");
+				if (CHECK_FLAG(
+					    flags,
+					    ECOMMUNITY_EVPN_SUBTYPE_ND_ROUTER_FLAG))
+					strlcpy(encbuf, "ND:Router Flag",
+						sizeof(encbuf));
 			} else
 				unk_ecom = 1;
 		} else if (type == ECOMMUNITY_ENCODE_REDIRECT_IP_NH) {
 			sub_type = *pnt++;
 			if (sub_type == ECOMMUNITY_REDIRECT_IP_NH) {
-				len = sprintf(
-					str_buf + str_pnt,
-					"FS:redirect IP 0x%x", *(pnt+5));
+				snprintf(encbuf, sizeof(encbuf),
+					 "FS:redirect IP 0x%x", *(pnt + 5));
 			} else
 				unk_ecom = 1;
 		} else if (type == ECOMMUNITY_ENCODE_TRANS_EXP ||
@@ -772,38 +821,35 @@ char *ecommunity_ecom2str(struct ecommunity *ecom, int format, int filter)
 			   type == ECOMMUNITY_EXTENDED_COMMUNITY_PART_3) {
 			sub_type = *pnt++;
 			if (sub_type == ECOMMUNITY_REDIRECT_VRF) {
-				char buf[16];
-
-				memset(buf, 0, sizeof(buf));
-				ecommunity_rt_soo_str(buf, (uint8_t *)pnt,
-						      type &
-						      ~ECOMMUNITY_ENCODE_TRANS_EXP,
-						      ECOMMUNITY_ROUTE_TARGET,
-						      ECOMMUNITY_FORMAT_DISPLAY);
-				len = snprintf(str_buf + str_pnt,
-					       str_size - len,
-					       "FS:redirect VRF %s", buf);
+				char buf[16] = {};
+				ecommunity_rt_soo_str(
+					buf, sizeof(buf), (uint8_t *)pnt,
+					type & ~ECOMMUNITY_ENCODE_TRANS_EXP,
+					ECOMMUNITY_ROUTE_TARGET,
+					ECOMMUNITY_FORMAT_DISPLAY);
+				snprintf(encbuf, sizeof(encbuf),
+					 "FS:redirect VRF %s", buf);
 			} else if (type != ECOMMUNITY_ENCODE_TRANS_EXP)
 				unk_ecom = 1;
 			else if (sub_type == ECOMMUNITY_TRAFFIC_ACTION) {
 				char action[64];
-				char *ptr = action;
 
 				if (*(pnt+3) ==
 				    1 << FLOWSPEC_TRAFFIC_ACTION_TERMINAL)
-					ptr += snprintf(ptr, sizeof(action),
-							"terminate (apply)");
+					strlcpy(action, "terminate (apply)",
+						sizeof(action));
 				else
-					ptr += snprintf(ptr, sizeof(action),
-						       "eval stops");
+					strlcpy(action, "eval stops",
+						sizeof(action));
+
 				if (*(pnt+3) ==
 				    1 << FLOWSPEC_TRAFFIC_ACTION_SAMPLE)
-					snprintf(ptr, sizeof(action) -
-						 (size_t)(ptr-action),
-						 ", sample");
-				len = snprintf(str_buf + str_pnt,
-					       str_size - len,
-					      "FS:action %s", action);
+					strlcat(action, ", sample",
+						sizeof(action));
+
+
+				snprintf(encbuf, sizeof(encbuf), "FS:action %s",
+					 action);
 			} else if (sub_type == ECOMMUNITY_TRAFFIC_RATE) {
 				union traffic_rate data;
 
@@ -811,21 +857,19 @@ char *ecommunity_ecom2str(struct ecommunity *ecom, int format, int filter)
 				data.rate_byte[2] = *(pnt+3);
 				data.rate_byte[1] = *(pnt+4);
 				data.rate_byte[0] = *(pnt+5);
-				len = sprintf(
-					str_buf + str_pnt,
-					"FS:rate %f", data.rate_float);
+				snprintf(encbuf, sizeof(encbuf), "FS:rate %f",
+					 data.rate_float);
 			} else if (sub_type == ECOMMUNITY_TRAFFIC_MARKING) {
-				len = sprintf(
-					str_buf + str_pnt,
-					"FS:marking %u", *(pnt+5));
+				snprintf(encbuf, sizeof(encbuf),
+					 "FS:marking %u", *(pnt + 5));
 			} else if (*pnt
 				   == ECOMMUNITY_EVPN_SUBTYPE_ES_IMPORT_RT) {
 				struct ethaddr mac;
 
-				pnt++;
 				memcpy(&mac, pnt, ETH_ALEN);
-				len = sprintf(
-					str_buf + str_pnt,
+
+				snprintf(
+					encbuf, sizeof(encbuf),
 					"ES-Import-Rt:%02x:%02x:%02x:%02x:%02x:%02x",
 					(uint8_t)mac.octet[0],
 					(uint8_t)mac.octet[1],
@@ -835,17 +879,23 @@ char *ecommunity_ecom2str(struct ecommunity *ecom, int format, int filter)
 					(uint8_t)mac.octet[5]);
 			} else
 				unk_ecom = 1;
+		} else if (type == ECOMMUNITY_ENCODE_AS_NON_TRANS) {
+			sub_type = *pnt++;
+			if (sub_type == ECOMMUNITY_LINK_BANDWIDTH)
+				ecommunity_lb_str(encbuf, sizeof(encbuf), pnt);
+			else
+				unk_ecom = 1;
 		} else {
 			sub_type = *pnt++;
 			unk_ecom = 1;
 		}
 
 		if (unk_ecom)
-			len = sprintf(str_buf + str_pnt, "UNK:%d, %d",
-				      type, sub_type);
+			snprintf(encbuf, sizeof(encbuf), "UNK:%d, %d", type,
+				 sub_type);
 
-		str_pnt += len;
-		first = 0;
+		int r = strlcat(str_buf, encbuf, str_size);
+		assert(r < str_size);
 	}
 
 	return str_buf;
@@ -1022,4 +1072,83 @@ int ecommunity_fill_pbr_action(struct ecommunity_val *ecom_eval,
 	} else
 		return -1;
 	return 0;
+}
+
+/*
+ * return the BGP link bandwidth extended community, if present;
+ * the actual bandwidth is returned via param
+ */
+uint8_t *ecommunity_linkbw_present(struct ecommunity *ecom, uint32_t *bw)
+{
+	uint8_t *eval;
+	int i;
+
+	if (bw)
+		*bw = 0;
+
+	if (!ecom || !ecom->size)
+		return NULL;
+
+	for (i = 0; i < ecom->size; i++) {
+		uint8_t *pnt;
+		uint8_t type, sub_type;
+		uint32_t bwval;
+
+		eval = pnt = (ecom->val + (i * ECOMMUNITY_SIZE));
+		type = *pnt++;
+		sub_type = *pnt++;
+
+		if ((type == ECOMMUNITY_ENCODE_AS ||
+		     type == ECOMMUNITY_ENCODE_AS_NON_TRANS) &&
+		    sub_type == ECOMMUNITY_LINK_BANDWIDTH) {
+			pnt += 2; /* bandwidth is encoded as AS:val */
+			pnt = ptr_get_be32(pnt, &bwval);
+			(void)pnt; /* consume value */
+			if (bw)
+				*bw = bwval;
+			return eval;
+		}
+	}
+
+	return NULL;
+}
+
+
+struct ecommunity *ecommunity_replace_linkbw(as_t as,
+					     struct ecommunity *ecom,
+					     uint64_t cum_bw)
+{
+	struct ecommunity *new;
+	struct ecommunity_val lb_eval;
+	uint8_t *eval, type;
+	uint32_t cur_bw;
+
+	/* Nothing to replace if link-bandwidth doesn't exist or
+	 * is non-transitive - just return existing extcommunity.
+	 */
+	new = ecom;
+	if (!ecom || !ecom->size)
+		return new;
+
+	eval = ecommunity_linkbw_present(ecom, &cur_bw);
+	if (!eval)
+		return new;
+
+	type = *eval;
+	if (type & ECOMMUNITY_FLAG_NON_TRANSITIVE)
+		return new;
+
+	/* Transitive link-bandwidth exists, replace with the passed
+	 * (cumulative) bandwidth value. We need to create a new
+	 * extcommunity for this - refer to AS-Path replace function
+	 * for reference.
+	 */
+	if (cum_bw > 0xFFFFFFFF)
+		cum_bw = 0xFFFFFFFF;
+	encode_lb_extcomm(as > BGP_AS_MAX ? BGP_AS_TRANS : as, cum_bw,
+			  false, &lb_eval);
+	new = ecommunity_dup(ecom);
+	ecommunity_add_val(new, &lb_eval, true, true);
+
+	return new;
 }

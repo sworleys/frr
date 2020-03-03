@@ -1,3 +1,9 @@
+frr (7.0+cl4u2) RELEASED; urgency=medium
+
+  * New Enabled: New Work
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Mon, 23 Dec 2019 09:18:19 -0400
+
 frr (7.0+cl4u1) RELEASED; urgency=medium
 
   * New Enabled: Version 7.0 of FRR Uplift

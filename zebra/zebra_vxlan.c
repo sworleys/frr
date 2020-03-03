@@ -98,8 +98,6 @@ static void *zvni_neigh_alloc(void *p);
 static zebra_neigh_t *zvni_neigh_add(zebra_vni_t *zvni, struct ipaddr *ip,
 				     struct ethaddr *mac);
 static int zvni_neigh_del(zebra_vni_t *zvni, zebra_neigh_t *n);
-static void zvni_neigh_del_from_vtep(zebra_vni_t *zvni, int uninstall,
-				     struct in_addr *r_vtep_ip);
 static void zvni_neigh_del_all(zebra_vni_t *zvni, int uninstall, int upd_client,
 			       uint32_t flags);
 static zebra_neigh_t *zvni_neigh_lookup(zebra_vni_t *zvni, struct ipaddr *ip);
@@ -155,8 +153,6 @@ static bool mac_cmp(const void *p1, const void *p2);
 static void *zvni_mac_alloc(void *p);
 static zebra_mac_t *zvni_mac_add(zebra_vni_t *zvni, struct ethaddr *macaddr);
 static int zvni_mac_del(zebra_vni_t *zvni, zebra_mac_t *mac);
-static void zvni_mac_del_from_vtep(zebra_vni_t *zvni, int uninstall,
-				   struct in_addr *r_vtep_ip);
 static void zvni_mac_del_all(zebra_vni_t *zvni, int uninstall, int upd_client,
 			     uint32_t flags);
 static zebra_mac_t *zvni_mac_lookup(zebra_vni_t *zvni, struct ethaddr *macaddr);
@@ -1993,6 +1989,7 @@ struct zvni_evpn_show {
 	struct vty *vty;
 	json_object *json;
 	struct zebra_vrf *zvrf;
+	bool use_json;
 };
 
 /* print a L3 VNI hash entry in detail*/
@@ -2000,20 +1997,21 @@ static void zl3vni_print_hash_detail(struct hash_bucket *bucket, void *data)
 {
 	struct vty *vty = NULL;
 	zebra_l3vni_t *zl3vni = NULL;
-	json_object *json = NULL;
+	json_object *json_array = NULL;
 	bool use_json = false;
 	struct zvni_evpn_show *zes = data;
 
 	vty = zes->vty;
-	json = zes->json;
-
-	if (json)
-		use_json = true;
+	json_array = zes->json;
+	use_json = zes->use_json;
 
 	zl3vni = (zebra_l3vni_t *)bucket->data;
 
-	zebra_vxlan_print_vni(vty, zes->zvrf, zl3vni->vni, use_json);
-	vty_out(vty, "\n");
+	zebra_vxlan_print_vni(vty, zes->zvrf, zl3vni->vni,
+		use_json, json_array);
+
+	if (!use_json)
+		vty_out(vty, "\n");
 }
 
 
@@ -2088,20 +2086,20 @@ static void zvni_print_hash_detail(struct hash_bucket *bucket, void *data)
 {
 	struct vty *vty;
 	zebra_vni_t *zvni;
-	json_object *json = NULL;
+	json_object *json_array = NULL;
 	bool use_json = false;
 	struct zvni_evpn_show *zes = data;
 
 	vty = zes->vty;
-	json = zes->json;
-
-	if (json)
-		use_json = true;
+	json_array = zes->json;
+	use_json = zes->use_json;
 
 	zvni = (zebra_vni_t *)bucket->data;
 
-	zebra_vxlan_print_vni(vty, zes->zvrf, zvni->vni, use_json);
-	vty_out(vty, "\n");
+	zebra_vxlan_print_vni(vty, zes->zvrf, zvni->vni, use_json, json_array);
+
+	if (!use_json)
+		vty_out(vty, "\n");
 }
 
 /*
@@ -2296,26 +2294,6 @@ static void zvni_neigh_del_hash_entry(struct hash_bucket *bucket, void *arg)
 	}
 
 	return;
-}
-
-/*
- * Delete all neighbor entries from specific VTEP for a particular VNI.
- */
-static void zvni_neigh_del_from_vtep(zebra_vni_t *zvni, int uninstall,
-				     struct in_addr *r_vtep_ip)
-{
-	struct neigh_walk_ctx wctx;
-
-	if (!zvni->neigh_table)
-		return;
-
-	memset(&wctx, 0, sizeof(struct neigh_walk_ctx));
-	wctx.zvni = zvni;
-	wctx.uninstall = uninstall;
-	wctx.flags = DEL_REMOTE_NEIGH_FROM_VTEP;
-	wctx.r_vtep_ip = *r_vtep_ip;
-
-	hash_iterate(zvni->neigh_table, zvni_neigh_del_hash_entry, &wctx);
 }
 
 /*
@@ -3440,26 +3418,6 @@ static void zvni_mac_del_hash_entry(struct hash_bucket *bucket, void *arg)
 	}
 
 	return;
-}
-
-/*
- * Delete all MAC entries from specific VTEP for a particular VNI.
- */
-static void zvni_mac_del_from_vtep(zebra_vni_t *zvni, int uninstall,
-				   struct in_addr *r_vtep_ip)
-{
-	struct mac_walk_ctx wctx;
-
-	if (!zvni->mac_table)
-		return;
-
-	memset(&wctx, 0, sizeof(struct mac_walk_ctx));
-	wctx.zvni = zvni;
-	wctx.uninstall = uninstall;
-	wctx.flags = DEL_REMOTE_MAC_FROM_VTEP;
-	wctx.r_vtep_ip = *r_vtep_ip;
-
-	hash_iterate(zvni->mac_table, zvni_mac_del_hash_entry, &wctx);
 }
 
 /*
@@ -5733,14 +5691,11 @@ static void process_remote_macip_del(vni_t vni,
 	zns = zebra_ns_lookup(NS_DEFAULT);
 	vxl = &zif->l2info.vxl;
 
-	/* The remote VTEP specified is normally expected to exist, but
-	 * it is possible that the peer may delete the VTEP before deleting
-	 * any MACs referring to the VTEP, in which case the handler (see
-	 * remote_vtep_del) would have already deleted the MACs.
+	/* It is possible remote vtep del request is processed prior to
+	 * remote macip route delete. remote_vtep_del does not clean up
+	 * the macip route delete. Explicite withdraw of the macip route
+	 * is expected to recieve. This handler removes the remote route.
 	 */
-	if (!zvni_vtep_find(zvni, &vtep_ip))
-		return;
-
 	mac = zvni_mac_lookup(zvni, macaddr);
 	if (ipa_len)
 		n = zvni_neigh_lookup(zvni, ipaddr);
@@ -5784,12 +5739,14 @@ static void process_remote_macip_del(vni_t vni,
 			vlan_if = zvni_map_to_svi(vxl->access_vlan,
 					zif->brslave_info.br_if);
 			if (IS_ZEBRA_DEBUG_VXLAN)
-				zlog_debug("%s: IP %s (flags 0x%x intf %s) is remote and duplicate, read kernel for local entry",
-					   __PRETTY_FUNCTION__,
-					   ipaddr2str(ipaddr, buf1,
-						      sizeof(buf1)), n->flags,
-					   vlan_if->name);
-			neigh_read_specific_ip(ipaddr, vlan_if);
+				zlog_debug(
+					"%s: IP %s (flags 0x%x intf %s) is remote and duplicate, read kernel for local entry",
+					__PRETTY_FUNCTION__,
+					ipaddr2str(ipaddr, buf1, sizeof(buf1)),
+					n->flags,
+					vlan_if ? vlan_if->name : "Unknown");
+			if (vlan_if)
+				neigh_read_specific_ip(ipaddr, vlan_if);
 		}
 
 		/* When the MAC changes for an IP, it is possible the
@@ -7143,9 +7100,14 @@ void zebra_vxlan_print_macs_vni_vtep(struct vty *vty, struct zebra_vrf *zvrf,
 
 /*
  * Display VNI information (VTY command handler).
+ *
+ * use_json flag indicates that output should be in JSON format.
+ * json_array is non NULL when JSON output needs to be aggregated (by the
+ * caller) and then printed, otherwise, JSON evpn vni info is printed
+ * right away.
  */
 void zebra_vxlan_print_vni(struct vty *vty, struct zebra_vrf *zvrf, vni_t vni,
-			   bool use_json)
+			   bool use_json, json_object *json_array)
 {
 	json_object *json = NULL;
 	void *args[2];
@@ -7157,6 +7119,7 @@ void zebra_vxlan_print_vni(struct vty *vty, struct zebra_vrf *zvrf, vni_t vni,
 
 	if (use_json)
 		json = json_object_new_object();
+
 	args[0] = vty;
 	args[1] = json;
 
@@ -7165,21 +7128,25 @@ void zebra_vxlan_print_vni(struct vty *vty, struct zebra_vrf *zvrf, vni_t vni,
 		zl3vni_print(zl3vni, (void *)args);
 	} else {
 		zvni = zvni_lookup(vni);
-		if (!zvni) {
-			if (use_json)
-				vty_out(vty, "{}\n");
-			else
-				vty_out(vty, "%% VNI %u does not exist\n", vni);
-			return;
-		}
-
-		zvni_print(zvni, (void *)args);
+		if (zvni)
+			zvni_print(zvni, (void *)args);
+		else if (!json)
+			vty_out(vty, "%% VNI %u does not exist\n", vni);
 	}
 
 	if (use_json) {
-		vty_out(vty, "%s\n", json_object_to_json_string_ext(
-					     json, JSON_C_TO_STRING_PRETTY));
-		json_object_free(json);
+		/*
+		 * Each "json" object contains info about 1 VNI.
+		 * When "json_array" is non-null, we aggreggate the json output
+		 * into json_array and print it as a JSON array.
+		 */
+		if (json_array)
+			json_object_array_add(json_array, json);
+		else {
+			vty_out(vty, "%s\n", json_object_to_json_string_ext(
+				json, JSON_C_TO_STRING_PRETTY));
+			json_object_free(json);
+		}
 	}
 }
 
@@ -7336,7 +7303,7 @@ stream_failure:
 void zebra_vxlan_print_vnis_detail(struct vty *vty, struct zebra_vrf *zvrf,
 				   bool use_json)
 {
-	json_object *json = NULL;
+	json_object *json_array = NULL;
 	struct zebra_ns *zns = NULL;
 	struct zvni_evpn_show zes;
 
@@ -7347,13 +7314,13 @@ void zebra_vxlan_print_vnis_detail(struct vty *vty, struct zebra_vrf *zvrf,
 	if (!zns)
 		return;
 
-
 	if (use_json)
-		json = json_object_new_object();
+		json_array = json_object_new_array();
 
 	zes.vty = vty;
-	zes.json = json;
+	zes.json = json_array;
 	zes.zvrf = zvrf;
+	zes.use_json = use_json;
 
 	/* Display all L2-VNIs */
 	hash_iterate(
@@ -7370,8 +7337,8 @@ void zebra_vxlan_print_vnis_detail(struct vty *vty, struct zebra_vrf *zvrf,
 	if (use_json) {
 		vty_out(vty, "%s\n",
 			json_object_to_json_string_ext(
-				json, JSON_C_TO_STRING_PRETTY));
-		json_object_free(json);
+				json_array, JSON_C_TO_STRING_PRETTY));
+		json_object_free(json_array);
 	}
 }
 
@@ -8163,8 +8130,6 @@ void zebra_vxlan_remote_vtep_del(ZAPI_HANDLER_ARGS)
 		if (!zvtep)
 			continue;
 
-		zvni_neigh_del_from_vtep(zvni, 1, &vtep_ip);
-		zvni_mac_del_from_vtep(zvni, 1, &vtep_ip);
 		zvni_vtep_uninstall(zvni, &vtep_ip);
 		zvni_vtep_del(zvni, zvtep);
 	}
@@ -8503,9 +8468,8 @@ void zebra_vxlan_macvlan_down(struct interface *ifp)
 			struct interface *ifp;
 
 			ifp = if_lookup_by_index_all_vrf(zif->link_ifindex);
-			zlog_debug("macvlan %s parent link is not found. Parent index %d ifp %s",
-				ifp->name, zif->link_ifindex,
-				ifp ? ifp->name : " ");
+			zlog_debug("macvlan parent link is not found. Parent index %d ifp %s",
+				zif->link_ifindex, ifp ? ifp->name : " ");
 		}
 		return;
 	}

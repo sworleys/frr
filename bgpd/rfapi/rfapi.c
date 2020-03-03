@@ -840,7 +840,7 @@ void add_vnc_route(struct rfapi_descriptor *rfd, /* cookie, VPN UN addr, peer */
 		beec.val[1] = ECOMMUNITY_OPAQUE_SUBTYPE_ENCAP;
 		beec.val[6] = ((TunnelType) >> 8) & 0xff;
 		beec.val[7] = (TunnelType)&0xff;
-		ecommunity_add_val(attr.ecommunity, &beec);
+		ecommunity_add_val(attr.ecommunity, &beec, false, false);
 	}
 
 	/*
@@ -2657,7 +2657,8 @@ int rfapi_register(void *handle, struct rfapi_ip_prefix *prefix,
 				ecom_value.val[7] =
 					(l2o->logical_net_id >> 0) & 0xff;
 				rtlist = ecommunity_new();
-				ecommunity_add_val(rtlist, &ecom_value);
+				ecommunity_add_val(rtlist, &ecom_value,
+						   false, false);
 			}
 			if (l2o->tag_id) {
 				as_t as = bgp->as;
@@ -2682,7 +2683,8 @@ int rfapi_register(void *handle, struct rfapi_ip_prefix *prefix,
 				ecom_value.val[7] = val & 0xff;
 				if (rtlist == NULL)
 					rtlist = ecommunity_new();
-				ecommunity_add_val(rtlist, &ecom_value);
+				ecommunity_add_val(rtlist, &ecom_value,
+						   false, false);
 			}
 		}
 

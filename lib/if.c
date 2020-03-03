@@ -135,7 +135,12 @@ static int if_cmp_func(const struct interface *ifp1,
 static int if_cmp_index_func(const struct interface *ifp1,
 			     const struct interface *ifp2)
 {
-	return ifp1->ifindex - ifp2->ifindex;
+	if (ifp1->ifindex == ifp2->ifindex)
+		return 0;
+	else if (ifp1->ifindex > ifp2->ifindex)
+		return 1;
+	else
+		return -1;
 }
 
 /* Create new interface structure. */
@@ -942,6 +947,20 @@ static int connected_same_prefix(struct prefix *p1, struct prefix *p2)
 			return 1;
 	}
 	return 0;
+}
+
+/* count the number of connected addresses that are in the given family */
+unsigned int connected_count_by_family(struct interface *ifp, int family)
+{
+	struct listnode *cnode;
+	struct connected *connected;
+	unsigned int cnt = 0;
+
+	for (ALL_LIST_ELEMENTS_RO(ifp->connected, cnode, connected))
+		if (connected->address->family == family)
+			cnt++;
+
+	return cnt;
 }
 
 struct connected *connected_lookup_prefix_exact(struct interface *ifp,

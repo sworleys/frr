@@ -1,23 +1,25 @@
-/* Zebra Mlag Code.
- * Copyright (C) 2018 Cumulus Networks, Inc.
- *                    Donald Sharp
+/*
+ * This is an implementation of MLAG Functionality
  *
- * This file is part of FRR.
+ * Module name: Zebra MLAG
  *
- * FRR is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the
- * Free Software Foundation; either version 2, or (at your option) any
- * later version.
+ * Author: sathesh Kumar karra <sathk@cumulusnetworks.com>
  *
- * FRR is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * General Public License for more details.
+ * Copyright (C) 2019 Cumulus Networks http://www.cumulusnetworks.com
  *
- * You should have received a copy of the GNU General Public License
- * along with FRR; see the file COPYING.  If not, write to the Free
- * Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
- * 02111-1307, USA.
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; see the file COPYING; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #include "zebra.h"
 
@@ -52,7 +54,7 @@ static int zebra_mlag_connect(struct thread *thread);
 static int zebra_mlag_read(struct thread *thread);
 
 /*
- * Write teh data to MLAGD
+ * Write the data to MLAGD
  */
 int zebra_mlag_private_write_data(uint8_t *data, uint32_t len)
 {
@@ -78,8 +80,6 @@ static int zebra_mlag_read(struct thread *thread)
 	uint32_t h_msglen;
 	uint32_t tot_len, curr_len = mlag_rd_buf_offset;
 
-	zrouter.mlag_info.t_read = NULL;
-
 	/*
 	 * Received message in sock_stream looks like below
 	 * | len-1 (4 Bytes) | payload-1 (len-1) |
@@ -101,6 +101,7 @@ static int zebra_mlag_read(struct thread *thread)
 			zebra_mlag_handle_process_state(MLAG_DOWN);
 			return -1;
 		}
+		mlag_rd_buf_offset += data_len;
 		if (data_len != (ssize_t)ZEBRA_MLAG_LEN_SIZE - curr_len) {
 			/* Try again later */
 			zebra_mlag_sched_read();
@@ -129,6 +130,7 @@ static int zebra_mlag_read(struct thread *thread)
 			zebra_mlag_handle_process_state(MLAG_DOWN);
 			return -1;
 		}
+		mlag_rd_buf_offset += data_len;
 		if (data_len != (ssize_t)tot_len - curr_len) {
 			/* Try again later */
 			zebra_mlag_sched_read();
@@ -156,13 +158,11 @@ static int zebra_mlag_read(struct thread *thread)
 
 static int zebra_mlag_connect(struct thread *thread)
 {
-	struct sockaddr_un svr;
+	struct sockaddr_un svr = {0};
 
 	/* Reset the Timer-running flag */
 	zrouter.mlag_info.timer_running = false;
 
-	zrouter.mlag_info.t_read = NULL;
-	memset(&svr, 0, sizeof(svr));
 	svr.sun_family = AF_UNIX;
 #define MLAG_SOCK_NAME "/var/run/clag-zebra.socket"
 	strcpy(svr.sun_path, MLAG_SOCK_NAME);

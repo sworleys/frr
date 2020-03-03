@@ -77,7 +77,7 @@ int allow_delete = 0;
 
 int graceful_restart;
 
-bool v6_rr_semantics = false;
+bool v6_rr_semantics = true;
 
 #ifdef HAVE_NETLINK
 /* Receive buffer size for netlink socket */
@@ -147,6 +147,9 @@ static void sigint(void)
 
 	atomic_store_explicit(&zrouter.in_shutdown, true,
 			      memory_order_relaxed);
+
+	/* send RA lifetime of 0 before stopping. rfc4861/6.2.5 */
+	rtadv_stop_ra_all();
 
 	frr_early_fini();
 

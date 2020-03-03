@@ -2082,7 +2082,7 @@ static void pim_show_state(struct pim_instance *pim, struct vty *vty,
 		} else {
 			vty_out(vty, "%-6d %-15s  %-15s  %-3s  %-16s  ",
 					c_oil->installed, src_str, grp_str,
-					isRpt? "y" : "n", in_ifname);
+					isRpt ? "y" : "n", in_ifname);
 		}
 
 		for (oif_vif_index = 0; oif_vif_index < MAXVIFS;
@@ -4296,7 +4296,7 @@ static void pim_show_mlag_up_entry_detail(struct vrf *vrf,
 			strcpy(own_str + strlen(own_str), "I");
 		/* XXX - fixup, print paragraph output */
 		vty_out(vty,
-				"%-15s %-15s %-6s %-11d %-10d %2s\n",
+				"%-15s %-15s %-6s %-11u %-10d %2s\n",
 				src_str, grp_str, own_str,
 				pim_up_mlag_local_cost(pim, up),
 				pim_up_mlag_peer_cost(up),
@@ -4425,7 +4425,7 @@ static void pim_show_mlag_up_vrf(struct vrf *vrf, struct vty *vty, bool uj)
 			if (up->flags & (PIM_UPSTREAM_FLAG_MASK_MLAG_INTERFACE))
 				strcpy(own_str + strlen(own_str), "I");
 			vty_out(vty,
-				"%-15s %-15s %-6s %-11d %-10d %2s\n",
+				"%-15s %-15s %-6s %-11u %-10u %2s\n",
 				src_str, grp_str, own_str,
 				pim_up_mlag_local_cost(pim, up),
 				pim_up_mlag_peer_cost(up),
@@ -5575,15 +5575,15 @@ DEFPY (show_ip_mroute,
 	return CMD_SUCCESS;
 }
 
-DEFUN (show_ip_mroute_vrf_all,
-       show_ip_mroute_vrf_all_cmd,
-       "show ip mroute vrf all [fill] [json]",
-       SHOW_STR
-       IP_STR
-       MROUTE_STR
-       VRF_CMD_HELP_STR
-       "Fill in Assumed data\n"
-       JSON_STR)
+DEFUN_HIDDEN (show_ip_mroute_vrf_all,
+	      show_ip_mroute_vrf_all_cmd,
+	      "show ip mroute vrf all [fill] [json]",
+	      SHOW_STR
+	      IP_STR
+	      MROUTE_STR
+	      VRF_CMD_HELP_STR
+	      "Fill in Assumed data\n"
+	      JSON_STR)
 {
 	struct prefix_sg sg = {0};
 	bool uj = use_json(argc, argv);
@@ -5613,14 +5613,14 @@ DEFUN (show_ip_mroute_vrf_all,
 	return CMD_SUCCESS;
 }
 
-DEFUN (clear_ip_mroute_count,
-       clear_ip_mroute_count_cmd,
-       "clear ip mroute [vrf NAME] count",
-       CLEAR_STR
-       IP_STR
-       MROUTE_STR
-       VRF_CMD_HELP_STR
-       "Route and packet count data\n")
+DEFUN_HIDDEN (clear_ip_mroute_count,
+	      clear_ip_mroute_count_cmd,
+	      "clear ip mroute [vrf NAME] count",
+	      CLEAR_STR
+	      IP_STR
+	      MROUTE_STR
+	      VRF_CMD_HELP_STR
+	      "Route and packet count data\n")
 {
 	int idx = 2;
 	struct listnode *node;
@@ -6354,6 +6354,7 @@ static int pim_ssm_cmd_worker(struct pim_instance *pim, struct vty *vty,
 			      const char *plist)
 {
 	int result = pim_ssm_range_set(pim, pim->vrf_id, plist);
+	int ret = CMD_WARNING_CONFIG_FAILED;
 
 	if (result == PIM_SSM_ERR_NONE)
 		return CMD_SUCCESS;
@@ -6364,12 +6365,13 @@ static int pim_ssm_cmd_worker(struct pim_instance *pim, struct vty *vty,
 		break;
 	case PIM_SSM_ERR_DUP:
 		vty_out(vty, "%% duplicate config\n");
+		ret = CMD_WARNING;
 		break;
 	default:
 		vty_out(vty, "%% ssm range config failed\n");
 	}
 
-	return CMD_WARNING_CONFIG_FAILED;
+	return ret;
 }
 
 DEFUN (ip_pim_ssm_prefix_list,
@@ -7388,6 +7390,8 @@ static int pim_cmd_interface_add(struct interface *ifp)
 
 	pim_if_addr_add_all(ifp);
 	pim_if_membership_refresh(ifp);
+
+	pim_if_create_pimreg(pim_ifp->pim);
 	return 1;
 }
 

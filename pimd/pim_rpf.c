@@ -43,7 +43,7 @@ static struct in_addr pim_rpf_find_rpf_addr(struct pim_upstream *up);
 void pim_rpf_set_refresh_time(struct pim_instance *pim)
 {
 	pim->last_route_change_time = pim_time_monotonic_usec();
-	if (PIM_DEBUG_TRACE)
+	if (PIM_DEBUG_PIM_TRACE)
 		zlog_debug("%s: vrf(%s) New last route change time: %" PRId64,
 			   __PRETTY_FUNCTION__, pim->vrf->name,
 			   pim->last_route_change_time);
@@ -70,7 +70,7 @@ bool pim_nexthop_lookup(struct pim_instance *pim, struct pim_nexthop *nexthop,
 
 	if ((nexthop->last_lookup.s_addr == addr.s_addr)
 	    && (nexthop->last_lookup_time > pim->last_route_change_time)) {
-		if (PIM_DEBUG_TRACE) {
+		if (PIM_DEBUG_PIM_NHT) {
 			char addr_str[INET_ADDRSTRLEN];
 			pim_inet4_dump("<addr?>", addr, addr_str,
 				       sizeof(addr_str));
@@ -86,7 +86,7 @@ bool pim_nexthop_lookup(struct pim_instance *pim, struct pim_nexthop *nexthop,
 		pim->nexthop_lookups_avoided++;
 		return true;
 	} else {
-		if (PIM_DEBUG_TRACE) {
+		if (PIM_DEBUG_PIM_NHT) {
 			char addr_str[INET_ADDRSTRLEN];
 			pim_inet4_dump("<addr?>", addr, addr_str,
 				       sizeof(addr_str));
@@ -103,11 +103,15 @@ bool pim_nexthop_lookup(struct pim_instance *pim, struct pim_nexthop *nexthop,
 	num_ifindex = zclient_lookup_nexthop(pim, nexthop_tab, MULTIPATH_NUM,
 					     addr, PIM_NEXTHOP_LOOKUP_MAX);
 	if (num_ifindex < 1) {
-		char addr_str[INET_ADDRSTRLEN];
-		pim_inet4_dump("<addr?>", addr, addr_str, sizeof(addr_str));
-		zlog_warn(
-			"%s %s: could not find nexthop ifindex for address %s",
-			__FILE__, __PRETTY_FUNCTION__, addr_str);
+		if (PIM_DEBUG_ZEBRA) {
+			char addr_str[INET_ADDRSTRLEN];
+
+			pim_inet4_dump("<addr?>", addr,
+				       addr_str, sizeof(addr_str));
+			zlog_warn(
+				"%s %s: could not find nexthop ifindex for address %s",
+				__FILE__, __PRETTY_FUNCTION__, addr_str);
+		}
 		return false;
 	}
 

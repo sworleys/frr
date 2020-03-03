@@ -65,9 +65,8 @@ static int _nexthop_labels_cmp(const struct nexthop *nh1,
 	return memcmp(nhl1->label, nhl2->label, nhl1->num_labels);
 }
 
-static int _nexthop_g_addr_cmp(enum nexthop_types_t type,
-			       const union g_addr *addr1,
-			       const union g_addr *addr2)
+int nexthop_g_addr_cmp(enum nexthop_types_t type, const union g_addr *addr1,
+		       const union g_addr *addr2)
 {
 	int ret = 0;
 
@@ -92,13 +91,13 @@ static int _nexthop_g_addr_cmp(enum nexthop_types_t type,
 static int _nexthop_gateway_cmp(const struct nexthop *nh1,
 				const struct nexthop *nh2)
 {
-	return _nexthop_g_addr_cmp(nh1->type, &nh1->gate, &nh2->gate);
+	return nexthop_g_addr_cmp(nh1->type, &nh1->gate, &nh2->gate);
 }
 
 static int _nexthop_source_cmp(const struct nexthop *nh1,
 			       const struct nexthop *nh2)
 {
-	return _nexthop_g_addr_cmp(nh1->type, &nh1->src, &nh2->src);
+	return nexthop_g_addr_cmp(nh1->type, &nh1->src, &nh2->src);
 }
 
 static int _nexthop_cmp_no_labels(const struct nexthop *next1,
@@ -116,6 +115,12 @@ static int _nexthop_cmp_no_labels(const struct nexthop *next1,
 		return -1;
 
 	if (next1->type > next2->type)
+		return 1;
+
+	if (next1->weight < next2->weight)
+		return -1;
+
+	if (next1->weight > next2->weight)
 		return 1;
 
 	switch (next1->type) {
@@ -350,7 +355,7 @@ const char *nexthop2str(const struct nexthop *nexthop, char *str, int size)
  * left branch is 'resolved' and right branch is 'next':
  * https://en.wikipedia.org/wiki/Tree_traversal#/media/File:Sorted_binary_tree_preorder.svg
  */
-struct nexthop *nexthop_next(struct nexthop *nexthop)
+struct nexthop *nexthop_next(const struct nexthop *nexthop)
 {
 	if (CHECK_FLAG(nexthop->flags, NEXTHOP_FLAG_RECURSIVE))
 		return nexthop->resolved;
@@ -366,7 +371,7 @@ struct nexthop *nexthop_next(struct nexthop *nexthop)
 }
 
 /* Return the next nexthop in the tree that is resolved and active */
-struct nexthop *nexthop_next_active_resolved(struct nexthop *nexthop)
+struct nexthop *nexthop_next_active_resolved(const struct nexthop *nexthop)
 {
 	struct nexthop *next = nexthop_next(nexthop);
 
@@ -460,6 +465,7 @@ void nexthop_copy(struct nexthop *copy, const struct nexthop *nexthop,
 	copy->ifindex = nexthop->ifindex;
 	copy->type = nexthop->type;
 	copy->flags = nexthop->flags;
+	copy->weight = nexthop->weight;
 	memcpy(&copy->gate, &nexthop->gate, sizeof(nexthop->gate));
 	memcpy(&copy->src, &nexthop->src, sizeof(nexthop->src));
 	memcpy(&copy->rmap_src, &nexthop->rmap_src, sizeof(nexthop->rmap_src));

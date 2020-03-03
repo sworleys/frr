@@ -228,6 +228,7 @@ struct bgp_path_info {
 #define BGP_PATH_MULTIPATH_CHG (1 << 12)
 #define BGP_PATH_RIB_ATTR_CHG (1 << 13)
 #define BGP_PATH_ANNC_NH_SELF (1 << 14)
+#define BGP_PATH_LINK_BW_CHG (1 << 15)
 
 	/* BGP route type.  This can be static, RIP, OSPF, BGP etc.  */
 	uint8_t type;
@@ -385,6 +386,25 @@ static inline bool is_pi_family_matching(struct bgp_path_info *pi,
 	    table->safi == safi)
 		return true;
 	return false;
+}
+
+static inline void prep_for_rmap_apply(struct bgp_path_info *dst_pi,
+				       struct bgp_path_info_extra *dst_pie,
+				       struct bgp_path_info *src_pi,
+				       struct peer *peer, struct attr *attr)
+{
+	memset(dst_pi, 0, sizeof(struct bgp_path_info));
+	dst_pi->peer = peer;
+	dst_pi->attr = attr;
+	dst_pi->flags = src_pi->flags;
+	dst_pi->type = src_pi->type;
+	dst_pi->sub_type = src_pi->sub_type;
+	dst_pi->mpath = src_pi->mpath;
+	if (src_pi->extra) {
+		memcpy(dst_pie, src_pi->extra,
+		       sizeof(struct bgp_path_info_extra));
+		dst_pi->extra = dst_pie;
+	}
 }
 
 /* called before bgp_process() */

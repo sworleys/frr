@@ -386,16 +386,12 @@ struct connected {
 	/* N.B. the ZEBRA_IFA_PEER flag should be set if and only if
 	   a peer address has been configured.  If this flag is set,
 	   the destination field must contain the peer address.
-	   Otherwise, if this flag is not set, the destination address
-	   will either contain a broadcast address or be NULL.
 	 */
 
 	/* Address of connected network. */
 	struct prefix *address;
 
-	/* Peer or Broadcast address, depending on whether ZEBRA_IFA_PEER is
-	   set.
-	   Note: destination may be NULL if ZEBRA_IFA_PEER is not set. */
+	/* Peer address, if ZEBRA_IFA_PEER is set, otherwise NULL */
 	struct prefix *destination;
 
 	/* Label for Linux 2.2.X and upper. */
@@ -554,6 +550,7 @@ extern struct connected *connected_lookup_prefix(struct interface *,
 						 struct prefix *);
 extern struct connected *connected_lookup_prefix_exact(struct interface *,
 						       struct prefix *);
+extern unsigned int connected_count_by_family(struct interface *, int family);
 extern struct nbr_connected *nbr_connected_new(void);
 extern void nbr_connected_free(struct nbr_connected *);
 struct nbr_connected *nbr_connected_check(struct interface *, struct prefix *);

@@ -54,7 +54,7 @@ enum mlag_owner {
 
 /*
  * This message definition should match mlag.proto
- * Beacuse mesasge registartion is based on this
+ * Because message registration is based on this
  */
 enum mlag_msg_type {
 	MLAG_MSG_NONE = 0,
@@ -75,15 +75,12 @@ struct mlag_frr_status {
 	enum mlag_frr_state frr_state;
 };
 
-#define MLAG_FRR_STATUS_MSGSIZE (sizeof(struct mlag_frr_status))
-
 struct mlag_status {
 	char peerlink_rif[INTERFACE_NAMSIZ];
 	enum mlag_role my_role;
 	enum mlag_state peer_state;
 };
 
-#define MLAG_STATUS_MSGSIZE (sizeof(struct mlag_status))
 #define MLAG_ROLE_STRSIZE 16
 
 struct mlag_vxlan {
@@ -91,60 +88,49 @@ struct mlag_vxlan {
 	uint32_t local_ip;
 };
 
-#define MLAG_VXLAN_MSGSIZE (sizeof(struct mlag_vxlan))
-
 struct mlag_mroute_add {
 	char vrf_name[VRF_NAMSIZ];
 	uint32_t source_ip;
 	uint32_t group_ip;
 	uint32_t cost_to_rp;
 	enum mlag_owner owner_id;
-	uint8_t am_i_dr;
-	uint8_t am_i_dual_active;
-	uint32_t vrf_id;
+	bool am_i_dr;
+	bool am_i_dual_active;
+	vrf_id_t vrf_id;
 	char intf_name[INTERFACE_NAMSIZ];
 };
-
-#define MLAG_MROUTE_ADD_MSGSIZE (sizeof(struct mlag_mroute_add))
 
 struct mlag_mroute_del {
 	char vrf_name[VRF_NAMSIZ];
 	uint32_t source_ip;
 	uint32_t group_ip;
 	enum mlag_owner owner_id;
-	uint32_t vrf_id;
+	vrf_id_t vrf_id;
 	char intf_name[INTERFACE_NAMSIZ];
 };
-
-#define MLAG_MROUTE_DEL_MSGSIZE (sizeof(struct mlag_mroute_del))
 
 struct mlag_msg {
 	enum mlag_msg_type msg_type;
 	uint16_t data_len;
 	uint16_t msg_cnt;
 	uint8_t data[0];
-};
-
-#define MLAG_HDR_MSGSIZE (sizeof(struct mlag_msg))
+} __attribute__((packed));
 
 extern char *mlag_role2str(enum mlag_role role, char *buf, size_t size);
-extern char *zebra_mlag_lib_msgid_to_str(enum mlag_msg_type msg_type, char *buf,
-					 size_t size);
-extern int zebra_mlag_lib_decode_mlag_hdr(struct stream *s,
-					  struct mlag_msg *msg, size_t *length);
-extern int zebra_mlag_lib_decode_mroute_add(struct stream *s,
-					    struct mlag_mroute_add *msg,
-					    size_t *length);
-extern int zebra_mlag_lib_decode_mroute_del(struct stream *s,
-					    struct mlag_mroute_del *msg,
-					    size_t *length);
-extern int zebra_mlag_lib_decode_mlag_status(struct stream *s,
-					     struct mlag_status *msg);
-extern int
-zebra_mlag_lib_decode_vxlan_update(struct stream *s,
-		struct mlag_vxlan *msg);
-
-extern int zebra_mlag_lib_decode_frr_status(struct stream *s,
-					    struct mlag_frr_status *msg);
-
+extern char *mlag_lib_msgid_to_str(enum mlag_msg_type msg_type, char *buf,
+				   size_t size);
+extern int mlag_lib_decode_mlag_hdr(struct stream *s, struct mlag_msg *msg,
+				    size_t *length);
+extern int mlag_lib_decode_mroute_add(struct stream *s,
+				      struct mlag_mroute_add *msg,
+				      size_t *length);
+extern int mlag_lib_decode_mroute_del(struct stream *s,
+				      struct mlag_mroute_del *msg,
+				      size_t *length);
+extern int mlag_lib_decode_mlag_status(struct stream *s,
+				       struct mlag_status *msg);
+extern int mlag_lib_decode_vxlan_update(struct stream *s,
+					struct mlag_vxlan *msg);
+extern int mlag_lib_decode_frr_status(struct stream *s,
+				      struct mlag_frr_status *msg);
 #endif

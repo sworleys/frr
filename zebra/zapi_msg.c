@@ -148,6 +148,25 @@ static int zserv_encode_nexthop(struct stream *s, struct nexthop *nexthop)
 	return 1;
 }
 
+/*
+ * Zebra error addition adds error type.
+ *
+ *
+ *  0                   1
+ *  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * |      enum zebra_error_types   |
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ *
+ */
+static void zserv_encode_error(struct stream *s, enum zebra_error_types error)
+{
+	stream_put(s, &error, sizeof(error));
+
+	/* Write packet size. */
+	stream_putw_at(s, 0, stream_get_endp(s));
+}
+
 /* Send handlers ----------------------------------------------------------- */
 
 /* Interface is added. Send ZEBRA_INTERFACE_ADD to client. */
@@ -567,6 +586,7 @@ int zsend_redistribute_route(int cmd, struct zserv *client,
 		api_nh = &api.nexthops[count];
 		api_nh->vrf_id = nexthop->vrf_id;
 		api_nh->type = nexthop->type;
+		api_nh->weight = nexthop->weight;
 		switch (nexthop->type) {
 		case NEXTHOP_TYPE_BLACKHOLE:
 			api_nh->bh_type = nexthop->bh_type;
@@ -1547,6 +1567,8 @@ static void zread_route_add(ZAPI_HANDLER_ARGS)
 		if (api_nh->onlink)
 			SET_FLAG(nexthop->flags, NEXTHOP_FLAG_ONLINK);
 
+		nexthop->weight = api_nh->weight;
+
 		/* MPLS labels for BGP-LU or Segment Routing */
 		if (CHECK_FLAG(api.message, ZAPI_MESSAGE_LABEL)
 		    && api_nh->type != NEXTHOP_TYPE_IFINDEX
@@ -2094,6 +2116,7 @@ static void zread_pseudowire(ZAPI_HANDLER_ARGS)
 
 	/* Get data. */
 	STREAM_GET(ifname, s, IF_NAMESIZE);
+	ifname[IF_NAMESIZE - 1] = '\0';
 	STREAM_GETL(s, ifindex);
 	STREAM_GETL(s, type);
 	STREAM_GETL(s, af);
@@ -2317,6 +2340,20 @@ static inline void zread_rule(ZAPI_HANDLER_ARGS)
 		if (zpr.rule.filter.fwmark)
 			zpr.rule.filter.filter_bm |= PBR_FILTER_FWMARK;
 
+		if (!(zpr.rule.filter.src_ip.family == AF_INET
+		      || zpr.rule.filter.src_ip.family == AF_INET6)) {
+			zlog_warn("Unsupported PBR source IP family: %s\n",
+				  family2str(zpr.rule.filter.src_ip.family));
+			return;
+		}
+		if (!(zpr.rule.filter.dst_ip.family == AF_INET
+		      || zpr.rule.filter.dst_ip.family == AF_INET6)) {
+			zlog_warn("Unsupported PBR dest IP family: %s\n",
+				  family2str(zpr.rule.filter.dst_ip.family));
+			return;
+		}
+
+
 		zpr.vrf_id = zvrf->vrf->vrf_id;
 		if (hdr->command == ZEBRA_RULE_ADD)
 			zebra_pbr_add_rule(&zpr);
@@ -2373,6 +2410,7 @@ static inline void zread_ipset_entry(ZAPI_HANDLER_ARGS)
 		zpi.sock = client->sock;
 		STREAM_GETL(s, zpi.unique);
 		STREAM_GET(&ipset.ipset_name, s, ZEBRA_IPSET_NAME_SIZE);
+		ipset.ipset_name[ZEBRA_IPSET_NAME_SIZE - 1] = '\0';
 		STREAM_GETC(s, zpi.src.family);
 		STREAM_GETC(s, zpi.src.prefixlen);
 		STREAM_GET(&zpi.src.u.prefix, s, prefix_blen(&zpi.src));
@@ -2416,37 +2454,69 @@ stream_failure:
 
 static inline void zread_iptable(ZAPI_HANDLER_ARGS)
 {
-	struct zebra_pbr_iptable zpi;
+	struct zebra_pbr_iptable *zpi =
+		XCALLOC(MTYPE_TMP, sizeof(struct zebra_pbr_iptable));
 	struct stream *s;
 
 	s = msg;
 
-	memset(&zpi, 0, sizeof(zpi));
-
-	zpi.interface_name_list = list_new();
-	zpi.sock = client->sock;
-	zpi.vrf_id = zvrf->vrf->vrf_id;
-	STREAM_GETL(s, zpi.unique);
-	STREAM_GETL(s, zpi.type);
-	STREAM_GETL(s, zpi.filter_bm);
-	STREAM_GETL(s, zpi.action);
-	STREAM_GETL(s, zpi.fwmark);
-	STREAM_GET(&zpi.ipset_name, s, ZEBRA_IPSET_NAME_SIZE);
-	STREAM_GETW(s, zpi.pkt_len_min);
-	STREAM_GETW(s, zpi.pkt_len_max);
-	STREAM_GETW(s, zpi.tcp_flags);
-	STREAM_GETW(s, zpi.tcp_mask_flags);
-	STREAM_GETC(s, zpi.dscp_value);
-	STREAM_GETC(s, zpi.fragment);
-	STREAM_GETL(s, zpi.nb_interface);
-	zebra_pbr_iptable_update_interfacelist(s, &zpi);
+	zpi->interface_name_list = list_new();
+	zpi->sock = client->sock;
+	zpi->vrf_id = zvrf->vrf->vrf_id;
+	STREAM_GETL(s, zpi->unique);
+	STREAM_GETL(s, zpi->type);
+	STREAM_GETL(s, zpi->filter_bm);
+	STREAM_GETL(s, zpi->action);
+	STREAM_GETL(s, zpi->fwmark);
+	STREAM_GET(&zpi->ipset_name, s, ZEBRA_IPSET_NAME_SIZE);
+	STREAM_GETW(s, zpi->pkt_len_min);
+	STREAM_GETW(s, zpi->pkt_len_max);
+	STREAM_GETW(s, zpi->tcp_flags);
+	STREAM_GETW(s, zpi->tcp_mask_flags);
+	STREAM_GETC(s, zpi->dscp_value);
+	STREAM_GETC(s, zpi->fragment);
+	STREAM_GETL(s, zpi->nb_interface);
+	zebra_pbr_iptable_update_interfacelist(s, zpi);
 
 	if (hdr->command == ZEBRA_IPTABLE_ADD)
-		zebra_pbr_add_iptable(&zpi);
+		zebra_pbr_add_iptable(zpi);
 	else
-		zebra_pbr_del_iptable(&zpi);
+		zebra_pbr_del_iptable(zpi);
+
 stream_failure:
+	zebra_pbr_iptable_free(zpi);
+	zpi = NULL;
 	return;
+}
+
+static void zsend_error_msg(struct zserv *client, enum zebra_error_types error,
+			    struct zmsghdr *bad_hdr)
+{
+
+	struct stream *s = stream_new(ZEBRA_MAX_PACKET_SIZ);
+
+	zclient_create_header(s, ZEBRA_ERROR, bad_hdr->vrf_id);
+
+	zserv_encode_error(s, error);
+
+	client->error_cnt++;
+	zserv_send_message(client, s);
+}
+
+static void zserv_error_no_vrf(ZAPI_HANDLER_ARGS)
+{
+	if (IS_ZEBRA_DEBUG_PACKET && IS_ZEBRA_DEBUG_RECV)
+		zlog_debug("ZAPI message specifies unknown VRF: %d",
+			   hdr->vrf_id);
+
+	return zsend_error_msg(client, ZEBRA_NO_VRF, hdr);
+}
+
+static void zserv_error_invalid_msg_type(ZAPI_HANDLER_ARGS)
+{
+	zlog_info("Zebra received unknown command %d", hdr->command);
+
+	return zsend_error_msg(client, ZEBRA_INVALID_MSG_TYPE, hdr);
 }
 
 void (*zserv_handlers[])(ZAPI_HANDLER_ARGS) = {
@@ -2552,6 +2622,14 @@ void zserv_handle_commands(struct zserv *client, struct stream *msg)
 	struct zmsghdr hdr;
 	struct zebra_vrf *zvrf;
 
+	if (STREAM_READABLE(msg) > ZEBRA_MAX_PACKET_SIZ) {
+		if (IS_ZEBRA_DEBUG_PACKET && IS_ZEBRA_DEBUG_RECV)
+			zlog_debug(
+				"ZAPI message is %zu bytes long but the maximum packet size is %u; dropping",
+				STREAM_READABLE(msg), ZEBRA_MAX_PACKET_SIZ);
+		return;
+	}
+
 	zapi_parse_header(msg, &hdr);
 
 	if (IS_ZEBRA_DEBUG_PACKET && IS_ZEBRA_DEBUG_RECV)
@@ -2565,16 +2643,12 @@ void zserv_handle_commands(struct zserv *client, struct stream *msg)
 
 	/* lookup vrf */
 	zvrf = zebra_vrf_lookup_by_id(hdr.vrf_id);
-	if (!zvrf) {
-		if (IS_ZEBRA_DEBUG_PACKET && IS_ZEBRA_DEBUG_RECV)
-			zlog_debug("ZAPI message specifies unknown VRF: %d",
-				   hdr.vrf_id);
-		return;
-	}
+	if (!zvrf)
+		return zserv_error_no_vrf(client, &hdr, msg, zvrf);
 
 	if (hdr.command >= array_size(zserv_handlers)
 	    || zserv_handlers[hdr.command] == NULL)
-		zlog_info("Zebra received unknown command %d", hdr.command);
-	else
-		zserv_handlers[hdr.command](client, &hdr, msg, zvrf);
+		return zserv_error_invalid_msg_type(client, &hdr, msg, zvrf);
+
+	zserv_handlers[hdr.command](client, &hdr, msg, zvrf);
 }

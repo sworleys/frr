@@ -182,7 +182,33 @@ typedef enum {
 	ZEBRA_MLAG_CLIENT_UNREGISTER,
 	ZEBRA_MLAG_FORWARD_MSG,
 	ZEBRA_VXLAN_SG_REPLAY,
+	ZEBRA_ERROR,
 } zebra_message_types_t;
+
+enum zebra_error_types {
+	ZEBRA_UNKNOWN_ERROR,	/* Error of unknown type */
+	ZEBRA_NO_VRF,		/* Vrf in header was not found */
+	ZEBRA_INVALID_MSG_TYPE, /* No handler found for msg type */
+};
+
+static inline const char *zebra_error_type2str(enum zebra_error_types type)
+{
+	const char *ret = "UNKNOWN";
+
+	switch (type) {
+	case ZEBRA_UNKNOWN_ERROR:
+		ret = "ZEBRA_UNKNOWN_ERROR";
+		break;
+	case ZEBRA_NO_VRF:
+		ret = "ZEBRA_NO_VRF";
+		break;
+	case ZEBRA_INVALID_MSG_TYPE:
+		ret = "ZEBRA_INVALID_MSG_TYPE";
+		break;
+	}
+
+	return ret;
+}
 
 struct redist_proto {
 	uint8_t enabled;
@@ -279,6 +305,7 @@ struct zclient {
 	int (*mlag_process_up)(void);
 	int (*mlag_process_down)(void);
 	int (*mlag_handle_msg)(struct stream *msg, int len);
+	int (*handle_error)(enum zebra_error_types error);
 };
 
 /* Zebra API message flag. */
@@ -323,6 +350,8 @@ struct zapi_nexthop {
 	mpls_label_t labels[MPLS_MAX_LABELS];
 
 	struct ethaddr rmac;
+
+	uint32_t weight;
 };
 
 /*
@@ -461,6 +490,29 @@ enum zapi_iptable_notify_owner {
 	ZAPI_IPTABLE_REMOVED,
 	ZAPI_IPTABLE_FAIL_REMOVE,
 };
+
+static inline const char *
+zapi_rule_notify_owner2str(enum zapi_rule_notify_owner note)
+{
+	const char *ret = "UNKNOWN";
+
+	switch (note) {
+	case ZAPI_RULE_FAIL_INSTALL:
+		ret = "ZAPI_RULE_FAIL_INSTALL";
+		break;
+	case ZAPI_RULE_INSTALLED:
+		ret = "ZAPI_RULE_INSTALLED";
+		break;
+	case ZAPI_RULE_FAIL_REMOVE:
+		ret = "ZAPI_RULE_FAIL_REMOVE";
+		break;
+	case ZAPI_RULE_REMOVED:
+		ret = "ZAPI_RULE_REMOVED";
+		break;
+	}
+
+	return ret;
+}
 
 /* Zebra MAC types */
 #define ZEBRA_MACIP_TYPE_STICKY                0x01 /* Sticky MAC*/
@@ -665,6 +717,9 @@ bool zapi_iptable_notify_decode(struct stream *s,
 extern struct nexthop *nexthop_from_zapi_nexthop(struct zapi_nexthop *znh);
 extern bool zapi_nexthop_update_decode(struct stream *s,
 				       struct zapi_route *nhr);
+
+/* Decode the zebra error message */
+extern bool zapi_error_decode(struct stream *s, enum zebra_error_types *error);
 
 static inline void zapi_route_set_blackhole(struct zapi_route *api,
 					    enum blackhole_type bh_type)

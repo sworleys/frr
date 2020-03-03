@@ -2943,6 +2943,8 @@ static struct bgp *bgp_create(as_t *as, const char *name,
 	bgp->stalepath_time = BGP_DEFAULT_STALEPATH_TIME;
 	bgp->dynamic_neighbors_limit = BGP_DYNAMIC_NEIGHBORS_LIMIT_DEFAULT;
 	bgp->dynamic_neighbors_count = 0;
+	bgp->lb_ref_bw = BGP_LINK_BW_REF_BW;
+	bgp->lb_handling = BGP_LINK_BW_ECMP;
 #if DFLT_BGP_IMPORT_CHECK
 	bgp_flag_set(bgp, BGP_FLAG_IMPORT_CHECK);
 #endif
@@ -7682,6 +7684,14 @@ int bgp_config_write(struct vty *vty)
 				vty_out(vty, " missing-as-worst");
 			vty_out(vty, "\n");
 		}
+
+		/* Link bandwidth handling. */
+		if (bgp->lb_handling == BGP_LINK_BW_IGNORE_BW)
+			vty_out(vty, " bgp bestpath bandwidth ignore\n");
+		else if (bgp->lb_handling == BGP_LINK_BW_SKIP_MISSING)
+			vty_out(vty, " bgp bestpath bandwidth skip-missing\n");
+		else if (bgp->lb_handling == BGP_LINK_BW_DEFWT_4_MISSING)
+			vty_out(vty, " bgp bestpath bandwidth default-weight-for-missing\n");
 
 		/* BGP network import check. */
 		if (!!bgp_flag_check(bgp, BGP_FLAG_IMPORT_CHECK)

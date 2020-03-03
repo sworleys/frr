@@ -153,7 +153,8 @@ static int rtadv_recv_packet(struct zebra_ns *zns, int sock, uint8_t *buf,
 #define RTADV_MSG_SIZE 4096
 
 /* Send router advertisement packet. */
-static void rtadv_send_packet(int sock, struct interface *ifp)
+static void rtadv_send_packet(int sock, struct interface *ifp,
+			      ipv6_nd_suppress_ra_status stop)
 {
 	struct msghdr msg;
 	struct iovec iov;
@@ -239,7 +240,10 @@ static void rtadv_send_packet(int sock, struct interface *ifp)
 		zif->rtadv.AdvDefaultLifetime != -1
 			? zif->rtadv.AdvDefaultLifetime
 			: MAX(1, 0.003 * zif->rtadv.MaxRtrAdvInterval);
-	rtadv->nd_ra_router_lifetime = htons(pkt_RouterLifetime);
+
+	/* send RA lifetime of 0 before stopping. rfc4861/6.2.5 */
+	rtadv->nd_ra_router_lifetime =
+		(stop == RA_SUPPRESS) ? htons(0) : htons(pkt_RouterLifetime);
 	rtadv->nd_ra_reachable = htonl(zif->rtadv.AdvReachableTime);
 	rtadv->nd_ra_retransmit = htonl(0);
 
@@ -412,7 +416,8 @@ static int rtadv_timer(struct thread *thread)
 			zif = ifp->info;
 
 			if (zif->rtadv.AdvSendAdvertisements) {
-				if (zif->rtadv.inFastRexmit) {
+				if (zif->rtadv.inFastRexmit
+				    && zif->rtadv.UseFastRexmit) {
 					/* We assume we fast rexmit every sec so
 					 * no
 					 * additional vars */
@@ -426,7 +431,7 @@ static int rtadv_timer(struct thread *thread)
 							ifp->name);
 
 					rtadv_send_packet(zrouter.rtadv.sock,
-							  ifp);
+							  ifp, RA_ENABLE);
 				} else {
 					zif->rtadv.AdvIntervalTimer -= period;
 					if (zif->rtadv.AdvIntervalTimer <= 0) {
@@ -440,7 +445,7 @@ static int rtadv_timer(struct thread *thread)
 								.MaxRtrAdvInterval;
 						rtadv_send_packet(
 							zrouter.rtadv.sock,
-							ifp);
+							ifp, RA_ENABLE);
 					}
 				}
 			}
@@ -453,9 +458,28 @@ static void rtadv_process_solicit(struct interface *ifp)
 {
 	struct zebra_vrf *zvrf = vrf_info_lookup(ifp->vrf_id);
 	struct zebra_ns *zns = zvrf->zns;
+	struct zebra_if *zif;
 
 	assert(zns);
-	rtadv_send_packet(zrouter.rtadv.sock, ifp);
+	zif = ifp->info;
+
+	/*
+	 * If FastRetransmit is enabled, send the RA immediately.
+	 * If not enabled but it has been more than MIN_DELAY_BETWEEN_RAS
+	 * (3 seconds) since the last RA was sent, send it now and reset
+	 * the timer to start at the max (configured) again.
+	 * If not enabled and it is less than 3 seconds since the last
+	 * RA packet was sent, set the timer for 3 seconds so the next
+	 * one will be sent with a minimum of 3 seconds between RAs.
+	 * RFC4861 sec 6.2.6
+	 */
+	if ((zif->rtadv.UseFastRexmit)
+	    || (zif->rtadv.AdvIntervalTimer <=
+		(zif->rtadv.MaxRtrAdvInterval - MIN_DELAY_BETWEEN_RAS))) {
+		rtadv_send_packet(zrouter.rtadv.sock, ifp, RA_ENABLE);
+		zif->rtadv.AdvIntervalTimer = zif->rtadv.MaxRtrAdvInterval;
+	} else
+		zif->rtadv.AdvIntervalTimer = MIN_DELAY_BETWEEN_RAS;
 }
 
 /*
@@ -768,18 +792,48 @@ static struct rtadv_prefix *rtadv_prefix_get(struct list *rplist,
 	return rprefix;
 }
 
+static void rtadv_prefix_set_defaults(struct rtadv_prefix *rp)
+{
+	rp->AdvAutonomousFlag = 1;
+	rp->AdvOnLinkFlag = 1;
+	rp->AdvRouterAddressFlag = 0;
+	rp->AdvPreferredLifetime = RTADV_PREFERRED_LIFETIME;
+	rp->AdvValidLifetime = RTADV_VALID_LIFETIME;
+}
+
 static void rtadv_prefix_set(struct zebra_if *zif, struct rtadv_prefix *rp)
 {
 	struct rtadv_prefix *rprefix;
 
 	rprefix = rtadv_prefix_get(zif->rtadv.AdvPrefixList, &rp->prefix);
 
-	/* Set parameters. */
-	rprefix->AdvValidLifetime = rp->AdvValidLifetime;
-	rprefix->AdvPreferredLifetime = rp->AdvPreferredLifetime;
-	rprefix->AdvOnLinkFlag = rp->AdvOnLinkFlag;
-	rprefix->AdvAutonomousFlag = rp->AdvAutonomousFlag;
-	rprefix->AdvRouterAddressFlag = rp->AdvRouterAddressFlag;
+	/*
+	 * Set parameters based on where the prefix is created.
+	 * If auto-created based on kernel address addition, set the
+	 * default values.  If created from a manual "ipv6 nd prefix"
+	 * command, take the parameters from the manual command. Note
+	 * that if the manual command exists, the default values will
+	 * not overwrite the manual values.
+	 */
+	if (rp->AdvPrefixCreate == PREFIX_SRC_MANUAL) {
+		if (rprefix->AdvPrefixCreate == PREFIX_SRC_AUTO)
+			rprefix->AdvPrefixCreate = PREFIX_SRC_BOTH;
+		else
+			rprefix->AdvPrefixCreate = PREFIX_SRC_MANUAL;
+
+		rprefix->AdvAutonomousFlag = rp->AdvAutonomousFlag;
+		rprefix->AdvOnLinkFlag = rp->AdvOnLinkFlag;
+		rprefix->AdvRouterAddressFlag = rp->AdvRouterAddressFlag;
+		rprefix->AdvPreferredLifetime = rp->AdvPreferredLifetime;
+		rprefix->AdvValidLifetime = rp->AdvValidLifetime;
+	} else if (rp->AdvPrefixCreate == PREFIX_SRC_AUTO) {
+		if (rprefix->AdvPrefixCreate == PREFIX_SRC_MANUAL)
+			rprefix->AdvPrefixCreate = PREFIX_SRC_BOTH;
+		else {
+			rprefix->AdvPrefixCreate = PREFIX_SRC_AUTO;
+			rtadv_prefix_set_defaults(rprefix);
+		}
+	}
 }
 
 static int rtadv_prefix_reset(struct zebra_if *zif, struct rtadv_prefix *rp)
@@ -788,11 +842,55 @@ static int rtadv_prefix_reset(struct zebra_if *zif, struct rtadv_prefix *rp)
 
 	rprefix = rtadv_prefix_lookup(zif->rtadv.AdvPrefixList, &rp->prefix);
 	if (rprefix != NULL) {
+
+		/*
+		 * When deleting an address from the list, need to take care
+		 * it wasn't defined both automatically via kernel
+		 * address addition as well as manually by vtysh cli. If both,
+		 * we don't actually delete but may change the parameters
+		 * back to default if a manually defined entry is deleted.
+		 */
+		if (rp->AdvPrefixCreate == PREFIX_SRC_MANUAL) {
+			if (rprefix->AdvPrefixCreate == PREFIX_SRC_BOTH) {
+				rprefix->AdvPrefixCreate = PREFIX_SRC_AUTO;
+				rtadv_prefix_set_defaults(rprefix);
+				return 1;
+			}
+		} else if (rp->AdvPrefixCreate == PREFIX_SRC_AUTO) {
+			if (rprefix->AdvPrefixCreate == PREFIX_SRC_BOTH) {
+				rprefix->AdvPrefixCreate = PREFIX_SRC_MANUAL;
+				return 1;
+			}
+
+		}
+
 		listnode_delete(zif->rtadv.AdvPrefixList, (void *)rprefix);
 		rtadv_prefix_free(rprefix);
 		return 1;
 	} else
 		return 0;
+}
+
+/* Add IPv6 prefixes learned from the kernel to the RA prefix list */
+void rtadv_add_prefix(struct zebra_if *zif, const struct prefix_ipv6 *p)
+{
+	struct rtadv_prefix rp;
+
+	rp.prefix = *p;
+	apply_mask_ipv6(&rp.prefix);
+	rp.AdvPrefixCreate = PREFIX_SRC_AUTO;
+	rtadv_prefix_set(zif, &rp);
+}
+
+/* Delete IPv6 prefixes removed by the kernel from the RA prefix list */
+void rtadv_delete_prefix(struct zebra_if *zif, const struct prefix *p)
+{
+	struct rtadv_prefix rp;
+
+	rp.prefix = *((struct prefix_ipv6 *)p);
+	apply_mask_ipv6(&rp.prefix);
+	rp.AdvPrefixCreate = PREFIX_SRC_AUTO;
+	rtadv_prefix_reset(zif, &rp);
 }
 
 static void ipv6_nd_suppress_ra_set(struct interface *ifp,
@@ -809,6 +907,7 @@ static void ipv6_nd_suppress_ra_set(struct interface *ifp,
 	if (status == RA_SUPPRESS) {
 		/* RA is currently enabled */
 		if (zif->rtadv.AdvSendAdvertisements) {
+			rtadv_send_packet(zrouter.rtadv.sock, ifp, RA_SUPPRESS);
 			zif->rtadv.AdvSendAdvertisements = 0;
 			zif->rtadv.AdvIntervalTimer = 0;
 			zrouter.rtadv.adv_if_count--;
@@ -824,9 +923,12 @@ static void ipv6_nd_suppress_ra_set(struct interface *ifp,
 			zif->rtadv.AdvIntervalTimer = 0;
 			zrouter.rtadv.adv_if_count++;
 
-			if (zif->rtadv.MaxRtrAdvInterval >= 1000) {
-				/* Enable Fast RA only when RA interval is in
-				 * secs */
+			if ((zif->rtadv.MaxRtrAdvInterval >= 1000)
+			    && zif->rtadv.UseFastRexmit) {
+				/*
+				 * Enable Fast RA only when RA interval is in
+				 * secs and Fast RA retransmit is enabled
+				 */
 				zif->rtadv.inFastRexmit = 1;
 				zif->rtadv.NumFastReXmitsRemain =
 					RTADV_NUM_FAST_REXMITS;
@@ -842,6 +944,36 @@ static void ipv6_nd_suppress_ra_set(struct interface *ifp,
 }
 
 /*
+ * send router lifetime value of zero in RAs on this interface since we're
+ * ceasing to advertise and want to let our neighbors know.
+ * RFC 4861 secion 6.2.5
+ */
+void rtadv_stop_ra(struct interface *ifp)
+{
+	struct zebra_if *zif;
+
+	zif = ifp->info;
+
+	if (zif->rtadv.AdvSendAdvertisements)
+		rtadv_send_packet(zrouter.rtadv.sock, ifp, RA_SUPPRESS);
+}
+
+/*
+ * send router lifetime value of zero in RAs on all interfaces since we're
+ * ceasing to advertise globally and want to let all of our neighbors know
+ * RFC 4861 secion 6.2.5
+ */
+void rtadv_stop_ra_all(void)
+{
+	struct vrf *vrf;
+	struct interface *ifp;
+
+	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name)
+		FOR_ALL_INTERFACES (vrf, ifp)
+			rtadv_stop_ra(ifp);
+}
+
+/*
  * Handle client (BGP) message to enable or disable IPv6 RA on an interface.
  * Note that while the client could request RA on an interface on which the
  * operator has not enabled RA, RA won't be disabled upon client request
@@ -854,16 +986,25 @@ static void zebra_interface_radv_set(ZAPI_HANDLER_ARGS, int enable)
 	ifindex_t ifindex;
 	struct interface *ifp;
 	struct zebra_if *zif;
-	int ra_interval;
+	int ra_interval_rxd;
 
 	s = msg;
 
 	/* Get interface index and RA interval. */
 	STREAM_GETL(s, ifindex);
-	STREAM_GETL(s, ra_interval);
+	STREAM_GETL(s, ra_interval_rxd);
+
+	if (ra_interval_rxd < 0) {
+		zlog_warn(
+			"Requested RA interval %d is garbage; ignoring request",
+			ra_interval_rxd);
+		return;
+	}
+
+	unsigned int ra_interval = ra_interval_rxd;
 
 	if (IS_ZEBRA_DEBUG_EVENT)
-		zlog_debug("%u: IF %u RA %s from client %s, interval %ds",
+		zlog_debug("%u: IF %u RA %s from client %s, interval %ums",
 			   zvrf_id(zvrf), ifindex,
 			   enable ? "enable" : "disable",
 			   zebra_route_string(client->proto), ra_interval);
@@ -890,7 +1031,7 @@ static void zebra_interface_radv_set(ZAPI_HANDLER_ARGS, int enable)
 		SET_FLAG(zif->rtadv.ra_configured, BGP_RA_CONFIGURED);
 		ipv6_nd_suppress_ra_set(ifp, RA_ENABLE);
 		if (ra_interval
-		    && (ra_interval * 1000) < zif->rtadv.MaxRtrAdvInterval
+		    && (ra_interval * 1000) < (unsigned int) zif->rtadv.MaxRtrAdvInterval
 		    && !CHECK_FLAG(zif->rtadv.ra_configured,
 				   VTY_RA_INTERVAL_CONFIGURED))
 			zif->rtadv.MaxRtrAdvInterval = ra_interval * 1000;
@@ -914,6 +1055,51 @@ void zebra_interface_radv_disable(ZAPI_HANDLER_ARGS)
 void zebra_interface_radv_enable(ZAPI_HANDLER_ARGS)
 {
 	zebra_interface_radv_set(client, hdr, msg, zvrf, 1);
+}
+
+DEFUN (ipv6_nd_ra_fast_retrans,
+       ipv6_nd_ra_fast_retrans_cmd,
+       "ipv6 nd ra-fast-retrans",
+       "Interface IPv6 config commands\n"
+       "Neighbor discovery\n"
+       "Fast retransmit of RA packets\n")
+{
+	VTY_DECLVAR_CONTEXT(interface, ifp);
+	struct zebra_if *zif = ifp->info;
+
+	if (if_is_loopback(ifp)
+	    || CHECK_FLAG(ifp->status, ZEBRA_INTERFACE_VRF_LOOPBACK)) {
+		vty_out(vty,
+			"Cannot configure IPv6 Router Advertisements on this  interface\n");
+		return CMD_WARNING_CONFIG_FAILED;
+	}
+
+	zif->rtadv.UseFastRexmit = true;
+
+	return CMD_SUCCESS;
+}
+
+DEFUN (no_ipv6_nd_ra_fast_retrans,
+	no_ipv6_nd_ra_fast_retrans_cmd,
+	"no ipv6 nd ra-fast-retrans",
+	NO_STR
+	"Interface IPv6 config commands\n"
+	"Neighbor discovery\n"
+	"Fast retransmit of RA packets\n")
+{
+	VTY_DECLVAR_CONTEXT(interface, ifp);
+	struct zebra_if *zif = ifp->info;
+
+	if (if_is_loopback(ifp)
+	    || CHECK_FLAG(ifp->status, ZEBRA_INTERFACE_VRF_LOOPBACK)) {
+		vty_out(vty,
+			"Cannot configure IPv6 Router Advertisements on this  interface\n");
+		return CMD_WARNING_CONFIG_FAILED;
+	}
+
+	zif->rtadv.UseFastRexmit = false;
+
+	return CMD_SUCCESS;
 }
 
 DEFUN (ipv6_nd_suppress_ra,
@@ -1395,6 +1581,7 @@ DEFUN (ipv6_nd_prefix,
 	rp.AdvRouterAddressFlag = routeraddr;
 	rp.AdvValidLifetime = RTADV_VALID_LIFETIME;
 	rp.AdvPreferredLifetime = RTADV_PREFERRED_LIFETIME;
+	rp.AdvPrefixCreate = PREFIX_SRC_MANUAL;
 
 	if (lifetimes) {
 		rp.AdvValidLifetime = strmatch(lifetime, "infinite")
@@ -1445,6 +1632,7 @@ DEFUN (no_ipv6_nd_prefix,
 		return CMD_WARNING_CONFIG_FAILED;
 	}
 	apply_mask_ipv6(&rp.prefix); /* RFC4861 4.6.2 */
+	rp.AdvPrefixCreate = PREFIX_SRC_MANUAL;
 
 	ret = rtadv_prefix_reset(zebra_if, &rp);
 	if (!ret) {
@@ -1563,6 +1751,9 @@ static int nd_dump_vty(struct vty *vty, struct interface *ifp)
 				"  ND router advertisements are sent every "
 				"%d seconds\n",
 				interval / 1000);
+		if (!rtadv->UseFastRexmit)
+			vty_out(vty,
+				"  ND router advertisements do not use fast retransmit\n");
 		if (rtadv->AdvDefaultLifetime != -1)
 			vty_out(vty,
 				"  ND router advertisements live for %d seconds\n",
@@ -1632,6 +1823,9 @@ static int rtadv_config_write(struct vty *vty, struct interface *ifp)
 	if (zif->rtadv.AdvIntervalOption)
 		vty_out(vty, " ipv6 nd adv-interval-option\n");
 
+	if (!zif->rtadv.UseFastRexmit)
+		vty_out(vty, " no ipv6 nd ra-fast-retrans\n");
+
 	if (zif->rtadv.AdvDefaultLifetime != -1)
 		vty_out(vty, " ipv6 nd ra-lifetime %d\n",
 			zif->rtadv.AdvDefaultLifetime);
@@ -1665,28 +1859,32 @@ static int rtadv_config_write(struct vty *vty, struct interface *ifp)
 		vty_out(vty, " ipv6 nd mtu %d\n", zif->rtadv.AdvLinkMTU);
 
 	for (ALL_LIST_ELEMENTS_RO(zif->rtadv.AdvPrefixList, node, rprefix)) {
-		vty_out(vty, " ipv6 nd prefix %s",
-			prefix2str(&rprefix->prefix, buf, sizeof(buf)));
-		if ((rprefix->AdvValidLifetime != RTADV_VALID_LIFETIME)
-		    || (rprefix->AdvPreferredLifetime
-			!= RTADV_PREFERRED_LIFETIME)) {
-			if (rprefix->AdvValidLifetime == UINT32_MAX)
-				vty_out(vty, " infinite");
-			else
-				vty_out(vty, " %u", rprefix->AdvValidLifetime);
-			if (rprefix->AdvPreferredLifetime == UINT32_MAX)
-				vty_out(vty, " infinite");
-			else
-				vty_out(vty, " %u",
-					rprefix->AdvPreferredLifetime);
+		if ((rprefix->AdvPrefixCreate == PREFIX_SRC_MANUAL)
+		    || (rprefix->AdvPrefixCreate == PREFIX_SRC_BOTH)) {
+			vty_out(vty, " ipv6 nd prefix %s",
+				prefix2str(&rprefix->prefix, buf, sizeof(buf)));
+			if ((rprefix->AdvValidLifetime != RTADV_VALID_LIFETIME)
+			    || (rprefix->AdvPreferredLifetime
+				!= RTADV_PREFERRED_LIFETIME)) {
+				if (rprefix->AdvValidLifetime == UINT32_MAX)
+					vty_out(vty, " infinite");
+				else
+					vty_out(vty, " %u",
+						rprefix->AdvValidLifetime);
+				if (rprefix->AdvPreferredLifetime == UINT32_MAX)
+					vty_out(vty, " infinite");
+				else
+					vty_out(vty, " %u",
+						rprefix->AdvPreferredLifetime);
+			}
+			if (!rprefix->AdvOnLinkFlag)
+				vty_out(vty, " off-link");
+			if (!rprefix->AdvAutonomousFlag)
+				vty_out(vty, " no-autoconfig");
+			if (rprefix->AdvRouterAddressFlag)
+				vty_out(vty, " router-address");
+			vty_out(vty, "\n");
 		}
-		if (!rprefix->AdvOnLinkFlag)
-			vty_out(vty, " off-link");
-		if (!rprefix->AdvAutonomousFlag)
-			vty_out(vty, " no-autoconfig");
-		if (rprefix->AdvRouterAddressFlag)
-			vty_out(vty, " router-address");
-		vty_out(vty, "\n");
 	}
 	return 0;
 }
@@ -1753,6 +1951,8 @@ void rtadv_cmd_init(void)
 	hook_register(zebra_if_extra_info, nd_dump_vty);
 	hook_register(zebra_if_config_wr, rtadv_config_write);
 
+	install_element(INTERFACE_NODE, &ipv6_nd_ra_fast_retrans_cmd);
+	install_element(INTERFACE_NODE, &no_ipv6_nd_ra_fast_retrans_cmd);
 	install_element(INTERFACE_NODE, &ipv6_nd_suppress_ra_cmd);
 	install_element(INTERFACE_NODE, &no_ipv6_nd_suppress_ra_cmd);
 	install_element(INTERFACE_NODE, &ipv6_nd_ra_interval_cmd);

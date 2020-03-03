@@ -3442,6 +3442,9 @@ static void show_ip_ospf_interface_sub(struct vty *vty, struct ospf *ospf,
 			else
 				vty_out(vty, "  This interface is UNNUMBERED,");
 		} else {
+			struct in_addr dest;
+			const char *dstr;
+
 			/* Show OSPF interface information. */
 			if (use_json) {
 				json_object_string_add(
@@ -3455,46 +3458,40 @@ static void show_ip_ospf_interface_sub(struct vty *vty, struct ospf *ospf,
 					inet_ntoa(oi->address->u.prefix4),
 					oi->address->prefixlen);
 
-			if (oi->connected->destination
-			    || oi->type == OSPF_IFTYPE_VIRTUALLINK) {
-				struct in_addr *dest;
-				const char *dstr;
+			/* For Vlinks, showing the peer address is
+			 * probably more informative than the local
+			 * interface that is being used */
+			if (oi->type == OSPF_IFTYPE_VIRTUALLINK) {
+				dstr = "Peer";
+				dest = oi->vl_data->peer_addr;
+			} else if (CONNECTED_PEER(oi->connected)
+					 && oi->connected->destination) {
+				dstr = "Peer";
+				dest = oi->connected->destination->u.prefix4;
+			} else {
+				dstr = "Broadcast";
+				dest.s_addr = ipv4_broadcast_addr(
+						oi->connected->address->u.prefix4.s_addr,
+						oi->connected->address->prefixlen);
+			}
 
-				if (CONNECTED_PEER(oi->connected)
-				    || oi->type == OSPF_IFTYPE_VIRTUALLINK)
-					dstr = "Peer";
-				else
-					dstr = "Broadcast";
-
-				/* For Vlinks, showing the peer address is
-		   * probably more
-		   *  *  *  *                * informative than the local
-		   * interface that is being used
-		   *   *   *   *                               */
+			if (use_json) {
+				json_object_string_add(
+					json_interface_sub,
+					"ospfIfType", dstr);
 				if (oi->type == OSPF_IFTYPE_VIRTUALLINK)
-					dest = &oi->vl_data->peer_addr;
-				else
-					dest = &oi->connected->destination->u
-							.prefix4;
-
-				if (use_json) {
 					json_object_string_add(
 						json_interface_sub,
-						"ospfIfType", dstr);
-					if (oi->type == OSPF_IFTYPE_VIRTUALLINK)
-						json_object_string_add(
-							json_interface_sub,
-							"vlinkPeer",
-							inet_ntoa(*dest));
-					else
-						json_object_string_add(
-							json_interface_sub,
-							"localIfUsed",
-							inet_ntoa(*dest));
-				} else
-					vty_out(vty, " %s %s,", dstr,
-						inet_ntoa(*dest));
-			}
+						"vlinkPeer",
+						inet_ntoa(dest));
+				else
+					json_object_string_add(
+						json_interface_sub,
+						"localIfUsed",
+						inet_ntoa(dest));
+			} else
+				vty_out(vty, " %s %s,", dstr,
+					inet_ntoa(dest));
 		}
 		if (use_json) {
 			json_object_string_add(json_interface_sub, "area",
@@ -4154,7 +4151,7 @@ DEFUN (show_ip_ospf_interface_traffic,
 
 static void show_ip_ospf_neighbour_header(struct vty *vty)
 {
-	vty_out(vty, "\n%-15s %3s %-15s %9s %-15s %-20s %5s %5s %5s\n",
+	vty_out(vty, "\n%-15s %3s %-15s %9s %-15s %-32s %5s %5s %5s\n",
 		"Neighbor ID", "Pri", "State", "Dead Time", "Address",
 		"Interface", "RXmtL", "RqstL", "DBsmL");
 }
@@ -4260,7 +4257,7 @@ static void show_ip_ospf_neighbor_sub(struct vty *vty,
 							timebuf,
 							sizeof(timebuf)));
 				vty_out(vty, "%-15s ", inet_ntoa(nbr->src));
-				vty_out(vty, "%-20s %5ld %5ld %5d\n",
+				vty_out(vty, "%-32s %5ld %5ld %5d\n",
 					IF_NAME(oi),
 					ospf_ls_retransmit_count(nbr),
 					ospf_ls_request_count(nbr),
@@ -4524,7 +4521,7 @@ static int show_ip_ospf_neighbor_all_common(struct vty *vty, struct ospf *ospf,
 						"-", nbr_nbma->priority, "Down",
 						"-");
 					vty_out(vty,
-						"%-15s %-20s %5d %5d %5d\n",
+						"%-32s %-20s %5d %5d %5d\n",
 						inet_ntoa(nbr_nbma->addr),
 						IF_NAME(oi), 0, 0, 0);
 				}

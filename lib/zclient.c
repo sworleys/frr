@@ -772,6 +772,98 @@ int zclient_route_send(uint8_t cmd, struct zclient *zclient,
 	return zclient_send_message(zclient);
 }
 
+static int zapi_nexthop_labels_cmp(const struct zapi_nexthop *next1,
+				   const struct zapi_nexthop *next2)
+{
+	if (next1->label_num > next2->label_num)
+		return 1;
+
+	if (next1->label_num < next2->label_num)
+		return -1;
+
+	return memcmp(next1->labels, next2->labels, next1->label_num);
+}
+
+static int zapi_nexthop_cmp_no_labels(const struct zapi_nexthop *next1,
+				      const struct zapi_nexthop *next2)
+{
+	int ret = 0;
+
+	if (next1->vrf_id < next2->vrf_id)
+		return -1;
+
+	if (next1->vrf_id > next2->vrf_id)
+		return 1;
+
+	if (next1->type < next2->type)
+		return -1;
+
+	if (next1->type > next2->type)
+		return 1;
+
+	if (next1->weight < next2->weight)
+		return -1;
+
+	if (next1->weight > next2->weight)
+		return 1;
+
+	switch (next1->type) {
+	case NEXTHOP_TYPE_IPV4:
+	case NEXTHOP_TYPE_IPV6:
+		ret = nexthop_g_addr_cmp(next1->type, &next1->gate,
+					 &next2->gate);
+		if (ret != 0)
+			return ret;
+		break;
+	case NEXTHOP_TYPE_IPV4_IFINDEX:
+	case NEXTHOP_TYPE_IPV6_IFINDEX:
+		ret = nexthop_g_addr_cmp(next1->type, &next1->gate,
+					 &next2->gate);
+		if (ret != 0)
+			return ret;
+		/* Intentional Fall-Through */
+	case NEXTHOP_TYPE_IFINDEX:
+		if (next1->ifindex < next2->ifindex)
+			return -1;
+
+		if (next1->ifindex > next2->ifindex)
+			return 1;
+		break;
+	case NEXTHOP_TYPE_BLACKHOLE:
+		if (next1->bh_type < next2->bh_type)
+			return -1;
+
+		if (next1->bh_type > next2->bh_type)
+			return 1;
+		break;
+	}
+
+	return 0;
+}
+
+static int zapi_nexthop_cmp(const void *item1, const void *item2)
+{
+	int ret = 0;
+
+	const struct zapi_nexthop *next1 = item1;
+	const struct zapi_nexthop *next2 = item2;
+
+	ret = zapi_nexthop_cmp_no_labels(next1, next2);
+	if (ret != 0)
+		return ret;
+
+	ret = zapi_nexthop_labels_cmp(next1, next2);
+
+	return ret;
+}
+
+static void zapi_nexthop_group_sort(struct zapi_nexthop *nh_grp,
+				    uint16_t nexthop_num)
+{
+	qsort(nh_grp, nexthop_num, sizeof(struct zapi_nexthop),
+	      &zapi_nexthop_cmp);
+}
+
 int zapi_route_encode(uint8_t cmd, struct stream *s, struct zapi_route *api)
 {
 	struct zapi_nexthop *api_nh;
@@ -827,6 +919,8 @@ int zapi_route_encode(uint8_t cmd, struct stream *s, struct zapi_route *api)
 			return -1;
 		}
 
+		zapi_nexthop_group_sort(api->nexthops, api->nexthop_num);
+
 		stream_putw(s, api->nexthop_num);
 
 		for (i = 0; i < api->nexthop_num; i++) {
@@ -880,6 +974,8 @@ int zapi_route_encode(uint8_t cmd, struct stream *s, struct zapi_route *api)
 					   api_nh->label_num
 						   * sizeof(mpls_label_t));
 			}
+
+			stream_putl(s, api_nh->weight);
 
 			/* Router MAC for EVPN routes. */
 			if (CHECK_FLAG(api->flags, ZEBRA_FLAG_EVPN_ROUTE))
@@ -1043,6 +1139,8 @@ int zapi_route_decode(struct stream *s, struct zapi_route *api)
 					   api_nh->label_num
 						   * sizeof(mpls_label_t));
 			}
+
+			STREAM_GETL(s, api_nh->weight);
 
 			/* Router MAC for EVPN routes. */
 			if (CHECK_FLAG(api->flags, ZEBRA_FLAG_EVPN_ROUTE))
@@ -1310,6 +1408,21 @@ stream_failure:
 	return false;
 }
 
+bool zapi_error_decode(struct stream *s, enum zebra_error_types *error)
+{
+	memset(error, 0, sizeof(*error));
+
+	STREAM_GET(error, s, sizeof(*error));
+
+	if (zclient_debug)
+		zlog_debug("%s: type: %s", __func__,
+			   zebra_error_type2str(*error));
+
+	return true;
+stream_failure:
+	return false;
+}
+
 /*
  * send a ZEBRA_REDISTRIBUTE_ADD or ZEBRA_REDISTRIBUTE_DELETE
  * for the route type (ZEBRA_ROUTE_KERNEL etc.). The zebra server will
@@ -1547,6 +1660,17 @@ static void zclient_interface_down(struct zclient *zclient, vrf_id_t vrf_id)
 		return;
 
 	if_down_via_zapi(ifp);
+}
+
+static void zclient_handle_error(ZAPI_CALLBACK_ARGS)
+{
+	enum zebra_error_types error;
+	struct stream *s = zclient->ibuf;
+
+	zapi_error_decode(s, &error);
+
+	if (zclient->handle_error)
+		(*zclient->handle_error)(error);
 }
 
 static void link_params_set_value(struct stream *s, struct if_link_params *iflp)
@@ -2843,6 +2967,8 @@ static int zclient_read(struct thread *thread)
 	case ZEBRA_MLAG_FORWARD_MSG:
 		zclient_mlag_handle_msg(command, zclient, length, vrf_id);
 		break;
+	case ZEBRA_ERROR:
+		zclient_handle_error(command, zclient, length, vrf_id);
 	default:
 		break;
 	}

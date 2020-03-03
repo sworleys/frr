@@ -75,6 +75,7 @@ func_frr()
     exec_cmd $jexec pim.neighbors vtysh -c "show ip pim vrf all neighbor $json"
     exec_cmd $jexec pim.mlag.summary vtysh -c "show ip pim mlag summary $json"
     exec_cmd $jexec pim.mlag.upstream vtysh -c "show ip pim vrf all mlag upstream $json"
+    exec_cmd $jexec pim.mlag.interface vtysh -c "show ip pim mlag interface detail $json"
     exec_cmd $jexec pim.vxlan.sg vtysh -c "show ip pim vxlan-groups $json"
     exec_cmd $jexec pim.igmp.group vtysh -c "show ip igmp vrf all group $json"
     exec_cmd pim.igmp.join vtysh -c "show ip igmp vrf all join"

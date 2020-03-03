@@ -417,28 +417,27 @@ static uint8_t parse_multipath_nexthops_unicast(ns_id_t ns_id,
 			}
 		}
 
-		if (gate) {
-			if (rtm->rtm_family == AF_INET) {
-				if (index)
-					nh = route_entry_nexthop_ipv4_ifindex_add(
-						re, gate, prefsrc, index,
-						nh_vrf_id);
-				else
-					nh = route_entry_nexthop_ipv4_add(
-						re, gate, prefsrc, nh_vrf_id);
-			} else if (rtm->rtm_family == AF_INET6) {
-				if (index)
-					nh = route_entry_nexthop_ipv6_ifindex_add(
-						re, gate, index, nh_vrf_id);
-				else
-					nh = route_entry_nexthop_ipv6_add(
-						re, gate, nh_vrf_id);
-			}
+		if (gate && rtm->rtm_family == AF_INET) {
+			if (index)
+				nh = route_entry_nexthop_ipv4_ifindex_add(
+					re, gate, prefsrc, index, nh_vrf_id);
+			else
+				nh = route_entry_nexthop_ipv4_add(
+					re, gate, prefsrc, nh_vrf_id);
+		} else if (gate && rtm->rtm_family == AF_INET6) {
+			if (index)
+				nh = route_entry_nexthop_ipv6_ifindex_add(
+					re, gate, index, nh_vrf_id);
+			else
+				nh = route_entry_nexthop_ipv6_add(re, gate,
+								  nh_vrf_id);
 		} else
 			nh = route_entry_nexthop_ifindex_add(re, index,
 							     nh_vrf_id);
 
 		if (nh) {
+			nh->weight = rtnh->rtnh_hops + 1;
+
 			if (num_labels)
 				nexthop_add_labels(nh, ZEBRA_LSP_STATIC,
 						   num_labels, labels);
@@ -745,34 +744,10 @@ static int netlink_route_change_read_unicast(struct nlmsghdr *h, ns_id_t ns_id,
 		} else {
 			if (!tb[RTA_MULTIPATH]) {
 				struct nexthop nh;
-				size_t sz = (afi == AFI_IP) ? 4 : 16;
 
-				memset(&nh, 0, sizeof(nh));
-				if (bh_type == BLACKHOLE_UNSPEC) {
-					if (index && !gate)
-						nh.type = NEXTHOP_TYPE_IFINDEX;
-					else if (index && gate)
-						nh.type =
-							(afi == AFI_IP)
-								? NEXTHOP_TYPE_IPV4_IFINDEX
-								: NEXTHOP_TYPE_IPV6_IFINDEX;
-					else if (!index && gate)
-						nh.type =
-							(afi == AFI_IP)
-								? NEXTHOP_TYPE_IPV4
-								: NEXTHOP_TYPE_IPV6;
-					else {
-						nh.type =
-							NEXTHOP_TYPE_BLACKHOLE;
-						nh.bh_type = BLACKHOLE_UNSPEC;
-					}
-				} else {
-					nh.type = NEXTHOP_TYPE_BLACKHOLE;
-					nh.bh_type = bh_type;
-				}
-				nh.ifindex = index;
-				if (gate)
-					memcpy(&nh.gate, gate, sz);
+				nh = parse_nexthop_unicast(
+					ns_id, rtm, tb, bh_type, index, prefsrc,
+					gate, afi, vrf_id);
 				rib_delete(afi, SAFI_UNICAST, vrf_id, proto, 0,
 					   flags, &p, &src_p, &nh, 0, table,
 					   metric, distance, true);
@@ -1307,6 +1282,8 @@ static void _netlink_route_build_multipath(const char *routedesc, int bytelen,
 			      bytelen);
 		rtnh->rtnh_len += sizeof(struct rtattr) + bytelen;
 		rtnh->rtnh_ifindex = nexthop->ifindex;
+		if (nexthop->weight)
+			rtnh->rtnh_hops = nexthop->weight - 1;
 
 		if (nexthop->rmap_src.ipv4.s_addr)
 			*src = &nexthop->rmap_src;
@@ -1379,6 +1356,9 @@ static void _netlink_route_build_multipath(const char *routedesc, int bytelen,
 				"nexthop via if %u",
 				routedesc, nexthop->ifindex);
 	}
+
+	if (nexthop->weight)
+		rtnh->rtnh_hops = nexthop->weight - 1;
 }
 
 static inline void _netlink_mpls_build_singlepath(const char *routedesc,
@@ -1878,7 +1858,7 @@ static void _netlink_nexthop_build_group(struct nlmsghdr *n, size_t req_size,
 	if (count) {
 		for (int i = 0; i < count; i++) {
 			grp[i].id = z_grp[i].id;
-			grp[i].weight = z_grp[i].weight;
+			grp[i].weight = z_grp[i].weight - 1;
 
 			if (IS_ZEBRA_DEBUG_KERNEL) {
 				if (i == 0)
@@ -1995,6 +1975,9 @@ static int netlink_nexthop(int cmd, struct zebra_dplane_ctx *ctx)
 			}
 
 			addattr32(&req.n, req_size, NHA_OIF, nh->ifindex);
+
+			if (CHECK_FLAG(nh->flags, NEXTHOP_FLAG_ONLINK))
+				req.nhm.nh_flags |= RTNH_F_ONLINK;
 
 			num_labels =
 				build_label_stack(nh->nh_label, out_lse,
@@ -2204,6 +2187,7 @@ static struct nexthop netlink_nexthop_process_nh(struct rtattr **tb,
 	enum nexthop_types_t type = 0;
 	int if_index = 0;
 	size_t sz = 0;
+	struct interface *ifp_lookup;
 
 	if_index = *(int *)RTA_DATA(tb[NHA_OIF]);
 
@@ -2238,9 +2222,13 @@ static struct nexthop netlink_nexthop_process_nh(struct rtattr **tb,
 	if (if_index)
 		nh.ifindex = if_index;
 
-	*ifp = if_lookup_by_index_per_ns(zebra_ns_lookup(ns_id), nh.ifindex);
+	ifp_lookup =
+		if_lookup_by_index_per_ns(zebra_ns_lookup(ns_id), nh.ifindex);
+
 	if (ifp)
-		nh.vrf_id = (*ifp)->vrf_id;
+		*ifp = ifp_lookup;
+	if (ifp_lookup)
+		nh.vrf_id = ifp_lookup->vrf_id;
 	else {
 		flog_warn(
 			EC_ZEBRA_UNKNOWN_INTERFACE,
@@ -2268,7 +2256,7 @@ static struct nexthop netlink_nexthop_process_nh(struct rtattr **tb,
 }
 
 static int netlink_nexthop_process_group(struct rtattr **tb,
-					 struct nh_grp *z_grp)
+					 struct nh_grp *z_grp, int z_grp_size)
 {
 	uint8_t count = 0;
 	/* linux/nexthop.h group struct */
@@ -2290,9 +2278,9 @@ static int netlink_nexthop_process_group(struct rtattr **tb,
 
 #endif
 
-	for (int i = 0; i < count; i++) {
+	for (int i = 0; ((i < count) && (i < z_grp_size)); i++) {
 		z_grp[i].id = n_grp[i].id;
-		z_grp[i].weight = n_grp[i].weight;
+		z_grp[i].weight = n_grp[i].weight + 1;
 	}
 	return count;
 }
@@ -2367,7 +2355,8 @@ int netlink_nexthop_change(struct nlmsghdr *h, ns_id_t ns_id, int startup)
 			 * If this is a group message its only going to have
 			 * an array of nexthop IDs associated with it
 			 */
-			grp_count = netlink_nexthop_process_group(tb, grp);
+			grp_count = netlink_nexthop_process_group(
+				tb, grp, array_size(grp));
 		} else {
 			if (tb[NHA_BLACKHOLE]) {
 				/**

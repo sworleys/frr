@@ -152,6 +152,7 @@ static int if_zebra_new_hook(struct interface *ifp)
 		rtadv->HomeAgentLifetime =
 			-1; /* derive from AdvDefaultLifetime */
 		rtadv->AdvIntervalOption = 0;
+		rtadv->UseFastRexmit = true;
 		rtadv->DefaultPreference = RTADV_PREF_MEDIUM;
 
 		rtadv->AdvPrefixList = list_new();
@@ -178,17 +179,31 @@ static int if_zebra_new_hook(struct interface *ifp)
 	return 0;
 }
 
-static void if_nhg_dependents_release(struct interface *ifp)
+static void if_nhg_dependents_check_valid(struct nhg_hash_entry *nhe)
 {
-	if (!if_nhg_dependents_is_empty(ifp)) {
-		struct nhg_connected *rb_node_dep = NULL;
-		struct zebra_if *zif = (struct zebra_if *)ifp->info;
+	zebra_nhg_check_valid(nhe);
+	if (!CHECK_FLAG(nhe->flags, NEXTHOP_GROUP_VALID))
+		/* Assuming uninstalled as well here */
+		UNSET_FLAG(nhe->flags, NEXTHOP_GROUP_INSTALLED);
+}
 
-		frr_each(nhg_connected_tree, &zif->nhg_dependents,
-			  rb_node_dep) {
-			rb_node_dep->nhe->ifp = NULL;
-			zebra_nhg_set_invalid(rb_node_dep->nhe);
-		}
+static void if_down_nhg_dependents(const struct interface *ifp)
+{
+	struct nhg_connected *rb_node_dep = NULL;
+	struct zebra_if *zif = (struct zebra_if *)ifp->info;
+
+	frr_each(nhg_connected_tree, &zif->nhg_dependents, rb_node_dep)
+		if_nhg_dependents_check_valid(rb_node_dep->nhe);
+}
+
+static void if_nhg_dependents_release(const struct interface *ifp)
+{
+	struct nhg_connected *rb_node_dep = NULL;
+	struct zebra_if *zif = (struct zebra_if *)ifp->info;
+
+	frr_each(nhg_connected_tree, &zif->nhg_dependents, rb_node_dep) {
+		rb_node_dep->nhe->ifp = NULL; /* Null it out */
+		if_nhg_dependents_check_valid(rb_node_dep->nhe);
 	}
 }
 
@@ -983,19 +998,6 @@ bool if_nhg_dependents_is_empty(const struct interface *ifp)
 	return false;
 }
 
-static void if_down_nhg_dependents(const struct interface *ifp)
-{
-	if (!if_nhg_dependents_is_empty(ifp)) {
-		struct nhg_connected *rb_node_dep = NULL;
-		struct zebra_if *zif = (struct zebra_if *)ifp->info;
-
-		frr_each(nhg_connected_tree, &zif->nhg_dependents,
-			  rb_node_dep) {
-			zebra_nhg_set_invalid(rb_node_dep->nhe);
-		}
-	}
-}
-
 /* Interface is up. */
 void if_up(struct interface *ifp)
 {
@@ -1021,7 +1023,8 @@ void if_up(struct interface *ifp)
 #if defined(HAVE_RTADV)
 	/* Enable fast tx of RA if enabled && RA interval is not in msecs */
 	if (zif->rtadv.AdvSendAdvertisements
-	    && (zif->rtadv.MaxRtrAdvInterval >= 1000)) {
+	    && (zif->rtadv.MaxRtrAdvInterval >= 1000)
+	    && zif->rtadv.UseFastRexmit) {
 		zif->rtadv.inFastRexmit = 1;
 		zif->rtadv.NumFastReXmitsRemain = RTADV_NUM_FAST_REXMITS;
 	}
@@ -1175,12 +1178,10 @@ static void connected_dump_vty(struct vty *vty, struct connected *connected)
 	vty_out(vty, "/%d", p->prefixlen);
 
 	/* If there is destination address, print it. */
-	if (connected->destination) {
-		vty_out(vty,
-			(CONNECTED_PEER(connected) ? " peer " : " broadcast "));
+	if (CONNECTED_PEER(connected) && connected->destination) {
+		vty_out(vty, " peer ");
 		prefix_vty_out(vty, connected->destination);
-		if (CONNECTED_PEER(connected))
-			vty_out(vty, "/%d", connected->destination->prefixlen);
+		vty_out(vty, "/%d", connected->destination->prefixlen);
 	}
 
 	if (CHECK_FLAG(connected->flags, ZEBRA_IFA_SECONDARY))
@@ -1981,6 +1982,8 @@ DEFUN (shutdown_if,
 	struct zebra_if *if_data;
 
 	if (ifp->ifindex != IFINDEX_INTERNAL) {
+		/* send RA lifetime of 0 before stopping. rfc4861/6.2.5 */
+		rtadv_stop_ra(ifp);
 		ret = if_unset_flags(ifp, IFF_UP);
 		if (ret < 0) {
 			vty_out(vty, "Can't shutdown interface\n");
@@ -2797,12 +2800,6 @@ static int ip_address_install(struct vty *vty, struct interface *ifp,
 			SET_FLAG(ifc->flags, ZEBRA_IFA_PEER);
 			p = prefix_ipv4_new();
 			*p = pp;
-			ifc->destination = (struct prefix *)p;
-		} else if (p->prefixlen <= IPV4_MAX_PREFIXLEN - 2) {
-			p = prefix_ipv4_new();
-			*p = lp;
-			p->prefix.s_addr = ipv4_broadcast_addr(p->prefix.s_addr,
-							       p->prefixlen);
 			ifc->destination = (struct prefix *)p;
 		}
 

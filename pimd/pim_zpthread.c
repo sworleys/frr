@@ -43,14 +43,14 @@ static void pim_mlag_zebra_fill_header(enum mlag_msg_type msg_type)
 	switch (msg_type) {
 	case MLAG_REGISTER:
 	case MLAG_DEREGISTER:
-		data_len = MLAG_HDR_MSGSIZE;
+		data_len = sizeof(struct mlag_msg);
 		break;
 	case MLAG_MROUTE_ADD:
-		data_len = MLAG_MROUTE_ADD_MSGSIZE;
+		data_len = sizeof(struct mlag_mroute_add);
 		fill_msg_type = MLAG_MROUTE_ADD_BULK;
 		break;
 	case MLAG_MROUTE_DEL:
-		data_len = MLAG_MROUTE_DEL_MSGSIZE;
+		data_len = sizeof(struct mlag_mroute_del);
 		fill_msg_type = MLAG_MROUTE_DEL_BULK;
 		break;
 	default:
@@ -86,12 +86,12 @@ static void pim_mlag_zebra_flush_buffer(void)
 		if (msg_type == MLAG_MROUTE_ADD_BULK) {
 			stream_putw_at(
 				router->mlag_stream, 4,
-				(mlag_bulk_cnt * MLAG_MROUTE_ADD_MSGSIZE));
+				(mlag_bulk_cnt * sizeof(struct mlag_mroute_add)));
 			stream_putw_at(router->mlag_stream, 6, mlag_bulk_cnt);
 		} else if (msg_type == MLAG_MROUTE_DEL_BULK) {
 			stream_putw_at(
 				router->mlag_stream, 4,
-				(mlag_bulk_cnt * MLAG_MROUTE_DEL_MSGSIZE));
+				(mlag_bulk_cnt * sizeof(struct mlag_mroute_del)));
 			stream_putw_at(router->mlag_stream, 6, mlag_bulk_cnt);
 		} else {
 			flog_err(EC_LIB_ZAPI_ENCODE,

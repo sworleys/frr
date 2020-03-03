@@ -126,6 +126,7 @@ struct community_list_handler {
 #define COMMUNITY_LIST_ERR_MALFORMED_VAL         -2
 #define COMMUNITY_LIST_ERR_STANDARD_CONFLICT     -3
 #define COMMUNITY_LIST_ERR_EXPANDED_CONFLICT     -4
+#define COMMUNITY_LIST_ERR_MALFORMED_TOKEN       -5
 
 /* Handler.  */
 extern struct community_list_handler *bgp_clist;
