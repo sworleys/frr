@@ -160,7 +160,8 @@ static inline const char *zl3vni_rmac2str(zebra_l3vni_t *zl3vni, char *buf,
 	char *ptr;
 
 	if (!buf)
-		ptr = XMALLOC(MTYPE_TMP, ETHER_ADDR_STRLEN * sizeof(char));
+		ptr = (char *)XMALLOC(MTYPE_TMP,
+				      ETHER_ADDR_STRLEN * sizeof(char));
 	else {
 		assert(size >= ETHER_ADDR_STRLEN);
 		ptr = buf;
@@ -197,7 +198,8 @@ static inline const char *zl3vni_sysmac2str(zebra_l3vni_t *zl3vni, char *buf,
 	char *ptr;
 
 	if (!buf)
-		ptr = XMALLOC(MTYPE_TMP, ETHER_ADDR_STRLEN * sizeof(char));
+		ptr = (char *)XMALLOC(MTYPE_TMP,
+				      ETHER_ADDR_STRLEN * sizeof(char));
 	else {
 		assert(size >= ETHER_ADDR_STRLEN);
 		ptr = buf;
