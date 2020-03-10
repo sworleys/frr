@@ -1,9 +1,3 @@
-frr (7.0+cl4u3) RELEASED; urgency=medium
-
-  * New Enabled: New Work
-
- -- dev-support <dev-support@cumulusnetworks.com>  Tue, 03 Mar 2020 09:14:23 -0400
-
 frr (7.0+cl4u2) RELEASED; urgency=medium
 
   * New Enabled: zebra: knob to make ra retransmit interval rfc compliant
@@ -12,6 +6,13 @@ frr (7.0+cl4u2) RELEASED; urgency=medium
   * New Enabled: vrrpd: Enable namespace support
   * New Enabled: bgpd: Allow link bandwidth to set nexthop weight
   * New Enabled: pimd: mlag support
+  * Fixes: CM-28283 bgpd: Print out vrf name as well as id
+  * Fixes: CM-28015 bgpd: Remove temporary debugs added for UCMP
+  * Fixes: CM-28814 bgpd: Change reference bandwidth for UCMP
+  * Fixes: CM-28783 bgpd: Fix 'bgp bestpath bandwidth' handling
+  * Fixes: CM-28017 pimd: Make [mlag] option in interface a discriminator
+  * Fixes: CM-28531 vrrpd: always null mvl_ifp ptr when mvl is deleted
+  * Fixes: CM-28625 bgpd: Add support for non-transitive link-bandwidth
   * Fixes: CM-26983 pimd: metric values are uint32_t not a int32_t
   * Fixes: CM-27247 pimd: Ignore igmp queries from itself
   * Fixes: CM-27233 tools: stop repeating lines to delete for multiple bfd timer changes
@@ -45,7 +46,7 @@ frr (7.0+cl4u2) RELEASED; urgency=medium
   * Fixes: CM-28237 bgpd: Allow generating EVPN type-5 routes with existing extended community
   * Fixes: CM-28636 bgpd: Refine 'no' command for bandwidth handling
 
- -- dev-support <dev-support@cumulusnetworks.com>  Mon, 23 Dec 2019 09:18:19 -0400
+ -- dev-support <dev-support@cumulusnetworks.com>  Tue, 10 Mar 2020 15:37:00 -0400
 
 frr (7.0+cl4u1) RELEASED; urgency=medium
 
