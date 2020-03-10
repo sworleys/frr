@@ -170,6 +170,8 @@ int pim_joinprune_recv(struct interface *ifp, struct pim_neighbor *neigh,
 	uint8_t *pastend;
 	int remain;
 	int group;
+	struct pim_ifchannel *child = NULL;
+	struct listnode *ch_node, *nch_node;
 
 	buf = tlv_buf;
 	pastend = tlv_buf + tlv_buf_size;
@@ -334,6 +336,17 @@ int pim_joinprune_recv(struct interface *ifp, struct pim_neighbor *neigh,
 			 * we parse the prune.
 			 */
 			sg_ch = pim_ifchannel_find(ifp, &sg);
+			/* (*,G) prune received */
+			if (sg.src.s_addr == INADDR_ANY) {
+				for (ALL_LIST_ELEMENTS(sg_ch->sources, ch_node, nch_node, child)) {
+					if (PIM_IF_FLAG_TEST_S_G_RPT(child->flags)) {
+						if (child->ifjoin_state == PIM_IFJOIN_PRUNE_PENDING_TMP)
+							THREAD_OFF(child->t_ifjoin_prune_pending_timer);
+						PIM_IF_FLAG_UNSET_S_G_RPT(child->flags);
+						child->ifjoin_state = PIM_IFJOIN_NOINFO;
+					}
+				}
+			}
 
 			/* Received SG-RPT Prune delete oif from specific S,G */
 			if (starg_ch && sg_ch

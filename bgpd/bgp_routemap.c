@@ -2282,44 +2282,22 @@ static route_map_result_t route_set_ecommunity_lb(void *rule,
 	memset(&ecom_lb, 0, sizeof(ecom_lb));
 	if (rels->lb_type == RMAP_ECOMM_LB_SET_VALUE) {
 		bw_bytes = ((uint64_t)(rels->bw * 1024 * 1024))/8;
-
-if (bgp_debug_update(peer, NULL, NULL, 0))
-zlog_debug("Setting LB in RMAP, type %d bw %u non-trans %d, bw-calc %u",
-rels->lb_type, rels->bw, rels->non_trans, bw_bytes);
 	} else if (rels->lb_type == RMAP_ECOMM_LB_SET_CUMUL) {
 		/* process this only for the best path. */
-		if (!CHECK_FLAG(path->flags, BGP_PATH_SELECTED)) {
-if (bgp_debug_update(peer, NULL, NULL, 0))
-zlog_debug("Skipping LB in RMAP type %d flags 0x%x", rels->lb_type, path->flags);
+		if (!CHECK_FLAG(path->flags, BGP_PATH_SELECTED))
 			return RMAP_OKAY;
-		}
 
 		bw_bytes = (uint32_t)bgp_path_info_mpath_cumbw(path);
-		if (!bw_bytes) {
-if (bgp_debug_update(peer, NULL, NULL, 0))
-zlog_debug("Skipping LB in RMAP type %d -- cumbw is 0", rels->lb_type);
+		if (!bw_bytes)
 			return RMAP_OKAY;
-		}
-
-if (bgp_debug_update(peer, NULL, NULL, 0))
-zlog_debug("Setting LB in RMAP, type %d non-trans %d, bw-calc %u",
-rels->lb_type, rels->non_trans, bw_bytes);
 	} else if (rels->lb_type == RMAP_ECOMM_LB_SET_NUM_MPATH) {
-
 		/* process this only for the best path. */
-		if (!CHECK_FLAG(path->flags, BGP_PATH_SELECTED)) {
-if (bgp_debug_update(peer, NULL, NULL, 0))
-zlog_debug("Skipping LB in RMAP type %d flags 0x%x", rels->lb_type, path->flags);
+		if (!CHECK_FLAG(path->flags, BGP_PATH_SELECTED))
 			return RMAP_OKAY;
-		}
 
 		bw_bytes = ((uint64_t)(peer->bgp->lb_ref_bw * 1024 * 1024))/8;
 		mpath_count = bgp_path_info_mpath_count(path) + 1;
 		bw_bytes *= mpath_count;
-
-if (bgp_debug_update(peer, NULL, NULL, 0))
-zlog_debug("Setting LB in RMAP, type %d refbw %u mpc %d non-trans %d, bw-calc %u",
-rels->lb_type, peer->bgp->lb_ref_bw, mpath_count, rels->non_trans, bw_bytes);
 	}
 
 	encode_lb_extcomm(as, bw_bytes, rels->non_trans, &lb_eval);
@@ -2355,15 +2333,29 @@ static void *route_set_ecommunity_lb_compile(const char *arg)
 	struct rmap_ecomm_lb_set *rels;
 	uint8_t lb_type;
 	uint32_t bw = 0;
+	char bw_str[40] = {0};
+	char *p, *str;
+	bool non_trans = false;
 
-	if (strcmp(arg, "cumulative") == 0)
+	str = (char *)arg;
+	p = strchr(arg, ' ');
+	if (p) {
+		int len;
+
+		len = p - arg;
+		memcpy(bw_str, arg, len);
+		non_trans = true;
+		str = bw_str;
+	}
+
+	if (strcmp(str, "cumulative") == 0)
 		lb_type = RMAP_ECOMM_LB_SET_CUMUL;
-	else if (strcmp(arg, "num-multipaths") == 0)
+	else if (strcmp(str, "num-multipaths") == 0)
 		lb_type = RMAP_ECOMM_LB_SET_NUM_MPATH;
 	else {
 		char *end = NULL;
 
-		bw = strtoul(arg, &end, 10);
+		bw = strtoul(str, &end, 10);
 		if (*end != '\0')
 			return NULL;
 		lb_type = RMAP_ECOMM_LB_SET_VALUE;
@@ -2373,7 +2365,7 @@ static void *route_set_ecommunity_lb_compile(const char *arg)
 		       sizeof(struct rmap_ecomm_lb_set));
 	rels->lb_type = lb_type;
 	rels->bw = bw;
-	rels->non_trans = false;
+	rels->non_trans = non_trans;
 
 	return rels;
 }

@@ -303,12 +303,15 @@ static int bgp_bfd_dest_update(ZAPI_CALLBACK_ARGS)
 	ifp = bfd_get_peer_info(zclient->ibuf, &dp, &sp, &status, vrf_id);
 
 	if (BGP_DEBUG(zebra, ZEBRA)) {
+		struct vrf *vrf;
 		char buf[2][PREFIX2STR_BUFFER];
+
+		vrf = vrf_lookup_by_id(vrf_id);
 		prefix2str(&dp, buf[0], sizeof(buf[0]));
 		if (ifp) {
 			zlog_debug(
-				"Zebra: vrf %u interface %s bfd destination %s %s",
-				vrf_id, ifp->name, buf[0],
+				"Zebra: vrf %s(%u) interface %s bfd destination %s %s",
+				VRF_LOGNAME(vrf),vrf_id, ifp->name, buf[0],
 				bfd_get_status_str(status));
 		} else {
 			prefix2str(&sp, buf[1], sizeof(buf[1]));

@@ -1696,7 +1696,10 @@ static void pim_show_join_helper(struct vty *vty, struct pim_interface *pim_ifp,
 			pim_ifchannel_ifjoin_name(ch->ifjoin_state, ch->flags));
 		if (PIM_IF_FLAG_TEST_S_G_RPT(ch->flags))
 			json_object_int_add(json_row, "SGRpt", 1);
-
+		if (PIM_IF_FLAG_TEST_PROTO_PIM(ch->flags))
+			json_object_int_add(json_row, "protocolPim", 1);
+		if (PIM_IF_FLAG_TEST_PROTO_IGMP(ch->flags))
+			json_object_int_add(json_row, "protocolIgmp", 1);
 		json_object_object_get_ex(json_iface, ch_grp_str, &json_grp);
 		if (!json_grp) {
 			json_grp = json_object_new_object();
@@ -3980,13 +3983,13 @@ DEFUN (show_ip_pim_assert_winner_metric,
 
 DEFUN (show_ip_pim_interface,
        show_ip_pim_interface_cmd,
-       "show ip pim [mlag] [vrf NAME] interface [detail|WORD] [json]",
+       "show ip pim [vrf NAME] interface [mlag] [detail|WORD] [json]",
        SHOW_STR
        IP_STR
        PIM_STR
-       "MLAG\n"
        VRF_CMD_HELP_STR
        "PIM interface information\n"
+       "MLAG\n"
        "Detailed output\n"
        "interface name\n"
        JSON_STR)
@@ -4002,6 +4005,7 @@ DEFUN (show_ip_pim_interface,
 	if (argv_find(argv, argc, "mlag", &idx))
 		mlag = true;
 
+	idx = 2;
 	if (argv_find(argv, argc, "WORD", &idx)
 	    || argv_find(argv, argc, "detail", &idx))
 		pim_show_interfaces_single(vrf->info, vty, argv[idx]->arg, mlag,
@@ -5575,15 +5579,15 @@ DEFPY (show_ip_mroute,
 	return CMD_SUCCESS;
 }
 
-DEFUN_HIDDEN (show_ip_mroute_vrf_all,
-	      show_ip_mroute_vrf_all_cmd,
-	      "show ip mroute vrf all [fill] [json]",
-	      SHOW_STR
-	      IP_STR
-	      MROUTE_STR
-	      VRF_CMD_HELP_STR
-	      "Fill in Assumed data\n"
-	      JSON_STR)
+DEFUN (show_ip_mroute_vrf_all,
+       show_ip_mroute_vrf_all_cmd,
+       "show ip mroute vrf all [fill] [json]",
+       SHOW_STR
+       IP_STR
+       MROUTE_STR
+       VRF_CMD_HELP_STR
+       "Fill in Assumed data\n"
+       JSON_STR)
 {
 	struct prefix_sg sg = {0};
 	bool uj = use_json(argc, argv);

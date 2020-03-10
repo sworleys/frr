@@ -480,8 +480,10 @@ static void zebra_pbr_cleanup_ipset(struct hash_bucket *b, void *data)
 	int *sock = data;
 
 	if (ipset->sock == *sock) {
-		hook_call(zebra_pbr_ipset_update, 0, ipset);
-		hash_release(zrouter.ipset_hash, ipset);
+		if (hash_release(zrouter.ipset_hash, ipset))
+			zebra_pbr_ipset_free(ipset);
+		else
+			hook_call(zebra_pbr_ipset_update, 0, ipset);
 	}
 }
 
@@ -491,8 +493,10 @@ static void zebra_pbr_cleanup_ipset_entry(struct hash_bucket *b, void *data)
 	int *sock = data;
 
 	if (ipset->sock == *sock) {
-		hook_call(zebra_pbr_ipset_entry_update, 0, ipset);
-		hash_release(zrouter.ipset_entry_hash, ipset);
+		if (hash_release(zrouter.ipset_entry_hash, ipset))
+			zebra_pbr_ipset_entry_free(ipset);
+		else
+			hook_call(zebra_pbr_ipset_entry_update, 0, ipset);
 	}
 }
 
@@ -502,8 +506,10 @@ static void zebra_pbr_cleanup_iptable(struct hash_bucket *b, void *data)
 	int *sock = data;
 
 	if (iptable->sock == *sock) {
-		hook_call(zebra_pbr_iptable_update, 0, iptable);
-		hash_release(zrouter.iptable_hash, iptable);
+		if (hash_release(zrouter.iptable_hash, iptable))
+			zebra_pbr_iptable_free(iptable);
+		else
+			hook_call(zebra_pbr_iptable_update, 0, iptable);
 	}
 }
 
@@ -649,12 +655,22 @@ static void *pbr_iptable_alloc_intern(void *arg)
 {
 	struct zebra_pbr_iptable *zpi;
 	struct zebra_pbr_iptable *new;
+	struct listnode *ln;
+	char *ifname;
 
 	zpi = (struct zebra_pbr_iptable *)arg;
 
 	new = XCALLOC(MTYPE_TMP, sizeof(struct zebra_pbr_iptable));
 
+	/* Deep structure copy */
 	memcpy(new, zpi, sizeof(*zpi));
+	new->interface_name_list = list_new();
+
+	if (zpi->interface_name_list) {
+		for (ALL_LIST_ELEMENTS_RO(zpi->interface_name_list, ln, ifname))
+			listnode_add(new->interface_name_list,
+				     XSTRDUP(MTYPE_PBR_IPTABLE_IFNAME, ifname));
+	}
 
 	return new;
 }

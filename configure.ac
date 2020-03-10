@@ -7,7 +7,7 @@
 ##
 AC_PREREQ([2.60])
 
-AC_INIT([frr], [7.0+cl4u2], [https://github.com/frrouting/frr/issues])
+AC_INIT([frr], [7.0+cl4u3], [https://github.com/frrouting/frr/issues])
 PACKAGE_URL="https://frrouting.org/"
 AC_SUBST([PACKAGE_URL])
 PACKAGE_FULLNAME="FRRouting"
@@ -237,7 +237,18 @@ if test "x${enable_gcov}" = "xyes"; then
    fi
 
    LDFLAGS="${LDFLAGS} -lgcov"
-elif test "x${enable_dev_build}" = "xyes"; then
+fi
+
+if test "x${enable_clang_coverage}" = "xyes"; then
+   AC_C_FLAG([-fprofile-instr-generate], [
+     AC_MSG_ERROR([$CC does not support -fprofile-instr-generate.])
+   ])
+   AC_C_FLAG([-fcoverage-mapping], [
+     AC_MSG_ERROR([$CC does not support -fcoverage-mapping.])
+   ])
+fi
+
+if test "x${enable_dev_build}" = "xyes"; then
    AC_DEFINE([DEV_BUILD], [1], [Build for development])
    if test "z$orig_cflags" = "z"; then
       AC_C_FLAG([-g3])
@@ -544,7 +555,9 @@ AC_ARG_ENABLE([clippy-only],
 AC_ARG_ENABLE([numeric_version],
   AS_HELP_STRING([--enable-numeric-version], [Only numeric digits allowed in version (for Alpine)]))
 AC_ARG_ENABLE([gcov],
-  AS_HELP_STRING([--enable-gcov], [Add code coverage information]))
+  AS_HELP_STRING([--enable-gcov], [Collect coverage information with gcov]))
+AC_ARG_ENABLE([clang_coverage],
+  AS_HELP_STRING([--enable-clang-coverage], [Collect coverage information with Clang Coverage]))
 AC_ARG_ENABLE([bfdd],
   AS_HELP_STRING([--disable-bfdd], [do not build bfdd]))
 AC_ARG_ENABLE([address-sanitizer],

@@ -668,7 +668,7 @@ static void bgp_clear_vty_error(struct vty *vty, struct peer *peer, afi_t afi,
 }
 
 static int bgp_peer_clear(struct peer *peer, afi_t afi, safi_t safi,
-			  struct listnode *nnode, enum bgp_clear_type stype)
+			  struct listnode **nnode, enum bgp_clear_type stype)
 {
 	int ret = 0;
 
@@ -682,7 +682,7 @@ static int bgp_peer_clear(struct peer *peer, afi_t afi, safi_t safi,
 				continue;
 
 			if (stype == BGP_CLEAR_SOFT_NONE)
-				ret = peer_clear(peer, &nnode);
+				ret = peer_clear(peer, nnode);
 			else
 				ret = peer_clear_soft(peer, tmp_afi, tmp_safi,
 						      stype);
@@ -697,7 +697,7 @@ static int bgp_peer_clear(struct peer *peer, afi_t afi, safi_t safi,
 				continue;
 
 			if (stype == BGP_CLEAR_SOFT_NONE)
-				ret = peer_clear(peer, &nnode);
+				ret = peer_clear(peer, nnode);
 			else
 				ret = peer_clear_soft(peer, afi,
 						      tmp_safi, stype);
@@ -708,7 +708,7 @@ static int bgp_peer_clear(struct peer *peer, afi_t afi, safi_t safi,
 			return 1;
 
 		if (stype == BGP_CLEAR_SOFT_NONE)
-			ret = peer_clear(peer, &nnode);
+			ret = peer_clear(peer, nnode);
 		else
 			ret = peer_clear_soft(peer, afi, safi, stype);
 	}
@@ -734,7 +734,7 @@ static int bgp_clear(struct vty *vty, struct bgp *bgp, afi_t afi, safi_t safi,
 	 */
 	if (sort == clear_all) {
 		for (ALL_LIST_ELEMENTS(bgp->peer, node, nnode, peer)) {
-			ret = bgp_peer_clear(peer, afi, safi, nnode,
+			ret = bgp_peer_clear(peer, afi, safi, &nnode,
 							  stype);
 
 			if (ret < 0)
@@ -798,7 +798,7 @@ static int bgp_clear(struct vty *vty, struct bgp *bgp, afi_t afi, safi_t safi,
 		}
 
 		for (ALL_LIST_ELEMENTS(group->peer, node, nnode, peer)) {
-			ret = bgp_peer_clear(peer, afi, safi, nnode, stype);
+			ret = bgp_peer_clear(peer, afi, safi, &nnode, stype);
 
 			if (ret < 0)
 				bgp_clear_vty_error(vty, peer, afi, safi, ret);
@@ -820,7 +820,7 @@ static int bgp_clear(struct vty *vty, struct bgp *bgp, afi_t afi, safi_t safi,
 			if (peer->sort == BGP_PEER_IBGP)
 				continue;
 
-			ret = bgp_peer_clear(peer, afi, safi, nnode, stype);
+			ret = bgp_peer_clear(peer, afi, safi, &nnode, stype);
 
 			if (ret < 0)
 				bgp_clear_vty_error(vty, peer, afi, safi, ret);
@@ -844,7 +844,7 @@ static int bgp_clear(struct vty *vty, struct bgp *bgp, afi_t afi, safi_t safi,
 			if (peer->as != as)
 				continue;
 
-			ret = bgp_peer_clear(peer, afi, safi, nnode, stype);
+			ret = bgp_peer_clear(peer, afi, safi, &nnode, stype);
 
 			if (ret < 0)
 				bgp_clear_vty_error(vty, peer, afi, safi, ret);
@@ -2379,9 +2379,43 @@ DEFUN (no_bgp_bestpath_med,
 }
 
 /* "bgp bestpath bandwidth" configuration. */
-DEFPY (bgp_bestpath_bw,
+DEFUN (bgp_bestpath_bw,
        bgp_bestpath_bw_cmd,
-       "[no$no] bgp bestpath bandwidth [<ignore|skip-missing|default-weight-for-missing>$bw_cfg]",
+       "bgp bestpath bandwidth <ignore|skip-missing|default-weight-for-missing>",
+       "BGP specific commands\n"
+       "Change the default bestpath selection\n"
+       "Link Bandwidth attribute\n"
+       "Ignore link bandwidth (i.e., do regular ECMP, not weighted)\n"
+       "Ignore paths without link bandwidth for ECMP (if other paths have it)\n"
+       "Assign a low default weight (value 1) to paths not having link bandwidth\n")
+{
+	VTY_DECLVAR_CONTEXT(bgp, bgp);
+	int idx_lb = 3;
+	afi_t afi;
+	safi_t safi;
+
+	if (!strcmp(argv[idx_lb]->text, "ignore"))
+		bgp->lb_handling = BGP_LINK_BW_IGNORE_BW;
+	else if (!strcmp(argv[idx_lb]->text, "skip-missing"))
+		bgp->lb_handling = BGP_LINK_BW_SKIP_MISSING;
+	else if (!strcmp(argv[idx_lb]->text, "default-weight-for-missing"))
+		bgp->lb_handling = BGP_LINK_BW_DEFWT_4_MISSING;
+	else
+		return CMD_ERR_NO_MATCH;
+
+	/* This config is used in route install, so redo that. */
+	FOREACH_AFI_SAFI (afi, safi) {
+		if (!bgp_fibupd_safi(safi))
+			continue;
+		bgp_zebra_announce_table(bgp, afi, safi);
+	}
+
+	return CMD_SUCCESS;
+}
+
+DEFUN (no_bgp_bestpath_bw,
+       no_bgp_bestpath_bw_cmd,
+       "no bgp bestpath bandwidth [<ignore|skip-missing|default-weight-for-missing>]",
        NO_STR
        "BGP specific commands\n"
        "Change the default bestpath selection\n"
@@ -2394,22 +2428,7 @@ DEFPY (bgp_bestpath_bw,
 	afi_t afi;
 	safi_t safi;
 
-	if (no) {
-		bgp->lb_handling = BGP_LINK_BW_ECMP;
-	} else {
-		if (!bw_cfg) {
-			vty_out(vty, "%% Bandwidth configuration must be specified\n");
-			return CMD_ERR_INCOMPLETE;
-		}
-		if (!strcmp(bw_cfg, "ignore"))
-			bgp->lb_handling = BGP_LINK_BW_IGNORE_BW;
-		else if (!strcmp(bw_cfg, "skip-missing"))
-			bgp->lb_handling = BGP_LINK_BW_SKIP_MISSING;
-		else if (!strcmp(bw_cfg, "default-weight-for-missing"))
-			bgp->lb_handling = BGP_LINK_BW_DEFWT_4_MISSING;
-		else
-			return CMD_ERR_NO_MATCH;
-	}
+	bgp->lb_handling = BGP_LINK_BW_ECMP;
 
 	/* This config is used in route install, so redo that. */
 	FOREACH_AFI_SAFI (afi, safi) {
@@ -6656,7 +6675,7 @@ ALIAS (af_label_vpn_export,
 
 DEFPY (af_nexthop_vpn_export,
        af_nexthop_vpn_export_cmd,
-       "[no] nexthop vpn export <A.B.C.D|X:X::X:X>$nexthop_str",
+       "[no] nexthop vpn export [<A.B.C.D|X:X::X:X>$nexthop_su]",
        NO_STR
        "Specify next hop to use for VRF advertised prefixes\n"
        "Between current address-family and vpn\n"
@@ -6667,14 +6686,14 @@ DEFPY (af_nexthop_vpn_export,
 	VTY_DECLVAR_CONTEXT(bgp, bgp);
 	afi_t afi;
 	struct prefix p;
-	int idx = 0;
-	int yes = 1;
 
-	if (argv_find(argv, argc, "no", &idx))
-		yes = 0;
+	if (!no) {
+		if (!nexthop_su) {
+			vty_out(vty, "%% Nexthop required\n");
+			return CMD_WARNING_CONFIG_FAILED;
+		}
 
-	if (yes) {
-		if (!sockunion2hostprefix(nexthop_str, &p))
+		if (!sockunion2hostprefix(nexthop_su, &p))
 			return CMD_WARNING_CONFIG_FAILED;
 	}
 
@@ -6688,7 +6707,7 @@ DEFPY (af_nexthop_vpn_export,
 	vpn_leak_prechange(BGP_VPN_POLICY_DIR_TOVPN, afi,
 			   bgp_get_default(), bgp);
 
-	if (yes) {
+	if (!no) {
 		bgp->vpn_policy[afi].tovpn_nexthop = p;
 		SET_FLAG(bgp->vpn_policy[afi].flags,
 			 BGP_VPN_POLICY_TOVPN_NEXTHOP_SET);
@@ -6703,14 +6722,6 @@ DEFPY (af_nexthop_vpn_export,
 
 	return CMD_SUCCESS;
 }
-
-ALIAS (af_nexthop_vpn_export,
-       af_no_nexthop_vpn_export_cmd,
-       "no nexthop vpn export",
-       NO_STR
-       "Specify next hop to use for VRF advertised prefixes\n"
-       "Between current address-family and vpn\n"
-       "For routes leaked from current address-family to vpn\n")
 
 static int vpn_policy_getdirs(struct vty *vty, const char *dstr, int *dodir)
 {
@@ -12975,6 +12986,7 @@ void bgp_vty_init(void)
 
 	/* "bgp bestpath bandwidth" commands */
 	install_element(BGP_NODE, &bgp_bestpath_bw_cmd);
+	install_element(BGP_NODE, &no_bgp_bestpath_bw_cmd);
 
 	/* "no bgp default ipv4-unicast" commands. */
 	install_element(BGP_NODE, &no_bgp_default_ipv4_unicast_cmd);
@@ -14018,8 +14030,6 @@ void bgp_vty_init(void)
 	install_element(BGP_IPV6_NODE, &af_no_rd_vpn_export_cmd);
 	install_element(BGP_IPV4_NODE, &af_no_label_vpn_export_cmd);
 	install_element(BGP_IPV6_NODE, &af_no_label_vpn_export_cmd);
-	install_element(BGP_IPV4_NODE, &af_no_nexthop_vpn_export_cmd);
-	install_element(BGP_IPV6_NODE, &af_no_nexthop_vpn_export_cmd);
 	install_element(BGP_IPV4_NODE, &af_no_rt_vpn_imexport_cmd);
 	install_element(BGP_IPV6_NODE, &af_no_rt_vpn_imexport_cmd);
 	install_element(BGP_IPV4_NODE, &af_no_route_map_vpn_imexport_cmd);
