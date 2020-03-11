@@ -3236,11 +3236,65 @@ void rib_sweep_table(struct route_table *table)
 	}
 }
 
+static int qmem_log_walker(void *arg, struct memgroup *mg, struct memtype *mt)
+{
+	if (!mt) {
+		zlog_info("--- qmem %s ---", mg->name);
+		zlog_info("%-30s: %8s %-8s%s %8s %9s", "Type", "Current#",
+			  "  Size",
+#ifdef HAVE_MALLOC_USABLE_SIZE
+			  "     Total",
+#else
+			  "",
+#endif
+			  "Max#",
+#ifdef HAVE_MALLOC_USABLE_SIZE
+			  "MaxBytes"
+#else
+			  ""
+#endif
+		);
+	} else {
+		if (mt->n_max != 0) {
+			char size[32];
+			snprintf(size, sizeof(size), "%6zu", mt->size);
+#ifdef HAVE_MALLOC_USABLE_SIZE
+#define TSTR " %9zu"
+#define TARG , mt->total
+#define TARG2 , mt->max_size
+#else
+#define TSTR ""
+#define TARG
+#define TARG2
+#endif
+			zlog_info("%-30s: %8zu %-8s" TSTR " %8zu" TSTR,
+				  mt->name, mt->n_alloc,
+				  mt->size == 0
+					  ? ""
+					  : mt->size == SIZE_VAR ? "variable"
+								 : size TARG,
+				  mt->n_max TARG2);
+		}
+	}
+	return 0;
+}
+
+static void memory_dump(void)
+{
+	zlog_info(
+		"=========================== Memory Dump ===========================");
+
+	qmem_walk(qmem_log_walker, NULL);
+}
+
 /* Sweep all RIB tables.  */
 int rib_sweep_route(struct thread *t)
 {
 	struct vrf *vrf;
 	struct zebra_vrf *zvrf;
+
+	zlog_info("Before Sweep");
+	memory_dump();
 
 	RB_FOREACH (vrf, vrf_id_head, &vrfs_by_id) {
 		if ((zvrf = vrf->info) == NULL)
@@ -3253,6 +3307,8 @@ int rib_sweep_route(struct thread *t)
 	zebra_router_sweep_route();
 	zebra_router_sweep_nhgs();
 
+	zlog_info("After Sweep");
+	memory_dump();
 	return 0;
 }
 
