@@ -6,6 +6,7 @@ frr (7.0+cl4u2) RELEASED; urgency=medium
   * New Enabled: vrrpd: Enable namespace support
   * New Enabled: bgpd: Allow link bandwidth to set nexthop weight
   * New Enabled: pimd: mlag support
+  * Fixes: CM-28786 bgpd: Strip Route Targets during VRF-to-VRF route leak
   * Fixes: CM-28283 bgpd: Print out vrf name as well as id
   * Fixes: CM-28015 bgpd: Remove temporary debugs added for UCMP
   * Fixes: CM-28814 bgpd: Change reference bandwidth for UCMP
