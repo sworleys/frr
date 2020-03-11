@@ -223,4 +223,14 @@ extern uint8_t *ecommunity_linkbw_present(struct ecommunity *ecom,
 					  uint32_t *bw);
 extern struct ecommunity *ecommunity_replace_linkbw(as_t as,
 				struct ecommunity *ecom, uint64_t cum_bw);
+
+static inline int ecommunity_strip_rts(struct ecommunity *ecom)
+{
+	uint8_t subtype = ECOMMUNITY_ROUTE_TARGET;
+
+	return(ecommunity_strip(ecom, ECOMMUNITY_ENCODE_AS, subtype) ||
+		ecommunity_strip(ecom, ECOMMUNITY_ENCODE_IP, subtype) ||
+		ecommunity_strip(ecom, ECOMMUNITY_ENCODE_AS4, subtype));
+}
+
 #endif /* _QUAGGA_BGP_ECOMMUNITY_H */
