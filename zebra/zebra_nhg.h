@@ -74,6 +74,9 @@ struct nhg_hash_entry {
 	 * faster with ID's.
 	 */
 	struct nhg_connected_tree_head nhg_depends, nhg_dependents;
+
+	/* Cached list of routes waiting for NH install */
+
 /*
  * Is this nexthop group valid, ie all nexthops are fully resolved.
  * What is fully resolved?  It's a nexthop that is either self contained
