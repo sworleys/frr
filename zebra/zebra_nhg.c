@@ -1941,6 +1941,8 @@ static uint8_t zebra_nhg_nhe2grp_internal(struct nh_grp *grp,
 
 			grp[i].id = depend->id;
 			grp[i].weight = depend->nhg.nexthop->weight;
+			nexthop_copy_no_recurse(&grp[i].nexthop,
+						depend->nhg.nexthop, NULL);
 			i++;
 		}
 	}
