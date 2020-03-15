@@ -766,6 +766,9 @@ static void vty_show_ip_route(struct vty *vty, struct route_node *rn,
 					       sizeof buf, 1));
 		}
 
+		if (nexthop->weight)
+			vty_out(vty, ", weight %u", nexthop->weight);
+
 		if (uptime < ONE_DAY_SECOND)
 			vty_out(vty, ", %02d:%02d:%02d", tm->tm_hour,
 				tm->tm_min, tm->tm_sec);
