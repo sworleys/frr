@@ -6,6 +6,7 @@ frr (7.0+cl4u2) RELEASED; urgency=medium
   * New Enabled: vrrpd: Enable namespace support
   * New Enabled: bgpd: Allow link bandwidth to set nexthop weight
   * New Enabled: pimd: mlag support
+  * Fixes: CM-28912 zebra: Display next hop's weight (if any) in route brief output
   * Fixes: CM-28878 bgpd: Refine multiaccess check for next hop resetting
   * Fixes: CM-28786 bgpd: Strip Route Targets during VRF-to-VRF route leak
   * Fixes: CM-28283 bgpd: Print out vrf name as well as id
