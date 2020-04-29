@@ -1419,7 +1419,7 @@ bool zserv_nexthop_num_warn(const char *caller, const struct prefix *p,
  */
 static struct nexthop *nexthop_from_zapi(struct route_entry *re,
 					 const struct zapi_nexthop *api_nh,
-					 const struct zapi_route *api)
+					 uint32_t flags, struct prefix *p)
 {
 	struct nexthop *nexthop = NULL;
 	struct ipaddr vtep_ip;
@@ -1460,14 +1460,14 @@ static struct nexthop *nexthop_from_zapi(struct route_entry *re,
 		/* Special handling for IPv4 routes sourced from EVPN:
 		 * the nexthop and associated MAC need to be installed.
 		 */
-		if (CHECK_FLAG(api->flags, ZEBRA_FLAG_EVPN_ROUTE)) {
+		if (CHECK_FLAG(flags, ZEBRA_FLAG_EVPN_ROUTE)) {
 			memset(&vtep_ip, 0, sizeof(struct ipaddr));
 			vtep_ip.ipa_type = IPADDR_V4;
 			memcpy(&(vtep_ip.ipaddr_v4), &(api_nh->gate.ipv4),
 			       sizeof(struct in_addr));
 			zebra_vxlan_evpn_vrf_route_add(
 				api_nh->vrf_id, &api_nh->rmac,
-				&vtep_ip, &api->prefix);
+				&vtep_ip, p);
 		}
 		break;
 	case NEXTHOP_TYPE_IPV6:
@@ -1494,14 +1494,14 @@ static struct nexthop *nexthop_from_zapi(struct route_entry *re,
 		/* Special handling for IPv6 routes sourced from EVPN:
 		 * the nexthop and associated MAC need to be installed.
 		 */
-		if (CHECK_FLAG(api->flags, ZEBRA_FLAG_EVPN_ROUTE)) {
+		if (CHECK_FLAG(flags, ZEBRA_FLAG_EVPN_ROUTE)) {
 			memset(&vtep_ip, 0, sizeof(struct ipaddr));
 			vtep_ip.ipa_type = IPADDR_V6;
 			memcpy(&vtep_ip.ipaddr_v6, &(api_nh->gate.ipv6),
 			       sizeof(struct in6_addr));
 			zebra_vxlan_evpn_vrf_route_add(
 				api_nh->vrf_id, &api_nh->rmac,
-				&vtep_ip, &api->prefix);
+				&vtep_ip, p);
 		}
 		break;
 	case NEXTHOP_TYPE_BLACKHOLE:
@@ -1577,7 +1577,7 @@ static bool zapi_read_nexthops(struct zserv *client, struct zapi_nexthop *nhops,
 		struct zapi_nexthop *api_nh = &nhops[i];
 
 		/* Convert zapi nexthop */
-		nexthop = nexthop_from_zapi(re, api_nh, api);
+		nexthop = nexthop_from_zapi(re, api_nh, api->flags, &api->prefix);
 		if (!nexthop) {
 			flog_warn(
 				EC_ZEBRA_NEXTHOP_CREATION_FAILED,
