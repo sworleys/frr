@@ -1417,9 +1417,9 @@ bool zserv_nexthop_num_warn(const char *caller, const struct prefix *p,
 /*
  * Create a new nexthop based on a zapi nexthop.
  */
-static struct nexthop *nexthop_from_zapi(struct route_entry *re,
-					 const struct zapi_nexthop *api_nh,
-					 uint32_t flags, struct prefix *p)
+static struct nexthop *nexthop_from_zapi(const struct zapi_nexthop *api_nh,
+					 uint32_t flags, struct prefix *p,
+					 uint16_t nexthop_num)
 {
 	struct nexthop *nexthop = NULL;
 	struct ipaddr vtep_ip;
@@ -1525,7 +1525,7 @@ static struct nexthop *nexthop_from_zapi(struct route_entry *re,
 		nexthop->weight = api_nh->weight;
 
 	if (CHECK_FLAG(api_nh->flags, ZAPI_NEXTHOP_FLAG_HAS_BACKUP)) {
-		if (api_nh->backup_idx < api->backup_nexthop_num) {
+		if (api_nh->backup_idx < nexthop_num) {
 			/* Capture backup info */
 			SET_FLAG(nexthop->flags, NEXTHOP_FLAG_HAS_BACKUP);
 			nexthop->backup_idx = api_nh->backup_idx;
@@ -1540,8 +1540,9 @@ done:
 	return nexthop;
 }
 
-static bool zapi_read_nexthops(struct zserv *client, struct zapi_nexthop *nhops,
-			       uint16_t nexthop_num,
+static bool zapi_read_nexthops(struct zserv *client, struct prefix *p,
+			       struct zapi_nexthop *nhops,
+			       uint32_t flags, uint16_t nexthop_num, uint16_t backup_nh_num,
 			       struct route_entry *re,
 			       struct nexthop_group **png,
 			       struct nhg_backup_info **pbnhg)
@@ -1577,7 +1578,7 @@ static bool zapi_read_nexthops(struct zserv *client, struct zapi_nexthop *nhops,
 		struct zapi_nexthop *api_nh = &nhops[i];
 
 		/* Convert zapi nexthop */
-		nexthop = nexthop_from_zapi(re, api_nh, api->flags, &api->prefix);
+		nexthop = nexthop_from_zapi(api_nh, flags, p, backup_nh_num);
 		if (!nexthop) {
 			flog_warn(
 				EC_ZEBRA_NEXTHOP_CREATION_FAILED,
@@ -1687,8 +1688,8 @@ static void zread_nhg_add(ZAPI_HANDLER_ARGS)
 		}
 	}
 
-	if (!zapi_read_nexthops(client, zapi_nexthops, nhops,
-				&nhg, NULL);
+	if (!zapi_read_nexthops(client, &p, zapi_nexthops, 0, nhops, 0,
+				&nhg, NULL, 0);
 		flog_warn(EC_ZEBRA_NEXTHOP_CREATION_FAILED,
 			  "%s: Nexthop Group Creation failed",
 			  __func__);
@@ -1771,8 +1772,10 @@ static void zread_route_add(ZAPI_HANDLER_ARGS)
 				zebra_route_string(client->proto), &api.prefix);
 	}
 
-	if (!zapi_read_nexthops(client, &api, re, &ng, NULL) ||
-	    !zapi_read_nexthops(client, &api, re, NULL, &bnhg)) {
+	if (!zapi_read_nexthops(client, api->nexthops, api->nexthop_num,
+				api->backup_nexthop_num, &api, re, &ng, NULL) ||
+	    !zapi_read_nexthops(client, api->backup_nexthops, api->backup_nexthop_num,
+				api->backup_nexthop_num, re, NULL, &bnhg)) {
 		XFREE(MTYPE_RE, re);
 		return;
 	}
