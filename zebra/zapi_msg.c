@@ -1543,7 +1543,6 @@ done:
 static bool zapi_read_nexthops(struct zserv *client, struct prefix *p,
 			       struct zapi_nexthop *nhops,
 			       uint32_t flags, uint16_t nexthop_num, uint16_t backup_nh_num,
-			       struct route_entry *re,
 			       struct nexthop_group **png,
 			       struct nhg_backup_info **pbnhg)
 {
@@ -1689,16 +1688,17 @@ static void zread_nhg_add(ZAPI_HANDLER_ARGS)
 	}
 
 	if (!zapi_read_nexthops(client, &p, zapi_nexthops, 0, nhops, 0,
-				&nhg, NULL, 0);
+				&nhg, NULL)) {
 		flog_warn(EC_ZEBRA_NEXTHOP_CREATION_FAILED,
 			  "%s: Nexthop Group Creation failed",
 			  __func__);
 		return;
-	}
 
+	}
 	/*
 	 * Install the nhg
 	 */
+        id++;
 
 	return;
 
@@ -1772,10 +1772,10 @@ static void zread_route_add(ZAPI_HANDLER_ARGS)
 				zebra_route_string(client->proto), &api.prefix);
 	}
 
-	if (!zapi_read_nexthops(client, api->nexthops, api->nexthop_num,
-				api->backup_nexthop_num, &api, re, &ng, NULL) ||
-	    !zapi_read_nexthops(client, api->backup_nexthops, api->backup_nexthop_num,
-				api->backup_nexthop_num, re, NULL, &bnhg)) {
+	if (!zapi_read_nexthops(client, &api.prefix, api.nexthops, api.flags,
+				api.nexthop_num, api.backup_nexthop_num, &ng, NULL) ||
+	    !zapi_read_nexthops(client, &api.prefix, api.backup_nexthops, api.flags,
+				api.backup_nexthop_num, api.backup_nexthop_num, NULL, &bnhg)) {
 		XFREE(MTYPE_RE, re);
 		return;
 	}
@@ -2902,7 +2902,8 @@ void (*const zserv_handlers[])(ZAPI_HANDLER_ARGS) = {
 	[ZEBRA_MLAG_CLIENT_REGISTER] = zebra_mlag_client_register,
 	[ZEBRA_MLAG_CLIENT_UNREGISTER] = zebra_mlag_client_unregister,
 	[ZEBRA_MLAG_FORWARD_MSG] = zebra_mlag_forward_client_msg,
-	[ZEBRA_CLIENT_CAPABILITIES] = zread_client_capabilities
+	[ZEBRA_CLIENT_CAPABILITIES] = zread_client_capabilities,
+	[ZEBRA_NHG_ADD] = zread_nhg_add,
 };
 
 #if defined(HANDLE_ZAPI_FUZZING)
