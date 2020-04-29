@@ -1679,7 +1679,7 @@ stream_failure:
 	return;
 }
 
-static void zread_nhg_add(ZAPI_HANDLER_ARGS)
+static void zread_nhg_reader(ZAPI_HANDLER_ARGS)
 {
 	struct stream *s;
 	uint32_t id;
@@ -2925,7 +2925,8 @@ void (*const zserv_handlers[])(ZAPI_HANDLER_ARGS) = {
 	[ZEBRA_MLAG_CLIENT_UNREGISTER] = zebra_mlag_client_unregister,
 	[ZEBRA_MLAG_FORWARD_MSG] = zebra_mlag_forward_client_msg,
 	[ZEBRA_CLIENT_CAPABILITIES] = zread_client_capabilities,
-	[ZEBRA_NHG_ADD] = zread_nhg_add,
+	[ZEBRA_NHG_ADD] = zread_nhg_reader,
+	[ZEBRA_NHG_REPLACE] = zread_nhg_reader,
 	[ZEBRA_NHG_DEL] = zread_nhg_del,
 };
 

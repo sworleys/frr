@@ -970,16 +970,16 @@ extern void zclient_nhg_del(struct zclient *zclient, uint32_t id)
 	stream_putw_at(s, 0, stream_get_endp(s));
 }
 
-extern void zclient_nhg_add(struct zclient *zclient, uint32_t id,
-			    size_t nhops, struct zapi_nexthop *znh)
+static void zclient_nhg_writer(struct stream *s, int cmd, uint32_t id,
+			       size_t nhops, struct zapi_nexthop *znh)
 {
-	struct stream *s = zclient->obuf;
 	size_t i;
+
+	stream_reset(s);
 
 	zapi_nexthop_group_sort(znh, nhops);
 
-	stream_reset(s);
-	zclient_create_header(s, ZEBRA_NHG_ADD, VRF_DEFAULT);
+	zclient_create_header(s, cmd, VRF_DEFAULT);
 
 	stream_putl(s, id);
 	stream_putw(s, nhops);
@@ -989,6 +989,22 @@ extern void zclient_nhg_add(struct zclient *zclient, uint32_t id,
 	}
 
 	stream_putw_at(s, 0, stream_get_endp(s));
+}
+
+extern void zclient_nhg_replace(struct zclient *zclient, uint32_t id,
+				size_t nhops, struct zapi_nexthop *znh)
+{
+	struct stream *s = zclient->obuf;
+
+	zclient_nhg_writer(s, ZEBRA_NHG_REPLACE, id, nhops, znh);
+}
+
+extern void zclient_nhg_add(struct zclient *zclient, uint32_t id,
+			    size_t nhops, struct zapi_nexthop *znh)
+{
+	struct stream *s = zclient->obuf;
+
+	zclient_nhg_writer(s, ZEBRA_NHG_ADD, id, nhops, znh);
 }
 
 int zapi_route_encode(uint8_t cmd, struct stream *s, struct zapi_route *api)

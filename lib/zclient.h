@@ -200,6 +200,7 @@ typedef enum {
 	ZEBRA_MLAG_CLIENT_UNREGISTER,
 	ZEBRA_MLAG_FORWARD_MSG,
 	ZEBRA_NHG_ADD,
+	ZEBRA_NHG_REPLACE,
 	ZEBRA_NHG_DEL,
 	ZEBRA_NHG_NOTIFY_OWNER,
 	ZEBRA_ERROR,
@@ -798,6 +799,9 @@ bool zapi_ipset_notify_decode(struct stream *s,
 extern void zclient_nhg_add(struct zclient *zclient,
 			    uint32_t id, size_t nhops,
 			    struct zapi_nexthop *znh);
+extern void zclient_nhg_replace(struct zclient *zclient,
+				uint32_t id, size_t nhops,
+				struct zapi_nexthop *znh);
 extern void zclient_nhg_del(struct zclient *zclient, uint32_t id);
 
 #define ZEBRA_IPSET_NAME_SIZE   32
