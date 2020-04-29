@@ -1540,33 +1540,28 @@ done:
 	return nexthop;
 }
 
-static bool zapi_read_nexthops(struct zserv *client, struct zapi_route *api,
+static bool zapi_read_nexthops(struct zserv *client, struct zapi_nexthop *nhops,
+			       uint16_t nexthop_num,
 			       struct route_entry *re,
 			       struct nexthop_group **png,
 			       struct nhg_backup_info **pbnhg)
 {
 	struct nexthop_group *ng = NULL;
 	struct nhg_backup_info *bnhg = NULL;
-	uint16_t nexthop_num, i;;
-	struct zapi_nexthop *nhops;
+	uint16_t i;
 	struct nexthop *last_nh = NULL;
 
 	assert(!(png && pbnhg));
 
-	if (png) {
+	if (png)
 		*png = ng = nexthop_group_new();
-		nexthop_num = api->nexthop_num;
-		nhops = api->nexthops;
-	}
 
-	if (pbnhg && api->backup_nexthop_num > 0) {
+	if (pbnhg && nexthop_num > 0) {
 		if (IS_ZEBRA_DEBUG_RECV)
 			zlog_debug("%s: adding %d backup nexthops",
-				   __func__, api->backup_nexthop_num);
+				   __func__, nexthop_num);
 
-		nexthop_num = api->backup_nexthop_num;
 		*pbnhg = bnhg = zebra_nhg_backup_alloc();
-		nhops = api->backup_nexthops;
 	}
 
 	/*
@@ -1660,6 +1655,57 @@ static bool zapi_read_nexthops(struct zserv *client, struct zapi_route *api,
 	}
 
 	return true;
+}
+
+static void zread_nhg_add(ZAPI_HANDLER_ARGS)
+{
+	struct stream *s;
+	uint32_t id;
+	size_t nhops, i;
+	struct zapi_nexthop zapi_nexthops[MULTIPATH_NUM];
+	struct nexthop_group *nhg = NULL;
+	struct prefix p;
+
+	memset(&p, 0, sizeof(p));
+
+	s = msg;
+
+	STREAM_GETL(s, id);
+	STREAM_GETW(s, nhops);
+
+	if (zserv_nexthop_num_warn(__func__, &p, nhops))
+		return;
+
+	for (i = 0; i < nhops; i++) {
+		struct zapi_nexthop *znh = &zapi_nexthops[i];
+
+		if (zapi_nexthop_decode(s, znh, 0) != 0) {
+			flog_warn(EC_ZEBRA_NEXTHOP_CREATION_FAILED,
+				  "%s: Nexthop creation failed",
+				  __func__);
+			return;
+		}
+	}
+
+	if (!zapi_read_nexthops(client, zapi_nexthops, nhops,
+				&nhg, NULL);
+		flog_warn(EC_ZEBRA_NEXTHOP_CREATION_FAILED,
+			  "%s: Nexthop Group Creation failed",
+			  __func__);
+		return;
+	}
+
+	/*
+	 * Install the nhg
+	 */
+
+	return;
+
+stream_failure:
+	flog_warn(EC_ZEBRA_NEXTHOP_CREATION_FAILED,
+		  "%s: Nexthop Group creation failed with some sort of stream read failure",
+		  __func__);
+	return;
 }
 
 static void zread_route_add(ZAPI_HANDLER_ARGS)
