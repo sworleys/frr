@@ -283,6 +283,33 @@ void vrf_label_add(vrf_id_t vrf_id, afi_t afi, mpls_label_t label)
 	zclient_send_vrf_label(zclient, vrf_id, afi, label, ZEBRA_LSP_SHARP);
 }
 
+static uint32_t nhg_id;
+
+static uint32_t sharp_get_next_nhid(void)
+{
+	return nhg_id++;
+}
+
+void nhg_add(const struct nexthop_group *nhg)
+{
+	struct zapi_nexthop nh_array[MULTIPATH_NUM];
+	struct zapi_nexthop *api_nh;
+	uint16_t nexthop_num = 0;
+	uint32_t id = sharp_get_next_nhid();
+	struct nexthop *nh;
+
+	for (ALL_NEXTHOPS_PTR(nhg, nh)) {
+		api_nh = &nh_array[nexthop_num];
+
+		zapi_nexthop_from_nexthop(api_nh, nh);
+		nexthop_num++;
+	}
+
+	zclient_nhg_add(zclient, id, nexthop_num, nh_array);
+
+	zclient_send_message(zclient);
+}
+
 void route_add(const struct prefix *p, vrf_id_t vrf_id,
 	       uint8_t instance, const struct nexthop_group *nhg,
 	       const struct nexthop_group *backup_nhg)
@@ -448,6 +475,8 @@ extern struct zebra_privs_t sharp_privs;
 void sharp_zebra_init(void)
 {
 	struct zclient_options opt = {.receive_notify = true};
+
+	nhg_id = zclient_get_nhg_start(ZEBRA_ROUTE_SHARP);
 
 	if_zapi_callbacks(sharp_ifp_create, sharp_ifp_up,
 			  sharp_ifp_down, sharp_ifp_destroy);

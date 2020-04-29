@@ -302,6 +302,26 @@ DEFPY (install_routes,
 	return CMD_SUCCESS;
 }
 
+DEFPY(install_nhg, install_nhg_cmd,
+      "sharp install nexthop-group WORD$nhg",
+      "Sharp Routing Protocol\n"
+      "Nexthop-Group to use\n"
+      "The Name of the nexthop-group\n")
+{
+	struct nexthop_group_cmd *nhgc = nhgc_find(nhg);
+
+	if (!nhgc) {
+		vty_out(vty,
+			"Specified Nexthop Group: %s does not exist\n",
+			nhg);
+		return CMD_WARNING;
+	}
+
+	nhg_add(&nhgc->nhg);
+
+	return CMD_SUCCESS;
+}
+
 DEFPY(vrf_label, vrf_label_cmd,
       "sharp label <ip$ipv4|ipv6$ipv6> vrf NAME$vrf_name label (0-100000)$label",
       "Sharp Routing Protocol\n"
@@ -531,6 +551,7 @@ void sharp_vty_init(void)
 {
 	install_element(ENABLE_NODE, &install_routes_data_dump_cmd);
 	install_element(ENABLE_NODE, &install_routes_cmd);
+	install_element(ENABLE_NODE, &install_nhg_cmd);
 	install_element(ENABLE_NODE, &remove_routes_cmd);
 	install_element(ENABLE_NODE, &vrf_label_cmd);
 	install_element(ENABLE_NODE, &sharp_nht_data_dump_cmd);
