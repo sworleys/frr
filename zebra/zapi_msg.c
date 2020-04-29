@@ -1657,6 +1657,28 @@ static bool zapi_read_nexthops(struct zserv *client, struct prefix *p,
 	return true;
 }
 
+static void zread_nhg_del(ZAPI_HANDLER_ARGS)
+{
+	struct stream *s = msg;
+	uint32_t id;
+
+	STREAM_GETL(s, id);
+
+	/*
+	 * Delete the received nhg id
+	 * id is incremented to make compiler happy right now
+	 * it should be removed in future code work.
+	 */
+	id++;
+
+	return;
+
+stream_failure:
+	flog_warn(EC_ZEBRA_NEXTHOP_CREATION_FAILED,
+		  "%s: Nexthop group deletion failed", __func__);
+	return;
+}
+
 static void zread_nhg_add(ZAPI_HANDLER_ARGS)
 {
 	struct stream *s;
@@ -2904,6 +2926,7 @@ void (*const zserv_handlers[])(ZAPI_HANDLER_ARGS) = {
 	[ZEBRA_MLAG_FORWARD_MSG] = zebra_mlag_forward_client_msg,
 	[ZEBRA_CLIENT_CAPABILITIES] = zread_client_capabilities,
 	[ZEBRA_NHG_ADD] = zread_nhg_add,
+	[ZEBRA_NHG_DEL] = zread_nhg_del,
 };
 
 #if defined(HANDLE_ZAPI_FUZZING)

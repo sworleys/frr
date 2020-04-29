@@ -958,6 +958,18 @@ done:
 	return ret;
 }
 
+extern void zclient_nhg_del(struct zclient *zclient, uint32_t id)
+{
+	struct stream *s = zclient->obuf;
+
+	stream_reset(s);
+	zclient_create_header(s, ZEBRA_NHG_DEL, VRF_DEFAULT);
+
+	stream_putl(s, id);
+
+	stream_putw_at(s, 0, stream_get_endp(s));
+}
+
 extern void zclient_nhg_add(struct zclient *zclient, uint32_t id,
 			    size_t nhops, struct zapi_nexthop *znh)
 {
