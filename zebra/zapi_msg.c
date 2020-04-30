@@ -1687,11 +1687,13 @@ static void zread_nhg_reader(ZAPI_HANDLER_ARGS)
 	struct zapi_nexthop zapi_nexthops[MULTIPATH_NUM];
 	struct nexthop_group *nhg = NULL;
 	struct prefix p;
+	uint16_t proto;
 
 	memset(&p, 0, sizeof(p));
 
 	s = msg;
 
+	STREAM_GETW(s, proto);
 	STREAM_GETL(s, id);
 	STREAM_GETW(s, nhops);
 
@@ -1721,6 +1723,7 @@ static void zread_nhg_reader(ZAPI_HANDLER_ARGS)
 	 * Install the nhg
 	 */
         id++;
+	proto++;
 
 	return;
 
