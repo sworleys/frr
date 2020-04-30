@@ -120,7 +120,8 @@ struct nhg_hash_entry {
 };
 
 /* Was this one we created, either this session or previously? */
-#define ZEBRA_NHG_CREATED(NHE) ((NHE->type) == ZEBRA_ROUTE_NHG)
+#define ZEBRA_NHG_CREATED(NHE)                                                 \
+	(((NHE->type) <= ZEBRA_ROUTE_MAX) && (NHE->type != ZEBRA_ROUTE_KERNEL))
 
 /*
  * Backup nexthops: this is a group object itself, so
@@ -261,8 +262,9 @@ zebra_nhg_rib_find_nhe(struct nhg_hash_entry *rt_nhe, afi_t rt_afi);
  *
  * Returns allocated NHE on success, otherwise NULL.
  */
-struct nhg_hash_entry *
-zebra_nhg_proto_add(uint32_t id, struct nexthop_group *nhg, afi_t afi);
+struct nhg_hash_entry *zebra_nhg_proto_add(uint32_t id, int type,
+					   struct nexthop_group *nhg,
+					   afi_t afi);
 
 
 /* 

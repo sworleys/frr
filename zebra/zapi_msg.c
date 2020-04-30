@@ -1756,7 +1756,8 @@ static void zread_nhg_reader(ZAPI_HANDLER_ARGS)
 	nhg_notify(proto, client->instance, id, ZAPI_NHG_INSTALLED);
 
 	// TODO: Forcing AF_UNSPEC/AF_IP for now
-	nhe = zebra_nhg_proto_add(id, nhg, ((nhops > 1) ? AFI_UNSPEC : AFI_IP));
+	nhe = zebra_nhg_proto_add(id, ZEBRA_ROUTE_BGP, nhg,
+				  ((nhops > 1) ? AFI_UNSPEC : AFI_IP));
 
 	/* Increment now so its not deleted after all routes using removed */
 	zebra_nhg_increment_ref(nhe);

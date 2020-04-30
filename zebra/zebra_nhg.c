@@ -433,17 +433,17 @@ static void *zebra_nhg_hash_alloc(void *arg)
 uint32_t zebra_nhg_hash_key(const void *arg)
 {
 	const struct nhg_hash_entry *nhe = arg;
-	uint32_t val, key = 0x5a351234;
+	uint32_t key = 0x5a351234;
+	uint32_t primary = 0;
+	uint32_t backup = 0;
 
-	val = nexthop_group_hash(&(nhe->nhg));
-	if (nhe->backup_info) {
-		val = jhash_2words(val,
-				   nexthop_group_hash(
-					   &(nhe->backup_info->nhe->nhg)),
-				   key);
-	}
+	primary = nexthop_group_hash(&(nhe->nhg));
+	if (nhe->backup_info)
+		backup = nexthop_group_hash(&(nhe->backup_info->nhe->nhg));
 
-	key = jhash_3words(nhe->vrf_id, nhe->afi, val, key);
+	key = jhash_3words(primary, backup, nhe->type, key);
+
+	key = jhash_2words(nhe->vrf_id, nhe->afi, key);
 
 	return key;
 }
@@ -505,6 +505,9 @@ bool zebra_nhg_hash_equal(const void *arg1, const void *arg2)
 	/* No matter what if they equal IDs, assume equal */
 	if (nhe1->id && nhe2->id && (nhe1->id == nhe2->id))
 		return true;
+
+	if (nhe1->type != nhe2->type)
+		return false;
 
 	if (nhe1->vrf_id != nhe2->vrf_id)
 		return false;
@@ -2374,7 +2377,8 @@ void zebra_nhg_install_kernel(struct nhg_hash_entry *nhe)
 	    && !CHECK_FLAG(nhe->flags, NEXTHOP_GROUP_INSTALLED)
 	    && !CHECK_FLAG(nhe->flags, NEXTHOP_GROUP_QUEUED)) {
 		/* Change its type to us since we are installing it */
-		nhe->type = ZEBRA_ROUTE_NHG;
+		if (!ZEBRA_NHG_CREATED(nhe))
+			nhe->type = ZEBRA_ROUTE_NHG;
 
 		int ret = dplane_nexthop_add(nhe);
 
@@ -2529,17 +2533,32 @@ bool zebra_nhg_kernel_nexthops_enabled(void)
 }
 
 /* Add NHE from upper level proto */
-struct nhg_hash_entry *zebra_nhg_proto_add(uint32_t id,
+struct nhg_hash_entry *zebra_nhg_proto_add(uint32_t id, int type,
 					   struct nexthop_group *nhg, afi_t afi)
 {
-	struct nhg_hash_entry *nhe;
+	struct nhg_hash_entry lookup;
+	struct nhg_hash_entry *new;
+	struct nhg_connected *rb_node_dep = NULL;
 
-	nhe = zebra_nhg_rib_find(id, nhg, afi);
+	zebra_nhe_init(&lookup, afi, nhg->nexthop);
+	lookup.nhg.nexthop = nhg->nexthop;
+	lookup.id = id;
+	lookup.type = type;
+
+	new = zebra_nhg_rib_find_nhe(&lookup, afi);
+
+	if (!new)
+		return NULL;
 
 	/* TODO: Assuming valid/onlink for now */
-	zebra_nhg_set_valid(nhe);
+	SET_FLAG(new->flags, NEXTHOP_GROUP_VALID);
 
-	return nhe;
+	if (!zebra_nhg_depends_is_empty(new)) {
+		frr_each (nhg_connected_tree, &new->nhg_depends, rb_node_dep)
+			SET_FLAG(rb_node_dep->nhe->flags, NEXTHOP_GROUP_VALID);
+	}
+
+	return new;
 }
 
 /* Delete NHE from upper level proto */
