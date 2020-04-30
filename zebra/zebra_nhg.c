@@ -52,13 +52,13 @@ uint32_t id_counter;
 /*  */
 static bool g_nexthops_enabled = true;
 
-static struct nhg_hash_entry *depends_find(const struct nexthop *nh,
-					   afi_t afi);
+static struct nhg_hash_entry *depends_find(const struct nexthop *nh, afi_t afi,
+					   int type);
 static void depends_add(struct nhg_connected_tree_head *head,
 			struct nhg_hash_entry *depend);
 static struct nhg_hash_entry *
 depends_find_add(struct nhg_connected_tree_head *head, struct nexthop *nh,
-		 afi_t afi);
+		 afi_t afi, int type);
 static struct nhg_hash_entry *
 depends_find_id_add(struct nhg_connected_tree_head *head, uint32_t id);
 static void depends_decrement_free(struct nhg_connected_tree_head *head);
@@ -425,7 +425,6 @@ static void *zebra_nhg_hash_alloc(void *arg)
 				nhe->nhg.nexthop->vrf_id, nhe->id);
 	}
 
-	zebra_nhg_insert_id(nhe);
 
 	return nhe;
 }
@@ -608,7 +607,7 @@ static int zebra_nhg_process_grp(struct nexthop_group *nhg,
 }
 
 static void handle_recursive_depend(struct nhg_connected_tree_head *nhg_depends,
-				    struct nexthop *nh, afi_t afi)
+				    struct nexthop *nh, afi_t afi, int type)
 {
 	struct nhg_hash_entry *depend = NULL;
 	struct nexthop_group resolved_ng = {};
@@ -619,7 +618,7 @@ static void handle_recursive_depend(struct nhg_connected_tree_head *nhg_depends,
 		zlog_debug("%s: head %p, nh %pNHv",
 			   __func__, nhg_depends, nh);
 
-	depend = zebra_nhg_rib_find(0, &resolved_ng, afi);
+	depend = zebra_nhg_rib_find(0, &resolved_ng, afi, type);
 
 	if (IS_ZEBRA_DEBUG_NHG_DETAIL)
 		zlog_debug("%s: nh %pNHv => %p (%u)",
@@ -669,7 +668,23 @@ static bool zebra_nhe_find(struct nhg_hash_entry **nhe, /* return value */
 	 */
 	if (lookup->id == 0)
 		lookup->id = ++id_counter;
-	newnhe = hash_get(zrouter.nhgs, lookup, zebra_nhg_hash_alloc);
+
+	if (lookup->type == ZEBRA_ROUTE_NHG) {
+		/*
+		 * This is a zebra hashed/owned NHG.
+		 *
+		 * It goes in HASH and ID table.
+		 */
+		newnhe = hash_get(zrouter.nhgs, lookup, zebra_nhg_hash_alloc);
+		zebra_nhg_insert_id(nhe);
+	} else {
+		/*
+		 * This is upperproto owned NHG and should not be hashed to.
+		 *
+		 * Its only going into ID table.
+		 */
+		newnhe = hash_get(zrouter.nhgs, lookup, zebra_nhg_hash_alloc);
+	}
 	created = true;
 
 	/* Mail back the new object */
@@ -710,7 +725,8 @@ static bool zebra_nhe_find(struct nhg_hash_entry **nhe, /* return value */
 		if (CHECK_FLAG(nh->flags, NEXTHOP_FLAG_RECURSIVE)) {
 			/* Single recursive nexthop */
 			handle_recursive_depend(&newnhe->nhg_depends,
-						nh->resolved, afi);
+						nh->resolved, afi,
+						newnhe->type);
 			recursive = true;
 		}
 	} else {
@@ -723,7 +739,8 @@ static bool zebra_nhe_find(struct nhg_hash_entry **nhe, /* return value */
 						      NEXTHOP_FLAG_RECURSIVE) ?
 					   "(R)" : "");
 
-			depends_find_add(&newnhe->nhg_depends, nh, afi);
+			depends_find_add(&newnhe->nhg_depends, nh, afi,
+					 newnhe->type);
 		}
 	}
 
@@ -750,8 +767,8 @@ static bool zebra_nhe_find(struct nhg_hash_entry **nhe, /* return value */
 				   __func__, nh);
 
 		/* Single recursive nexthop */
-		handle_recursive_depend(&backup_nhe->nhg_depends,
-					nh->resolved, afi);
+		handle_recursive_depend(&backup_nhe->nhg_depends, nh->resolved,
+					afi, backup_nhe->type);
 		recursive = true;
 	} else {
 		/* One or more backup NHs */
@@ -763,8 +780,8 @@ static bool zebra_nhe_find(struct nhg_hash_entry **nhe, /* return value */
 						      NEXTHOP_FLAG_RECURSIVE) ?
 					   "(R)" : "");
 
-			depends_find_add(&backup_nhe->nhg_depends,
-					 nh, afi);
+			depends_find_add(&backup_nhe->nhg_depends, nh, afi,
+					 backup_nhe->type);
 		}
 	}
 
@@ -1090,8 +1107,8 @@ static int nhg_ctx_process_new(struct nhg_ctx *ctx)
 			return -ENOENT;
 		}
 
-		if (!zebra_nhg_find(&nhe, id, nhg, &nhg_depends, vrf_id, type,
-				    afi))
+		if (!zebra_nhg_find(&nhe, id, nhg, &nhg_depends, vrf_id, afi,
+				    type))
 			depends_decrement_free(&nhg_depends);
 
 		/* These got copied over in zebra_nhg_alloc() */
@@ -1258,14 +1275,14 @@ int zebra_nhg_kernel_del(uint32_t id, vrf_id_t vrf_id)
 
 /* Some dependency helper functions */
 static struct nhg_hash_entry *depends_find_recursive(const struct nexthop *nh,
-						     afi_t afi)
+						     afi_t afi, int type)
 {
 	struct nhg_hash_entry *nhe;
 	struct nexthop *lookup = NULL;
 
 	lookup = nexthop_dup(nh, NULL);
 
-	nhe = zebra_nhg_find_nexthop(0, lookup, afi, 0);
+	nhe = zebra_nhg_find_nexthop(0, lookup, afi, type);
 
 	nexthops_free(lookup);
 
@@ -1273,7 +1290,7 @@ static struct nhg_hash_entry *depends_find_recursive(const struct nexthop *nh,
 }
 
 static struct nhg_hash_entry *depends_find_singleton(const struct nexthop *nh,
-						     afi_t afi)
+						     afi_t afi, int type)
 {
 	struct nhg_hash_entry *nhe;
 	struct nexthop lookup = {};
@@ -1283,7 +1300,7 @@ static struct nhg_hash_entry *depends_find_singleton(const struct nexthop *nh,
 	 */
 	nexthop_copy_no_recurse(&lookup, nh, NULL);
 
-	nhe = zebra_nhg_find_nexthop(0, &lookup, afi, 0);
+	nhe = zebra_nhg_find_nexthop(0, &lookup, afi, type);
 
 	/* The copy may have allocated labels; free them if necessary. */
 	nexthop_del_labels(&lookup);
@@ -1295,7 +1312,8 @@ static struct nhg_hash_entry *depends_find_singleton(const struct nexthop *nh,
 	return nhe;
 }
 
-static struct nhg_hash_entry *depends_find(const struct nexthop *nh, afi_t afi)
+static struct nhg_hash_entry *depends_find(const struct nexthop *nh, afi_t afi,
+					   int type)
 {
 	struct nhg_hash_entry *nhe = NULL;
 	char rbuf[10];
@@ -1307,10 +1325,10 @@ static struct nhg_hash_entry *depends_find(const struct nexthop *nh, afi_t afi)
 	 * in the non-recursive case (by not alloc/freeing)
 	 */
 	if (CHECK_FLAG(nh->flags, NEXTHOP_FLAG_RECURSIVE)) {
-		nhe = depends_find_recursive(nh, afi);
+		nhe = depends_find_recursive(nh, afi, type);
 		strlcpy(rbuf, "(R)", sizeof(rbuf));
 	} else {
-		nhe = depends_find_singleton(nh, afi);
+		nhe = depends_find_singleton(nh, afi, type);
 		rbuf[0] = '\0';
 	}
 
@@ -1342,11 +1360,11 @@ static void depends_add(struct nhg_connected_tree_head *head,
 
 static struct nhg_hash_entry *
 depends_find_add(struct nhg_connected_tree_head *head, struct nexthop *nh,
-		 afi_t afi)
+		 afi_t afi, int type)
 {
 	struct nhg_hash_entry *depend = NULL;
 
-	depend = depends_find(nh, afi);
+	depend = depends_find(nh, afi, type);
 
 	if (IS_ZEBRA_DEBUG_NHG_DETAIL)
 		zlog_debug("%s: nh %pNHv => %p",
@@ -1378,8 +1396,9 @@ static void depends_decrement_free(struct nhg_connected_tree_head *head)
 }
 
 /* Find an nhe based on a list of nexthops */
-struct nhg_hash_entry *
-zebra_nhg_rib_find(uint32_t id, struct nexthop_group *nhg, afi_t rt_afi)
+struct nhg_hash_entry *zebra_nhg_rib_find(uint32_t id,
+					  struct nexthop_group *nhg,
+					  afi_t rt_afi, int type)
 {
 	struct nhg_hash_entry *nhe = NULL;
 	vrf_id_t vrf_id;
@@ -1391,7 +1410,7 @@ zebra_nhg_rib_find(uint32_t id, struct nexthop_group *nhg, afi_t rt_afi)
 	assert(nhg->nexthop);
 	vrf_id = !vrf_is_backend_netns() ? VRF_DEFAULT : nhg->nexthop->vrf_id;
 
-	zebra_nhg_find(&nhe, id, nhg, NULL, vrf_id, rt_afi, 0);
+	zebra_nhg_find(&nhe, id, nhg, NULL, vrf_id, rt_afi, type);
 
 	if (IS_ZEBRA_DEBUG_NHG_DETAIL)
 		zlog_debug("%s: => nhe %p (%u)",
