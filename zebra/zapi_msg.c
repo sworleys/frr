@@ -717,6 +717,32 @@ static int zsend_ipv4_nexthop_lookup_mrib(struct zserv *client,
 	return zserv_send_message(client, s);
 }
 
+static int nhg_notify(uint16_t type, uint16_t instance, uint16_t id,
+		      enum zapi_nhg_notify_owner note)
+{
+	struct zserv *client;
+	struct stream *s;
+
+	client = zserv_find_client(type, instance);
+	if (!client) {
+		if (IS_ZEBRA_DEBUG_PACKET) {
+			zlog_debug("Not Notifying Owner: %u(%u) about %u(%d)",
+				   type, instance, id, note);
+		}
+		return 0;
+	}
+
+	s = stream_new(ZEBRA_MAX_PACKET_SIZ);
+	stream_reset(s);
+
+	zclient_create_header(s, ZEBRA_NHG_NOTIFY_OWNER, VRF_DEFAULT);
+
+	stream_putw(s, id);
+	stream_put(s, &note, sizeof(note));
+
+	return zserv_send_message(client, s);
+}
+
 /*
  * Common utility send route notification, called from a path using a
  * route_entry and from a path using a dataplane context.
@@ -1661,7 +1687,9 @@ static void zread_nhg_del(ZAPI_HANDLER_ARGS)
 {
 	struct stream *s = msg;
 	uint32_t id;
+	uint16_t proto;
 
+	STREAM_GETW(s, proto);
 	STREAM_GETL(s, id);
 
 	/*
@@ -1669,7 +1697,7 @@ static void zread_nhg_del(ZAPI_HANDLER_ARGS)
 	 * id is incremented to make compiler happy right now
 	 * it should be removed in future code work.
 	 */
-	id++;
+	nhg_notify(proto, client->instance, id, ZAPI_NHG_REMOVED);
 
 	return;
 
@@ -1722,8 +1750,7 @@ static void zread_nhg_reader(ZAPI_HANDLER_ARGS)
 	/*
 	 * Install the nhg
 	 */
-        id++;
-	proto++;
+	nhg_notify(proto, client->instance, id, ZAPI_NHG_INSTALLED);
 
 	return;
 

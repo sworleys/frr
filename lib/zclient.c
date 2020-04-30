@@ -965,6 +965,7 @@ extern void zclient_nhg_del(struct zclient *zclient, uint32_t id)
 	stream_reset(s);
 	zclient_create_header(s, ZEBRA_NHG_DEL, VRF_DEFAULT);
 
+	stream_putw(s, zclient->redist_default);
 	stream_putl(s, id);
 
 	stream_putw_at(s, 0, stream_get_endp(s));
@@ -1405,6 +1406,22 @@ int zapi_pbr_rule_encode(uint8_t cmd, struct stream *s, struct pbr_rule *zrule)
 	stream_putw_at(s, 0, stream_get_endp(s));
 
 	return 0;
+}
+
+bool zapi_nhg_notify_decode(struct stream *s, uint32_t *id,
+			    enum zapi_nhg_notify_owner *note)
+{
+	uint16_t read_id;
+
+	STREAM_GETL(s, read_id);
+	STREAM_GET(note, s, sizeof(*note));
+
+	*id = read_id;
+
+	return true;
+
+stream_failure:
+	return false;
 }
 
 bool zapi_route_notify_decode(struct stream *s, struct prefix *p,
@@ -3350,6 +3367,11 @@ static int zclient_read(struct thread *thread)
 		if (zclient->rule_notify_owner)
 			(*zclient->rule_notify_owner)(command, zclient, length,
 						      vrf_id);
+		break;
+	case ZEBRA_NHG_NOTIFY_OWNER:
+		if (zclient->nhg_notify_owner)
+			(*zclient->nhg_notify_owner)(command, zclient, length,
+						     vrf_id);
 		break;
 	case ZEBRA_GET_LABEL_CHUNK:
 		if (zclient->label_chunk)

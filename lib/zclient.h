@@ -529,6 +529,13 @@ enum zapi_route_notify_owner {
 	ZAPI_ROUTE_REMOVE_FAIL,
 };
 
+enum zapi_nhg_notify_owner {
+	ZAPI_NHG_FAIL_INSTALL,
+	ZAPI_NHG_INSTALLED,
+	ZAPI_NHG_REMOVED,
+	ZAPI_NHG_REMOVE_FAIL,
+};
+
 enum zapi_rule_notify_owner {
 	ZAPI_RULE_FAIL_INSTALL,
 	ZAPI_RULE_INSTALLED,
@@ -785,6 +792,8 @@ extern int zapi_route_encode(uint8_t, struct stream *, struct zapi_route *);
 extern int zapi_route_decode(struct stream *s, struct zapi_route *api);
 extern int zapi_nexthop_decode(struct stream *s, struct zapi_nexthop *api_nh,
 			       uint32_t api_flags);
+bool zapi_nhg_notify_decode(struct stream *s, uint32_t *id,
+			    enum zapi_nhg_notify_owner *note);
 bool zapi_route_notify_decode(struct stream *s, struct prefix *p,
 			      uint32_t *tableid,
 			      enum zapi_route_notify_owner *note);
