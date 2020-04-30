@@ -2527,3 +2527,30 @@ bool zebra_nhg_kernel_nexthops_enabled(void)
 {
 	return g_nexthops_enabled;
 }
+
+/* Add NHE from upper level proto */
+struct nhg_hash_entry *zebra_nhg_proto_add(uint32_t id,
+					   struct nexthop_group *nhg, afi_t afi)
+{
+	struct nhg_hash_entry *nhe;
+
+	nhe = zebra_nhg_rib_find(id, nhg, afi);
+
+	/* TODO: Assuming valid/onlink for now */
+	zebra_nhg_set_valid(nhe);
+
+	return nhe;
+}
+
+/* Delete NHE from upper level proto */
+struct nhg_hash_entry *zebra_nhg_proto_del(uint32_t id)
+{
+	return NULL;
+}
+
+/* Replace NHE from upper level proto */
+struct nhg_hash_entry *
+zebra_nhg_proto_replace(uint32_t id, struct nexthop_group *nhg, afi_t afi)
+{
+	return NULL;
+}

@@ -1716,6 +1716,7 @@ static void zread_nhg_reader(ZAPI_HANDLER_ARGS)
 	struct nexthop_group *nhg = NULL;
 	struct prefix p;
 	uint16_t proto;
+	struct nhg_hash_entry *nhe;
 
 	memset(&p, 0, sizeof(p));
 
@@ -1725,8 +1726,9 @@ static void zread_nhg_reader(ZAPI_HANDLER_ARGS)
 	STREAM_GETL(s, id);
 	STREAM_GETW(s, nhops);
 
-	if (zserv_nexthop_num_warn(__func__, &p, nhops))
-		return;
+	// TODO: Can't use this without a prefix.
+	//if (zserv_nexthop_num_warn(__func__, &p, nhops))
+	//	return;
 
 	for (i = 0; i < nhops; i++) {
 		struct zapi_nexthop *znh = &zapi_nexthops[i];
@@ -1747,10 +1749,27 @@ static void zread_nhg_reader(ZAPI_HANDLER_ARGS)
 		return;
 
 	}
+
 	/*
 	 * Install the nhg
 	 */
 	nhg_notify(proto, client->instance, id, ZAPI_NHG_INSTALLED);
+
+	// TODO: Forcing AF_UNSPEC/AF_IP for now
+	nhe = zebra_nhg_proto_add(id, nhg, ((nhops > 1) ? AFI_UNSPEC : AFI_IP));
+
+	/* Increment now so its not deleted after all routes using removed */
+	zebra_nhg_increment_ref(nhe);
+
+	/*
+	 * TODO:
+	 * Assume fully resolved for now and install.
+	 *
+	 * Resolution is going to need some more work.
+	 */
+	zebra_nhg_install_kernel(nhe);
+
+	nexthop_group_delete(&nhg);
 
 	return;
 

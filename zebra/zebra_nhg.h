@@ -246,6 +246,42 @@ zebra_nhg_rib_find(uint32_t id, struct nexthop_group *nhg, afi_t rt_afi);
 struct nhg_hash_entry *
 zebra_nhg_rib_find_nhe(struct nhg_hash_entry *rt_nhe, afi_t rt_afi);
 
+
+/**
+ * Functions for Add/Del/Replace via protocol NHG creation.
+ *
+ * The NHEs will not be hashed. They will only be present in the
+ * ID table and therefore not sharable.
+ *
+ * It is the owning protocols job to manage these.
+ */
+
+/* 
+ * Add NHE.
+ *
+ * Returns allocated NHE on success, otherwise NULL.
+ */
+struct nhg_hash_entry *
+zebra_nhg_proto_add(uint32_t id, struct nexthop_group *nhg, afi_t afi);
+
+
+/* 
+ * Del NHE.
+ *
+ * Returns deleted NHE on success, otherwise NULL.
+ *
+ * Caller must free the NHE.
+ */
+struct nhg_hash_entry *zebra_nhg_proto_del(uint32_t id);
+
+/* 
+ * Replace NHE.
+ *
+ * Returns new NHE on success, otherwise NULL.
+ */
+struct nhg_hash_entry *
+zebra_nhg_proto_replace(uint32_t id, struct nexthop_group *nhg, afi_t afi);
+
 /* Reference counter functions */
 extern void zebra_nhg_decrement_ref(struct nhg_hash_entry *nhe);
 extern void zebra_nhg_increment_ref(struct nhg_hash_entry *nhe);
