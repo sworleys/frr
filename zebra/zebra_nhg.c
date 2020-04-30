@@ -669,22 +669,24 @@ static bool zebra_nhe_find(struct nhg_hash_entry **nhe, /* return value */
 	if (lookup->id == 0)
 		lookup->id = ++id_counter;
 
-	if (lookup->type == ZEBRA_ROUTE_NHG) {
+	if (ZEBRA_OWNED(lookup)) {
 		/*
 		 * This is a zebra hashed/owned NHG.
 		 *
 		 * It goes in HASH and ID table.
 		 */
 		newnhe = hash_get(zrouter.nhgs, lookup, zebra_nhg_hash_alloc);
-		zebra_nhg_insert_id(nhe);
+		zebra_nhg_insert_id(newnhe);
 	} else {
 		/*
 		 * This is upperproto owned NHG and should not be hashed to.
 		 *
-		 * Its only going into ID table.
+		 * It goes in ID table.
 		 */
-		newnhe = hash_get(zrouter.nhgs, lookup, zebra_nhg_hash_alloc);
+		newnhe =
+			hash_get(zrouter.nhgs_id, lookup, zebra_nhg_hash_alloc);
 	}
+
 	created = true;
 
 	/* Mail back the new object */
@@ -1028,10 +1030,10 @@ static void zebra_nhg_release(struct nhg_hash_entry *nhe)
 		if_nhg_dependents_del(nhe->ifp, nhe);
 
 	/*
-	 * If its not zebra created, we didn't store it here and have to be
+	 * If its not zebra owned, we didn't store it here and have to be
 	 * sure we don't clear one thats actually being used.
 	 */
-	if (nhe->type == ZEBRA_ROUTE_NHG)
+	if (ZEBRA_OWNED(nhe))
 		hash_release(zrouter.nhgs, nhe);
 
 	hash_release(zrouter.nhgs_id, nhe);

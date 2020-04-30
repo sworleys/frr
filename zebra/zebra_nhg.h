@@ -115,6 +115,9 @@ struct nhg_hash_entry {
 #define ZEBRA_NHG_CREATED(NHE)                                                 \
 	(((NHE->type) <= ZEBRA_ROUTE_MAX) && (NHE->type != ZEBRA_ROUTE_KERNEL))
 
+/* Is this an NHE owned by zebra and not an upper level protocol? */
+#define ZEBRA_OWNED(NHE) (NHE->type == ZEBRA_ROUTE_NHG)
+
 /*
  * Backup nexthops: this is a group object itself, so
  * that the backup nexthops can use the same code as a normal object.
