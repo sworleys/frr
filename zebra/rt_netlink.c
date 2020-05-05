@@ -1562,6 +1562,7 @@ ssize_t netlink_route_multipath(int cmd, struct zebra_dplane_ctx *ctx,
 	union g_addr src;
 	const struct prefix *p, *src_p;
 	uint32_t table_id;
+	bool is_v4_over_v6 = false;
 
 	struct {
 		struct nlmsghdr n;
@@ -1681,15 +1682,13 @@ ssize_t netlink_route_multipath(int cmd, struct zebra_dplane_ctx *ctx,
 				"netlink_route_multipath(): %pFX nhg_id is %u",
 				p, dplane_ctx_get_nhe_id(ctx));
 
-		addattr32(&req->n, datalen, RTA_NH_ID,
-			  dplane_ctx_get_nhe_id(ctx));
-
 		/* Have to determine src still */
 		for (ALL_NEXTHOPS_PTR(dplane_ctx_get_ng(ctx), nexthop)) {
-			if (setsrc)
-				break;
-
 			setsrc = nexthop_set_src(nexthop, p->family, &src);
+
+			if (is_route_v4_over_v6(req->r.rtm_family,
+						nexthop->type))
+				is_v4_over_v6 = true;
 		}
 
 		if (setsrc) {
@@ -1701,7 +1700,12 @@ ssize_t netlink_route_multipath(int cmd, struct zebra_dplane_ctx *ctx,
 					  &src.ipv6, bytelen);
 		}
 
-		return req->n.nlmsg_len;
+		if (!is_v4_over_v6) {
+			addattr32(&req->n, datalen, RTA_NH_ID,
+				  dplane_ctx_get_nhe_id(ctx));
+
+			return req->n.nlmsg_len;
+		}
 	}
 
 	/* Count overall nexthops so we can decide whether to use singlepath
