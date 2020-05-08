@@ -51,7 +51,7 @@ uint32_t id_counter;
 
 /*  */
 static bool g_nexthops_enabled = true;
-static bool proto_nexthops_only = false;
+static bool proto_nexthops_only = true;
 
 static struct nhg_hash_entry *depends_find(const struct nexthop *nh, afi_t afi,
 					   int type);
