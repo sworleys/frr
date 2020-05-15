@@ -317,6 +317,7 @@ typedef struct rib_tables_iter_t_ {
 enum rib_update_event {
 	RIB_UPDATE_KERNEL,
 	RIB_UPDATE_RMAP_CHANGE,
+	RIB_UPDATE_NHG_REPLACE,
 	RIB_UPDATE_OTHER,
 	RIB_UPDATE_MAX
 };
@@ -383,8 +384,10 @@ extern struct route_entry *rib_match_ipv4_multicast(vrf_id_t vrf_id,
 extern struct route_entry *rib_lookup_ipv4(struct prefix_ipv4 *p,
 					   vrf_id_t vrf_id);
 
-extern void rib_update(enum rib_update_event event);
-extern void rib_update_vrf(vrf_id_t vrf_id, enum rib_update_event event);
+extern void rib_update(enum rib_update_event event, void *data);
+extern void rib_update_no_limit(enum rib_update_event event, void *data);
+extern void rib_update_vrf(vrf_id_t vrf_id, enum rib_update_event event,
+			   void *data);
 extern void rib_update_table(struct route_table *table,
 			     enum rib_update_event event);
 extern int rib_sweep_route(struct thread *t);

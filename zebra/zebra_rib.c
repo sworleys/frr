@@ -223,7 +223,7 @@ int route_entry_update_nhe(struct route_entry *re, struct nhg_hash_entry *new)
 		goto done;
 	}
 
-	if ((re->nhe_id != 0) && (re->nhe_id != new->id)) {
+	if ((re->nhe_id != 0) && (re->nhe != new)) {
 		old = re->nhe;
 
 		route_entry_attach_ref(re, new);
@@ -3096,6 +3096,9 @@ static const char *rib_update_event2str(enum rib_update_event event)
 	case RIB_UPDATE_RMAP_CHANGE:
 		ret = "RIB_UPDATE_RMAP_CHANGE";
 		break;
+	case RIB_UPDATE_NHG_REPLACE:
+		ret = "RIB_UPDATE_NHG_REPLACE";
+		break;
 	case RIB_UPDATE_OTHER:
 		ret = "RIB_UPDATE_OTHER";
 		break;
@@ -3106,12 +3109,44 @@ static const char *rib_update_event2str(enum rib_update_event event)
 	return ret;
 }
 
+struct rib_update_ctx {
+	enum rib_update_event event;
+	bool vrf_all;
+	vrf_id_t vrf_id;
+	union {
+		uint32_t nhg_id;
+	} u;
+};
+
+/* Update route NHG pointers after matching NHG ID replace issued */
+static void rib_update_route_node_nhg_replace(struct route_node *rn,
+					      struct nhg_hash_entry *nhe)
+{
+	struct route_entry *re, *next;
+
+	if (!nhe)
+		return;
+
+	RNODE_FOREACH_RE_SAFE (rn, re, next) {
+		if (re->nhe_id == nhe->id)
+			route_entry_update_nhe(re, nhe);
+	}
+}
 
 /* Schedule route nodes to be processed if they match the type */
 static void rib_update_route_node(struct route_node *rn, int type)
 {
 	struct route_entry *re, *next;
 	bool re_changed = false;
+
+	/*
+	 * If we are looking at a route node and the node
+	 * has already been queued  we don't
+	 * need to queue it up again
+	 */
+	if (rn->info
+	    && CHECK_FLAG(rib_dest_from_rnode(rn)->flags, RIB_ROUTE_ANY_QUEUED))
+		return;
 
 	RNODE_FOREACH_RE_SAFE (rn, re, next) {
 		if (type == ZEBRA_ROUTE_ALL || type == re->type) {
@@ -3124,10 +3159,11 @@ static void rib_update_route_node(struct route_node *rn, int type)
 		rib_queue_add(rn);
 }
 
-/* Schedule routes of a particular table (address-family) based on event. */
-void rib_update_table(struct route_table *table, enum rib_update_event event)
+static void rib_update_table_internal(struct route_table *table,
+				      const struct rib_update_ctx *ctx)
 {
 	struct route_node *rn;
+	struct nhg_hash_entry *nhe;
 
 	if (IS_ZEBRA_DEBUG_EVENT) {
 		struct zebra_vrf *zvrf;
@@ -3143,26 +3179,22 @@ void rib_update_table(struct route_table *table, enum rib_update_event event)
 				   ((struct rib_table_info *)table->info)->afi)
 				       : "Unknown",
 			   VRF_LOGNAME(vrf), zvrf ? zvrf->table_id : 0,
-			   rib_update_event2str(event));
+			   rib_update_event2str(ctx->event));
 	}
+
+	if (ctx->event == RIB_UPDATE_NHG_REPLACE)
+		nhe = zebra_nhg_lookup_id(ctx->u.nhg_id);
 
 	/* Walk all routes and queue for processing, if appropriate for
 	 * the trigger event.
 	 */
 	for (rn = route_top(table); rn; rn = srcdest_route_next(rn)) {
-		/*
-		 * If we are looking at a route node and the node
-		 * has already been queued  we don't
-		 * need to queue it up again
-		 */
-		if (rn->info
-		    && CHECK_FLAG(rib_dest_from_rnode(rn)->flags,
-				  RIB_ROUTE_ANY_QUEUED))
-			continue;
-
-		switch (event) {
+		switch (ctx->event) {
 		case RIB_UPDATE_KERNEL:
 			rib_update_route_node(rn, ZEBRA_ROUTE_KERNEL);
+			break;
+		case RIB_UPDATE_NHG_REPLACE:
+			rib_update_route_node_nhg_replace(rn, nhe);
 			break;
 		case RIB_UPDATE_RMAP_CHANGE:
 		case RIB_UPDATE_OTHER:
@@ -3173,46 +3205,50 @@ void rib_update_table(struct route_table *table, enum rib_update_event event)
 		}
 	}
 }
+/* Schedule routes of a particular table (address-family) based on event. */
+void rib_update_table(struct route_table *table, enum rib_update_event event)
+{
+	struct rib_update_ctx ctx = {};
 
-static void rib_update_handle_vrf(vrf_id_t vrf_id, enum rib_update_event event)
+	ctx.event = event;
+
+	rib_update_table_internal(table, &ctx);
+}
+
+static void rib_update_handle_vrf(const struct rib_update_ctx *ctx)
 {
 	struct route_table *table;
 
 	if (IS_ZEBRA_DEBUG_EVENT)
 		zlog_debug("%s: Handling VRF %s event %s", __func__,
-			   vrf_id_to_name(vrf_id), rib_update_event2str(event));
+			   vrf_id_to_name(ctx->vrf_id),
+			   rib_update_event2str(ctx->event));
 
 	/* Process routes of interested address-families. */
-	table = zebra_vrf_table(AFI_IP, SAFI_UNICAST, vrf_id);
+	table = zebra_vrf_table(AFI_IP, SAFI_UNICAST, ctx->vrf_id);
 	if (table)
-		rib_update_table(table, event);
+		rib_update_table_internal(table, ctx);
 
-	table = zebra_vrf_table(AFI_IP6, SAFI_UNICAST, vrf_id);
+	table = zebra_vrf_table(AFI_IP6, SAFI_UNICAST, ctx->vrf_id);
 	if (table)
-		rib_update_table(table, event);
+		rib_update_table_internal(table, ctx);
 }
 
-static void rib_update_handle_vrf_all(enum rib_update_event event)
+static void rib_update_handle_vrf_all(const struct rib_update_ctx *ctx)
 {
 	struct zebra_router_table *zrt;
 
 	if (IS_ZEBRA_DEBUG_EVENT)
 		zlog_debug("%s: Handling VRF (ALL) event %s", __func__,
-			   rib_update_event2str(event));
+			   rib_update_event2str(ctx->event));
 
 	/* Just iterate over all the route tables, rather than vrf lookups */
 	RB_FOREACH (zrt, zebra_router_table_head, &zrouter.tables)
-		rib_update_table(zrt->table, event);
+		rib_update_table_internal(zrt->table, ctx);
 }
 
-struct rib_update_ctx {
-	enum rib_update_event event;
-	bool vrf_all;
-	vrf_id_t vrf_id;
-};
-
-static struct rib_update_ctx *rib_update_ctx_init(vrf_id_t vrf_id,
-						  enum rib_update_event event)
+static struct rib_update_ctx *
+rib_update_ctx_init(vrf_id_t vrf_id, enum rib_update_event event, void *data)
 {
 	struct rib_update_ctx *ctx;
 
@@ -3220,6 +3256,18 @@ static struct rib_update_ctx *rib_update_ctx_init(vrf_id_t vrf_id,
 
 	ctx->event = event;
 	ctx->vrf_id = vrf_id;
+
+	switch (event) {
+	case RIB_UPDATE_NHG_REPLACE:
+		ctx->u.nhg_id = *(uint32_t *)data;
+		break;
+	case RIB_UPDATE_KERNEL:
+	case RIB_UPDATE_RMAP_CHANGE:
+	case RIB_UPDATE_OTHER:
+		break;
+	default:
+		break;
+	}
 
 	return ctx;
 }
@@ -3236,9 +3284,9 @@ static int rib_update_handler(struct thread *thread)
 	ctx = THREAD_ARG(thread);
 
 	if (ctx->vrf_all)
-		rib_update_handle_vrf_all(ctx->event);
+		rib_update_handle_vrf_all(ctx);
 	else
-		rib_update_handle_vrf(ctx->vrf_id, ctx->event);
+		rib_update_handle_vrf(ctx);
 
 	rib_update_ctx_fini(&ctx);
 
@@ -3252,11 +3300,11 @@ static int rib_update_handler(struct thread *thread)
 static struct thread *t_rib_update_threads[RIB_UPDATE_MAX];
 
 /* Schedule a RIB update event for specific vrf */
-void rib_update_vrf(vrf_id_t vrf_id, enum rib_update_event event)
+void rib_update_vrf(vrf_id_t vrf_id, enum rib_update_event event, void *data)
 {
 	struct rib_update_ctx *ctx;
 
-	ctx = rib_update_ctx_init(vrf_id, event);
+	ctx = rib_update_ctx_init(vrf_id, event, data);
 
 	/* Don't worry about making sure multiple rib updates for specific vrf
 	 * are scheduled at once for now. If it becomes a problem, we can use a
@@ -3271,21 +3319,33 @@ void rib_update_vrf(vrf_id_t vrf_id, enum rib_update_event event)
 			   rib_update_event2str(event));
 }
 
-/* Schedule a RIB update event for all vrfs */
-void rib_update(enum rib_update_event event)
+static void rib_update_internal(enum rib_update_event event, void *data,
+				bool limit)
 {
 	struct rib_update_ctx *ctx;
 
-	ctx = rib_update_ctx_init(0, event);
+	ctx = rib_update_ctx_init(0, event, data);
 
 	ctx->vrf_all = true;
 
 	if (!thread_add_event(zrouter.master, rib_update_handler, ctx, 0,
-			      &t_rib_update_threads[event]))
+			      (limit ? &t_rib_update_threads[event] : NULL))) {
 		rib_update_ctx_fini(&ctx); /* Already scheduled */
-	else if (IS_ZEBRA_DEBUG_EVENT)
+	} else if (IS_ZEBRA_DEBUG_EVENT)
 		zlog_debug("%s: Scheduled VRF (ALL), event %s", __func__,
 			   rib_update_event2str(event));
+}
+
+/* Schedule a RIB update event for all vrfs */
+void rib_update(enum rib_update_event event, void *data)
+{
+	rib_update_internal(event, data, true);
+}
+
+/* Schedule a RIB update event for all vrfs without limiting threads */
+void rib_update_no_limit(enum rib_update_event event, void *data)
+{
+	rib_update_internal(event, data, false);
 }
 
 /* Delete self installed routes after zebra is relaunched.  */

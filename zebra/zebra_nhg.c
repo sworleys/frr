@@ -2646,7 +2646,8 @@ struct nhg_hash_entry *zebra_nhg_proto_add(uint32_t id, int type,
 
 	if (old) {
 		/* Now release depends/dependents in old one */
-		zebra_nhg_release_all_deps(old);
+		// zebra_nhg_release_all_deps(old);
+		rib_update_no_limit(RIB_UPDATE_NHG_REPLACE, &new->id);
 	}
 
 	if (!new)
