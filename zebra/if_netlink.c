@@ -1143,7 +1143,7 @@ int netlink_interface_addr(struct nlmsghdr *h, ns_id_t ns_id, int startup)
 	 * so we have to re-process routes it owns (i.e. kernel routes)
 	 */
 	if (h->nlmsg_type != RTM_NEWADDR)
-		rib_update(RIB_UPDATE_KERNEL, NULL);
+		rib_update(RIB_UPDATE_KERNEL);
 
 	return 0;
 }
@@ -1374,7 +1374,7 @@ int netlink_link_change(struct nlmsghdr *h, ns_id_t ns_id, int startup)
 							"Intf %s(%u) has gone DOWN",
 							name, ifp->ifindex);
 					if_down(ifp);
-					rib_update(RIB_UPDATE_KERNEL, NULL);
+					rib_update(RIB_UPDATE_KERNEL);
 				} else if (if_is_operative(ifp)) {
 					/* Must notify client daemons of new
 					 * interface status. */
@@ -1414,7 +1414,7 @@ int netlink_link_change(struct nlmsghdr *h, ns_id_t ns_id, int startup)
 							"Intf %s(%u) has gone DOWN",
 							name, ifp->ifindex);
 					if_down(ifp);
-					rib_update(RIB_UPDATE_KERNEL, NULL);
+					rib_update(RIB_UPDATE_KERNEL);
 				}
 			}
 
