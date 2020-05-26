@@ -2125,7 +2125,7 @@ int zebra_evpn_add_update_local_mac(struct zebra_vrf *zvrf, zebra_evpn_t *zevpn,
 	 */
 	if ((old_local_inactive != local_inactive)
 	    || (new_bgp_ready != old_bgp_ready)) {
-		if (IS_ZEBRA_DEBUG_EVPN_MH_MAC)
+		//if (IS_ZEBRA_DEBUG_EVPN_MH_MAC)
 			zlog_debug(
 				"local mac vni %u mac %s es %s seq %d f 0x%x%s",
 				zevpn->vni,
@@ -2141,6 +2141,9 @@ int zebra_evpn_add_update_local_mac(struct zebra_vrf *zvrf, zebra_evpn_t *zevpn,
 		inform_client = true;
 		upd_neigh = true;
 	}
+
+	zlog_debug("%s is_dup_detect %u es_change %u inform_client %u upd_neigh %u",
+		   __func__, is_dup_detect, es_change, inform_client , upd_neigh);
 
 	/* Inform dataplane if required. */
 	if (inform_dataplane)
