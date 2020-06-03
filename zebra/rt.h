@@ -31,6 +31,10 @@
 #include "zebra/zebra_mpls.h"
 #include "zebra/zebra_dplane.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define RKERNEL_ROUTE(type) ((type) == ZEBRA_ROUTE_KERNEL)
 
 #define RSYSTEM_ROUTE(type)                                                    \
@@ -38,8 +42,8 @@
 
 
 /*
- * Update or delete a route, nexthop, LSP, or pseudowire from the kernel,
- * using info from a dataplane context.
+ * Update or delete a route, nexthop, LSP, pseudowire, or vxlan MAC from the
+ * kernel, using info from a dataplane context.
  */
 extern enum zebra_dplane_result kernel_route_update(
 	struct zebra_dplane_ctx *ctx);
@@ -52,8 +56,15 @@ extern enum zebra_dplane_result kernel_lsp_update(
 
 enum zebra_dplane_result kernel_pw_update(struct zebra_dplane_ctx *ctx);
 
+enum zebra_dplane_result kernel_br_port_update_ctx(
+	struct zebra_dplane_ctx *ctx);
+
 enum zebra_dplane_result kernel_address_update_ctx(
 	struct zebra_dplane_ctx *ctx);
+
+enum zebra_dplane_result kernel_mac_update_ctx(struct zebra_dplane_ctx *ctx);
+
+enum zebra_dplane_result kernel_neigh_update_ctx(struct zebra_dplane_ctx *ctx);
 
 extern int kernel_neigh_update(int cmd, int ifindex, uint32_t addr, char *lla,
 			       int llalen, ns_id_t ns_id);
@@ -62,23 +73,8 @@ extern int kernel_interface_set_master(struct interface *master,
 
 extern int mpls_kernel_init(void);
 
-extern uint32_t kernel_get_speed(struct interface *ifp);
+extern uint32_t kernel_get_speed(struct interface *ifp, int *error);
 extern int kernel_get_ipmr_sg_stats(struct zebra_vrf *zvrf, void *mroute);
-extern int kernel_add_vtep(vni_t vni, struct interface *ifp,
-			   struct in_addr *vtep_ip);
-extern int kernel_del_vtep(vni_t vni, struct interface *ifp,
-			   struct in_addr *vtep_ip);
-extern int kernel_add_mac(struct interface *ifp, vlanid_t vid,
-			  struct ethaddr *mac, struct in_addr vtep_ip,
-			  bool sticky);
-extern int kernel_del_mac(struct interface *ifp, vlanid_t vid,
-			  struct ethaddr *mac, struct in_addr vtep_ip);
-
-extern int kernel_add_neigh(struct interface *ifp, struct ipaddr *ip,
-			    struct ethaddr *mac, uint8_t flags);
-extern int kernel_del_neigh(struct interface *ifp, struct ipaddr *ip);
-extern int kernel_upd_neigh(struct interface *ifp, struct ipaddr *ip,
-                           struct ethaddr *mac, uint8_t flags, uint16_t state);
 
 /*
  * Southbound Initialization routines to get initial starting
@@ -98,5 +94,14 @@ extern void neigh_read_for_vlan(struct zebra_ns *zns, struct interface *ifp);
 extern void neigh_read_specific_ip(struct ipaddr *ip,
 				   struct interface *vlan_if);
 extern void route_read(struct zebra_ns *zns);
+extern int kernel_upd_mac_nh(uint32_t nh_id, struct in_addr vtep_ip);
+extern int kernel_del_mac_nh(uint32_t nh_id);
+extern int kernel_upd_mac_nhg(uint32_t nhg_id, uint32_t nh_cnt,
+		struct nh_grp *nh_ids);
+extern int kernel_del_mac_nhg(uint32_t nhg_id);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _ZEBRA_RT_H */

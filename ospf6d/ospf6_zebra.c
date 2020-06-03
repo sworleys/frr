@@ -64,10 +64,9 @@ static int ospf6_router_id_update_zebra(ZAPI_CALLBACK_ARGS)
 	if (IS_OSPF6_DEBUG_ZEBRA(RECV)) {
 		char buf[INET_ADDRSTRLEN];
 
-		zlog_debug("%s: zebra router-id %s update",
-			   __PRETTY_FUNCTION__,
-			   inet_ntop(AF_INET, &router_id.u.prefix4,
-				     buf, INET_ADDRSTRLEN));
+		zlog_debug("%s: zebra router-id %s update", __func__,
+			   inet_ntop(AF_INET, &router_id.u.prefix4, buf,
+				     INET_ADDRSTRLEN));
 	}
 
 	ospf6_router_id_update();
@@ -143,7 +142,7 @@ static int ospf6_zebra_if_address_update_delete(ZAPI_CALLBACK_ARGS)
 		ospf6_interface_state_update(c->ifp);
 	}
 
-	connected_free(c);
+	connected_free(&c);
 
 	return 0;
 }
@@ -172,8 +171,8 @@ static int ospf6_zebra_read_route(ZAPI_CALLBACK_ARGS)
 
 	if (IS_OSPF6_DEBUG_ZEBRA(RECV)) {
 		char prefixstr[PREFIX2STR_BUFFER], nexthopstr[128];
-		prefix2str((struct prefix *)&api.prefix, prefixstr,
-			   sizeof(prefixstr));
+
+		prefix2str(&api.prefix, prefixstr, sizeof(prefixstr));
 		inet_ntop(AF_INET6, nexthop, nexthopstr, sizeof(nexthopstr));
 
 		zlog_debug(
@@ -257,7 +256,7 @@ static void ospf6_zebra_route_update(int type, struct ospf6_route *request)
 	    && ospf6_route_is_same(request, request->next)) {
 		if (IS_OSPF6_DEBUG_ZEBRA(SEND))
 			zlog_debug(
-				"  Best-path removal resulted Sencondary addition");
+				"  Best-path removal resulted Secondary addition");
 		type = ADD;
 		request = request->next;
 	}
@@ -520,7 +519,7 @@ uint8_t ospf6_distance_apply(struct prefix_ipv6 *p, struct ospf6_route * or)
 static void ospf6_zebra_connected(struct zclient *zclient)
 {
 	/* Send the client registration */
-	bfd_client_sendmsg(zclient, ZEBRA_BFD_CLIENT_REGISTER);
+	bfd_client_sendmsg(zclient, ZEBRA_BFD_CLIENT_REGISTER, VRF_DEFAULT);
 
 	zclient_send_reg_requests(zclient, VRF_DEFAULT);
 }

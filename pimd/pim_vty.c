@@ -39,6 +39,7 @@
 #include "pim_msdp.h"
 #include "pim_ssm.h"
 #include "pim_bfd.h"
+#include "pim_bsm.h"
 #include "pim_vxlan.h"
 
 int pim_debug_config_write(struct vty *vty)
@@ -116,8 +117,13 @@ int pim_debug_config_write(struct vty *vty)
 		++writes;
 	}
 
-	if (PIM_DEBUG_MLAG) {
-		vty_out(vty, "debug pim mlag\n");
+        if (PIM_DEBUG_MLAG) {
+                vty_out(vty, "debug pim mlag\n");
+                ++writes;
+        }
+
+	if (PIM_DEBUG_BSM) {
+		vty_out(vty, "debug pim bsm\n");
 		++writes;
 	}
 
@@ -208,6 +214,11 @@ int pim_global_config_write_worker(struct pim_instance *pim, struct vty *vty)
 	if (ssm->plist_name) {
 		vty_out(vty, "%sip pim ssm prefix-list %s\n", spaces,
 			ssm->plist_name);
+		++writes;
+	}
+	if (pim->register_plist) {
+		vty_out(vty, "%sip pim register-accept-list %s\n", spaces,
+			pim->register_plist);
 		++writes;
 	}
 	if (pim->spt.switchover == PIM_SPT_INFINITY) {
@@ -376,13 +387,19 @@ int pim_interface_config_write(struct vty *vty)
 							ij->group_addr,
 							group_str,
 							sizeof(group_str));
-						inet_ntop(AF_INET,
-							  &ij->source_addr,
-							  source_str,
-							  sizeof(source_str));
-						vty_out(vty,
-							" ip igmp join %s %s\n",
-							group_str, source_str);
+						if (ij->source_addr.s_addr == INADDR_ANY) {
+							vty_out(vty,
+								" ip igmp join %s\n",
+								group_str);
+						} else {
+							inet_ntop(AF_INET,
+								  &ij->source_addr,
+								  source_str,
+								  sizeof(source_str));
+							vty_out(vty,
+								" ip igmp join %s %s\n",
+								group_str, source_str);
+						}
 						++writes;
 					}
 				}
@@ -400,7 +417,10 @@ int pim_interface_config_write(struct vty *vty)
 
 				writes +=
 					pim_static_write_mroute(pim, vty, ifp);
+				pim_bsm_write_config(vty, ifp);
+				++writes;
 				pim_bfd_write_config(vty, ifp);
+				++writes;
 			}
 			vty_endframe(vty, "!\n");
 			++writes;

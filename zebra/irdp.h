@@ -28,6 +28,10 @@
 
 #include "lib/vty.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* ICMP Messages */
 #ifndef ICMP_ROUTERADVERT
 #define ICMP_ROUTERADVERT 9
@@ -47,7 +51,7 @@
 #endif /* INADDR_ALLRTRS_GROUP */
 
 /* Default irdp packet interval */
-#define IRDP_DEFAULT_INTERVAL 300 
+#define IRDP_DEFAULT_INTERVAL 300
 
 /* Router constants from RFC1256 */
 #define MAX_INITIAL_ADVERT_INTERVAL 16
@@ -119,10 +123,10 @@ struct irdp_interface {
 #define IF_ACTIVE               (1<<0) /* ICMP Active */
 #define IF_BROADCAST            (1<<1) /* 255.255.255.255 */
 #define IF_SOLICIT              (1<<2) /* Solicit active */
-#define IF_DEBUG_MESSAGES       (1<<3) 
-#define IF_DEBUG_PACKET         (1<<4) 
-#define IF_DEBUG_MISC           (1<<5) 
-#define IF_SHUTDOWN             (1<<6) 
+#define IF_DEBUG_MESSAGES       (1<<3)
+#define IF_DEBUG_PACKET         (1<<4)
+#define IF_DEBUG_MISC           (1<<5)
+#define IF_SHUTDOWN             (1<<6)
 
 	struct interface *ifp;
 	struct thread *t_advertise;
@@ -147,5 +151,8 @@ extern int irdp_read_raw(struct thread *r);
 extern void send_packet(struct interface *ifp, struct stream *s, uint32_t dst,
 			struct prefix *p, uint32_t ttl);
 
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _IRDP_H */

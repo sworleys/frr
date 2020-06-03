@@ -25,9 +25,15 @@
 #include "redistribute.h"
 #include "vrf.h"
 #include "hook.h"
+#include "bitfield.h"
 
 #include "zebra/zebra_l2.h"
 #include "zebra/zebra_nhg_private.h"
+#include "zebra/zebra_router.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* For interface multicast configuration. */
 #define IF_ZEBRA_MULTICAST_UNSPEC 0
@@ -37,6 +43,8 @@
 /* For interface shutdown configuration. */
 #define IF_ZEBRA_SHUTDOWN_OFF    0
 #define IF_ZEBRA_SHUTDOWN_ON     1
+
+#define IF_VLAN_BITMAP_MAX 4096
 
 #if defined(HAVE_RTADV)
 /* Router advertisement parameter.  From RFC4861, RFC6275 and RFC4191. */
@@ -113,6 +121,7 @@ struct rtadvconf {
 	   Default: The value specified in the "Assigned Numbers" RFC
 	   [ASSIGNED] that was in effect at the time of implementation. */
 	int AdvCurHopLimit;
+#define RTADV_DEFAULT_HOPLIMIT 64 /* 64 hops */
 
 	/* The value to be placed in the Router Lifetime field of Router
 	   Advertisements sent from the interface, in seconds.  MUST be
@@ -170,6 +179,22 @@ struct rtadvconf {
 #define RTADV_PREF_MEDIUM 0x0 /* Per RFC4191. */
 
 	/*
+	 * List of recursive DNS servers to include in the RDNSS option.
+	 * See [RFC8106 5.1]
+	 *
+	 * Default: empty list; do not emit RDNSS option
+	 */
+	struct list *AdvRDNSSList;
+
+	/*
+	 * List of DNS search domains to include in the DNSSL option.
+	 * See [RFC8106 5.2]
+	 *
+	 * Default: empty list; do not emit DNSSL option
+	 */
+	struct list *AdvDNSSLList;
+
+	/*
 	 * rfc4861 states RAs must be sent at least 3 seconds apart.
 	 * We allow faster retransmits to speed up convergence but can
 	 * turn that capability off to meet the rfc if needed.
@@ -188,6 +213,41 @@ struct rtadvconf {
 
 #define RTADV_FAST_REXMIT_PERIOD 1 /* 1 sec */
 #define RTADV_NUM_FAST_REXMITS   4 /* Fast Rexmit RA 4 times on certain events */
+};
+
+struct rtadv_rdnss {
+	/* Address of recursive DNS server to advertise */
+	struct in6_addr addr;
+
+	/*
+	 * Lifetime in seconds; all-ones means infinity, zero
+	 * stop using it.
+	 */
+	uint32_t lifetime;
+
+	/* If lifetime not set, use a default of 3*MaxRtrAdvInterval */
+	int lifetime_set;
+};
+
+/*
+ * [RFC1035 2.3.4] sets the maximum length of a domain name (a sequence of
+ * labels, each prefixed by a length octet) at 255 octets.
+ */
+#define RTADV_MAX_ENCODED_DOMAIN_NAME 255
+
+struct rtadv_dnssl {
+	/* Domain name without trailing root zone dot (NUL-terminated) */
+	char name[RTADV_MAX_ENCODED_DOMAIN_NAME - 1];
+
+	/* Name encoded as in [RFC1035 3.1] */
+	uint8_t encoded_name[RTADV_MAX_ENCODED_DOMAIN_NAME];
+
+	/* Actual length of encoded_name */
+	size_t encoded_len;
+
+	/* Lifetime as for RDNSS */
+	uint32_t lifetime;
+	int lifetime_set;
 };
 
 #endif /* HAVE_RTADV */
@@ -216,8 +276,33 @@ typedef enum {
 
 struct irdp_interface;
 
+/* Ethernet segment info used for setting up EVPN multihoming */
+struct zebra_evpn_es;
+struct zebra_es_if_info {
+	struct ethaddr sysmac;
+	uint32_t lid; /* local-id; has to be unique per-ES-sysmac */
+	uint16_t df_pref;
+	struct zebra_evpn_es *es; /* local ES */
+};
+
+enum zebra_if_flags {
+	/* device has been configured as an uplink for
+	 * EVPN multihoming
+	 */
+	ZIF_FLAG_EVPN_MH_UPLINK = (1 << 0),
+	ZIF_FLAG_EVPN_MH_UPLINK_OPER_UP = (1 << 1),
+
+	/* Dataplane protodown-on */
+	ZIF_FLAG_PROTODOWN = (1 << 2)
+};
+
 /* `zebra' daemon local interface structure. */
 struct zebra_if {
+	/* back pointer to the interface */
+	struct interface *ifp;
+
+	enum zebra_if_flags flags;
+
 	/* Shutdown configuration. */
 	uint8_t shutdown;
 
@@ -290,6 +375,21 @@ struct zebra_if {
 	struct zebra_l2info_brslave brslave_info;
 
 	struct zebra_l2info_bondslave bondslave_info;
+	struct zebra_l2info_bond bond_info;
+
+	/* ethernet segment */
+	struct zebra_es_if_info es_info;
+
+	/* bitmap of vlans associated with this interface */
+	bitfield_t vlan_bitmap;
+
+	/* An interface can be error-disabled if a protocol (such as EVPN or
+	 * VRRP) detects a problem with keeping it operationally-up.
+	 * If any of the protodown bits are set protodown-on is programmed
+	 * in the dataplane. This results in a carrier/L1 down on the
+	 * physical device.
+	 */
+	enum protodown_reasons protodown_rc;
 
 	/* Link fields - for sub-interfaces. */
 	ifindex_t link_ifindex;
@@ -314,17 +414,6 @@ DECLARE_HOOK(zebra_if_extra_info, (struct vty * vty, struct interface *ifp),
 DECLARE_HOOK(zebra_if_config_wr, (struct vty * vty, struct interface *ifp),
 	     (vty, ifp))
 
-static inline void zebra_if_set_ziftype(struct interface *ifp,
-					zebra_iftype_t zif_type,
-					zebra_slave_iftype_t zif_slave_type)
-{
-	struct zebra_if *zif;
-
-	zif = (struct zebra_if *)ifp->info;
-	zif->zif_type = zif_type;
-	zif->zif_slave_type = zif_slave_type;
-}
-
 #define IS_ZEBRA_IF_VRF(ifp)                                                   \
 	(((struct zebra_if *)(ifp->info))->zif_type == ZEBRA_IF_VRF)
 
@@ -342,6 +431,9 @@ static inline void zebra_if_set_ziftype(struct interface *ifp,
 
 #define IS_ZEBRA_IF_VETH(ifp)                                               \
 	(((struct zebra_if *)(ifp->info))->zif_type == ZEBRA_IF_VETH)
+
+#define IS_ZEBRA_IF_BOND(ifp)                                               \
+	(((struct zebra_if *)(ifp->info))->zif_type == ZEBRA_IF_BOND)
 
 #define IS_ZEBRA_IF_BRIDGE_SLAVE(ifp)					\
 	(((struct zebra_if *)(ifp->info))->zif_slave_type                      \
@@ -395,6 +487,10 @@ extern unsigned int if_nhg_dependents_count(const struct interface *ifp);
 extern bool if_nhg_dependents_is_empty(const struct interface *ifp);
 
 extern void vrf_add_update(struct vrf *vrfp);
+extern void zebra_l2_map_slave_to_bond(struct zebra_if *zif, vrf_id_t vrf);
+extern void zebra_l2_unmap_slave_from_bond(struct zebra_if *zif);
+extern char *zebra_protodown_rc_str(enum protodown_reasons protodown_rc,
+		char *pd_buf, uint32_t pd_buf_len);
 
 #ifdef HAVE_PROC_NET_DEV
 extern void ifstat_update_proc(void);
@@ -409,5 +505,9 @@ extern int interface_list_proc(void);
 #ifdef HAVE_PROC_NET_IF_INET6
 extern int ifaddr_proc_ipv6(void);
 #endif /* HAVE_PROC_NET_IF_INET6 */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _ZEBRA_INTERFACE_H */

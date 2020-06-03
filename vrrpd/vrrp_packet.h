@@ -28,8 +28,6 @@
 
 #define VRRP_TYPE_ADVERTISEMENT 1
 
-extern const char *vrrp_packet_names[16];
-
 /*
  * Shared header for VRRPv2/v3 packets.
  */
@@ -134,6 +132,9 @@ ssize_t vrrp_pkt_adver_build(struct vrrp_pkt **pkt, struct ipaddr *src,
 			     uint8_t version, uint8_t vrid, uint8_t prio,
 			     uint16_t max_adver_int, uint8_t numip,
 			     struct ipaddr **ips);
+
+/* free memory allocated by vrrp_pkt_adver_build's pkt arg */
+void vrrp_pkt_free(struct vrrp_pkt *pkt);
 
 /*
  * Dumps a VRRP ADVERTISEMENT packet to a string.

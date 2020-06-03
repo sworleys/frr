@@ -51,9 +51,15 @@ DEFINE_HOOK(ospf6_neighbor_change,
 
 unsigned char conf_debug_ospf6_neighbor = 0;
 
-const char *ospf6_neighbor_state_str[] = {
+const char *const ospf6_neighbor_state_str[] = {
 	"None",    "Down",     "Attempt", "Init", "Twoway",
 	"ExStart", "ExChange", "Loading", "Full", NULL};
+
+const char *const ospf6_neighbor_event_str[] = {
+	"NoEvent",      "HelloReceived", "2-WayReceived",   "NegotiationDone",
+	"ExchangeDone", "LoadingDone",   "AdjOK?",	  "SeqNumberMismatch",
+	"BadLSReq",     "1-WayReceived", "InactivityTimer",
+};
 
 int ospf6_neighbor_cmp(void *va, void *vb)
 {
@@ -618,7 +624,7 @@ static void ospf6_neighbor_show(struct vty *vty, struct ospf6_neighbor *on)
 	snprintf(deadtime, sizeof(deadtime), "%02ld:%02ld:%02ld", h, m, s);
 
 	/* Neighbor State */
-	if (if_is_pointopoint(on->ospf6_if->interface))
+	if (on->ospf6_if->type == OSPF_IFTYPE_POINTOPOINT)
 		snprintf(nstate, sizeof(nstate), "PointToPoint");
 	else {
 		if (on->router_id == on->drouter)

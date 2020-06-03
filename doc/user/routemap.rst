@@ -7,6 +7,9 @@ Route Maps
 Route maps provide a means to both filter and/or apply actions to route, hence
 allowing policy to be applied to routes.
 
+For a route reflector to apply a ``route-map`` to reflected routes, be sure to
+include ``bgp route-reflector allow-outbound-policy`` in ``router bgp`` mode.
+
 Route maps are an ordered list of route map entries. Each entry may specify up
 to four distinct sets of clauses:
 
@@ -38,11 +41,12 @@ to four distinct sets of clauses:
       the ordered entry in the route-map. See below.
 
    Call Action
-      Call to another route-map, after any :term:`Set Actions` have been carried out.
-      If the route-map called returns `deny` then processing of the route-map
-      finishes and the route is denied, regardless of the :term:Matching Policy` or
-      the :term:`Exit Policy`. If the called route-map returns `permit`, then
-      :term:`Matching Policy` and :term:`Exit Policy` govern further behaviour, as normal.
+      Call to another route-map, after any :term:`Set Actions` have been
+      carried out.  If the route-map called returns `deny` then processing of
+      the route-map finishes and the route is denied, regardless of the
+      :term:`Matching Policy` or the :term:`Exit Policy`. If the called
+      route-map returns `permit`, then :term:`Matching Policy` and :term:`Exit
+      Policy` govern further behaviour, as normal.
 
    Exit Policy
       An entry may, optionally, specify an alternative :dfn:`Exit Policy` to
@@ -147,13 +151,18 @@ Route Map Match Command
 
    Matches the specified `prefix-len`. This is a Zebra specific command.
 
-.. index:: match ip next-hop IPV4_ADDR
-.. clicmd:: match ip next-hop IPV4_ADDR
+.. index:: match ip next-hop address IPV4_ADDR
+.. clicmd:: match ip next-hop address IPV4_ADDR
 
-   Matches the specified `ipv4_addr`.
+   This is a BGP specific match command. Matches the specified `ipv4_addr`.
 
-.. index:: match aspath AS_PATH
-.. clicmd:: match aspath AS_PATH
+.. index:: match ipv6 next-hop IPV6_ADDR
+.. clicmd:: match ipv6 next-hop IPV6_ADDR
+
+   This is a BGP specific match command. Matches the specified `ipv6_addr`.
+
+.. index:: match as-path AS_PATH
+.. clicmd:: match as-path AS_PATH
 
    Matches the specified `as_path`.
 
@@ -269,6 +278,22 @@ Route Map Set Command
 
    Set the BGP local preference to `local_pref`.
 
+.. index:: set local-preference +LOCAL_PREF
+.. clicmd:: set local-preference +LOCAL_PREF
+
+   Add the BGP local preference to an existing `local_pref`.
+
+.. index:: set local-preference -LOCAL_PREF
+.. clicmd:: set local-preference -LOCAL_PREF
+
+   Subtract the BGP local preference from an existing `local_pref`.
+
+.. index:: [no] set distance DISTANCE
+.. clicmd:: [no] set distance DISTANCE
+
+   Set the Administrative distance to DISTANCE to use for the route.
+   This is only locally significant and will not be dispersed to peers.
+
 .. index:: set weight WEIGHT
 .. clicmd:: set weight WEIGHT
 
@@ -298,6 +323,11 @@ Route Map Set Command
 .. clicmd:: set origin ORIGIN <egp|igp|incomplete>
 
    Set BGP route origin.
+
+.. index:: set table (1-4294967295)
+.. clicmd:: set table (1-4294967295)
+
+   Set the BGP table to a given table identifier
 
 .. _route-map-call-command:
 
@@ -331,6 +361,27 @@ Route Map Exit Action Command
 
    Proceed processing the route-map at the first entry whose order is >= N
 
+.. _route-map-optimization-command:
+
+Route Map Optimization Command
+==============================
+
+.. index:: route-map optimization
+.. clicmd:: route-map optimization
+
+   Enable route-map processing optimization. The optimization is
+   enabled by default.
+   Instead of sequentially passing through all the route-map indexes
+   until a match is found, the search for the best-match index will be
+   based on a look-up in a prefix-tree. A per-route-map prefix-tree
+   will be constructed for this purpose. The prefix-tree will compose
+   of all the prefixes in all the prefix-lists that are included in the
+   match rule of all the sequences of a route-map.
+
+.. index:: no route-map optimization
+.. clicmd:: no route-map optimization
+
+   Disable the route-map processing optimization.
 
 Route Map Examples
 ==================

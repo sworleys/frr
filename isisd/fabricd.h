@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2018 Christian Franke
  *
- * This file is part of FreeRangeRouting (FRR)
+ * This file is part of FRRouting (FRR)
  *
  * FRR is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -53,4 +53,6 @@ void fabricd_update_lsp_no_flood(struct isis_lsp *lsp,
 void fabricd_configure_triggered_csnp(struct isis_area *area, int delay,
 				      bool always_send_csnp);
 void fabricd_init(void);
+void isis_vty_daemon_init(void);
+
 #endif

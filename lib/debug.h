@@ -24,6 +24,10 @@
 #include "command.h"
 #include "frratomic.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Debugging modes.
  *
@@ -76,7 +80,7 @@
  *    Human-readable description of this debugging record.
  */
 struct debug {
-	_Atomic uint32_t flags;
+	atomic_uint_fast32_t flags;
 	const char *desc;
 };
 
@@ -236,5 +240,15 @@ struct debug_callbacks {
  * MT-Safe
  */
 void debug_init(struct debug_callbacks *cb);
+
+/*
+ * Turn on the cli to turn on/off debugs.
+ * Should only be called by libfrr
+ */
+void debug_init_cli(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _FRRDEBUG_H */

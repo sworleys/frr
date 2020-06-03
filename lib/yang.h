@@ -29,8 +29,9 @@
 
 #include "yang_wrappers.h"
 
-DECLARE_MTYPE(YANG_MODULE)
-DECLARE_MTYPE(YANG_DATA)
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* Maximum XPath length. */
 #define XPATH_MAXLEN 256
@@ -481,19 +482,37 @@ extern struct yang_data *yang_data_list_find(const struct list *list,
 
 /*
  * Create and set up a libyang context (for use by the translator)
+ *
+ * embedded_modules
+ *    Specify whether libyang should attempt to look for embedded YANG modules.
  */
-extern struct ly_ctx *yang_ctx_new_setup(void);
+extern struct ly_ctx *yang_ctx_new_setup(bool embedded_modules);
+
+/*
+ * Enable or disable libyang verbose debugging.
+ *
+ * enable
+ *    When set to true, enable libyang verbose debugging, otherwise disable it.
+ */
+extern void yang_debugging_set(bool enable);
 
 /*
  * Initialize the YANG subsystem. Should be called only once during the
  * daemon initialization process.
+ *
+ * embedded_modules
+ *    Specify whether libyang should attempt to look for embedded YANG modules.
  */
-extern void yang_init(void);
+extern void yang_init(bool embedded_modules);
 
 /*
  * Finish the YANG subsystem gracefully. Should be called only when the daemon
  * is exiting.
  */
 extern void yang_terminate(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _FRR_YANG_H_ */

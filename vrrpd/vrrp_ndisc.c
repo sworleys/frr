@@ -83,8 +83,7 @@ static int vrrp_ndisc_una_build(struct interface *ifp, struct ipaddr *ip,
 	struct nd_opt_hdr *nd_opt_h =
 		(struct nd_opt_hdr *)((char *)ndh
 				      + sizeof(struct nd_neighbor_advert));
-	char *nd_opt_lladdr =
-		(char *)((char *)nd_opt_h + sizeof(struct nd_opt_hdr));
+	char *nd_opt_lladdr = ((char *)nd_opt_h + sizeof(struct nd_opt_hdr));
 	char *lladdr = (char *)ifp->hw_addr;
 
 	/*
@@ -214,8 +213,7 @@ int vrrp_ndisc_una_send_all(struct vrrp_router *r)
 
 void vrrp_ndisc_init(void)
 {
-	frr_elevate_privs(&vrrp_privs)
-	{
+	frr_with_privs(&vrrp_privs) {
 		ndisc_fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_IPV6));
 	}
 

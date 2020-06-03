@@ -52,7 +52,9 @@ typedef unsigned char uint8_t;
 #include <sys/types.h>
 #include <sys/param.h>
 #ifdef HAVE_SYS_SYSCTL_H
-#ifndef GNU_LINUX
+#ifdef GNU_LINUX
+#include <linux/types.h>
+#else
 #include <sys/sysctl.h>
 #endif
 #endif /* HAVE_SYS_SYSCTL_H */
@@ -131,6 +133,11 @@ typedef unsigned char uint8_t;
 #include <openssl/des.h>
 #      define crypt DES_crypt
 #endif
+#endif
+
+#ifdef CRYPTO_OPENSSL
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
 #endif
 
 #include "openbsd-tree.h"
@@ -225,6 +232,15 @@ typedef unsigned char uint8_t;
 
 #include "zassert.h"
 
+/*
+ * Add explicit static cast only when using a C++ compiler.
+ */
+#ifdef __cplusplus
+#define static_cast(l, r) static_cast<decltype(l)>((r))
+#else
+#define static_cast(l, r) (r)
+#endif
+
 #ifndef HAVE_STRLCAT
 size_t strlcat(char *__restrict dest,
 	       const char *__restrict src, size_t destsize);
@@ -233,13 +249,6 @@ size_t strlcat(char *__restrict dest,
 size_t strlcpy(char *__restrict dest,
 	       const char *__restrict src, size_t destsize);
 #endif
-
-/* GCC have printf type attribute check.  */
-#ifdef __GNUC__
-#define PRINTF_ATTRIBUTE(a,b) __attribute__ ((__format__ (__printf__, a, b)))
-#else
-#define PRINTF_ATTRIBUTE(a,b)
-#endif /* __GNUC__ */
 
 /*
  * RFC 3542 defines several macros for using struct cmsghdr.
@@ -350,6 +359,8 @@ typedef enum {
 	AFI_L2VPN = 3,
 	AFI_MAX = 4
 } afi_t;
+
+#define IS_VALID_AFI(a) ((a) > AFI_UNSPEC && (a) < AFI_MAX)
 
 /* Subsequent Address Family Identifier. */
 typedef enum {

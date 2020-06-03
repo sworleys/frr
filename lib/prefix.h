@@ -35,12 +35,34 @@
 #include "ipaddr.h"
 #include "compiler.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #ifndef ETH_ALEN
 #define ETH_ALEN 6
 #endif
 
+/* value of first byte of ESI */
+#define ESI_TYPE_ARBITRARY 0  /* */
+#define ESI_TYPE_LACP      1  /* <> */
+#define ESI_TYPE_BRIDGE    2  /* <Root bridge Mac-6B>:<Root Br Priority-2B>:00 */
+#define ESI_TYPE_MAC       3  /* <Syst Mac Add-6B>:<Local Discriminator Value-3B> */
+#define ESI_TYPE_ROUTER    4  /* <RouterId-4B>:<Local Discriminator Value-4B> */
+#define ESI_TYPE_AS        5  /* <AS-4B>:<Local Discriminator Value-4B> */
+
+#define MAX_ESI {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+
+
 #define ESI_BYTES 10
 #define ESI_STR_LEN (3 * ESI_BYTES)
+#define EVPN_DF_ALG_STR_LEN 24
+
+/* Maximum number of VTEPs per-ES -
+ * XXX - temporary limit for allocating strings etc.
+ */
+#define ES_VTEP_MAX_CNT 10
+#define ES_VTEP_LIST_STR_SZ (ES_VTEP_MAX_CNT * 16)
 
 #define ETHER_ADDR_STRLEN (3*ETH_ALEN)
 /*
@@ -60,12 +82,14 @@ struct ethaddr {
 #define PREFIX_LEN_ROUTE_TYPE_5_IPV6 (30*8)
 
 typedef struct esi_t_ {
-	uint8_t val[10];
+	uint8_t val[ESI_BYTES];
 } esi_t;
 
 struct evpn_ead_addr {
 	esi_t esi;
 	uint32_t eth_tag;
+	uint8_t ip_prefix_length;
+	struct ipaddr ip;
 };
 
 struct evpn_macip_addr {
@@ -213,6 +237,8 @@ struct prefix_evpn {
 
 static inline int is_evpn_prefix_ipaddr_none(const struct prefix_evpn *evp)
 {
+	if (evp->prefix.route_type == 1)
+		return IS_IPADDR_NONE(&(evp)->prefix.ead_addr.ip);
 	if (evp->prefix.route_type == 2)
 		return IS_IPADDR_NONE(&(evp)->prefix.macip_addr.ip);
 	if (evp->prefix.route_type == 3)
@@ -226,6 +252,8 @@ static inline int is_evpn_prefix_ipaddr_none(const struct prefix_evpn *evp)
 
 static inline int is_evpn_prefix_ipaddr_v4(const struct prefix_evpn *evp)
 {
+	if (evp->prefix.route_type == 1)
+		return IS_IPADDR_V4(&(evp)->prefix.ead_addr.ip);
 	if (evp->prefix.route_type == 2)
 		return IS_IPADDR_V4(&(evp)->prefix.macip_addr.ip);
 	if (evp->prefix.route_type == 3)
@@ -239,6 +267,8 @@ static inline int is_evpn_prefix_ipaddr_v4(const struct prefix_evpn *evp)
 
 static inline int is_evpn_prefix_ipaddr_v6(const struct prefix_evpn *evp)
 {
+	if (evp->prefix.route_type == 1)
+		return IS_IPADDR_V6(&(evp)->prefix.ead_addr.ip);
 	if (evp->prefix.route_type == 2)
 		return IS_IPADDR_V6(&(evp)->prefix.macip_addr.ip);
 	if (evp->prefix.route_type == 3)
@@ -276,20 +306,29 @@ struct prefix_sg {
  * side, which strips type safety since the cast will accept any pointer
  * type.)
  */
+#ifndef __cplusplus
+#define prefixtype(uname, typename, fieldname) \
+	typename *fieldname;
+#else
+#define prefixtype(uname, typename, fieldname) \
+	typename *fieldname; \
+	uname(typename *x) { this->fieldname = x; }
+#endif
+
 union prefixptr {
-	struct prefix *p;
-	struct prefix_ipv4 *p4;
-	struct prefix_ipv6 *p6;
-	struct prefix_evpn *evp;
-	const struct prefix_fs *fs;
+	prefixtype(prefixptr, struct prefix,      p)
+	prefixtype(prefixptr, struct prefix_ipv4, p4)
+	prefixtype(prefixptr, struct prefix_ipv6, p6)
+	prefixtype(prefixptr, struct prefix_evpn, evp)
+	prefixtype(prefixptr, struct prefix_fs,   fs)
 } __attribute__((transparent_union));
 
 union prefixconstptr {
-	const struct prefix *p;
-	const struct prefix_ipv4 *p4;
-	const struct prefix_ipv6 *p6;
-	const struct prefix_evpn *evp;
-	const struct prefix_fs *fs;
+	prefixtype(prefixconstptr, const struct prefix,      p)
+	prefixtype(prefixconstptr, const struct prefix_ipv4, p4)
+	prefixtype(prefixconstptr, const struct prefix_ipv6, p6)
+	prefixtype(prefixconstptr, const struct prefix_evpn, evp)
+	prefixtype(prefixconstptr, const struct prefix_fs,   fs)
 } __attribute__((transparent_union));
 
 #ifndef INET_ADDRSTRLEN
@@ -379,11 +418,13 @@ extern const char *afi2str(afi_t afi);
 
 /* Check bit of the prefix. */
 extern unsigned int prefix_bit(const uint8_t *prefix, const uint16_t prefixlen);
-extern unsigned int prefix6_bit(const struct in6_addr *prefix,
-				const uint16_t prefixlen);
 
 extern struct prefix *prefix_new(void);
-extern void prefix_free(struct prefix *);
+extern void prefix_free(struct prefix **p);
+/*
+ * Function to handle prefix_free being used as a del function.
+ */
+extern void prefix_free_lists(void *arg);
 extern const char *prefix_family_str(const struct prefix *);
 extern int prefix_blen(const struct prefix *);
 extern int str2prefix(const char *, struct prefix *);
@@ -394,6 +435,8 @@ extern void prefix_mcast_inet4_dump(const char *onfail, struct in_addr addr,
 				char *buf, int buf_size);
 extern const char *prefix_sg2str(const struct prefix_sg *sg, char *str);
 extern const char *prefix2str(union prefixconstptr, char *, int);
+extern int evpn_type5_prefix_match(const struct prefix *evpn_pfx,
+				   const struct prefix *match_pfx);
 extern int prefix_match(const struct prefix *, const struct prefix *);
 extern int prefix_match_network_statement(const struct prefix *,
 					  const struct prefix *);
@@ -411,8 +454,6 @@ extern void apply_mask(struct prefix *);
 #define prefix_copy(a, b) ({ memset(a, 0, sizeof(*a)); prefix_copy(a, b); })
 #endif
 
-extern struct prefix *sockunion2prefix(const union sockunion *dest,
-				       const union sockunion *mask);
 extern struct prefix *sockunion2hostprefix(const union sockunion *,
 					   struct prefix *p);
 extern void prefix2sockunion(const struct prefix *, union sockunion *);
@@ -420,7 +461,7 @@ extern void prefix2sockunion(const struct prefix *, union sockunion *);
 extern int str2prefix_eth(const char *, struct prefix_eth *);
 
 extern struct prefix_ipv4 *prefix_ipv4_new(void);
-extern void prefix_ipv4_free(struct prefix_ipv4 *);
+extern void prefix_ipv4_free(struct prefix_ipv4 **p);
 extern int str2prefix_ipv4(const char *, struct prefix_ipv4 *);
 extern void apply_mask_ipv4(struct prefix_ipv4 *);
 
@@ -434,18 +475,15 @@ extern void apply_classful_mask_ipv4(struct prefix_ipv4 *);
 
 extern uint8_t ip_masklen(struct in_addr);
 extern void masklen2ip(const int, struct in_addr *);
-/* returns the network portion of the host address */
-extern in_addr_t ipv4_network_addr(in_addr_t hostaddr, int masklen);
 /* given the address of a host on a network and the network mask length,
  * calculate the broadcast address for that network;
- * special treatment for /31: returns the address of the other host
- * on the network by flipping the host bit */
+ * special treatment for /31 according to RFC3021 section 3.3 */
 extern in_addr_t ipv4_broadcast_addr(in_addr_t hostaddr, int masklen);
 
 extern int netmask_str2prefix_str(const char *, const char *, char *);
 
 extern struct prefix_ipv6 *prefix_ipv6_new(void);
-extern void prefix_ipv6_free(struct prefix_ipv6 *);
+extern void prefix_ipv6_free(struct prefix_ipv6 **p);
 extern int str2prefix_ipv6(const char *, struct prefix_ipv6 *);
 extern void apply_mask_ipv6(struct prefix_ipv6 *);
 
@@ -457,7 +495,9 @@ extern void masklen2ip6(const int, struct in6_addr *);
 
 extern const char *inet6_ntoa(struct in6_addr);
 
-extern int is_zero_mac(struct ethaddr *mac);
+extern int is_zero_mac(const struct ethaddr *mac);
+extern bool is_mcast_mac(const struct ethaddr *mac);
+extern bool is_bcast_mac(const struct ethaddr *mac);
 extern int prefix_str2mac(const char *str, struct ethaddr *mac);
 extern char *prefix_mac2str(const struct ethaddr *mac, char *buf, int size);
 
@@ -465,7 +505,7 @@ extern unsigned prefix_hash_key(const void *pp);
 
 extern int str_to_esi(const char *str, esi_t *esi);
 extern char *esi_to_str(const esi_t *esi, char *buf, int size);
-extern void prefix_hexdump(const struct prefix *p);
+extern char *evpn_es_df_alg2str(uint8_t df_alg, char *buf, int buf_len);
 extern void prefix_evpn_hexdump(const struct prefix_evpn *p);
 
 static inline int ipv6_martian(struct in6_addr *addr)
@@ -518,7 +558,7 @@ static inline int is_host_route(struct prefix *p)
 	return 0;
 }
 
-static inline int is_default_host_route(struct prefix *p)
+static inline int is_default_host_route(const struct prefix *p)
 {
 	if (p->family == AF_INET) {
 		return (p->u.prefix4.s_addr == INADDR_ANY &&
@@ -530,5 +570,25 @@ static inline int is_default_host_route(struct prefix *p)
 	}
 	return 0;
 }
+
+#ifdef _FRR_ATTRIBUTE_PRINTFRR
+#pragma FRR printfrr_ext "%pI4"  (struct in_addr *)
+#pragma FRR printfrr_ext "%pI4"  (in_addr_t *)
+
+#pragma FRR printfrr_ext "%pI6"  (struct in6_addr *)
+
+#pragma FRR printfrr_ext "%pFX"  (struct prefix *)
+#pragma FRR printfrr_ext "%pFX"  (struct prefix_ipv4 *)
+#pragma FRR printfrr_ext "%pFX"  (struct prefix_ipv6 *)
+#pragma FRR printfrr_ext "%pFX"  (struct prefix_eth *)
+#pragma FRR printfrr_ext "%pFX"  (struct prefix_evpn *)
+#pragma FRR printfrr_ext "%pFX"  (struct prefix_fs *)
+
+#pragma FRR printfrr_ext "%pSG4" (struct prefix_sg *)
+#endif
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _ZEBRA_PREFIX_H */

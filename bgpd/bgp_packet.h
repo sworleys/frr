@@ -39,14 +39,22 @@ DECLARE_HOOK(bgp_packet_send,
 
 /* When to refresh */
 #define REFRESH_IMMEDIATE 1
-#define REFRESH_DEFER     2 
+#define REFRESH_DEFER     2
 
 /* ORF Common part flag */
-#define ORF_COMMON_PART_ADD        0x00 
-#define ORF_COMMON_PART_REMOVE     0x80 
-#define ORF_COMMON_PART_REMOVE_ALL 0xC0 
-#define ORF_COMMON_PART_PERMIT     0x00 
-#define ORF_COMMON_PART_DENY       0x20 
+#define ORF_COMMON_PART_ADD        0x00
+#define ORF_COMMON_PART_REMOVE     0x80
+#define ORF_COMMON_PART_REMOVE_ALL 0xC0
+#define ORF_COMMON_PART_PERMIT     0x00
+#define ORF_COMMON_PART_DENY       0x20
+
+#define BGP_UPDATE_EOR_PKT(_peer, _afi, _safi, _s)                             \
+	do {                                                                   \
+		_s = bgp_update_packet_eor(_peer, _afi, _safi);                \
+		if (_s) {                                                      \
+			bgp_packet_add(_peer, _s);                             \
+		}                                                              \
+	} while (0)
 
 /* Packet send and receive function prototypes. */
 extern void bgp_keepalive_send(struct peer *);
@@ -73,4 +81,5 @@ extern int bgp_packet_set_size(struct stream *s);
 extern int bgp_generate_updgrp_packets(struct thread *);
 extern int bgp_process_packet(struct thread *);
 
+extern void bgp_send_delayed_eor(struct bgp *bgp);
 #endif /* _QUAGGA_BGP_PACKET_H */

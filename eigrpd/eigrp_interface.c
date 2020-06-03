@@ -69,7 +69,7 @@ struct eigrp_interface *eigrp_if_new(struct eigrp *eigrp, struct interface *ifp,
 
 	/* Set zebra interface pointer. */
 	ei->ifp = ifp;
-	ei->address = p;
+	prefix_copy(&ei->address, p);
 
 	ifp->info = ei;
 	listnode_add(eigrp->eiflist, ei);
@@ -118,8 +118,9 @@ int eigrp_if_delete_hook(struct interface *ifp)
 	eigrp = ei->eigrp;
 	listnode_delete(eigrp->eiflist, ei);
 
+	eigrp_fifo_free(ei->obuf);
+
 	XFREE(MTYPE_EIGRP_IF_INFO, ifp->info);
-	ifp->info = NULL;
 
 	return 0;
 }
@@ -273,7 +274,7 @@ int eigrp_if_up(struct eigrp_interface *ei)
 
 	struct prefix dest_addr;
 
-	dest_addr = *ei->address;
+	dest_addr = ei->address;
 	apply_mask(&dest_addr);
 	pe = eigrp_topology_table_lookup_ipv4(eigrp->topology_table,
 					      &dest_addr);
@@ -294,7 +295,7 @@ int eigrp_if_up(struct eigrp_interface *ei)
 		eigrp_prefix_entry_add(eigrp->topology_table, pe);
 		listnode_add(eigrp->topology_changes_internalIPV4, pe);
 
-		eigrp_nexthop_entry_add(pe, ne);
+		eigrp_nexthop_entry_add(eigrp, pe, ne);
 
 		for (ALL_LIST_ELEMENTS(eigrp->eiflist, node, nnode, ei2)) {
 			eigrp_update_send(ei2);
@@ -306,7 +307,7 @@ int eigrp_if_up(struct eigrp_interface *ei)
 		struct eigrp_fsm_action_message msg;
 
 		ne->prefix = pe;
-		eigrp_nexthop_entry_add(pe, ne);
+		eigrp_nexthop_entry_add(eigrp, pe, ne);
 
 		msg.packet_type = EIGRP_OPC_UPDATE;
 		msg.eigrp = eigrp;
@@ -355,16 +356,11 @@ void eigrp_if_stream_unset(struct eigrp_interface *ei)
 {
 	struct eigrp *eigrp = ei->eigrp;
 
-	if (ei->obuf) {
-		eigrp_fifo_free(ei->obuf);
-		ei->obuf = NULL;
-
-		if (ei->on_write_q) {
-			listnode_delete(eigrp->oi_write_q, ei);
-			if (list_isempty(eigrp->oi_write_q))
-				thread_cancel(eigrp->t_write);
-			ei->on_write_q = 0;
-		}
+	if (ei->on_write_q) {
+		listnode_delete(eigrp->oi_write_q, ei);
+		if (list_isempty(eigrp->oi_write_q))
+			thread_cancel(eigrp->t_write);
+		ei->on_write_q = 0;
 	}
 }
 
@@ -385,7 +381,7 @@ void eigrp_if_set_multicast(struct eigrp_interface *ei)
 		/* The interface should belong to the EIGRP-all-routers group.
 		 */
 		if (!ei->member_allrouters
-		    && (eigrp_if_add_allspfrouters(ei->eigrp, ei->address,
+		    && (eigrp_if_add_allspfrouters(ei->eigrp, &ei->address,
 						   ei->ifp->ifindex)
 			>= 0))
 			/* Set the flag only if the system call to join
@@ -396,7 +392,7 @@ void eigrp_if_set_multicast(struct eigrp_interface *ei)
 		 * group. */
 		if (ei->member_allrouters) {
 			/* Only actually drop if this is the last reference */
-			eigrp_if_drop_allspfrouters(ei->eigrp, ei->address,
+			eigrp_if_drop_allspfrouters(ei->eigrp, &ei->address,
 						    ei->ifp->ifindex);
 			/* Unset the flag regardless of whether the system call
 			   to leave
@@ -422,26 +418,22 @@ void eigrp_if_free(struct eigrp_interface *ei, int source)
 {
 	struct prefix dest_addr;
 	struct eigrp_prefix_entry *pe;
-	struct eigrp *eigrp = eigrp_lookup();
-
-	if (!eigrp)
-		return;
+	struct eigrp *eigrp = ei->eigrp;
 
 	if (source == INTERFACE_DOWN_BY_VTY) {
 		THREAD_OFF(ei->t_hello);
 		eigrp_hello_send(ei, EIGRP_HELLO_GRACEFUL_SHUTDOWN, NULL);
 	}
 
-	dest_addr = *ei->address;
+	dest_addr = ei->address;
 	apply_mask(&dest_addr);
 	pe = eigrp_topology_table_lookup_ipv4(eigrp->topology_table,
 					      &dest_addr);
 	if (pe)
-		eigrp_prefix_entry_delete(eigrp->topology_table, pe);
+		eigrp_prefix_entry_delete(eigrp, eigrp->topology_table, pe);
 
 	eigrp_if_down(ei);
 
-	list_delete(&ei->nbrs);
 	listnode_delete(ei->eigrp->eiflist, ei);
 }
 
@@ -469,7 +461,7 @@ struct eigrp_interface *eigrp_if_lookup_by_local_addr(struct eigrp *eigrp,
 		if (ifp && ei->ifp != ifp)
 			continue;
 
-		if (IPV4_ADDR_SAME(&address, &ei->address->u.prefix4))
+		if (IPV4_ADDR_SAME(&address, &ei->address.u.prefix4))
 			return ei;
 	}
 

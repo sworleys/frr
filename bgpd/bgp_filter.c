@@ -168,10 +168,7 @@ static struct as_list *as_list_new(void)
 
 static void as_list_free(struct as_list *aslist)
 {
-	if (aslist->name) {
-		XFREE(MTYPE_AS_STR, aslist->name);
-		aslist->name = NULL;
-	}
+	XFREE(MTYPE_AS_STR, aslist->name);
 	XFREE(MTYPE_AS_LIST, aslist);
 }
 
@@ -193,7 +190,7 @@ static struct as_list *as_list_insert(const char *name)
 	/* If name is made by all digit character.  We treat it as
 	   number. */
 	for (number = 0, i = 0; i < strlen(name); i++) {
-		if (isdigit((int)name[i]))
+		if (isdigit((unsigned char)name[i]))
 			number = (number * 10) + (name[i] - '0');
 		else
 			break;
@@ -305,12 +302,9 @@ static void as_list_delete(struct as_list *aslist)
 	as_list_free(aslist);
 }
 
-static int as_list_empty(struct as_list *aslist)
+static bool as_list_empty(struct as_list *aslist)
 {
-	if (aslist->head == NULL && aslist->tail == NULL)
-		return 1;
-	else
-		return 0;
+	return aslist->head == NULL && aslist->tail == NULL;
 }
 
 static void as_list_filter_delete(struct as_list *aslist,
@@ -340,11 +334,9 @@ static void as_list_filter_delete(struct as_list *aslist,
 	XFREE(MTYPE_AS_STR, name);
 }
 
-static int as_filter_match(struct as_filter *asfilter, struct aspath *aspath)
+static bool as_filter_match(struct as_filter *asfilter, struct aspath *aspath)
 {
-	if (bgp_regexec(asfilter->reg, aspath) != REG_NOMATCH)
-		return 1;
-	return 0;
+	return bgp_regexec(asfilter->reg, aspath) != REG_NOMATCH;
 }
 
 /* Apply AS path filter to AS. */
@@ -377,26 +369,25 @@ void as_list_delete_hook(void (*func)(const char *))
 	as_list_master.delete_hook = func;
 }
 
-static int as_list_dup_check(struct as_list *aslist, struct as_filter *new)
+static bool as_list_dup_check(struct as_list *aslist, struct as_filter *new)
 {
 	struct as_filter *asfilter;
 
 	for (asfilter = aslist->head; asfilter; asfilter = asfilter->next) {
 		if (asfilter->type == new->type
 		    && strcmp(asfilter->reg_str, new->reg_str) == 0)
-			return 1;
+			return true;
 	}
-	return 0;
+	return false;
 }
 
-int config_bgp_aspath_validate(const char *regstr)
+bool config_bgp_aspath_validate(const char *regstr)
 {
-	char valid_chars[] = "1234567890_^|[,{}() ]$*+.?-";
+	char valid_chars[] = "1234567890_^|[,{}() ]$*+.?-\\";
 
 	if (strspn(regstr, valid_chars) == strlen(regstr))
-		return 1;
-
-	return 0;
+		return true;
+	return false;
 }
 
 DEFUN(as_path, bgp_as_path_cmd,
@@ -407,7 +398,7 @@ DEFUN(as_path, bgp_as_path_cmd,
       "Regular expression access list name\n"
       "Specify packets to reject\n"
       "Specify packets to forward\n"
-      "A regular-expression (1234567890_(^|[,{}() ]|$)) to match the BGP AS paths\n")
+      "A regular-expression (1234567890_^|[,{}() ]$*+.?-\\) to match the BGP AS paths\n")
 {
 	int idx = 0;
 	enum as_filter_type type;
@@ -475,7 +466,7 @@ ALIAS(as_path, ip_as_path_cmd,
       "Regular expression access list name\n"
       "Specify packets to reject\n"
       "Specify packets to forward\n"
-      "A regular-expression (1234567890_(^|[,{}() ]|$)) to match the BGP AS paths\n")
+      "A regular-expression (1234567890_^|[,{}() ]$*+.?-\\) to match the BGP AS paths\n")
 
 DEFUN(no_as_path, no_bgp_as_path_cmd,
       "no bgp as-path access-list WORD <deny|permit> LINE...",
@@ -486,7 +477,7 @@ DEFUN(no_as_path, no_bgp_as_path_cmd,
       "Regular expression access list name\n"
       "Specify packets to reject\n"
       "Specify packets to forward\n"
-      "A regular-expression (1234567890_(^|[,{}() ]|$)) to match the BGP AS paths\n")
+      "A regular-expression (1234567890_^|[,{}() ]$*+.?-\\) to match the BGP AS paths\n")
 {
 	int idx = 0;
 	enum as_filter_type type;
@@ -563,7 +554,7 @@ ALIAS(no_as_path, no_ip_as_path_cmd,
       "Regular expression access list name\n"
       "Specify packets to reject\n"
       "Specify packets to forward\n"
-      "A regular-expression (1234567890_(^|[,{}() ]|$)) to match the BGP AS paths\n")
+      "A regular-expression (1234567890_^|[,{}() ]$*+.?-\\) to match the BGP AS paths\n")
 
 DEFUN (no_as_path_all,
        no_bgp_as_path_all_cmd,
@@ -668,6 +659,7 @@ DEFUN (show_as_path_access_list,
 		vty_out(vty, "'show bgp as-path-access-list WORD'\n");
 		zlog_warn("Deprecated option: 'show ip as-path-access-list WORD' being used");
 	}
+
 	aslist = as_list_lookup(argv[idx_word]->arg);
 	if (aslist)
 		as_list_show(vty, aslist);

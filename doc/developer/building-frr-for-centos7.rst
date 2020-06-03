@@ -1,9 +1,8 @@
 CentOS 7
 ========================================
 
-(As an alternative to this installation, you may prefer to create a FRR
-rpm package yourself and install that package instead. See instructions
-in redhat/README.rpm\_build.md on how to build a rpm package)
+This document describes installation from source. If you want to build an RPM,
+see :ref:`packaging-redhat`.
 
 CentOS 7 restrictions:
 ----------------------
@@ -19,10 +18,10 @@ Add packages:
 
 ::
 
-    sudo yum install git autoconf automake libtool make gawk \
+    sudo yum install git autoconf automake libtool make \
       readline-devel texinfo net-snmp-devel groff pkgconfig \
       json-c-devel pam-devel bison flex pytest c-ares-devel \
-      python-devel systemd-devel python-sphinx
+      python-devel systemd-devel python-sphinx libcap-devel
 
 .. include:: building-libyang.rst
 
@@ -71,7 +70,8 @@ an example.)
         --disable-ldpd \
         --enable-fpm \
         --with-pkg-git-version \
-        --with-pkg-extra-version=-MyOwnFRRVersion
+        --with-pkg-extra-version=-MyOwnFRRVersion \
+	SPHINXBUILD=/usr/bin/sphinx-build
     make
     make check
     sudo make install
@@ -104,7 +104,7 @@ Install daemon config file
 
 ::
 
-    sudo install -p -m 644 redhat/daemons /etc/frr/
+    sudo install -p -m 644 tools/etc/frr/daemons /etc/frr/
     sudo chown frr:frr /etc/frr/daemons
 
 Edit /etc/frr/daemons as needed to select the required daemons
@@ -127,19 +127,18 @@ following content:
     net.ipv4.conf.all.forwarding=1
     net.ipv6.conf.all.forwarding=1
 
-Load the modifed sysctl's on the system:
+Load the modified sysctl's on the system:
 
 ::
 
     sudo sysctl -p /etc/sysctl.d/90-routing-sysctl.conf
 
-Install frr Service and redhat init files
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Install frr Service
+^^^^^^^^^^^^^^^^^^^
 
 ::
 
-    sudo install -p -m 644 redhat/frr.service /usr/lib/systemd/system/frr.service
-    sudo install -p -m 755 redhat/frr.init /usr/lib/frr/frr
+    sudo install -p -m 644 tools/frr.service /usr/lib/systemd/system/frr.service
 
 Register the systemd files
 ^^^^^^^^^^^^^^^^^^^^^^^^^^

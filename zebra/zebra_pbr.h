@@ -32,6 +32,10 @@
 #include "rt.h"
 #include "pbr.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct zebra_pbr_rule {
 	int sock;
 
@@ -141,6 +145,7 @@ struct zebra_pbr_iptable {
 	uint16_t tcp_mask_flags;
 	uint8_t dscp_value;
 	uint8_t fragment;
+	uint8_t protocol;
 
 	uint32_t nb_interface;
 
@@ -176,6 +181,13 @@ extern enum zebra_dplane_result kernel_add_pbr_rule(struct zebra_pbr_rule *rule)
  * Uninstall specified rule for a specific interface.
  */
 extern enum zebra_dplane_result kernel_del_pbr_rule(struct zebra_pbr_rule *rule);
+
+/*
+ * Update specified rule for a specific interface.
+ */
+extern enum zebra_dplane_result
+kernel_update_pbr_rule(struct zebra_pbr_rule *old_rule,
+		       struct zebra_pbr_rule *new_rule);
 
 /*
  * Get to know existing PBR rules in the kernel - typically called at startup.
@@ -251,5 +263,9 @@ DECLARE_HOOK(zebra_pbr_ipset_entry_update,
 	     (int cmd, struct zebra_pbr_ipset_entry *ipset), (cmd, ipset));
 DECLARE_HOOK(zebra_pbr_ipset_update,
 	     (int cmd, struct zebra_pbr_ipset *ipset), (cmd, ipset));
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _ZEBRA_PBR_H */

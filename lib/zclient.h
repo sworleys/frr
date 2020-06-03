@@ -73,6 +73,18 @@ typedef uint16_t zebra_size_t;
 #define ZEBRA_FEC_REGISTER_LABEL          0x1
 #define ZEBRA_FEC_REGISTER_LABEL_INDEX    0x2
 
+/* Client capabilities */
+enum zserv_client_capabilities {
+	ZEBRA_CLIENT_GR_CAPABILITIES = 1,
+	ZEBRA_CLIENT_ROUTE_UPDATE_COMPLETE = 2,
+	ZEBRA_CLIENT_ROUTE_UPDATE_PENDING = 3,
+	ZEBRA_CLIENT_GR_DISABLE = 4,
+	ZEBRA_CLIENT_RIB_STALE_TIME
+};
+
+/* Macro to check if there GR enabled. */
+#define ZEBRA_CLIENT_GR_ENABLED(X) (X == ZEBRA_CLIENT_GR_CAPABILITIES)
+
 extern struct sockaddr_storage zclient_addr;
 extern socklen_t zclient_addr_len;
 
@@ -126,6 +138,7 @@ typedef enum {
 	ZEBRA_INTERFACE_LINK_PARAMS,
 	ZEBRA_MPLS_LABELS_ADD,
 	ZEBRA_MPLS_LABELS_DELETE,
+	ZEBRA_MPLS_LABELS_REPLACE,
 	ZEBRA_IPMR_ROUTE_STATS,
 	ZEBRA_LABEL_MANAGER_CONNECT,
 	ZEBRA_LABEL_MANAGER_CONNECT_ASYNC,
@@ -140,6 +153,10 @@ typedef enum {
 	ZEBRA_ADVERTISE_ALL_VNI,
 	ZEBRA_LOCAL_ES_ADD,
 	ZEBRA_LOCAL_ES_DEL,
+	ZEBRA_REMOTE_ES_VTEP_ADD,
+	ZEBRA_REMOTE_ES_VTEP_DEL,
+	ZEBRA_LOCAL_ES_EVI_ADD,
+	ZEBRA_LOCAL_ES_EVI_DEL,
 	ZEBRA_VNI_ADD,
 	ZEBRA_VNI_DEL,
 	ZEBRA_L3VNI_ADD,
@@ -176,17 +193,21 @@ typedef enum {
 	ZEBRA_VXLAN_FLOOD_CONTROL,
 	ZEBRA_VXLAN_SG_ADD,
 	ZEBRA_VXLAN_SG_DEL,
+	ZEBRA_VXLAN_SG_REPLAY,
 	ZEBRA_MLAG_PROCESS_UP,
 	ZEBRA_MLAG_PROCESS_DOWN,
 	ZEBRA_MLAG_CLIENT_REGISTER,
 	ZEBRA_MLAG_CLIENT_UNREGISTER,
 	ZEBRA_MLAG_FORWARD_MSG,
-	ZEBRA_VXLAN_SG_REPLAY,
+	ZEBRA_NHG_ADD,
+	ZEBRA_NHG_DEL,
+	ZEBRA_NHG_NOTIFY_OWNER,
 	ZEBRA_ERROR,
+	ZEBRA_CLIENT_CAPABILITIES
 } zebra_message_types_t;
 
 enum zebra_error_types {
-	ZEBRA_UNKNOWN_ERROR,	/* Error of unknown type */
+	ZEBRA_UNKNOWN_ERROR,    /* Error of unknown type */
 	ZEBRA_NO_VRF,		/* Vrf in header was not found */
 	ZEBRA_INVALID_MSG_TYPE, /* No handler found for msg type */
 };
@@ -221,6 +242,15 @@ struct zclient_capabilities {
 	enum mlag_role role;
 };
 
+/* Graceful Restart Capabilities message */
+struct zapi_cap {
+	enum zserv_client_capabilities cap;
+	uint32_t stale_removal_time;
+	afi_t afi;
+	safi_t safi;
+	vrf_id_t vrf_id;
+};
+
 /* Structure for the zebra client. */
 struct zclient {
 	/* The thread master we schedule ourselves on */
@@ -231,6 +261,9 @@ struct zclient {
 
 	/* Do we care about failure events for route install? */
 	bool receive_notify;
+
+	/* Is this a synchronous client? */
+	bool synchronous;
 
 	/* Socket to zebra daemon. */
 	int sock;
@@ -285,6 +318,8 @@ struct zclient {
 	int (*fec_update)(int, struct zclient *, uint16_t);
 	int (*local_es_add)(ZAPI_CALLBACK_ARGS);
 	int (*local_es_del)(ZAPI_CALLBACK_ARGS);
+	int (*local_es_evi_add)(ZAPI_CALLBACK_ARGS);
+	int (*local_es_evi_del)(ZAPI_CALLBACK_ARGS);
 	int (*local_vni_add)(ZAPI_CALLBACK_ARGS);
 	int (*local_vni_del)(ZAPI_CALLBACK_ARGS);
 	int (*local_l3vni_add)(ZAPI_CALLBACK_ARGS);
@@ -305,6 +340,7 @@ struct zclient {
 	int (*mlag_process_up)(void);
 	int (*mlag_process_down)(void);
 	int (*mlag_handle_msg)(struct stream *msg, int len);
+	int (*nhg_notify_owner)(ZAPI_CALLBACK_ARGS);
 	int (*handle_error)(enum zebra_error_types error);
 };
 
@@ -315,7 +351,10 @@ struct zclient {
 #define ZAPI_MESSAGE_TAG      0x08
 #define ZAPI_MESSAGE_MTU      0x10
 #define ZAPI_MESSAGE_SRCPFX   0x20
-#define ZAPI_MESSAGE_LABEL    0x40
+/* Backup nexthops are present */
+#define ZAPI_MESSAGE_BACKUP_NEXTHOPS 0x40
+#define ZAPI_MESSAGE_NHG      0x80
+
 /*
  * This should only be used by a DAEMON that needs to communicate
  * the table being used is not in the VRF.  You must pass the
@@ -339,7 +378,7 @@ struct zapi_nexthop {
 	enum nexthop_types_t type;
 	vrf_id_t vrf_id;
 	ifindex_t ifindex;
-	bool onlink;
+	uint8_t flags;
 	union {
 		union g_addr gate;
 		enum blackhole_type bh_type;
@@ -352,7 +391,21 @@ struct zapi_nexthop {
 	struct ethaddr rmac;
 
 	uint32_t weight;
+
+	/* Index of backup nexthop */
+	uint8_t backup_idx;
 };
+
+/*
+ * ZAPI nexthop flags values - we're encoding a single octet
+ * initially, so ensure that the on-the-wire encoding continues
+ * to match the number of valid flags.
+ */
+
+#define ZAPI_NEXTHOP_FLAG_ONLINK	0x01
+#define ZAPI_NEXTHOP_FLAG_LABEL		0x02
+#define ZAPI_NEXTHOP_FLAG_WEIGHT	0x04
+#define ZAPI_NEXTHOP_FLAG_HAS_BACKUP	0x08 /* Nexthop has a backup */
 
 /*
  * Some of these data structures do not map easily to
@@ -416,6 +469,12 @@ struct zapi_route {
 	uint16_t nexthop_num;
 	struct zapi_nexthop nexthops[MULTIPATH_NUM];
 
+	/* Support backup routes for IP FRR, TI-LFA, traffic engineering */
+	uint16_t backup_nexthop_num;
+	struct zapi_nexthop backup_nexthops[MULTIPATH_NUM];
+
+	uint32_t nhgid;
+
 	uint8_t distance;
 
 	uint32_t metric;
@@ -427,6 +486,21 @@ struct zapi_route {
 	vrf_id_t vrf_id;
 
 	uint32_t tableid;
+};
+
+struct zapi_labels {
+	uint8_t message;
+#define ZAPI_LABELS_FTN      0x01
+	enum lsp_types_t type;
+	mpls_label_t local_label;
+	struct {
+		struct prefix prefix;
+		uint8_t type;
+		unsigned short instance;
+	} route;
+
+	uint16_t nexthop_num;
+	struct zapi_nexthop nexthops[MULTIPATH_NUM];
 };
 
 struct zapi_pw {
@@ -454,6 +528,13 @@ enum zapi_route_notify_owner {
 	ZAPI_ROUTE_INSTALLED,
 	ZAPI_ROUTE_REMOVED,
 	ZAPI_ROUTE_REMOVE_FAIL,
+};
+
+enum zapi_nhg_notify_owner {
+	ZAPI_NHG_FAIL_INSTALL,
+	ZAPI_NHG_INSTALLED,
+	ZAPI_NHG_REMOVED,
+	ZAPI_NHG_REMOVE_FAIL,
 };
 
 enum zapi_rule_notify_owner {
@@ -520,14 +601,42 @@ zapi_rule_notify_owner2str(enum zapi_rule_notify_owner note)
 #define ZEBRA_MACIP_TYPE_ROUTER_FLAG           0x04 /* Router Flag - proxy NA */
 #define ZEBRA_MACIP_TYPE_OVERRIDE_FLAG         0x08 /* Override Flag */
 #define ZEBRA_MACIP_TYPE_SVI_IP                0x10 /* SVI MAC-IP */
+#define ZEBRA_MACIP_TYPE_PROXY_ADVERT          0x20 /* Not locally active */
+#define ZEBRA_MACIP_TYPE_SYNC_PATH             0x40 /* sync path */
+/* XXX - flags is an u8; that needs to be changed to u32 if you need
+ * to allocate past 0x80
+ */
+
+/* Zebra ES VTEP flags (ZEBRA_REMOTE_ES_VTEP_ADD) */
+/* ESR has been rxed from the VTEP. Only VTEPs that have advertised the
+ * Type-4 route can participate in DF election.
+ */
+#define ZAPI_ES_VTEP_FLAG_ESR_RXED (1 << 0)
 
 enum zebra_neigh_state { ZEBRA_NEIGH_INACTIVE = 0, ZEBRA_NEIGH_ACTIVE = 1 };
 
 struct zclient_options {
 	bool receive_notify;
+	bool synchronous;
 };
 
 extern struct zclient_options zclient_options_default;
+
+/*
+ * We reserve the top 4 bits for l2-NHG, everything else
+ * is for zebra/proto l3-NHG.
+ *
+ * Each client is going to get it's own nexthop group space
+ * and we'll separate them, we'll figure out where to start based upon
+ * the route_types.h
+ */
+#define ZEBRA_NHG_PROTO_UPPER                                                  \
+	((uint32_t)250000000) /* Bottom 28 bits then rounded down */
+#define ZEBRA_NHG_PROTO_SPACING (ZEBRA_NHG_PROTO_UPPER / ZEBRA_ROUTE_MAX)
+#define ZEBRA_NHG_PROTO_LOWER                                                  \
+	(ZEBRA_NHG_PROTO_SPACING * (ZEBRA_ROUTE_CONNECT + 1))
+
+extern uint32_t zclient_get_nhg_start(uint32_t proto);
 
 extern struct zclient *zclient_new(struct thread_master *m,
 				   struct zclient_options *opt);
@@ -545,6 +654,7 @@ extern unsigned short *redist_check_instance(struct redist_proto *,
 					     unsigned short);
 extern void redist_add_instance(struct redist_proto *, unsigned short);
 extern void redist_del_instance(struct redist_proto *, unsigned short);
+extern void redist_del_all_instances(struct redist_proto *red);
 
 /*
  * Send to zebra that the specified vrf is using label to resolve
@@ -660,21 +770,19 @@ zebra_interface_nbr_address_read(int, struct stream *, vrf_id_t);
 extern struct interface *zebra_interface_vrf_update_read(struct stream *s,
 							 vrf_id_t vrf_id,
 							 vrf_id_t *new_vrf_id);
-extern void zebra_router_id_update_read(struct stream *s, struct prefix *rid);
+extern int zebra_router_id_update_read(struct stream *s, struct prefix *rid);
 
 extern struct interface *zebra_interface_link_params_read(struct stream *s,
 							  vrf_id_t vrf_id);
 extern size_t zebra_interface_link_params_write(struct stream *,
 						struct interface *);
-extern int zclient_send_get_label_chunk(
-	struct zclient	*zclient,
-	uint8_t		keep,
-	uint32_t	chunk_size);
+extern int zclient_send_get_label_chunk(struct zclient *zclient, uint8_t keep,
+					uint32_t chunk_size, uint32_t base);
 
 extern int lm_label_manager_connect(struct zclient *zclient, int async);
 extern int lm_get_label_chunk(struct zclient *zclient, uint8_t keep,
-			      uint32_t chunk_size, uint32_t *start,
-			      uint32_t *end);
+			      uint32_t base, uint32_t chunk_size,
+			      uint32_t *start, uint32_t *end);
 extern int lm_release_label_chunk(struct zclient *zclient, uint32_t start,
 				  uint32_t end);
 extern int tm_table_manager_connect(struct zclient *zclient);
@@ -683,16 +791,29 @@ extern int tm_get_table_chunk(struct zclient *zclient, uint32_t chunk_size,
 extern int tm_release_table_chunk(struct zclient *zclient, uint32_t start,
 				  uint32_t end);
 
+extern int zebra_send_mpls_labels(struct zclient *zclient, int cmd,
+				  struct zapi_labels *zl);
+extern int zapi_labels_encode(struct stream *s, int cmd,
+			      struct zapi_labels *zl);
+extern int zapi_labels_decode(struct stream *s, struct zapi_labels *zl);
+
 extern int zebra_send_pw(struct zclient *zclient, int command,
 			 struct zapi_pw *pw);
-extern void zebra_read_pw_status_update(ZAPI_CALLBACK_ARGS, struct zapi_pw_status *pw);
+extern int zebra_read_pw_status_update(ZAPI_CALLBACK_ARGS,
+				       struct zapi_pw_status *pw);
 
 extern int zclient_route_send(uint8_t, struct zclient *, struct zapi_route *);
 extern int zclient_send_rnh(struct zclient *zclient, int command,
-			    struct prefix *p, bool exact_match,
+			    const struct prefix *p, bool exact_match,
 			    vrf_id_t vrf_id);
+int zapi_nexthop_encode(struct stream *s, const struct zapi_nexthop *api_nh,
+			uint32_t api_flags);
 extern int zapi_route_encode(uint8_t, struct stream *, struct zapi_route *);
-extern int zapi_route_decode(struct stream *, struct zapi_route *);
+extern int zapi_route_decode(struct stream *s, struct zapi_route *api);
+extern int zapi_nexthop_decode(struct stream *s, struct zapi_nexthop *api_nh,
+			       uint32_t api_flags);
+bool zapi_nhg_notify_decode(struct stream *s, uint32_t *id,
+			    enum zapi_nhg_notify_owner *note);
 bool zapi_route_notify_decode(struct stream *s, struct prefix *p,
 			      uint32_t *tableid,
 			      enum zapi_route_notify_owner *note);
@@ -704,6 +825,11 @@ bool zapi_ipset_notify_decode(struct stream *s,
 			      uint32_t *unique,
 			     enum zapi_ipset_notify_owner *note);
 
+extern void zclient_nhg_add(struct zclient *zclient,
+			    uint32_t id, size_t nhops,
+			    struct zapi_nexthop *znh);
+extern void zclient_nhg_del(struct zclient *zclient, uint32_t id);
+
 #define ZEBRA_IPSET_NAME_SIZE   32
 
 bool zapi_ipset_entry_notify_decode(struct stream *s,
@@ -714,12 +840,22 @@ bool zapi_iptable_notify_decode(struct stream *s,
 		uint32_t *unique,
 		enum zapi_iptable_notify_owner *note);
 
-extern struct nexthop *nexthop_from_zapi_nexthop(struct zapi_nexthop *znh);
+extern struct nexthop *
+nexthop_from_zapi_nexthop(const struct zapi_nexthop *znh);
+int zapi_nexthop_from_nexthop(struct zapi_nexthop *znh,
+			      const struct nexthop *nh);
+int zapi_backup_nexthop_from_nexthop(struct zapi_nexthop *znh,
+				     const struct nexthop *nh);
 extern bool zapi_nexthop_update_decode(struct stream *s,
 				       struct zapi_route *nhr);
 
 /* Decode the zebra error message */
 extern bool zapi_error_decode(struct stream *s, enum zebra_error_types *error);
+
+/* Encode and decode restart capabilities */
+extern int32_t zclient_capabilities_send(uint32_t cmd, struct zclient *zclient,
+					 struct zapi_cap *api);
+extern int32_t zapi_capabilities_decode(struct stream *s, struct zapi_cap *api);
 
 static inline void zapi_route_set_blackhole(struct zapi_route *api,
 					    enum blackhole_type bh_type)
@@ -737,4 +873,10 @@ extern void zclient_send_mlag_deregister(struct zclient *client);
 
 extern void zclient_send_mlag_data(struct zclient *client,
 				   struct stream *client_s);
+
+/* Send the hello message.
+ * Returns 0 for success or -1 on an I/O error.
+ */
+extern int zclient_send_hello(struct zclient *client);
+
 #endif /* _ZEBRA_ZCLIENT_H */

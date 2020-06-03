@@ -4,7 +4,7 @@
  * Copyright (C) 2017 by David Lamparter & Christian Franke,
  *                       Open Source Routing / NetDEF Inc.
  *
- * This file is part of FreeRangeRouting (FRR)
+ * This file is part of FRRouting (FRR)
  *
  * FRR is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -45,6 +45,10 @@
 
 #include "prefix.h"
 #include "table.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define SRCDEST2STR_BUFFER (2*PREFIX2STR_BUFFER + sizeof(" from "))
 
@@ -95,5 +99,9 @@ static inline void *srcdest_rnode_table_info(struct route_node *rn)
 {
 	return route_table_get_info(srcdest_rnode_table(rn));
 }
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _ZEBRA_SRC_DEST_TABLE_H */

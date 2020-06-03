@@ -89,6 +89,7 @@ struct pbr_map_sequence {
 	 */
 	struct prefix *src;
 	struct prefix *dst;
+	uint32_t mark;
 
 	/*
 	 * Family of the src/dst.  Needed when deleting since we clear them
@@ -138,13 +139,13 @@ struct pbr_map_sequence {
 	 * A reason of 0 means we think the pbr_map_sequence is good to go
 	 * We can accumuluate multiple failure states
 	 */
-#define PBR_MAP_VALID_SEQUENCE_NUMBER  0
-#define PBR_MAP_INVALID_NEXTHOP_GROUP  (1 << 0)
-#define PBR_MAP_INVALID_NEXTHOP        (1 << 1)
-#define PBR_MAP_INVALID_NO_NEXTHOPS    (1 << 2)
-#define PBR_MAP_INVALID_BOTH_NHANDGRP  (1 << 3)
-#define PBR_MAP_INVALID_SRCDST         (1 << 4)
-#define PBR_MAP_INVALID_VRF            (1 << 5)
+#define PBR_MAP_VALID_SEQUENCE_NUMBER    0
+#define PBR_MAP_INVALID_NEXTHOP_GROUP    (1 << 0)
+#define PBR_MAP_INVALID_NEXTHOP          (1 << 1)
+#define PBR_MAP_INVALID_NO_NEXTHOPS      (1 << 2)
+#define PBR_MAP_INVALID_BOTH_NHANDGRP    (1 << 3)
+#define PBR_MAP_INVALID_EMPTY            (1 << 4)
+#define PBR_MAP_INVALID_VRF              (1 << 5)
 	uint64_t reason;
 
 	QOBJ_FIELDS
@@ -181,7 +182,15 @@ extern void pbr_map_init(void);
 
 extern bool pbr_map_check_valid(const char *name);
 
-extern void pbr_map_check(struct pbr_map_sequence *pbrms);
+/**
+ * Re-check the pbr map for validity.
+ *
+ * Install if valid, remove if not.
+ *
+ * If changed is set, the config on the on the map has changed somewhere
+ * and the rules need to be replaced if valid.
+ */
+extern void pbr_map_check(struct pbr_map_sequence *pbrms, bool changed);
 extern void pbr_map_check_nh_group_change(const char *nh_group);
 extern void pbr_map_reason_string(unsigned int reason, char *buf, int size);
 

@@ -26,7 +26,7 @@ Configuring OSPF
 
 .. option:: -a, --apiserver
 
-   Enable the OSPF API server
+   Enable the OSPF API server. This is required to use ``ospfclient``.
 
 *ospfd* must acquire interface information from *zebra* in order to function.
 Therefore *zebra* must be running before invoking *ospfd*. Also, if *zebra* is
@@ -69,7 +69,7 @@ The instance number should be specified in the config when addressing a particul
 .. code-block:: frr
 
    router ospf 5
-      router-id 1.2.3.4
+      ospf router-id 1.2.3.4
       area 0.0.0.0 authentication message-digest
       ...
 
@@ -218,7 +218,7 @@ To start OSPF process you have to specify the OSPF router.
    SPF-triggering event occurs within the hold-time of the previous SPF
    calculation.
 
-   This command supercedes the *timers spf* command in previous FRR
+   This command supersedes the *timers spf* command in previous FRR
    releases.
 
 .. index:: max-metric router-lsa [on-startup|on-shutdown] (5-86400)
@@ -662,6 +662,12 @@ Interfaces
 .. index:: ip ospf network (broadcast|non-broadcast|point-to-multipoint|point-to-point)
 .. clicmd:: ip ospf network (broadcast|non-broadcast|point-to-multipoint|point-to-point)
 
+   When configuring a point-to-point network on an interface and the interface
+   has a /32 address associated with then OSPF will treat the interface
+   as being `unnumbered`.  If you are doing this you *must* set the
+   net.ipv4.conf.<interface name>.rp_filter value to 0.  In order for
+   the ospf multicast packets to be delivered by the kernel.
+
 .. index:: no ip ospf network
 .. clicmd:: no ip ospf network
 
@@ -703,6 +709,18 @@ Interfaces
 .. clicmd:: no ip ospf area
 
    Enable ospf on an interface and set associated area.
+
+OSPF route-map
+==============
+
+Usage of *ospfd*'s route-map support.
+
+.. index:: set metric [+|-](0-4294967295)
+.. clicmd:: set metric [+|-](0-4294967295)
+
+   Set a metric for matched route when sending announcement. Use plus (+) sign
+   to add a metric value to an existing metric. Use minus (-) sign to
+   substract a metric value from an existing metric.
 
 .. _redistribute-routes-to-ospf:
 
@@ -906,10 +924,13 @@ Opaque LSA
 .. index:: no capability opaque
 .. clicmd:: no capability opaque
 
-   *ospfd* supports Opaque LSA (:rfc:`2370`) as fundamental for MPLS Traffic
-   Engineering LSA. Prior to used MPLS TE, opaque-lsa must be enable in the
-   configuration file. Alternate command could be "mpls-te on"
-   (:ref:`ospf-traffic-engineering`).
+   *ospfd* supports Opaque LSA (:rfc:`2370`) as partial support for
+   MPLS Traffic Engineering LSAs. The opaque-lsa capability must be
+   enabled in the configuration. An alternate command could be
+   "mpls-te on" (:ref:`ospf-traffic-engineering`). Note that FRR
+   offers only partial support for some of the routing protocol
+   extensions that are used with MPLS-TE; it does not support a
+   complete RSVP-TE solution.
 
 .. index:: show ip ospf database (opaque-link|opaque-area|opaque-external)
 .. clicmd:: show ip ospf database (opaque-link|opaque-area|opaque-external)
@@ -935,6 +956,12 @@ Opaque LSA
 
 Traffic Engineering
 ===================
+
+.. note::
+
+   At this time, FRR offers partial support for some of the routing
+   protocol extensions that can be used with MPLS-TE. FRR does not
+   support a complete RSVP-TE solution currently.
 
 .. index:: mpls-te on
 .. clicmd:: mpls-te on

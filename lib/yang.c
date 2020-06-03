@@ -27,8 +27,8 @@
 
 #include <libyang/user_types.h>
 
-DEFINE_MTYPE(LIB, YANG_MODULE, "YANG module")
-DEFINE_MTYPE(LIB, YANG_DATA, "YANG data structure")
+DEFINE_MTYPE_STATIC(LIB, YANG_MODULE, "YANG module")
+DEFINE_MTYPE_STATIC(LIB, YANG_DATA, "YANG data structure")
 
 /* libyang container. */
 struct ly_ctx *ly_native_ctx;
@@ -77,6 +77,7 @@ static const char *const frr_native_modules[] = {
 	"frr-ripd",
 	"frr-ripngd",
 	"frr-isisd",
+	"frr-vrrpd",
 };
 
 /* Generate the yang_modules tree. */
@@ -595,7 +596,7 @@ struct yang_data *yang_data_list_find(const struct list *list,
 /* Make libyang log its errors using FRR logging infrastructure. */
 static void ly_log_cb(LY_LOG_LEVEL level, const char *msg, const char *path)
 {
-	int priority;
+	int priority = LOG_ERR;
 
 	switch (level) {
 	case LY_LLERR:
@@ -605,10 +606,9 @@ static void ly_log_cb(LY_LOG_LEVEL level, const char *msg, const char *path)
 		priority = LOG_WARNING;
 		break;
 	case LY_LLVRB:
+	case LY_LLDBG:
 		priority = LOG_DEBUG;
 		break;
-	default:
-		return;
 	}
 
 	if (path)
@@ -617,7 +617,18 @@ static void ly_log_cb(LY_LOG_LEVEL level, const char *msg, const char *path)
 		zlog(priority, "libyang: %s", msg);
 }
 
-struct ly_ctx *yang_ctx_new_setup(void)
+void yang_debugging_set(bool enable)
+{
+	if (enable) {
+		ly_verb(LY_LLDBG);
+		ly_verb_dbg(0xFF);
+	} else {
+		ly_verb(LY_LLERR);
+		ly_verb_dbg(0);
+	}
+}
+
+struct ly_ctx *yang_ctx_new_setup(bool embedded_modules)
 {
 	struct ly_ctx *ctx;
 	const char *yang_models_path = YANG_MODELS_PATH;
@@ -636,18 +647,21 @@ struct ly_ctx *yang_ctx_new_setup(void)
 	ctx = ly_ctx_new(yang_models_path, LY_CTX_DISABLE_SEARCHDIR_CWD);
 	if (!ctx)
 		return NULL;
-	ly_ctx_set_module_imp_clb(ctx, yang_module_imp_clb, NULL);
+
+	if (embedded_modules)
+		ly_ctx_set_module_imp_clb(ctx, yang_module_imp_clb, NULL);
+
 	return ctx;
 }
 
-void yang_init(void)
+void yang_init(bool embedded_modules)
 {
 	/* Initialize libyang global parameters that affect all containers. */
 	ly_set_log_clb(ly_log_cb, 1);
 	ly_log_options(LY_LOLOG | LY_LOSTORE);
 
 	/* Initialize libyang container for native models. */
-	ly_native_ctx = yang_ctx_new_setup();
+	ly_native_ctx = yang_ctx_new_setup(embedded_modules);
 	if (!ly_native_ctx) {
 		flog_err(EC_LIB_LIBYANG, "%s: ly_ctx_new() failed", __func__);
 		exit(1);

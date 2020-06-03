@@ -26,12 +26,19 @@
 #include "zclient.h"
 #include "zebra/zserv.h"
 
-#ifdef HAVE_PROTOBUF
+#ifdef HAVE_PROTOBUF_VERSION_3
 #include "mlag/mlag.pb-c.h"
 #endif
 
 #define ZEBRA_MLAG_BUF_LIMIT 2048
 #define ZEBRA_MLAG_LEN_SIZE 4
+
+DECLARE_HOOK(zebra_mlag_private_write_data,
+	     (uint8_t *data, uint32_t len), (data, len))
+DECLARE_HOOK(zebra_mlag_private_monitor_state, (), ())
+DECLARE_HOOK(zebra_mlag_private_open_channel, (), ())
+DECLARE_HOOK(zebra_mlag_private_close_channel, (), ())
+DECLARE_HOOK(zebra_mlag_private_cleanup_data, (), ())
 
 extern uint8_t mlag_wr_buffer[ZEBRA_MLAG_BUF_LIMIT];
 extern uint8_t mlag_rd_buffer[ZEBRA_MLAG_BUF_LIMIT];
@@ -39,6 +46,7 @@ extern uint32_t mlag_rd_buf_offset;
 
 static inline void zebra_mlag_reset_read_buffer(void)
 {
+	memset(mlag_wr_buffer, 0, ZEBRA_MLAG_BUF_LIMIT);
 	mlag_rd_buf_offset = 0;
 }
 
@@ -57,6 +65,7 @@ void zebra_mlag_send_register(void);
 void zebra_mlag_send_deregister(void);
 void zebra_mlag_handle_process_state(enum zebra_mlag_state state);
 void zebra_mlag_process_mlag_data(uint8_t *data, uint32_t len);
+
 /*
  * ProtoBuffer Api's
  */

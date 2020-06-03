@@ -355,7 +355,7 @@ int rfapi_check(void *handle)
 
 void del_vnc_route(struct rfapi_descriptor *rfd,
 		   struct peer *peer, /* rfd->peer for RFP regs */
-		   struct bgp *bgp, safi_t safi, struct prefix *p,
+		   struct bgp *bgp, safi_t safi, const struct prefix *p,
 		   struct prefix_rd *prd, uint8_t type, uint8_t sub_type,
 		   struct rfapi_nexthop *lnh, int kill)
 {
@@ -388,15 +388,13 @@ void del_vnc_route(struct rfapi_descriptor *rfd,
 	     bpi = bpi->next) {
 
 		vnc_zlog_debug_verbose(
-			"%s: trying bpi=%p, bpi->peer=%p, bpi->type=%d, bpi->sub_type=%d, bpi->extra->vnc.export.rfapi_handle=%p, local_pref=%u",
+			"%s: trying bpi=%p, bpi->peer=%p, bpi->type=%d, bpi->sub_type=%d, bpi->extra->vnc.export.rfapi_handle=%p, local_pref=%" PRIu64,
 			__func__, bpi, bpi->peer, bpi->type, bpi->sub_type,
 			(bpi->extra ? bpi->extra->vnc.export.rfapi_handle
 				    : NULL),
-			((bpi->attr
-			  && CHECK_FLAG(bpi->attr->flag,
-					ATTR_FLAG_BIT(BGP_ATTR_LOCAL_PREF)))
-				 ? bpi->attr->local_pref
-				 : 0));
+			CHECK_FLAG(bpi->attr->flag,
+				   ATTR_FLAG_BIT(BGP_ATTR_LOCAL_PREF)
+				   ? bpi->attr->local_pref : 0));
 
 		if (bpi->peer == peer && bpi->type == type
 		    && bpi->sub_type == sub_type && bpi->extra
@@ -559,7 +557,7 @@ void rfapi_vn_options_free(struct rfapi_vn_option *p)
 
 /* Based on bgp_redistribute_add() */
 void add_vnc_route(struct rfapi_descriptor *rfd, /* cookie, VPN UN addr, peer */
-		   struct bgp *bgp, int safi, struct prefix *p,
+		   struct bgp *bgp, int safi, const struct prefix *p,
 		   struct prefix_rd *prd, struct rfapi_ip_addr *nexthop,
 		   uint32_t *local_pref,
 		   uint32_t *lifetime, /* NULL => dont send lifetime */
@@ -880,12 +878,12 @@ void add_vnc_route(struct rfapi_descriptor *rfd, /* cookie, VPN UN addr, peer */
 		attr.nexthop.s_addr = nexthop->addr.v4.s_addr;
 
 		attr.mp_nexthop_global_in = nexthop->addr.v4;
-		attr.mp_nexthop_len = 4;
+		attr.mp_nexthop_len = BGP_ATTR_NHLEN_IPV4;
 		break;
 
 	case AF_INET6:
 		attr.mp_nexthop_global = nexthop->addr.v6;
-		attr.mp_nexthop_len = 16;
+		attr.mp_nexthop_len = BGP_ATTR_NHLEN_IPV6_GLOBAL;
 		break;
 
 	default:
@@ -1282,8 +1280,7 @@ static int rfapi_open_inner(struct rfapi_descriptor *rfd, struct bgp *bgp,
 	 * since this peer is not on the I/O thread, this lock is not strictly
 	 * necessary, but serves as a reminder to those who may meddle...
 	 */
-	pthread_mutex_lock(&rfd->peer->io_mtx);
-	{
+	frr_with_mutex(&rfd->peer->io_mtx) {
 		// we don't need any I/O related facilities
 		if (rfd->peer->ibuf)
 			stream_fifo_free(rfd->peer->ibuf);
@@ -1300,7 +1297,6 @@ static int rfapi_open_inner(struct rfapi_descriptor *rfd, struct bgp *bgp,
 		rfd->peer->obuf_work = NULL;
 		rfd->peer->ibuf_work = NULL;
 	}
-	pthread_mutex_unlock(&rfd->peer->io_mtx);
 
 	{ /* base code assumes have valid host pointer */
 		char buf[BUFSIZ];
@@ -1493,10 +1489,7 @@ void rfapiFreeBgpTeaOptionChain(struct bgp_tea_options *p)
 	while (p) {
 		next = p->next;
 
-		if (p->value) {
-			XFREE(MTYPE_BGP_TEA_OPTIONS_VALUE, p->value);
-			p->value = NULL;
-		}
+		XFREE(MTYPE_BGP_TEA_OPTIONS_VALUE, p->value);
 		XFREE(MTYPE_BGP_TEA_OPTIONS, p);
 
 		p = next;
@@ -2157,7 +2150,7 @@ int rfapi_close(void *handle)
 
 	vnc_zlog_debug_verbose("%s: rfd=%p", __func__, rfd);
 
-#if RFAPI_WHO_IS_CALLING_ME
+#ifdef RFAPI_WHO_IS_CALLING_ME
 #ifdef HAVE_GLIBC_BACKTRACE
 #define RFAPI_DEBUG_BACKTRACE_NENTRIES 5
 	{
@@ -2931,7 +2924,7 @@ DEFUN (debug_rfapi_open,
 {
 	struct rfapi_ip_addr vn;
 	struct rfapi_ip_addr un;
-	uint32_t lifetime;
+	uint32_t lifetime = 0;
 	int rc;
 	rfapi_handle handle;
 
@@ -3196,12 +3189,8 @@ DEFUN (debug_rfapi_register_vn_un_l2o,
 		return CMD_WARNING_CONFIG_FAILED;
 	}
 	optary[opt_next].type = RFAPI_VN_OPTION_TYPE_L2ADDR;
-	if (opt_next) {
-		optary[opt_next - 1].next = optary + opt_next;
-	} else {
-		opt = optary;
-	}
-	++opt_next;
+	opt = optary;
+
 	/* L2 option parsing END */
 
 	/* TBD fixme */

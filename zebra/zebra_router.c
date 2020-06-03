@@ -29,8 +29,10 @@
 #include "zebra_pbr.h"
 #include "zebra_vxlan.h"
 #include "zebra_mlag.h"
-#include "zebra_nhg_private.h"
+#include "zebra_nhg.h"
 #include "debug.h"
+
+DEFINE_MTYPE_STATIC(ZEBRA, RIB_TABLE_INFO, "RIB table info")
 
 struct zebra_router zrouter = {
 	.multipath_num = MULTIPATH_NUM,
@@ -221,10 +223,11 @@ void zebra_router_terminate(void)
 	zebra_vxlan_disable();
 	zebra_mlag_terminate();
 
-	hash_clean(zrouter.nhgs, zebra_nhg_free);
-	hash_free(zrouter.nhgs);
-	hash_clean(zrouter.nhgs_id, NULL);
+	/* Free NHE in ID table only since it has unhashable entries as well */
+	hash_clean(zrouter.nhgs_id, zebra_nhg_hash_free);
 	hash_free(zrouter.nhgs_id);
+	hash_clean(zrouter.nhgs, NULL);
+	hash_free(zrouter.nhgs);
 
 	hash_clean(zrouter.rules_hash, zebra_pbr_rules_free);
 	hash_free(zrouter.rules_hash);
@@ -242,6 +245,8 @@ void zebra_router_init(void)
 	zrouter.sequence_num = 0;
 
 	zrouter.packets_to_process = ZEBRA_ZAPI_PACKETS_TO_PROCESS;
+
+	zrouter.rtadv_sock = -1;
 
 	zebra_vxlan_init();
 	zebra_mlag_init();

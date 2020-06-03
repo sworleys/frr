@@ -47,6 +47,7 @@
 #include "sharp_zebra.h"
 #include "sharp_vty.h"
 #include "sharp_globals.h"
+#include "sharp_nht.h"
 
 DEFINE_MGROUP(SHARPD, "sharpd")
 
@@ -111,7 +112,9 @@ struct quagga_signal_t sharp_signals[] = {
 
 #define SHARP_VTY_PORT 2614
 
-static const struct frr_yang_module_info *sharpd_yang_modules[] = {
+static const struct frr_yang_module_info *const sharpd_yang_modules[] = {
+	&frr_interface_info,
+	&frr_route_map_info,
 };
 
 FRR_DAEMON_INFO(sharpd, SHARP, .vty_port = SHARP_VTY_PORT,
@@ -158,7 +161,7 @@ int main(int argc, char **argv, char **envp)
 
 	sharp_global_init();
 
-	nexthop_group_init(NULL, NULL, NULL, NULL);
+	sharp_nhgroup_init();
 	vrf_init(NULL, NULL, NULL, NULL, NULL);
 
 	access_list_init();

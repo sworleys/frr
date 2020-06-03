@@ -72,15 +72,29 @@ int getsockopt_so_sendbuf(const int sock)
 	return optval;
 }
 
+int getsockopt_so_recvbuf(const int sock)
+{
+	uint32_t optval;
+	socklen_t optlen = sizeof(optval);
+	int ret = getsockopt(sock, SOL_SOCKET, SO_RCVBUF, (char *)&optval,
+			     &optlen);
+	if (ret < 0) {
+		flog_err_sys(EC_LIB_SYSTEM_CALL,
+			     "fd %d: can't getsockopt SO_RCVBUF: %d (%s)", sock,
+			     errno, safe_strerror(errno));
+		return ret;
+	}
+	return optval;
+}
+
 static void *getsockopt_cmsg_data(struct msghdr *msgh, int level, int type)
 {
 	struct cmsghdr *cmsg;
-	void *ptr = NULL;
 
 	for (cmsg = CMSG_FIRSTHDR(msgh); cmsg != NULL;
 	     cmsg = CMSG_NXTHDR(msgh, cmsg))
 		if (cmsg->cmsg_level == level && cmsg->cmsg_type == type)
-			return (ptr = CMSG_DATA(cmsg));
+			return CMSG_DATA(cmsg);
 
 	return NULL;
 }
@@ -103,21 +117,6 @@ int setsockopt_ipv6_pktinfo(int sock, int val)
 		flog_err(EC_LIB_SOCKET, "can't setsockopt IPV6_PKTINFO : %s",
 			 safe_strerror(errno));
 #endif /* INIA_IPV6 */
-	return ret;
-}
-
-/* Set multicast hops val to the socket. */
-int setsockopt_ipv6_checksum(int sock, int val)
-{
-	int ret;
-
-#ifdef GNU_LINUX
-	ret = setsockopt(sock, IPPROTO_RAW, IPV6_CHECKSUM, &val, sizeof(val));
-#else
-	ret = setsockopt(sock, IPPROTO_IPV6, IPV6_CHECKSUM, &val, sizeof(val));
-#endif /* GNU_LINUX */
-	if (ret < 0)
-		flog_err(EC_LIB_SOCKET, "can't setsockopt IPV6_CHECKSUM");
 	return ret;
 }
 
@@ -537,10 +536,8 @@ ifindex_t getsockopt_ifindex(int af, struct msghdr *msgh)
 	switch (af) {
 	case AF_INET:
 		return (getsockopt_ipv4_ifindex(msgh));
-		break;
 	case AF_INET6:
 		return (getsockopt_ipv6_ifindex(msgh));
-		break;
 	default:
 		flog_err(EC_LIB_DEVELOPMENT,
 			 "getsockopt_ifindex: unknown address family %d", af);
@@ -686,7 +683,7 @@ int sockopt_tcp_signature_ext(int sock, union sockunion *su, uint16_t prefixlen,
 #endif /* GNU_LINUX */
 
 	if ((ret = setsockopt(sock, IPPROTO_TCP, optname, &md5sig,
-			      sizeof md5sig))
+			      sizeof(md5sig)))
 	    < 0) {
 		/* ENOENT is harmless.  It is returned when we clear a password
 		   for which
@@ -701,6 +698,12 @@ int sockopt_tcp_signature_ext(int sock, union sockunion *su, uint16_t prefixlen,
 	}
 	return ret;
 #endif /* HAVE_TCP_MD5SIG */
+
+	/*
+	 * Making compiler happy.  If we get to this point we probably
+	 * have done something really really wrong.
+	 */
+	return -2;
 }
 
 int sockopt_tcp_signature(int sock, union sockunion *su, const char *password)

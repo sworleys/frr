@@ -90,9 +90,12 @@ struct channel_counts {
   installed: indicate if this entry is installed in the kernel.
 
 */
+PREDECL_RBTREE_UNIQ(rb_pim_oil)
 
 struct channel_oil {
 	struct pim_instance *pim;
+
+	struct rb_pim_oil_item oil_rb;
 
 	struct mfcctl oil;
 	int installed;
@@ -106,6 +109,12 @@ struct channel_oil {
 	time_t mroute_creation;
 };
 
+extern int pim_channel_oil_compare(const struct channel_oil *c1,
+				   const struct channel_oil *c2);
+DECLARE_RBTREE_UNIQ(rb_pim_oil, struct channel_oil, oil_rb,
+                    pim_channel_oil_compare)
+
+
 extern struct list *pim_channel_oil_list;
 
 void pim_oil_init(struct pim_instance *pim);
@@ -116,11 +125,12 @@ struct channel_oil *pim_find_channel_oil(struct pim_instance *pim,
 					 struct prefix_sg *sg);
 struct channel_oil *pim_channel_oil_add(struct pim_instance *pim,
 					struct prefix_sg *sg,
-					const char *caller);
+					const char *name);
 void pim_channel_oil_change_iif(struct pim_instance *pim,
 				struct channel_oil *c_oil, int input_vif_index,
 				const char *name);
-struct channel_oil *pim_channel_oil_del(struct channel_oil *c_oil);
+struct channel_oil *pim_channel_oil_del(struct channel_oil *c_oil,
+					const char *name);
 
 int pim_channel_add_oif(struct channel_oil *c_oil, struct interface *oif,
 			uint32_t proto_mask, const char *caller);
@@ -136,6 +146,6 @@ void pim_channel_update_oif_mute(struct channel_oil *c_oil,
 
 void pim_channel_oil_upstream_deref(struct channel_oil *c_oil);
 void pim_channel_del_inherited_oif(struct channel_oil *c_oil,
-		struct interface *oif, const char *caller);
+				   struct interface *oif, const char *caller);
 
 #endif /* PIM_OIL_H */

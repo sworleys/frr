@@ -280,7 +280,6 @@ void bgp_path_info_mpath_free(struct bgp_path_info_mpath **mpath)
 		if ((*mpath)->mp_attr)
 			bgp_attr_unintern(&(*mpath)->mp_attr);
 		XFREE(MTYPE_BGP_MPATH_INFO, *mpath);
-		*mpath = NULL;
 	}
 }
 
@@ -465,10 +464,10 @@ bool bgp_path_info_mpath_chkwtd(struct bgp *bgp, struct bgp_path_info *path)
 	 */
 	if (bgp->lb_handling != BGP_LINK_BW_SKIP_MISSING &&
 	    bgp->lb_handling != BGP_LINK_BW_DEFWT_4_MISSING)
-		return ((path->mpath->mp_flags & BGP_MP_LB_ALL));
+		return (path->mpath->mp_flags & BGP_MP_LB_ALL);
 
 	/* At least one path should have bandwidth. */
-	return ((path->mpath->mp_flags & BGP_MP_LB_PRESENT));
+	return (path->mpath->mp_flags & BGP_MP_LB_PRESENT);
 }
 
 /*
@@ -519,8 +518,8 @@ void bgp_path_info_mpath_update(struct bgp_node *rn,
 	struct listnode *mp_node, *mp_next_node;
 	struct bgp_path_info *cur_mpath, *new_mpath, *next_mpath, *prev_mpath;
 	int mpath_changed, debug;
+	char nh_buf[2][INET6_ADDRSTRLEN];
 	bool all_paths_lb;
-	char pfx_buf[PREFIX2STR_BUFFER], nh_buf[2][INET6_ADDRSTRLEN];
 	char path_buf[PATH_ADDPATH_STR_BUFFER];
 
 	mpath_changed = 0;
@@ -531,10 +530,7 @@ void bgp_path_info_mpath_update(struct bgp_node *rn,
 	old_cum_bw = cum_bw = 0;
 	prev_mpath = new_best;
 	mp_node = listhead(mp_list);
-	debug = bgp_debug_bestpath(&rn->p);
-
-	if (debug)
-		prefix2str(&rn->p, pfx_buf, sizeof(pfx_buf));
+	debug = bgp_debug_bestpath(rn);
 
 	if (new_best) {
 		mpath_count++;
@@ -556,8 +552,8 @@ void bgp_path_info_mpath_update(struct bgp_node *rn,
 
 	if (debug)
 		zlog_debug(
-			"%s: starting mpath update, newbest %s num candidates %d old-mpath-count %d old-cum-bw u%" PRIu64,
-			pfx_buf, new_best ? new_best->peer->host : "NONE",
+			"%pRN: starting mpath update, newbest %s num candidates %d old-mpath-count %d old-cum-bw u%" PRIu64,
+			rn, new_best ? new_best->peer->host : "NONE",
 			mp_list ? listcount(mp_list) : 0,
 			old_mpath_count, old_cum_bw);
 
@@ -591,8 +587,8 @@ void bgp_path_info_mpath_update(struct bgp_node *rn,
 
 		if (debug)
 			zlog_debug(
-				"%s: comparing candidate %s with existing mpath %s",
-				pfx_buf,
+				"%pRN: comparing candidate %s with existing mpath %s",
+				rn,
 				tmp_info ? tmp_info->peer->host : "NONE",
 				cur_mpath ? cur_mpath->peer->host : "NONE");
 
@@ -620,8 +616,8 @@ void bgp_path_info_mpath_update(struct bgp_node *rn,
 					bgp_path_info_path_with_addpath_rx_str(
 						cur_mpath, path_buf);
 					zlog_debug(
-						"%s: %s is still multipath, cur count %d",
-						pfx_buf, path_buf, mpath_count);
+						"%pRN: %s is still multipath, cur count %d",
+						rn, path_buf, mpath_count);
 				}
 			} else {
 				mpath_changed = 1;
@@ -629,8 +625,8 @@ void bgp_path_info_mpath_update(struct bgp_node *rn,
 					bgp_path_info_path_with_addpath_rx_str(
 						cur_mpath, path_buf);
 					zlog_debug(
-						"%s: remove mpath %s nexthop %s, cur count %d",
-						pfx_buf, path_buf,
+						"%pRN: remove mpath %s nexthop %s, cur count %d",
+						rn, path_buf,
 						inet_ntop(AF_INET,
 							  &cur_mpath->attr
 								   ->nexthop,
@@ -662,8 +658,8 @@ void bgp_path_info_mpath_update(struct bgp_node *rn,
 				bgp_path_info_path_with_addpath_rx_str(
 					cur_mpath, path_buf);
 				zlog_debug(
-					"%s: remove mpath %s nexthop %s, cur count %d",
-					pfx_buf, path_buf,
+					"%pRN: remove mpath %s nexthop %s, cur count %d",
+					rn, path_buf,
 					inet_ntop(AF_INET,
 						  &cur_mpath->attr->nexthop,
 						  nh_buf[0], sizeof(nh_buf[0])),
@@ -696,8 +692,6 @@ void bgp_path_info_mpath_update(struct bgp_node *rn,
 			if ((mpath_count < maxpaths) && (new_mpath != new_best)
 			    && bgp_path_info_nexthop_cmp(prev_mpath,
 							 new_mpath)) {
-				if (new_mpath == next_mpath)
-					bgp_path_info_mpath_next(new_mpath);
 				bgp_path_info_mpath_dequeue(new_mpath);
 
 				bgp_path_info_mpath_enqueue(prev_mpath,
@@ -714,8 +708,8 @@ void bgp_path_info_mpath_update(struct bgp_node *rn,
 					bgp_path_info_path_with_addpath_rx_str(
 						new_mpath, path_buf);
 					zlog_debug(
-						"%s: add mpath %s nexthop %s, cur count %d",
-						pfx_buf, path_buf,
+						"%pRN: add mpath %s nexthop %s, cur count %d",
+						rn, path_buf,
 						inet_ntop(AF_INET,
 							  &new_mpath->attr
 								   ->nexthop,
@@ -741,9 +735,9 @@ void bgp_path_info_mpath_update(struct bgp_node *rn,
 
 		if (debug)
 			zlog_debug(
-				"%s: New mpath count (incl newbest) %d mpath-change %s"
+				"%pRN: New mpath count (incl newbest) %d mpath-change %s"
 				" all_paths_lb %d cum_bw u%" PRIu64,
-				pfx_buf, mpath_count,
+				rn, mpath_count,
 				mpath_changed ? "YES" : "NO",
 				all_paths_lb, cum_bw);
 
@@ -826,8 +820,9 @@ void bgp_path_info_mpath_aggregate_update(struct bgp_path_info *new_best,
 
 	attr = *new_best->attr;
 
-	if (new_best->peer && bgp_flag_check(new_best->peer->bgp,
-					     BGP_FLAG_MULTIPATH_RELAX_AS_SET)) {
+	if (new_best->peer
+	    && CHECK_FLAG(new_best->peer->bgp->flags,
+			  BGP_FLAG_MULTIPATH_RELAX_AS_SET)) {
 
 		/* aggregate attribute from multipath constituents */
 		aspath = aspath_dup(attr.aspath);
@@ -902,7 +897,7 @@ void bgp_path_info_mpath_aggregate_update(struct bgp_path_info *new_best,
 		}
 
 		/* Zap multipath attr nexthop so we set nexthop to self */
-		attr.nexthop.s_addr = 0;
+		attr.nexthop.s_addr = INADDR_ANY;
 		memset(&attr.mp_nexthop_global, 0, sizeof(struct in6_addr));
 
 		/* TODO: should we set ATOMIC_AGGREGATE and AGGREGATOR? */

@@ -24,7 +24,7 @@
 #include "bgp_addpath.h"
 #include "bgp_route.h"
 
-static struct bgp_addpath_strategy_names strat_names[BGP_ADDPATH_MAX] = {
+static const struct bgp_addpath_strategy_names strat_names[BGP_ADDPATH_MAX] = {
 	{
 		.config_name = "addpath-tx-all-paths",
 		.human_name = "All",
@@ -41,7 +41,7 @@ static struct bgp_addpath_strategy_names strat_names[BGP_ADDPATH_MAX] = {
 	}
 };
 
-static struct bgp_addpath_strategy_names unknown_names = {
+static const struct bgp_addpath_strategy_names unknown_names = {
 	.config_name = "addpath-tx-unknown",
 	.human_name = "Unknown-Addpath-Strategy",
 	.human_description = "Unknown Addpath Strategy",
@@ -53,7 +53,7 @@ static struct bgp_addpath_strategy_names unknown_names = {
  * Returns a structure full of strings associated with an addpath type. Will
  * never return null.
  */
-struct bgp_addpath_strategy_names *
+const struct bgp_addpath_strategy_names *
 bgp_addpath_names(enum bgp_addpath_strat strat)
 {
 	if (strat < BGP_ADDPATH_MAX)
@@ -65,8 +65,8 @@ bgp_addpath_names(enum bgp_addpath_strat strat)
 /*
  * Returns if any peer is transmitting addpaths for a given afi/safi.
  */
-int bgp_addpath_is_addpath_used(struct bgp_addpath_bgp_data *d, afi_t afi,
-			      safi_t safi)
+bool bgp_addpath_is_addpath_used(struct bgp_addpath_bgp_data *d, afi_t afi,
+				 safi_t safi)
 {
 	return d->total_peercount[afi][safi] > 0;
 }
@@ -123,15 +123,15 @@ uint32_t bgp_addpath_id_for_peer(struct peer *peer, afi_t afi, safi_t safi,
  * Returns true if the path has an assigned addpath ID for any of the addpath
  * strategies.
  */
-int bgp_addpath_info_has_ids(struct bgp_addpath_info_data *d)
+bool bgp_addpath_info_has_ids(struct bgp_addpath_info_data *d)
 {
 	int i;
 
 	for (i = 0; i < BGP_ADDPATH_MAX; i++)
 		if (d->addpath_tx_id[i] != 0)
-			return 1;
+			return true;
 
-	return 0;
+	return false;
 }
 
 /*
@@ -152,7 +152,7 @@ void bgp_addpath_free_node_data(struct bgp_addpath_bgp_data *bd,
 /*
  * Check to see if the addpath strategy requires DMED to be configured to work.
  */
-int bgp_addpath_dmed_required(int strategy)
+bool bgp_addpath_dmed_required(int strategy)
 {
 	return strategy == BGP_ADDPATH_BEST_PER_AS;
 }
@@ -161,21 +161,42 @@ int bgp_addpath_dmed_required(int strategy)
  * Return true if this is a path we should advertise due to a
  * configured addpath-tx knob
  */
-int bgp_addpath_tx_path(enum bgp_addpath_strat strat,
-			    struct bgp_path_info *pi)
+bool bgp_addpath_tx_path(enum bgp_addpath_strat strat, struct bgp_path_info *pi)
 {
 	switch (strat) {
 	case BGP_ADDPATH_NONE:
-		return 0;
+		return false;
 	case BGP_ADDPATH_ALL:
-		return 1;
+		return true;
 	case BGP_ADDPATH_BEST_PER_AS:
 		if (CHECK_FLAG(pi->flags, BGP_PATH_DMED_SELECTED))
-			return 1;
+			return true;
 		else
-			return 0;
+			return false;
 	default:
-		return 0;
+		return false;
+	}
+}
+
+static void bgp_addpath_flush_type_rn(struct bgp *bgp, afi_t afi, safi_t safi,
+				      enum bgp_addpath_strat addpath_type,
+				      struct bgp_node *rn)
+{
+	struct bgp_path_info *pi;
+
+	idalloc_drain_pool(
+		bgp->tx_addpath.id_allocators[afi][safi][addpath_type],
+		&(rn->tx_addpath.free_ids[addpath_type]));
+	for (pi = bgp_node_get_bgp_path_info(rn); pi; pi = pi->next) {
+		if (pi->tx_addpath.addpath_tx_id[addpath_type]
+		    != IDALLOC_INVALID) {
+			idalloc_free(
+				bgp->tx_addpath
+					.id_allocators[afi][safi][addpath_type],
+				pi->tx_addpath.addpath_tx_id[addpath_type]);
+			pi->tx_addpath.addpath_tx_id[addpath_type] =
+				IDALLOC_INVALID;
+		}
 	}
 }
 
@@ -189,26 +210,24 @@ int bgp_addpath_tx_path(enum bgp_addpath_strat strat,
 static void bgp_addpath_flush_type(struct bgp *bgp, afi_t afi, safi_t safi,
 				   enum bgp_addpath_strat addpath_type)
 {
-	struct bgp_node *rn;
-	struct bgp_path_info *pi;
+	struct bgp_node *rn, *nrn;
 
 	for (rn = bgp_table_top(bgp->rib[afi][safi]); rn;
 	     rn = bgp_route_next(rn)) {
-		idalloc_drain_pool(
-			bgp->tx_addpath.id_allocators[afi][safi][addpath_type],
-			&(rn->tx_addpath.free_ids[addpath_type]));
-		for (pi = bgp_node_get_bgp_path_info(rn); pi; pi = pi->next) {
-			if (pi->tx_addpath.addpath_tx_id[addpath_type]
-			    != IDALLOC_INVALID) {
-				idalloc_free(
-					bgp->tx_addpath
-						.id_allocators[afi][safi]
-							      [addpath_type],
-					pi->tx_addpath
-						.addpath_tx_id[addpath_type]);
-				pi->tx_addpath.addpath_tx_id[addpath_type] =
-					IDALLOC_INVALID;
-			}
+		if (safi == SAFI_MPLS_VPN) {
+			struct bgp_table *table;
+
+			table = bgp_node_get_bgp_table_info(rn);
+			if (!table)
+				continue;
+
+			for (nrn = bgp_table_top(table); nrn;
+			     nrn = bgp_route_next(nrn))
+				bgp_addpath_flush_type_rn(bgp, afi, safi,
+							  addpath_type, nrn);
+		} else {
+			bgp_addpath_flush_type_rn(bgp, afi, safi, addpath_type,
+						  rn);
 		}
 	}
 
@@ -238,8 +257,7 @@ static void bgp_addpath_populate_path(struct id_alloc *allocator,
 static void bgp_addpath_populate_type(struct bgp *bgp, afi_t afi, safi_t safi,
 				    enum bgp_addpath_strat addpath_type)
 {
-	struct bgp_node *rn;
-	struct bgp_path_info *bi;
+	struct bgp_node *rn, *nrn;
 	char buf[200];
 	struct id_alloc *allocator;
 
@@ -259,9 +277,29 @@ static void bgp_addpath_populate_type(struct bgp *bgp, afi_t afi, safi_t safi,
 	allocator = bgp->tx_addpath.id_allocators[afi][safi][addpath_type];
 
 	for (rn = bgp_table_top(bgp->rib[afi][safi]); rn;
-	     rn = bgp_route_next(rn))
-		for (bi = bgp_node_get_bgp_path_info(rn); bi; bi = bi->next)
-			bgp_addpath_populate_path(allocator, bi, addpath_type);
+	     rn = bgp_route_next(rn)) {
+		struct bgp_path_info *bi;
+
+		if (safi == SAFI_MPLS_VPN) {
+			struct bgp_table *table;
+
+			table = bgp_node_get_bgp_table_info(rn);
+			if (!table)
+				continue;
+
+			for (nrn = bgp_table_top(table); nrn;
+			     nrn = bgp_route_next(nrn))
+				for (bi = bgp_node_get_bgp_path_info(nrn); bi;
+				     bi = bi->next)
+					bgp_addpath_populate_path(allocator, bi,
+								  addpath_type);
+		} else {
+			for (bi = bgp_node_get_bgp_path_info(rn); bi;
+			     bi = bi->next)
+				bgp_addpath_populate_path(allocator, bi,
+							  addpath_type);
+		}
+	}
 }
 
 /*
@@ -341,11 +379,13 @@ void bgp_addpath_set_peer_type(struct peer *peer, afi_t afi, safi_t safi,
 
 	if (addpath_type != BGP_ADDPATH_NONE) {
 		if (bgp_addpath_dmed_required(addpath_type)) {
-			if (!bgp_flag_check(bgp, BGP_FLAG_DETERMINISTIC_MED)) {
+			if (!CHECK_FLAG(bgp->flags,
+					BGP_FLAG_DETERMINISTIC_MED)) {
 				zlog_warn(
 					"%s: enabling bgp deterministic-med, this is required for addpath-tx-bestpath-per-AS",
 					peer->host);
-				bgp_flag_set(bgp, BGP_FLAG_DETERMINISTIC_MED);
+				SET_FLAG(bgp->flags,
+					 BGP_FLAG_DETERMINISTIC_MED);
 				bgp_recalculate_all_bestpaths(bgp);
 			}
 		}

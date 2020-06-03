@@ -98,12 +98,13 @@ static void ts_hash(const char *text, const char *expect)
 	unsigned i = 0;
 	uint8_t hash[32];
 	char hashtext[65];
-	uint32_t count;
+	uint32_t swap_count, count;
 
-	count = htonl(list_count(&head));
+	count = list_count(&head);
+	swap_count = htonl(count);
 
 	SHA256_Init(&ctx);
-	SHA256_Update(&ctx, &count, sizeof(count));
+	SHA256_Update(&ctx, &swap_count, sizeof(swap_count));
 
 	frr_each (list, &head, item) {
 		struct {
@@ -115,17 +116,17 @@ static void ts_hash(const char *text, const char *expect)
 		};
 		SHA256_Update(&ctx, &hashitem, sizeof(hashitem));
 		i++;
-		assert(i < count);
+		assert(i <= count);
 	}
 	SHA256_Final(hash, &ctx);
 
 	for (i = 0; i < sizeof(hash); i++)
 		sprintf(hashtext + i * 2, "%02x", hash[i]);
 
-	printf("%7"PRId64"us  %-25s %s%s\n", us, text,
+	printfrr("%7"PRId64"us  %-25s %s%s\n", us, text,
 	       expect ? " " : "*", hashtext);
 	if (expect && strcmp(expect, hashtext)) {
-		printf("%-21s %s\n", "EXPECTED:", expect);
+		printfrr("%-21s %s\n", "EXPECTED:", expect);
 		assert(0);
 	}
 	monotime(&ref);
@@ -148,7 +149,7 @@ static void concat(test_, TYPE)(void)
 	for (i = 0; i < NITEM; i++)
 		itm[i].val = i;
 
-	printf("%s start\n", str(TYPE));
+	printfrr("%s start\n", str(TYPE));
 	ts_start();
 
 	list_init(&head);
@@ -209,7 +210,7 @@ static void concat(test_, TYPE)(void)
 			assert(list_add(&head, &dummy) == &itm[j]);
 		else {
 			assert(list_add(&head, &dummy) == NULL);
-			list_del(&head, &dummy);
+			assert(list_del(&head, &dummy) != NULL);
 		}
 	}
 	ts_hashx("add-dup", "a538546a6e6ab0484e925940aa8dd02fd934408bbaed8cb66a0721841584d838");
@@ -255,7 +256,7 @@ static void concat(test_, TYPE)(void)
 					list_first(&head) == &dummy);
 		} else if (list_next(&head, &dummy))
 			assert(list_next(&head, &dummy)->val > j);
-		list_del(&head, &dummy);
+		assert(list_del(&head, &dummy) != NULL);
 	}
 	ts_hash("add-dup+find_{lt,gteq}", "a538546a6e6ab0484e925940aa8dd02fd934408bbaed8cb66a0721841584d838");
 #endif
@@ -280,7 +281,7 @@ static void concat(test_, TYPE)(void)
 			assert(!tmp || tmp->val >= j);
 		} else
 			assert(gteq == list_first(&head));
-		
+
 		if (gteq)
 			assert(gteq->val >= j);
 	}
@@ -295,7 +296,7 @@ static void concat(test_, TYPE)(void)
 		(void)prng_rand(prng);
 		j = prng_rand(prng) % NITEM;
 		if (itm[j].scratchpad == 1) {
-			list_del(&head, &itm[j]);
+			assert(list_del(&head, &itm[j]) != NULL);
 			itm[j].scratchpad = 0;
 			l++;
 		}
@@ -307,7 +308,7 @@ static void concat(test_, TYPE)(void)
 		assert(item->scratchpad != 0);
 
 		if (item->val & 1) {
-			list_del(&head, item);
+			assert(list_del(&head, item) != NULL);
 			item->scratchpad = 0;
 			l++;
 		}
@@ -333,7 +334,7 @@ static void concat(test_, TYPE)(void)
 	for (i = 0; i < NITEM / 2; i++) {
 		j = prng_rand(prng) % NITEM;
 		if (itm[j].scratchpad == 1) {
-			list_del(&head, &itm[j]);
+			assert(list_del(&head, &itm[j]) != NULL);
 			itm[j].scratchpad = 0;
 			k--;
 		}
@@ -371,7 +372,7 @@ static void concat(test_, TYPE)(void)
 	for (i = 0; i < NITEM / 2; i++) {
 		j = prng_rand(prng) % NITEM;
 		if (itm[j].scratchpad == 1) {
-			list_del(&head, &itm[j]);
+			assert(list_del(&head, &itm[j]) != NULL);
 			itm[j].scratchpad = 0;
 			k--;
 		}
@@ -424,7 +425,7 @@ static void concat(test_, TYPE)(void)
 				item = &itm[j];
 				if (item->scratchpad == 0)
 					continue;
-				list_del(&head, item);
+				assert(list_del(&head, item) != NULL);
 			}
 			item->scratchpad = 0;
 			k--;
@@ -469,7 +470,7 @@ static void concat(test_, TYPE)(void)
 				item = &itm[j];
 				if (item->scratchpad == 0)
 					continue;
-				list_del(&head, item);
+				assert(list_del(&head, item) != NULL);
 			}
 			item->scratchpad = 0;
 			k--;
@@ -529,7 +530,7 @@ static void concat(test_, TYPE)(void)
 	list_fini(&head);
 	ts_ref("fini");
 	ts_end();
-	printf("%s end\n", str(TYPE));
+	printfrr("%s end\n", str(TYPE));
 }
 
 #undef ts_hashx

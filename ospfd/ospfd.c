@@ -91,7 +91,6 @@ void ospf_router_id_update(struct ospf *ospf)
 	struct ospf_interface *oi;
 	struct interface *ifp;
 	struct listnode *node;
-	int type;
 
 	if (!ospf->oi_running) {
 		if (IS_DEBUG_OSPF_EVENT)
@@ -133,24 +132,6 @@ void ospf_router_id_update(struct ospf *ospf)
 			 * !(virtual | ptop) links
 			 */
 			ospf_nbr_self_reset(oi, router_id);
-		}
-
-		/* If AS-external-LSA is queued, then flush those LSAs. */
-		if (router_id_old.s_addr == 0 && ospf->external_origin) {
-			/* Originate each redistributed external route. */
-			for (type = 0; type < ZEBRA_ROUTE_MAX; type++)
-				if (ospf->external_origin & (1 << type))
-					thread_add_event(
-						master,
-						ospf_external_lsa_originate_timer,
-						ospf, type, NULL);
-			/* Originate Deafult. */
-			if (ospf->external_origin & (1 << ZEBRA_ROUTE_MAX))
-				thread_add_event(master,
-						 ospf_default_originate_timer,
-						 ospf, 0, NULL);
-
-			ospf->external_origin = 0;
 		}
 
 		/* Flush (inline) all external LSAs based on the OSPF_LSA_SELF
@@ -196,20 +177,14 @@ void ospf_router_id_update(struct ospf *ospf)
 			}
 		}
 
-		/* Originate each redistributed external route. */
-		for (type = 0; type < ZEBRA_ROUTE_MAX; type++)
-			thread_add_event(master,
-					 ospf_external_lsa_originate_timer,
-					 ospf, type, NULL);
-		thread_add_event(master, ospf_default_originate_timer, ospf, 0,
-				 NULL);
-
 		/* update router-lsa's for each area */
 		ospf_router_lsa_update(ospf);
 
 		/* update ospf_interface's */
 		FOR_ALL_INTERFACES (vrf, ifp)
 			ospf_if_update(ospf, ifp);
+
+		ospf_external_lsa_rid_change(ospf);
 	}
 }
 
@@ -245,7 +220,7 @@ static struct ospf *ospf_new(unsigned short instance, const char *name)
 		if (IS_DEBUG_OSPF_EVENT)
 			zlog_debug(
 				"%s: Create new ospf instance with vrf_name %s vrf_id %u",
-				__PRETTY_FUNCTION__, name, new->vrf_id);
+				__func__, name, new->vrf_id);
 	} else {
 		new->vrf_id = VRF_DEFAULT;
 		vrf = vrf_lookup_by_id(VRF_DEFAULT);
@@ -318,11 +293,6 @@ static struct ospf *ospf_new(unsigned short instance, const char *name)
 	new->oi_write_q = list_new();
 	new->write_oi_count = OSPF_WRITE_INTERFACE_COUNT_DEFAULT;
 
-/* Enable "log-adjacency-changes" */
-#if DFLT_OSPF_LOG_ADJACENCY_CHANGES
-	SET_FLAG(new->config, OSPF_LOG_ADJACENCY_CHANGES);
-#endif
-
 	QOBJ_REG(new, ospf);
 
 	new->fd = -1;
@@ -359,7 +329,7 @@ struct ospf *ospf_lookup_instance(unsigned short instance)
 static int ospf_is_ready(struct ospf *ospf)
 {
 	/* OSPF must be on and Router-ID must be configured. */
-	if (!ospf || ospf->router_id.s_addr == 0)
+	if (!ospf || ospf->router_id.s_addr == INADDR_ANY)
 		return 0;
 
 	return 1;
@@ -393,7 +363,7 @@ struct ospf *ospf_lookup_by_inst_name(unsigned short instance, const char *name)
 	return NULL;
 }
 
-struct ospf *ospf_get(unsigned short instance, const char *name)
+struct ospf *ospf_get(unsigned short instance, const char *name, bool *created)
 {
 	struct ospf *ospf;
 
@@ -404,11 +374,12 @@ struct ospf *ospf_get(unsigned short instance, const char *name)
 	else
 		ospf = ospf_lookup_by_vrf_id(VRF_DEFAULT);
 
+	*created = (ospf == NULL);
 	if (ospf == NULL) {
 		ospf = ospf_new(instance, name);
 		ospf_add(ospf);
 
-		if (ospf->router_id_static.s_addr == 0)
+		if (ospf->router_id_static.s_addr == INADDR_ANY)
 			ospf_router_id_update(ospf);
 
 		ospf_opaque_type11_lsa_init(ospf);
@@ -417,27 +388,18 @@ struct ospf *ospf_get(unsigned short instance, const char *name)
 	return ospf;
 }
 
-struct ospf *ospf_get_instance(unsigned short instance)
+struct ospf *ospf_get_instance(unsigned short instance, bool *created)
 {
 	struct ospf *ospf;
 
 	ospf = ospf_lookup_instance(instance);
+	*created = (ospf == NULL);
 	if (ospf == NULL) {
 		ospf = ospf_new(instance, NULL /* VRF_DEFAULT*/);
 		ospf_add(ospf);
 
-		if (ospf->router_id_static.s_addr == 0) {
-			if (vrf_lookup_by_id(ospf->vrf_id))
-				ospf_router_id_update(ospf);
-			else {
-				if (IS_DEBUG_OSPF_EVENT)
-					zlog_debug(
-						"%s: ospf VRF (id %d) is not active yet, skip router id update",
-						__PRETTY_FUNCTION__,
-						ospf->vrf_id);
-			}
+		if (ospf->router_id_static.s_addr == INADDR_ANY)
 			ospf_router_id_update(ospf);
-		}
 
 		ospf_opaque_type11_lsa_init(ospf);
 	}
@@ -609,7 +571,6 @@ static void ospf_finish_final(struct ospf *ospf)
 	struct ospf_vl_data *vl_data;
 	struct listnode *node, *nnode;
 	int i;
-	unsigned short instance = 0;
 
 	QOBJ_UNREG(ospf);
 
@@ -633,7 +594,7 @@ static void ospf_finish_final(struct ospf *ospf)
 			ospf_redist_del(ospf, i, red->instance);
 		}
 	}
-	ospf_redistribute_default_unset(ospf);
+	ospf_redistribute_default_set(ospf, DEFAULT_ORIGINATE_NONE, 0, 0);
 
 	for (ALL_LIST_ELEMENTS(ospf->areas, node, nnode, area))
 		ospf_remove_vls_through_area(ospf, area);
@@ -702,7 +663,6 @@ static void ospf_finish_final(struct ospf *ospf)
 	/* Cancel all timers. */
 	OSPF_TIMER_OFF(ospf->t_read);
 	OSPF_TIMER_OFF(ospf->t_write);
-	OSPF_TIMER_OFF(ospf->t_external_lsa);
 	OSPF_TIMER_OFF(ospf->t_spf_calc);
 	OSPF_TIMER_OFF(ospf->t_ase_calc);
 	OSPF_TIMER_OFF(ospf->t_maxage);
@@ -781,9 +741,6 @@ static void ospf_finish_final(struct ospf *ospf)
 	ospf_distance_reset(ospf);
 	route_table_finish(ospf->distance_table);
 
-	if (!CHECK_FLAG(om->options, OSPF_MASTER_SHUTDOWN))
-		instance = ospf->instance;
-
 	list_delete(&ospf->areas);
 	list_delete(&ospf->oi_write_q);
 
@@ -804,9 +761,6 @@ static void ospf_finish_final(struct ospf *ospf)
 	}
 
 	XFREE(MTYPE_OSPF_TOP, ospf);
-
-	if (!CHECK_FLAG(om->options, OSPF_MASTER_SHUTDOWN))
-		ospf_get_instance(instance);
 }
 
 
@@ -984,7 +938,8 @@ static void add_ospf_interface(struct connected *co, struct ospf_area *area)
 	 * ospf_router_id_update() will call ospf_if_update
 	 * whenever r-id is configured instead.
 	 */
-	if ((area->ospf->router_id.s_addr != 0) && if_is_operative(co->ifp))
+	if ((area->ospf->router_id.s_addr != INADDR_ANY)
+	    && if_is_operative(co->ifp))
 		ospf_if_up(oi);
 }
 
@@ -1313,7 +1268,7 @@ static void ospf_network_run(struct prefix *p, struct ospf_area *area)
 	struct interface *ifp;
 
 	/* Schedule Router ID Update. */
-	if (area->ospf->router_id.s_addr == 0)
+	if (area->ospf->router_id.s_addr == INADDR_ANY)
 		ospf_router_id_update(area->ospf);
 
 	/* Get target interface. */
@@ -1353,7 +1308,7 @@ void ospf_if_update(struct ospf *ospf, struct interface *ifp)
 	if (IS_DEBUG_OSPF_EVENT)
 		zlog_debug(
 			"%s: interface %s ifp->vrf_id %u ospf vrf %s vrf_id %u router_id %s",
-			__PRETTY_FUNCTION__, ifp->name, ifp->vrf_id,
+			__func__, ifp->name, ifp->vrf_id,
 			ospf_vrf_id_to_name(ospf->vrf_id), ospf->vrf_id,
 			inet_ntoa(ospf->router_id));
 
@@ -1832,7 +1787,7 @@ static void ospf_nbr_nbma_add(struct ospf_nbr_nbma *nbr_nbma,
 	p.prefixlen = IPV4_MAX_BITLEN;
 	p.u.prefix4 = nbr_nbma->addr;
 
-	rn = route_node_get(oi->nbrs, (struct prefix *)&p);
+	rn = route_node_get(oi->nbrs, &p);
 	if (rn->info) {
 		nbr = rn->info;
 		nbr->nbr_nbma = nbr_nbma;
@@ -2064,8 +2019,8 @@ void ospf_vrf_unlink(struct ospf *ospf, struct vrf *vrf)
 static int ospf_vrf_new(struct vrf *vrf)
 {
 	if (IS_DEBUG_OSPF_EVENT)
-		zlog_debug("%s: VRF Created: %s(%u)", __PRETTY_FUNCTION__,
-			   vrf->name, vrf->vrf_id);
+		zlog_debug("%s: VRF Created: %s(%u)", __func__, vrf->name,
+			   vrf->vrf_id);
 
 	return 0;
 }
@@ -2074,8 +2029,8 @@ static int ospf_vrf_new(struct vrf *vrf)
 static int ospf_vrf_delete(struct vrf *vrf)
 {
 	if (IS_DEBUG_OSPF_EVENT)
-		zlog_debug("%s: VRF Deletion: %s(%u)", __PRETTY_FUNCTION__,
-			   vrf->name, vrf->vrf_id);
+		zlog_debug("%s: VRF Deletion: %s(%u)", __func__, vrf->name,
+			   vrf->vrf_id);
 
 	return 0;
 }
@@ -2105,8 +2060,8 @@ static int ospf_vrf_enable(struct vrf *vrf)
 	int ret = 0;
 
 	if (IS_DEBUG_OSPF_EVENT)
-		zlog_debug("%s: VRF %s id %u enabled", __PRETTY_FUNCTION__,
-			   vrf->name, vrf->vrf_id);
+		zlog_debug("%s: VRF %s id %u enabled", __func__, vrf->name,
+			   vrf->vrf_id);
 
 	ospf = ospf_lookup_by_name(vrf->name);
 	if (ospf) {
@@ -2120,11 +2075,10 @@ static int ospf_vrf_enable(struct vrf *vrf)
 		if (IS_DEBUG_OSPF_EVENT)
 			zlog_debug(
 				"%s: ospf linked to vrf %s vrf_id %u (old id %u)",
-				__PRETTY_FUNCTION__, vrf->name, ospf->vrf_id,
-				old_vrf_id);
+				__func__, vrf->name, ospf->vrf_id, old_vrf_id);
 
 		if (old_vrf_id != ospf->vrf_id) {
-			frr_elevate_privs(&ospfd_privs) {
+			frr_with_privs(&ospfd_privs) {
 				/* stop zebra redist to us for old vrf */
 				zclient_send_dereg_requests(zclient,
 							    old_vrf_id);
@@ -2158,8 +2112,8 @@ static int ospf_vrf_disable(struct vrf *vrf)
 		return 0;
 
 	if (IS_DEBUG_OSPF_EVENT)
-		zlog_debug("%s: VRF %s id %d disabled.", __PRETTY_FUNCTION__,
-			   vrf->name, vrf->vrf_id);
+		zlog_debug("%s: VRF %s id %d disabled.", __func__, vrf->name,
+			   vrf->vrf_id);
 
 	ospf = ospf_lookup_by_name(vrf->name);
 	if (ospf) {
@@ -2171,8 +2125,8 @@ static int ospf_vrf_disable(struct vrf *vrf)
 		ospf_vrf_unlink(ospf, vrf);
 		ospf->oi_running = 0;
 		if (IS_DEBUG_OSPF_EVENT)
-			zlog_debug("%s: ospf old_vrf_id %d unlinked",
-				   __PRETTY_FUNCTION__, old_vrf_id);
+			zlog_debug("%s: ospf old_vrf_id %d unlinked", __func__,
+				   old_vrf_id);
 		thread_cancel(ospf->t_read);
 		close(ospf->fd);
 		ospf->fd = -1;
@@ -2185,7 +2139,7 @@ static int ospf_vrf_disable(struct vrf *vrf)
 void ospf_vrf_init(void)
 {
 	vrf_init(ospf_vrf_new, ospf_vrf_enable, ospf_vrf_disable,
-		 ospf_vrf_delete, NULL);
+		 ospf_vrf_delete, ospf_vrf_enable);
 }
 
 void ospf_vrf_terminate(void)

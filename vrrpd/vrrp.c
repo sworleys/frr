@@ -34,12 +34,14 @@
 #include "vrrp.h"
 #include "vrrp_arp.h"
 #include "vrrp_debug.h"
-#include "vrrp_memory.h"
 #include "vrrp_ndisc.h"
 #include "vrrp_packet.h"
 #include "vrrp_zebra.h"
 
 #define VRRP_LOGPFX "[CORE] "
+
+DEFINE_MTYPE_STATIC(VRRPD, VRRP_IP, "VRRP IP address")
+DEFINE_MTYPE_STATIC(VRRPD, VRRP_RTR, "VRRP Router")
 
 /* statics */
 struct hash *vrrp_vrouters_hash;
@@ -48,13 +50,13 @@ int vrrp_autoconfig_version;
 
 struct vrrp_defaults vd;
 
-const char *vrrp_state_names[3] = {
+const char *const vrrp_state_names[3] = {
 	[VRRP_STATE_INITIALIZE] = "Initialize",
 	[VRRP_STATE_MASTER] = "Master",
 	[VRRP_STATE_BACKUP] = "Backup",
 };
 
-const char *vrrp_event_names[2] = {
+static const char *const vrrp_event_names[2] = {
 	[VRRP_EVENT_STARTUP] = "Startup",
 	[VRRP_EVENT_SHUTDOWN] = "Shutdown",
 };
@@ -409,9 +411,10 @@ static bool vrrp_has_ip(struct vrrp_vrouter *vr, struct ipaddr *ip)
 	return false;
 }
 
-int vrrp_add_ip(struct vrrp_router *r, struct ipaddr *ip)
+int vrrp_add_ip(struct vrrp_vrouter *vr, struct ipaddr *ip)
 {
-	int af = (ip->ipa_type == IPADDR_V6) ? AF_INET6 : AF_INET;
+	struct vrrp_router *r = IS_IPADDR_V4(ip) ? vr->v4 : vr->v6;
+	int af = r->family;
 
 	assert(r->family == af);
 	assert(!(r->vr->version == 2 && ip->ipa_type == IPADDR_V6));
@@ -455,7 +458,7 @@ int vrrp_add_ipv4(struct vrrp_vrouter *vr, struct in_addr v4)
 
 	ip.ipa_type = IPADDR_V4;
 	ip.ipaddr_v4 = v4;
-	return vrrp_add_ip(vr->v4, &ip);
+	return vrrp_add_ip(vr, &ip);
 }
 
 int vrrp_add_ipv6(struct vrrp_vrouter *vr, struct in6_addr v6)
@@ -466,14 +469,16 @@ int vrrp_add_ipv6(struct vrrp_vrouter *vr, struct in6_addr v6)
 
 	ip.ipa_type = IPADDR_V6;
 	ip.ipaddr_v6 = v6;
-	return vrrp_add_ip(vr->v6, &ip);
+	return vrrp_add_ip(vr, &ip);
 }
 
-int vrrp_del_ip(struct vrrp_router *r, struct ipaddr *ip)
+int vrrp_del_ip(struct vrrp_vrouter *vr, struct ipaddr *ip)
 {
 	struct listnode *ln, *nn;
 	struct ipaddr *iter;
 	int ret = 0;
+
+	struct vrrp_router *r = IS_IPADDR_V4(ip) ? vr->v4 : vr->v6;
 
 	if (!vrrp_has_ip(r->vr, ip))
 		return 0;
@@ -500,7 +505,7 @@ int vrrp_del_ipv6(struct vrrp_vrouter *vr, struct in6_addr v6)
 
 	ip.ipa_type = IPADDR_V6;
 	ip.ipaddr_v6 = v6;
-	return vrrp_del_ip(vr->v6, &ip);
+	return vrrp_del_ip(vr, &ip);
 }
 
 int vrrp_del_ipv4(struct vrrp_vrouter *vr, struct in_addr v4)
@@ -509,7 +514,7 @@ int vrrp_del_ipv4(struct vrrp_vrouter *vr, struct in_addr v4)
 
 	ip.ipa_type = IPADDR_V4;
 	ip.ipaddr_v4 = v4;
-	return vrrp_del_ip(vr->v4, &ip);
+	return vrrp_del_ip(vr, &ip);
 }
 
 
@@ -662,15 +667,12 @@ void vrrp_vrouter_destroy(struct vrrp_vrouter *vr)
 	XFREE(MTYPE_VRRP_RTR, vr);
 }
 
-struct vrrp_vrouter *vrrp_lookup(struct interface *ifp, uint8_t vrid)
+struct vrrp_vrouter *vrrp_lookup(const struct interface *ifp, uint8_t vrid)
 {
-	if (!ifp)
-		return NULL;
-
 	struct vrrp_vrouter vr;
 
 	vr.vrid = vrid;
-	vr.ifp = ifp;
+	vr.ifp = (struct interface *)ifp;
 
 	return hash_lookup(vrrp_vrouters_hash, &vr);
 }
@@ -805,7 +807,7 @@ static void vrrp_send_advertisement(struct vrrp_router *r)
 	ssize_t sent = sendto(r->sock_tx, pkt, (size_t)pktsz, 0, &dest.sa,
 			      sockunion_sizeof(&dest));
 
-	XFREE(MTYPE_VRRP_PKT, pkt);
+	vrrp_pkt_free(pkt);
 
 	if (sent < 0) {
 		zlog_warn(VRRP_LOGPFX VRRP_LOGPFX_VRID VRRP_LOGPFX_FAM
@@ -917,7 +919,7 @@ static int vrrp_recv_advertisement(struct vrrp_router *r, struct ipaddr *src,
 			THREAD_OFF(r->t_adver_timer);
 			thread_add_timer_msec(
 				master, vrrp_adver_timer_expire, r,
-				r->vr->advertisement_interval * 10,
+				r->vr->advertisement_interval * CS2MS,
 				&r->t_adver_timer);
 		} else if (pkt->hdr.priority > r->priority
 			   || ((pkt->hdr.priority == r->priority)
@@ -937,7 +939,7 @@ static int vrrp_recv_advertisement(struct vrrp_router *r, struct ipaddr *src,
 			THREAD_OFF(r->t_master_down_timer);
 			thread_add_timer_msec(master,
 					      vrrp_master_down_timer_expire, r,
-					      r->master_down_interval * 10,
+					      r->master_down_interval * CS2MS,
 					      &r->t_master_down_timer);
 			vrrp_change_state(r, VRRP_STATE_BACKUP);
 		} else {
@@ -955,8 +957,8 @@ static int vrrp_recv_advertisement(struct vrrp_router *r, struct ipaddr *src,
 			THREAD_OFF(r->t_master_down_timer);
 			thread_add_timer_msec(
 				master, vrrp_master_down_timer_expire, r,
-				r->skew_time * 10, &r->t_master_down_timer);
-		} else if (r->vr->preempt_mode == false
+				r->skew_time * CS2MS, &r->t_master_down_timer);
+		} else if (!r->vr->preempt_mode
 			   || pkt->hdr.priority >= r->priority) {
 			if (r->vr->version == 3) {
 				r->master_adver_interval =
@@ -966,9 +968,9 @@ static int vrrp_recv_advertisement(struct vrrp_router *r, struct ipaddr *src,
 			THREAD_OFF(r->t_master_down_timer);
 			thread_add_timer_msec(master,
 					      vrrp_master_down_timer_expire, r,
-					      r->master_down_interval * 10,
+					      r->master_down_interval * CS2MS,
 					      &r->t_master_down_timer);
-		} else if (r->vr->preempt_mode == true
+		} else if (r->vr->preempt_mode
 			   && pkt->hdr.priority < r->priority) {
 			/* Discard advertisement */
 			DEBUGD(&vrrp_dbg_proto,
@@ -1091,7 +1093,7 @@ static int vrrp_socket(struct vrrp_router *r)
 	int ret;
 	bool failed = false;
 
-	frr_elevate_privs(&vrrp_privs) {
+	frr_with_privs(&vrrp_privs) {
 		r->sock_rx = vrf_socket(r->family, SOCK_RAW, IPPROTO_VRRP,
 					r->vr->ifp->vrf_id, NULL);
 		r->sock_tx = vrf_socket(r->family, SOCK_RAW, IPPROTO_VRRP,
@@ -1113,7 +1115,7 @@ static int vrrp_socket(struct vrrp_router *r)
 	 * otherwise the kernel will select the vrf device
 	 */
 	if (r->vr->ifp->vrf_id != VRF_DEFAULT) {
-		frr_elevate_privs(&vrrp_privs) {
+		frr_with_privs (&vrrp_privs) {
 			ret = setsockopt(r->sock_tx, SOL_SOCKET,
 					 SO_BINDTODEVICE, r->mvl_ifp->name,
 					 strlen(r->mvl_ifp->name));
@@ -1150,8 +1152,7 @@ static int vrrp_socket(struct vrrp_router *r)
 		setsockopt_ipv4_multicast_loop(r->sock_tx, 0);
 
 		/* Bind Rx socket to exact interface */
-		frr_elevate_privs(&vrrp_privs)
-		{
+		frr_with_privs(&vrrp_privs) {
 			ret = setsockopt(r->sock_rx, SOL_SOCKET,
 					 SO_BINDTODEVICE, r->vr->ifp->name,
 					 strlen(r->vr->ifp->name));
@@ -1261,8 +1262,7 @@ static int vrrp_socket(struct vrrp_router *r)
 		setsockopt_ipv6_multicast_loop(r->sock_tx, 0);
 
 		/* Bind Rx socket to exact interface */
-		frr_elevate_privs(&vrrp_privs)
-		{
+		frr_with_privs(&vrrp_privs) {
 			ret = setsockopt(r->sock_rx, SOL_SOCKET,
 					 SO_BINDTODEVICE, r->vr->ifp->name,
 					 strlen(r->vr->ifp->name));
@@ -1453,11 +1453,11 @@ static void vrrp_change_state_initialize(struct vrrp_router *r)
 	r->ndisc_pending = false;
 
 	/* Disable ND Router Advertisements */
-	if (r->family == AF_INET6)
+	if (r->family == AF_INET6 && r->mvl_ifp)
 		vrrp_zebra_radv_set(r, false);
 }
 
-void (*vrrp_change_state_handlers[])(struct vrrp_router *vr) = {
+void (*const vrrp_change_state_handlers[])(struct vrrp_router *vr) = {
 	[VRRP_STATE_MASTER] = vrrp_change_state_master,
 	[VRRP_STATE_BACKUP] = vrrp_change_state_backup,
 	[VRRP_STATE_INITIALIZE] = vrrp_change_state_initialize,
@@ -1507,7 +1507,7 @@ static int vrrp_adver_timer_expire(struct thread *thread)
 
 		/* Reset the Adver_Timer to Advertisement_Interval */
 		thread_add_timer_msec(master, vrrp_adver_timer_expire, r,
-				      r->vr->advertisement_interval * 10,
+				      r->vr->advertisement_interval * CS2MS,
 				      &r->t_adver_timer);
 	} else {
 		zlog_err(VRRP_LOGPFX VRRP_LOGPFX_VRID VRRP_LOGPFX_FAM
@@ -1531,7 +1531,7 @@ static int vrrp_master_down_timer_expire(struct thread *thread)
 		  r->vr->vrid, family2str(r->family));
 
 	thread_add_timer_msec(master, vrrp_adver_timer_expire, r,
-			      r->vr->advertisement_interval * 10,
+			      r->vr->advertisement_interval * CS2MS,
 			      &r->t_adver_timer);
 	vrrp_change_state(r, VRRP_STATE_MASTER);
 
@@ -1607,14 +1607,14 @@ static int vrrp_startup(struct vrrp_router *r)
 
 	if (r->priority == VRRP_PRIO_MASTER) {
 		thread_add_timer_msec(master, vrrp_adver_timer_expire, r,
-				      r->vr->advertisement_interval * 10,
+				      r->vr->advertisement_interval * CS2MS,
 				      &r->t_adver_timer);
 		vrrp_change_state(r, VRRP_STATE_MASTER);
 	} else {
 		r->master_adver_interval = r->vr->advertisement_interval;
 		vrrp_recalculate_timers(r);
 		thread_add_timer_msec(master, vrrp_master_down_timer_expire, r,
-				      r->master_down_interval * 10,
+				      r->master_down_interval * CS2MS,
 				      &r->t_master_down_timer);
 		vrrp_change_state(r, VRRP_STATE_BACKUP);
 	}
@@ -1661,7 +1661,8 @@ static int vrrp_shutdown(struct vrrp_router *r)
 	THREAD_OFF(r->t_write);
 
 	/* Protodown macvlan */
-	vrrp_zclient_send_interface_protodown(r->mvl_ifp, true);
+	if (r->mvl_ifp)
+		vrrp_zclient_send_interface_protodown(r->mvl_ifp, true);
 
 	/* Throw away our source address */
 	memset(&r->src, 0x00, sizeof(r->src));
@@ -1682,7 +1683,7 @@ static int vrrp_shutdown(struct vrrp_router *r)
 	return 0;
 }
 
-static int (*vrrp_event_handlers[])(struct vrrp_router *r) = {
+static int (*const vrrp_event_handlers[])(struct vrrp_router *r) = {
 	[VRRP_EVENT_STARTUP] = vrrp_startup,
 	[VRRP_EVENT_SHUTDOWN] = vrrp_shutdown,
 };
@@ -1838,7 +1839,7 @@ static int vrrp_autoconfig_if_add(struct interface *ifp)
 		created = true;
 	}
 
-	if (!vr || vr->autoconf == false)
+	if (!vr || !vr->autoconf)
 		return 0;
 
 	if (!created) {
@@ -2342,71 +2343,6 @@ void vrrp_if_address_del(struct interface *ifp)
 
 /* Other ------------------------------------------------------------------- */
 
-int vrrp_config_write_interface(struct vty *vty)
-{
-	struct list *vrs = hash_to_list(vrrp_vrouters_hash);
-	struct listnode *ln, *ipln;
-	struct vrrp_vrouter *vr;
-	int writes = 0;
-
-	for (ALL_LIST_ELEMENTS_RO(vrs, ln, vr)) {
-		vty_frame(vty, "interface %s\n", vr->ifp->name);
-		++writes;
-
-		vty_out(vty, " vrrp %" PRIu8 "%s\n", vr->vrid,
-			vr->version == 2 ? " version 2" : "");
-		++writes;
-
-		if (vr->shutdown != vd.shutdown && ++writes)
-			vty_out(vty, " %svrrp %" PRIu8 " shutdown\n",
-				vr->shutdown ? "" : "no ", vr->vrid);
-
-		if (vr->preempt_mode != vd.preempt_mode && ++writes)
-			vty_out(vty, " %svrrp %" PRIu8 " preempt\n",
-				vr->preempt_mode ? "" : "no ", vr->vrid);
-
-		if (vr->accept_mode != vd.accept_mode && ++writes)
-			vty_out(vty, " %svrrp %" PRIu8 " accept\n",
-				vr->accept_mode ? "" : "no ", vr->vrid);
-
-		if (vr->advertisement_interval != vd.advertisement_interval
-		    && ++writes)
-			vty_out(vty,
-				" vrrp %" PRIu8
-				" advertisement-interval %d\n",
-				vr->vrid, vr->advertisement_interval * CS2MS);
-
-		if (vr->priority != vd.priority && ++writes)
-			vty_out(vty, " vrrp %" PRIu8 " priority %" PRIu8 "\n",
-				vr->vrid, vr->priority);
-
-		struct ipaddr *ip;
-
-		for (ALL_LIST_ELEMENTS_RO(vr->v4->addrs, ipln, ip)) {
-			char ipbuf[INET6_ADDRSTRLEN];
-
-			ipaddr2str(ip, ipbuf, sizeof(ipbuf));
-			vty_out(vty, " vrrp %" PRIu8 " ip %s\n", vr->vrid,
-				ipbuf);
-			++writes;
-		}
-
-		for (ALL_LIST_ELEMENTS_RO(vr->v6->addrs, ipln, ip)) {
-			char ipbuf[INET6_ADDRSTRLEN];
-
-			ipaddr2str(ip, ipbuf, sizeof(ipbuf));
-			vty_out(vty, " vrrp %" PRIu8 " ipv6 %s\n", vr->vrid,
-				ipbuf);
-			++writes;
-		}
-		vty_endframe(vty, "!\n");
-	}
-
-	list_delete(&vrs);
-
-	return writes;
-}
-
 int vrrp_config_write_global(struct vty *vty)
 {
 	unsigned int writes = 0;
@@ -2415,6 +2351,7 @@ int vrrp_config_write_global(struct vty *vty)
 		vty_out(vty, "vrrp autoconfigure%s\n",
 			vrrp_autoconfig_version == 2 ? " version 2" : "");
 
+	/* FIXME: needs to be udpated for full YANG conversion. */
 	if (vd.priority != VRRP_DEFAULT_PRIORITY && ++writes)
 		vty_out(vty, "vrrp default priority %" PRIu8 "\n", vd.priority);
 
@@ -2454,20 +2391,23 @@ static bool vrrp_hash_cmp(const void *arg1, const void *arg2)
 	const struct vrrp_vrouter *vr2 = arg2;
 
 	if (vr1->ifp != vr2->ifp)
-		return 0;
+		return false;
 	if (vr1->vrid != vr2->vrid)
-		return 0;
+		return false;
 
-	return 1;
+	return true;
 }
 
 void vrrp_init(void)
 {
 	/* Set default defaults */
-	vd.priority = VRRP_DEFAULT_PRIORITY;
-	vd.advertisement_interval = VRRP_DEFAULT_ADVINT;
-	vd.preempt_mode = VRRP_DEFAULT_PREEMPT;
-	vd.accept_mode = VRRP_DEFAULT_ACCEPT;
+	vd.version = yang_get_default_uint8("%s/version", VRRP_XPATH_FULL);
+	vd.priority = yang_get_default_uint8("%s/priority", VRRP_XPATH_FULL);
+	vd.advertisement_interval = yang_get_default_uint16(
+		"%s/advertisement-interval", VRRP_XPATH_FULL);
+	vd.preempt_mode = yang_get_default_bool("%s/preempt", VRRP_XPATH_FULL);
+	vd.accept_mode =
+		yang_get_default_bool("%s/accept-mode", VRRP_XPATH_FULL);
 	vd.shutdown = VRRP_DEFAULT_SHUTDOWN;
 
 	vrrp_autoconfig_version = 3;

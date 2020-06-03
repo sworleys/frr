@@ -82,7 +82,7 @@ static void print_range_result(struct list *list)
 	for (ALL_LIST_ELEMENTS_RO(list, listnode, bnode)) {
 		char buf[PREFIX2STR_BUFFER];
 
-		prefix2str(&bnode->p, buf, PREFIX2STR_BUFFER);
+		prefix2str(bgp_node_get_prefix(bnode), buf, PREFIX2STR_BUFFER);
 		printf("%s\n", buf);
 	}
 }
@@ -106,7 +106,7 @@ static void check_lookup_result(struct list *list, va_list arglist)
 			assert(0);
 
 		for (ALL_LIST_ELEMENTS_RO(list, listnode, bnode)) {
-			if (prefix_same(&bnode->p, &p))
+			if (prefix_same(bgp_node_get_prefix(bnode), &p))
 				found = true;
 		}
 
@@ -183,7 +183,7 @@ static void test_range_lookup(void)
 
 	do_test(table, "16.0.0.0/8", 16, "16.0.0.0/16", NULL);
 
-	do_test(table, "0.0.0.0/3", 21, "1.16.0.0/16", "1.16.128.0/18",
+	do_test(table, "0.0.0.0/2", 21, "1.16.0.0/16", "1.16.128.0/18",
 		"1.16.192.0/18", "1.16.64.0/19", "1.16.160.0/19",
 		"1.16.32.0/20", "1.16.32.0/21", "16.0.0.0/16", NULL);
 }

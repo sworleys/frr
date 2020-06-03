@@ -79,9 +79,23 @@ options from the list below.
 
 .. program:: configure
 
+.. option:: --enable-tcmalloc
+
+   Enable the alternate malloc library.  In some cases this is faster and more efficient,
+   in some cases it is not.
+
+.. option:: --disable-doc
+
+   Do not build any documentation, including this one.
+
+.. option:: --enable-doc-html
+
+   From the documentation build html docs as well in addition to the normal output.
+
 .. option:: --disable-zebra
 
-   Do not build zebra daemon.
+   Do not build zebra daemon.  This generally only be useful in a scenario where
+   you are building bgp as a standalone server.
 
 .. option:: --disable-ripd
 
@@ -103,6 +117,62 @@ options from the list below.
 
    Do not build bgpd.
 
+.. option:: --disable-ldpd
+
+   Do not build ldpd.
+
+.. option:: --disable-nhrpd
+
+   Do not build nhrpd.
+
+.. option:: --disable-eigrpd
+
+   Do not build eigrpd.
+
+.. option:: --disable-babeld
+
+   Do not build babeld.
+
+.. option:: --disable-watchfrr
+
+   Do not build watchfrr.  Watchfrr is used to integrate daemons into startup/shutdown
+   software available on your machine.  This is needed for systemd integration, if you
+   disable watchfrr you cannot have any systemd integration.
+
+.. option:: --enable-systemd
+
+   Build watchfrr with systemd integration, this will allow FRR to communicate with
+   systemd to tell systemd if FRR has come up properly.
+
+.. option:: --enable-werror
+
+   Build with all warnings converted to errors as a compile option.  This
+   is recommended for developers only.
+
+.. option:: --disable-pimd
+
+   Turn off building of pimd.  On some BSD platforms pimd will not build properly due
+   to lack of kernel support.
+
+.. option:: --disable-vrrpd
+
+   Turn off building of vrrpd. Linux is required for vrrpd support;
+   other platforms are not supported.
+
+.. option:: --disable-pbrd
+
+   Turn off building of pbrd.  This daemon currently requires linux in order to function
+   properly.
+
+.. option:: --enable-sharpd
+
+   Turn on building of sharpd.  This daemon facilitates testing of FRR and can also
+   be used as a quick and easy route generator.
+
+.. option:: --disable-staticd
+
+   Do not build staticd.  This daemon is necessary if you want static routes.
+
 .. option:: --disable-bfdd
 
    Do not build bfdd.
@@ -111,6 +181,14 @@ options from the list below.
 
    Make *bgpd* which does not make bgp announcements at all.  This
    feature is good for using *bgpd* as a BGP announcement listener.
+
+.. option:: --disable-bgp-vnc
+
+   Turn off bgpd's ability to use VNC.
+
+.. option:: --disable-bgp-bmp
+
+   Turn off BGP BMP support
 
 .. option:: --enable-datacenter
 
@@ -130,11 +208,6 @@ options from the list below.
 
    Disable building of the example OSPF-API client.
 
-.. option:: --disable-ospf-ri
-
-   Disable support for OSPF Router Information (RFC4970 & RFC5088) this
-   requires support for Opaque LSAs and Traffic Engineering.
-
 .. option:: --disable-isisd
 
    Do not build isisd.
@@ -147,15 +220,16 @@ options from the list below.
 
    Enable IS-IS topology generator.
 
-.. option:: --enable-isis-te
-
-   Enable Traffic Engineering Extension for ISIS (RFC5305)
-
 .. option:: --enable-realms
 
    Enable the support of Linux Realms. Convert tag values from 1-255 into a
    realm value when inserting into the Linux kernel. Then routing policy can be
    assigned to the realm. See the tc man page.
+
+.. option:: --disable-irdp
+
+   Disable IRDP server support.  This is enabled by default if we have
+   both `struct in_pktinfo` and `struct icmphdr` available to us.
 
 .. option:: --disable-rtadv
 
@@ -208,10 +282,17 @@ options from the list below.
 .. option:: --enable-multipath=X
 
    Compile FRR with up to X way ECMP supported.  This number can be from 0-999.
-   For backwards compatability with older configure options when setting X = 0,
+   For backwards compatibility with older configure options when setting X = 0,
    we will build FRR with 64 way ECMP.  This is needed because there are
    hardcoded arrays that FRR builds towards, so we need to know how big to
-   make these arrays at build time.
+   make these arrays at build time.  Additionally if this parameter is
+   not passed in FRR will default to 16 ECMP.
+
+.. option:: --enable-shell-access
+
+   Turn on the ability of FRR to access some shell options( telnet/ssh/bash/etc. )
+   from vtysh itself.  This option is considered extremely unsecure and should only
+   be considered for usage if you really really know what you are doing.
 
 .. option:: --enable-gcov
 
@@ -234,6 +315,39 @@ options from the list below.
 .. option:: --enable-sysrepo
 
    Build the Sysrepo northbound plugin.
+
+.. option:: --enable-grpc
+
+   Enable the gRPC northbound plugin.
+
+.. option:: --enable-zeromq
+
+   Enable the ZeroMQ handler.
+
+.. option:: --with-libpam
+
+   Use libpam for PAM support in vtysh.
+
+.. option:: --enable-time-check XXX
+
+   When this is enabled with a XXX value in microseconds, any thread that
+   runs for over this value will cause a warning to be issued to the log.
+   If you do not specify any value or don't include this option then
+   the default time is 5 seconds.  If --disable-time-check is specified
+   then no warning is issued for any thread run length.
+
+.. option:: --disable-cpu-time
+
+   Disable cpu process accounting, this command also disables the `show thread cpu`
+   command.  If this option is disabled, --enable-time-check is ignored.  This
+   disabling of cpu time effectively means that the getrusage call is skipped.
+   Since this is a process switch into the kernel, systems with high FRR
+   load might see improvement in behavior.  Be aware that `show thread cpu`
+   is considered a good data gathering tool from the perspective of developers.
+
+.. option:: --enable-pcreposix
+
+   Turn on the usage of PCRE Posix libs for regex functionality.
 
 You may specify any combination of the above options to the configure
 script. By default, the executables are placed in :file:`/usr/local/sbin`
@@ -260,21 +374,26 @@ options to the configuration script.
    Look for YANG modules in `dir` [`prefix`/share/yang]. Note that the FRR
    YANG modules will be installed here.
 
-.. option:: --with-libyang-pluginsdir <dir>
+Python dependency, documentation and tests
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-   Look for libyang plugins in `dir` [`prefix`/lib/frr/libyang_plugins].
-   Note that the FRR libyang plugins will be installed here.
+FRR's documentation and basic unit tests heavily use code written in Python.
+Additionally, FRR ships Python extensions written in C which are used during
+its build process.
 
-   This option is meaningless with libyang 0.16.74 or newer and will be
-   removed once support for older libyang versions is dropped.
+To this extent, FRR needs the following:
 
-When it's desired to run FRR without installing it in the system, it's possible
-to configure it as follows to look for YANG modules and libyang plugins in the
-compile directory:
-.. code-block:: shell
+* an installation of CPython, preferably version 3.2 or newer (2.7 works but
+  is end of life and will stop working at some point.)
+* development files (mostly headers) for that version of CPython
+* an installation of `sphinx` for that version of CPython, to build the
+  documentation
+* an installation of `pytest` for that version of CPython, to run the unit
+  tests
 
-   ./configure --with-libyang-pluginsdir="`pwd`/yang/libyang_plugins/.libs" \
-               --with-yangmodelsdir="`pwd`/yang"
+The `sphinx` and `pytest` dependencies can be avoided by not building
+documentation / not running ``make check``, but the CPython dependency is a
+hard dependency of the FRR build process (for the `clippy` tool.)
 
 .. _least-privilege-support:
 
@@ -327,7 +446,7 @@ GNU/Linux, make sure that the current kernel configuration is what you want.
 FRR will run with any kernel configuration but some recommendations do exist.
 
 :makevar:`CONFIG_NETLINK`
-   Kernel/User Netlink socket. This is a enables an advanced interface between
+   Kernel/User Netlink socket. This enables an advanced interface between
    the Linux kernel and *zebra* (:ref:`kernel-interface`).
 
 :makevar:`CONFIG_RTNETLINK`
@@ -359,9 +478,9 @@ Additional kernel modules are also needed to support MPLS forwarding.
       net.ipv6.conf.all.forwarding=1
 
 :makevar:`MPLS forwarding`
-   Basic MPLS kernel support was introduced 4.1, additional capability
-   was introduced in 4.3 and 4.5. For some general information on Linux
-   MPLS support see
+   Basic MPLS support was introduced in the kernel in version 4.1 and
+   additional capability was introduced in 4.3 and 4.5.
+   For some general information on Linux MPLS support, see
    https://www.netdevconf.org/1.1/proceedings/slides/prabhu-mpls-tutorial.pdf.
    The following modules should be loaded to support MPLS forwarding,
    and are generally added to a configuration file such as
@@ -373,7 +492,8 @@ Additional kernel modules are also needed to support MPLS forwarding.
       mpls_router
       mpls_iptunnel
 
-   The following is an example to enable MPLS forwarding in the kernel:
+   The following is an example to enable MPLS forwarding in the
+   kernel, typically by editing :file:`/etc/sysctl.conf`:
 
    .. code-block:: shell
 
@@ -421,7 +541,7 @@ Additional kernel modules are also needed to support MPLS forwarding.
    running these kernel versions, if unable to establish any VRF BGP
    adjacencies, either downgrade to 4.13 or set
    'net.ipv4.tcp_l3mdev_accept=1'. The fix for this issue is planned to be
-   included in future kernel versions so upgrading your kernel may also
+   included in future kernel versions. So upgrading your kernel may also
    address this issue.
 
 
@@ -443,7 +563,7 @@ the options you chose:
        --enable-watchfrr \
        ...
 
-After configuring the software, you are ready to build and install it for your
+After configuring the software, you are ready to build and install it in your
 system.
 
 .. code-block:: shell

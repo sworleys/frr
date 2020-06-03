@@ -123,8 +123,7 @@ struct isis_circuit {
 	uint16_t psnp_interval[2];    /* psnp-interval in seconds */
 	uint8_t metric[2];
 	uint32_t te_metric[2];
-	struct mpls_te_circuit
-		*mtc;   /* Support for MPLS-TE parameters - see isis_te.[c,h] */
+	struct isis_ext_subtlvs *ext; /* Extended parameters (TE + Adj SID */
 	int ip_router;  /* Route IP ? */
 	int is_passive; /* Is Passive ? */
 	struct list *mt_settings;   /* IS-IS MT Settings */
@@ -147,6 +146,13 @@ struct isis_circuit {
 	uint32_t
 		desig_changes[2]; /* lanLxDesignatedIntermediateSystemChanges */
 	uint32_t rej_adjacencies; /* rejectedAdjacencies */
+	/*
+	 * Counters as in ietf-isis@2019-09-09.yang
+	 */
+	uint32_t id_len_mismatches; /* id-len-mismatch */
+	uint32_t max_area_addr_mismatches; /* max-area-addresses-mismatch */
+	uint32_t auth_type_failures; /*authentication-type-fails */
+	uint32_t auth_failures; /* authentication-fails */
 
 	QOBJ_FIELDS
 };

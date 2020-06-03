@@ -69,14 +69,14 @@ static void pim_mlag_zebra_fill_header(enum mlag_msg_type msg_type)
 	stream_putw(router->mlag_stream, msg_cnt);
 
 	if (PIM_DEBUG_MLAG)
-		zlog_debug(":%s: msg_type: %d/%d len %d data_type %d",
-			__func__, msg_type, fill_msg_type, data_len,
-			ntohl(*((uint32_t *)router->mlag_stream->data)));
+		zlog_debug(":%s: msg_type: %d/%d len %d",
+			   __func__, msg_type, fill_msg_type, data_len);
 }
 
 static void pim_mlag_zebra_flush_buffer(void)
 {
 	uint32_t msg_type;
+
 	/* Stream had bulk messages update the Hedaer */
 	if (mlag_bulk_cnt > 1) {
 		/*

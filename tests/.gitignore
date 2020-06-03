@@ -1,7 +1,6 @@
 *.log
 *.sum
 *.xml
-Makefile.in
 .pytest_cache
 /bgpd/test_aspath
 /bgpd/test_bgp_table
@@ -20,6 +19,7 @@ Makefile.in
 /lib/cli/test_commands
 /lib/cli/test_commands_defun.c
 /lib/northbound/test_oper_data
+/lib/cxxcompat
 /lib/test_atomlist
 /lib/test_buffer
 /lib/test_checksum
@@ -32,6 +32,7 @@ Makefile.in
 /lib/test_nexthop_iter
 /lib/test_ntop
 /lib/test_prefix2str
+/lib/test_printfrr
 /lib/test_privs
 /lib/test_ringbuf
 /lib/test_segv
@@ -44,6 +45,7 @@ Makefile.in
 /lib/test_timer_performance
 /lib/test_ttable
 /lib/test_typelist
+/lib/test_versioncmp
 /lib/test_zlog
 /lib/test_zmq
 /ospf6d/test_lsdb

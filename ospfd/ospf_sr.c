@@ -608,26 +608,8 @@ static int compute_prefix_nhlfe(struct sr_prefix *srp)
 /* Send MPLS Label entry to Zebra for installation or deletion */
 static int ospf_zebra_send_mpls_labels(int cmd, struct sr_nhlfe nhlfe)
 {
-	struct stream *s;
-
-	/* Reset stream. */
-	s = zclient->obuf;
-	stream_reset(s);
-
-	zclient_create_header(s, cmd, VRF_DEFAULT);
-	stream_putc(s, ZEBRA_LSP_SR);
-	/* OSPF Segment Routing currently support only IPv4 */
-	stream_putl(s, nhlfe.prefv4.family);
-	stream_put_in_addr(s, &nhlfe.prefv4.prefix);
-	stream_putc(s, nhlfe.prefv4.prefixlen);
-	stream_put_in_addr(s, &nhlfe.nexthop);
-	stream_putl(s, nhlfe.ifindex);
-	stream_putc(s, OSPF_SR_PRIORITY_DEFAULT);
-	stream_putl(s, nhlfe.label_in);
-	stream_putl(s, nhlfe.label_out);
-
-	/* Put length at the first point of the stream. */
-	stream_putw_at(s, 0, stream_get_endp(s));
+	struct zapi_labels zl = {};
+	struct zapi_nexthop *znh;
 
 	if (IS_DEBUG_OSPF_SR)
 		zlog_debug("    |-  %s LSP %u/%u for %s/%u via %u",
@@ -636,70 +618,39 @@ static int ospf_zebra_send_mpls_labels(int cmd, struct sr_nhlfe nhlfe)
 			   inet_ntoa(nhlfe.prefv4.prefix),
 			   nhlfe.prefv4.prefixlen, nhlfe.ifindex);
 
-	return zclient_send_message(zclient);
-}
+	zl.type = ZEBRA_LSP_OSPF_SR;
+	zl.local_label = nhlfe.label_in;
 
-/* Request zebra to install/remove FEC in FIB */
-static int ospf_zebra_send_mpls_ftn(int cmd, struct sr_nhlfe nhlfe)
-{
-	struct zapi_route api;
-	struct zapi_nexthop *api_nh;
+	SET_FLAG(zl.message, ZAPI_LABELS_FTN);
+	zl.route.prefix.family = nhlfe.prefv4.family;
+	zl.route.prefix.prefixlen = nhlfe.prefv4.prefixlen;
+	zl.route.prefix.u.prefix4 = nhlfe.prefv4.prefix;
+	zl.route.type = ZEBRA_ROUTE_OSPF;
+	zl.route.instance = 0;
 
-	/* Support only IPv4 */
-	if (nhlfe.prefv4.family != AF_INET)
-		return -1;
+	zl.nexthop_num = 1;
+	znh = &zl.nexthops[0];
+	znh->type = NEXTHOP_TYPE_IPV4_IFINDEX;
+	znh->gate.ipv4 = nhlfe.nexthop;
+	znh->ifindex = nhlfe.ifindex;
+	znh->label_num = 1;
+	znh->labels[0] = nhlfe.label_out;
 
-	memset(&api, 0, sizeof(api));
-	api.vrf_id = VRF_DEFAULT;
-	api.type = ZEBRA_ROUTE_OSPF;
-	api.safi = SAFI_UNICAST;
-	memcpy(&api.prefix, &nhlfe.prefv4, sizeof(struct prefix_ipv4));
-
-	if (cmd == ZEBRA_ROUTE_ADD) {
-		/* Metric value. */
-		SET_FLAG(api.message, ZAPI_MESSAGE_METRIC);
-		api.metric = OSPF_SR_DEFAULT_METRIC;
-		/* Nexthop */
-		SET_FLAG(api.message, ZAPI_MESSAGE_NEXTHOP);
-		api_nh = &api.nexthops[0];
-		IPV4_ADDR_COPY(&api_nh->gate.ipv4, &nhlfe.nexthop);
-		api_nh->type = NEXTHOP_TYPE_IPV4_IFINDEX;
-		api_nh->ifindex = nhlfe.ifindex;
-		/* MPLS labels */
-		SET_FLAG(api.message, ZAPI_MESSAGE_LABEL);
-		api_nh->labels[0] = nhlfe.label_out;
-		api_nh->label_num = 1;
-		api_nh->vrf_id = VRF_DEFAULT;
-		api.nexthop_num = 1;
-	}
-
-	if (IS_DEBUG_OSPF_SR)
-		zlog_debug("    |-  %s FEC %u for %s/%u via %u",
-			   cmd == ZEBRA_ROUTE_ADD ? "Add" : "Delete",
-			   nhlfe.label_out, inet_ntoa(nhlfe.prefv4.prefix),
-			   nhlfe.prefv4.prefixlen, nhlfe.ifindex);
-
-	return zclient_route_send(cmd, zclient, &api);
+	return zebra_send_mpls_labels(zclient, cmd, &zl);
 }
 
 /* Add new NHLFE entry for SID */
 static inline void add_sid_nhlfe(struct sr_nhlfe nhlfe)
 {
-	if ((nhlfe.label_in != 0) && (nhlfe.label_out != 0)) {
+	if ((nhlfe.label_in != 0) && (nhlfe.label_out != 0))
 		ospf_zebra_send_mpls_labels(ZEBRA_MPLS_LABELS_ADD, nhlfe);
-		if (nhlfe.label_out != MPLS_LABEL_IMPLICIT_NULL)
-			ospf_zebra_send_mpls_ftn(ZEBRA_ROUTE_ADD, nhlfe);
-	}
 }
 
 /* Remove NHLFE entry for SID */
 static inline void del_sid_nhlfe(struct sr_nhlfe nhlfe)
 {
-	if ((nhlfe.label_in != 0) && (nhlfe.label_out != 0)) {
+	if ((nhlfe.label_in != 0) && (nhlfe.label_out != 0))
 		ospf_zebra_send_mpls_labels(ZEBRA_MPLS_LABELS_DELETE, nhlfe);
-		if (nhlfe.label_out != MPLS_LABEL_IMPLICIT_NULL)
-			ospf_zebra_send_mpls_ftn(ZEBRA_ROUTE_DELETE, nhlfe);
-	}
 }
 
 /* Update NHLFE entry for SID */
@@ -1084,7 +1035,7 @@ void ospf_sr_ri_lsa_update(struct ospf_lsa *lsa)
 {
 	struct sr_node *srn;
 	struct tlv_header *tlvh;
-	struct lsa_header *lsah = (struct lsa_header *)lsa->data;
+	struct lsa_header *lsah = lsa->data;
 	struct ri_sr_tlv_sid_label_range *ri_srgb;
 	struct ri_sr_tlv_sr_algorithm *algo;
 	struct sr_srgb srgb;
@@ -1205,7 +1156,7 @@ void ospf_sr_ri_lsa_update(struct ospf_lsa *lsa)
 void ospf_sr_ri_lsa_delete(struct ospf_lsa *lsa)
 {
 	struct sr_node *srn;
-	struct lsa_header *lsah = (struct lsa_header *)lsa->data;
+	struct lsa_header *lsah = lsa->data;
 
 	if (IS_DEBUG_OSPF_SR)
 		zlog_debug("SR (%s): Remove SR node %s from lsa_id 4.0.0.%u",
@@ -1247,7 +1198,7 @@ void ospf_sr_ext_link_lsa_update(struct ospf_lsa *lsa)
 {
 	struct sr_node *srn;
 	struct tlv_header *tlvh;
-	struct lsa_header *lsah = (struct lsa_header *)lsa->data;
+	struct lsa_header *lsah = lsa->data;
 	struct sr_link *srl;
 
 	uint16_t length, sum;
@@ -1357,7 +1308,7 @@ void ospf_sr_ext_prefix_lsa_update(struct ospf_lsa *lsa)
 {
 	struct sr_node *srn;
 	struct tlv_header *tlvh;
-	struct lsa_header *lsah = (struct lsa_header *)lsa->data;
+	struct lsa_header *lsah = lsa->data;
 	struct sr_prefix *srp;
 
 	uint16_t length, sum;

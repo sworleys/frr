@@ -23,8 +23,9 @@
 
 #include "command.h"
 
+#include "lib/bfd.h"
+#include "isisd/isis_bfd.h"
 #include "isisd/isisd.h"
-#include "isisd/isis_vty_common.h"
 #include "isisd/fabricd.h"
 #include "isisd/isis_tlvs.h"
 #include "isisd/isis_misc.h"
@@ -33,6 +34,25 @@
 #include "isisd/isis_circuit.h"
 #include "lib/spf_backoff.h"
 #include "isisd/isis_mt.h"
+
+static struct isis_circuit *isis_circuit_lookup(struct vty *vty)
+{
+	struct interface *ifp = VTY_GET_CONTEXT(interface);
+	struct isis_circuit *circuit;
+
+	if (!ifp) {
+		vty_out(vty, "Invalid interface \n");
+		return NULL;
+	}
+
+	circuit = circuit_scan_by_ifp(ifp);
+	if (!circuit) {
+		vty_out(vty, "ISIS is not enabled on circuit %s\n", ifp->name);
+		return NULL;
+	}
+
+	return circuit;
+}
 
 DEFUN (fabric_tier,
        fabric_tier_cmd,
@@ -95,6 +115,7 @@ DEFUN (no_triggered_csnp,
 static void lsp_print_flooding(struct vty *vty, struct isis_lsp *lsp)
 {
 	char lspid[255];
+	char buf[MONOTIME_STRLEN];
 
 	lspid_print(lsp->hdr.lsp_id, lspid, true, true);
 	vty_out(vty, "Flooding information for %s\n", lspid);
@@ -109,19 +130,10 @@ static void lsp_print_flooding(struct vty *vty, struct isis_lsp *lsp)
 		lsp->flooding_interface : "(null)");
 
 	time_t uptime = time(NULL) - lsp->flooding_time;
-	struct tm *tm = gmtime(&uptime);
 
-	if (uptime < ONE_DAY_SECOND)
-		vty_out(vty, "%02d:%02d:%02d", tm->tm_hour, tm->tm_min,
-			tm->tm_sec);
-	else if (uptime < ONE_WEEK_SECOND)
-		vty_out(vty, "%dd%02dh%02dm", tm->tm_yday, tm->tm_hour,
-			tm->tm_min);
-	else
-		vty_out(vty, "%02dw%dd%02dh", tm->tm_yday / 7,
-			tm->tm_yday - ((tm->tm_yday / 7) * 7),
-			tm->tm_hour);
-	vty_out(vty, " ago)\n");
+	frrtime_to_interval(uptime, buf, sizeof(buf));
+
+	vty_out(vty, "%s ago)\n", buf);
 
 	if (lsp->flooding_circuit_scoped) {
 		vty_out(vty, "    Received as circuit-scoped LSP, so not "
@@ -285,6 +297,49 @@ DEFUN (no_ip_router_isis,
 		ip = false;
 
 	isis_circuit_af_set(circuit, ip, ipv6);
+	return CMD_SUCCESS;
+}
+
+DEFUN (isis_bfd,
+       isis_bfd_cmd,
+       PROTO_NAME " bfd",
+       PROTO_HELP
+       "Enable BFD support\n")
+{
+	struct isis_circuit *circuit = isis_circuit_lookup(vty);
+
+	if (!circuit)
+		return CMD_ERR_NO_MATCH;
+
+	if (circuit->bfd_info
+	    && CHECK_FLAG(circuit->bfd_info->flags, BFD_FLAG_PARAM_CFG)) {
+		return CMD_SUCCESS;
+	}
+
+	isis_bfd_circuit_param_set(circuit, BFD_DEF_MIN_RX,
+				   BFD_DEF_MIN_TX, BFD_DEF_DETECT_MULT, true);
+
+	return CMD_SUCCESS;
+}
+
+DEFUN (no_isis_bfd,
+       no_isis_bfd_cmd,
+       "no " PROTO_NAME " bfd",
+       NO_STR
+       PROTO_HELP
+       "Disables BFD support\n"
+)
+{
+	struct isis_circuit *circuit = isis_circuit_lookup(vty);
+
+	if (!circuit)
+		return CMD_ERR_NO_MATCH;
+
+	if (!circuit->bfd_info)
+		return CMD_SUCCESS;
+
+	isis_bfd_circuit_cmd(circuit, ZEBRA_BFD_DEST_DEREGISTER);
+	bfd_info_free(&circuit->bfd_info);
 	return CMD_SUCCESS;
 }
 
@@ -1045,6 +1100,8 @@ void isis_vty_daemon_init(void)
 	install_element(INTERFACE_NODE, &ip_router_isis_cmd);
 	install_element(INTERFACE_NODE, &ip6_router_isis_cmd);
 	install_element(INTERFACE_NODE, &no_ip_router_isis_cmd);
+	install_element(INTERFACE_NODE, &isis_bfd_cmd);
+	install_element(INTERFACE_NODE, &no_isis_bfd_cmd);
 
 	install_element(ROUTER_NODE, &set_overload_bit_cmd);
 	install_element(ROUTER_NODE, &no_set_overload_bit_cmd);

@@ -27,14 +27,6 @@
 extern void bgp_parse_nexthop_update(int command, vrf_id_t vrf_id);
 
 /**
- * bgp_find_nexthop() - lookup the nexthop cache table for the bnc object
- * ARGUMENTS:
- *   p - path for which the nexthop object is being looked up
- *   connected - True if NH MUST be a connected route
- */
-extern int bgp_find_nexthop(struct bgp_path_info *p, int connected);
-
-/**
  * bgp_find_or_add_nexthop() - lookup the nexthop cache table for the bnc
  *  object. If not found, create a new object and register with ZEBRA for
  *  nexthop notification.
@@ -95,6 +87,13 @@ extern void bgp_nht_register_nexthops(struct bgp *bgp);
  * this code can walk the registered nexthops and
  * register the important ones with zebra for RA.
  */
-extern void bgp_nht_register_enhe_capability_interfaces(struct peer *peer);
+extern void bgp_nht_reg_enhe_cap_intfs(struct peer *peer);
+extern void bgp_nht_dereg_enhe_cap_intfs(struct peer *peer);
+
+/* APIs for setting up and allocating L3 nexthop group ids */
+extern uint32_t bgp_l3nhg_id_alloc(void);
+extern void bgp_l3nhg_id_free(uint32_t nhg_id);
+extern void bgp_l3nhg_init(void);
+void bgp_l3nhg_finish(void);
 
 #endif /* _BGP_NHT_H */

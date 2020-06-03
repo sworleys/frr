@@ -142,13 +142,10 @@ static int eigrp_route_match_add(struct vty *vty, struct route_map_index *index,
 	case RMAP_RULE_MISSING:
 		vty_out(vty, "%% Can't find rule.\n");
 		return CMD_WARNING_CONFIG_FAILED;
-		break;
 	case RMAP_COMPILE_ERROR:
 		vty_out(vty, "%% Argument is malformed.\n");
 		return CMD_WARNING_CONFIG_FAILED;
-		break;
 	case RMAP_COMPILE_SUCCESS:
-	case RMAP_DUPLICATE_RULE:
 		/*
 		 * Intentionally not handling these cases
 		 */
@@ -165,18 +162,15 @@ static int eigrp_route_match_delete(struct vty *vty,
 {
 	enum rmap_compile_rets ret;
 
-	ret = route_map_delete_match(index, command, arg);
+	ret = route_map_delete_match(index, command, arg, type);
 	switch (ret) {
 	case RMAP_RULE_MISSING:
 		vty_out(vty, "%% Can't find rule.\n");
 		return CMD_WARNING_CONFIG_FAILED;
-		break;
 	case RMAP_COMPILE_ERROR:
 		vty_out(vty, "%% Argument is malformed.\n");
 		return CMD_WARNING_CONFIG_FAILED;
-		break;
 	case RMAP_COMPILE_SUCCESS:
-	case RMAP_DUPLICATE_RULE:
 		/*
 		 * These cases intentionally ignored
 		 */
@@ -197,7 +191,6 @@ static int eigrp_route_set_add(struct vty *vty, struct route_map_index *index,
 	case RMAP_RULE_MISSING:
 		vty_out(vty, "%% Can't find rule.\n");
 		return CMD_WARNING_CONFIG_FAILED;
-		break;
 	case RMAP_COMPILE_ERROR:
 		/*
 		 * rip, ripng and other protocols share the set metric command
@@ -211,7 +204,6 @@ static int eigrp_route_set_add(struct vty *vty, struct route_map_index *index,
 		}
 		break;
 	case RMAP_COMPILE_SUCCESS:
-	case RMAP_DUPLICATE_RULE:
 		/*
 		 * These cases intentionally left blank here
 		 */
@@ -233,13 +225,10 @@ static int eigrp_route_set_delete(struct vty *vty,
 	case RMAP_RULE_MISSING:
 		vty_out(vty, "%% Can't find rule.\n");
 		return CMD_WARNING_CONFIG_FAILED;
-		break;
 	case RMAP_COMPILE_ERROR:
 		vty_out(vty, "%% Argument is malformed.\n");
 		return CMD_WARNING_CONFIG_FAILED;
-		break;
 	case RMAP_COMPILE_SUCCESS:
-	case RMAP_DUPLICATE_RULE:
 		/*
 		 * These cases intentionally not handled
 		 */
@@ -269,9 +258,9 @@ void eigrp_route_map_update(const char *notused)
 
 /* `match metric METRIC' */
 /* Match function return 1 if match is success else return zero. */
-static route_map_result_t route_match_metric(void *rule, struct prefix *prefix,
-					     route_map_object_t type,
-					     void *object)
+static enum route_map_cmd_result_t
+route_match_metric(void *rule, struct prefix *prefix, route_map_object_t type,
+		   void *object)
 {
 	//  uint32_t *metric;
 	//  uint32_t  check;
@@ -306,7 +295,7 @@ static void *route_match_metric_compile(const char *arg)
 {
 	//  uint32_t *metric;
 	//
-	//  metric = XMALLOC (MTYPE_ROUTE_MAP_COMPILED, sizeof (uint32_t));
+	//  metric = XMALLOC (MTYPE_ROUTE_MAP_COMPILED, sizeof(uint32_t));
 	//  *metric = atoi (arg);
 	//
 	//  if(*metric > 0)
@@ -323,16 +312,18 @@ static void route_match_metric_free(void *rule)
 }
 
 /* Route map commands for metric matching. */
-struct route_map_rule_cmd route_match_metric_cmd = {
-	"metric", route_match_metric, route_match_metric_compile,
-	route_match_metric_free};
+static const struct route_map_rule_cmd route_match_metric_cmd = {
+	"metric",
+	route_match_metric,
+	route_match_metric_compile,
+	route_match_metric_free
+};
 
 /* `match interface IFNAME' */
 /* Match function return 1 if match is success else return zero. */
-static route_map_result_t route_match_interface(void *rule,
-						struct prefix *prefix,
-						route_map_object_t type,
-						void *object)
+static enum route_map_cmd_result_t
+route_match_interface(void *rule, struct prefix *prefix,
+		      route_map_object_t type, void *object)
 {
 	//  struct rip_info *rinfo;
 	//  struct interface *ifp;
@@ -371,17 +362,19 @@ static void route_match_interface_free(void *rule)
 }
 
 /* Route map commands for interface matching. */
-struct route_map_rule_cmd route_match_interface_cmd = {
-	"interface", route_match_interface, route_match_interface_compile,
-	route_match_interface_free};
+static const struct route_map_rule_cmd route_match_interface_cmd = {
+	"interface",
+	route_match_interface,
+	route_match_interface_compile,
+	route_match_interface_free
+};
 
 /* `match ip next-hop IP_ACCESS_LIST' */
 
 /* Match function return 1 if match is success else return zero. */
-static route_map_result_t route_match_ip_next_hop(void *rule,
-						  struct prefix *prefix,
-						  route_map_object_t type,
-						  void *object)
+static enum route_map_cmd_result_t
+route_match_ip_next_hop(void *rule, struct prefix *prefix,
+			route_map_object_t type, void *object)
 {
 	//  struct access_list *alist;
 	//  struct rip_info *rinfo;
@@ -419,13 +412,16 @@ static void route_match_ip_next_hop_free(void *rule)
 }
 
 /* Route map commands for ip next-hop matching. */
-static struct route_map_rule_cmd route_match_ip_next_hop_cmd = {
-	"ip next-hop", route_match_ip_next_hop, route_match_ip_next_hop_compile,
-	route_match_ip_next_hop_free};
+static const struct route_map_rule_cmd route_match_ip_next_hop_cmd = {
+	"ip next-hop",
+	route_match_ip_next_hop,
+	route_match_ip_next_hop_compile,
+	route_match_ip_next_hop_free
+};
 
 /* `match ip next-hop prefix-list PREFIX_LIST' */
 
-static route_map_result_t
+static enum route_map_cmd_result_t
 route_match_ip_next_hop_prefix_list(void *rule, struct prefix *prefix,
 				    route_map_object_t type, void *object)
 {
@@ -461,19 +457,21 @@ static void route_match_ip_next_hop_prefix_list_free(void *rule)
 	XFREE(MTYPE_ROUTE_MAP_COMPILED, rule);
 }
 
-static struct route_map_rule_cmd route_match_ip_next_hop_prefix_list_cmd = {
-	"ip next-hop prefix-list", route_match_ip_next_hop_prefix_list,
+static const struct route_map_rule_cmd
+		route_match_ip_next_hop_prefix_list_cmd = {
+	"ip next-hop prefix-list",
+	route_match_ip_next_hop_prefix_list,
 	route_match_ip_next_hop_prefix_list_compile,
-	route_match_ip_next_hop_prefix_list_free};
+	route_match_ip_next_hop_prefix_list_free
+};
 
 /* `match ip address IP_ACCESS_LIST' */
 
 /* Match function should return 1 if match is success else return
    zero. */
-static route_map_result_t route_match_ip_address(void *rule,
-						 struct prefix *prefix,
-						 route_map_object_t type,
-						 void *object)
+static enum route_map_cmd_result_t
+route_match_ip_address(void *rule, struct prefix *prefix,
+		       route_map_object_t type, void *object)
 {
 	struct access_list *alist;
 
@@ -503,13 +501,16 @@ static void route_match_ip_address_free(void *rule)
 }
 
 /* Route map commands for ip address matching. */
-static struct route_map_rule_cmd route_match_ip_address_cmd = {
-	"ip address", route_match_ip_address, route_match_ip_address_compile,
-	route_match_ip_address_free};
+static const struct route_map_rule_cmd route_match_ip_address_cmd = {
+	"ip address",
+	route_match_ip_address,
+	route_match_ip_address_compile,
+	route_match_ip_address_free
+};
 
 /* `match ip address prefix-list PREFIX_LIST' */
 
-static route_map_result_t
+static enum route_map_cmd_result_t
 route_match_ip_address_prefix_list(void *rule, struct prefix *prefix,
 				   route_map_object_t type, void *object)
 {
@@ -537,15 +538,19 @@ static void route_match_ip_address_prefix_list_free(void *rule)
 	XFREE(MTYPE_ROUTE_MAP_COMPILED, rule);
 }
 
-static struct route_map_rule_cmd route_match_ip_address_prefix_list_cmd = {
-	"ip address prefix-list", route_match_ip_address_prefix_list,
+static const struct route_map_rule_cmd
+		route_match_ip_address_prefix_list_cmd = {
+	"ip address prefix-list",
+	route_match_ip_address_prefix_list,
 	route_match_ip_address_prefix_list_compile,
-	route_match_ip_address_prefix_list_free};
+	route_match_ip_address_prefix_list_free
+};
 
 /* `match tag TAG' */
 /* Match function return 1 if match is success else return zero. */
-static route_map_result_t route_match_tag(void *rule, struct prefix *prefix,
-					  route_map_object_t type, void *object)
+static enum route_map_cmd_result_t
+route_match_tag(void *rule, struct prefix *prefix, route_map_object_t type,
+		void *object)
 {
 	//  unsigned short *tag;
 	//  struct rip_info *rinfo;
@@ -569,7 +574,7 @@ static void *route_match_tag_compile(const char *arg)
 {
 	//  unsigned short *tag;
 	//
-	//  tag = XMALLOC (MTYPE_ROUTE_MAP_COMPILED, sizeof (unsigned short));
+	//  tag = XMALLOC (MTYPE_ROUTE_MAP_COMPILED, sizeof(unsigned short));
 	//  *tag = atoi (arg);
 	//
 	//  return tag;
@@ -582,13 +587,17 @@ static void route_match_tag_free(void *rule)
 }
 
 /* Route map commands for tag matching. */
-struct route_map_rule_cmd route_match_tag_cmd = {
-	"tag", route_match_tag, route_match_tag_compile, route_match_tag_free};
+static const struct route_map_rule_cmd route_match_tag_cmd = {
+	"tag",
+	route_match_tag,
+	route_match_tag_compile,
+	route_match_tag_free
+};
 
 /* Set metric to attribute. */
-static route_map_result_t route_set_metric(void *rule, struct prefix *prefix,
-					   route_map_object_t type,
-					   void *object)
+static enum route_map_cmd_result_t
+route_set_metric(void *rule, struct prefix *prefix,
+		 route_map_object_t type, void *object)
 {
 	//  if (type == RMAP_RIP)
 	//    {
@@ -658,7 +667,7 @@ static void *route_set_metric_compile(const char *arg)
 	//    return NULL;*/
 	//
 	//  mod = XMALLOC (MTYPE_ROUTE_MAP_COMPILED,
-	//    sizeof (struct rip_metric_modifier));
+	//    sizeof(struct rip_metric_modifier));
 	//  mod->type = type;
 	//  mod->metric = metric;
 
@@ -672,18 +681,19 @@ static void route_set_metric_free(void *rule)
 }
 
 /* Set metric rule structure. */
-static struct route_map_rule_cmd route_set_metric_cmd = {
-	"metric", route_set_metric, route_set_metric_compile,
+static const struct route_map_rule_cmd route_set_metric_cmd = {
+	"metric",
+	route_set_metric,
+	route_set_metric_compile,
 	route_set_metric_free,
 };
 
 /* `set ip next-hop IP_ADDRESS' */
 
 /* Set nexthop to object.  ojbect must be pointer to struct attr. */
-static route_map_result_t route_set_ip_nexthop(void *rule,
-					       struct prefix *prefix,
-					       route_map_object_t type,
-					       void *object)
+static enum route_map_cmd_result_t
+route_set_ip_nexthop(void *rule, struct prefix *prefix,
+		     route_map_object_t type, void *object)
 {
 	//  struct in_addr *address;
 	//  struct rip_info *rinfo;
@@ -708,7 +718,7 @@ static void *route_set_ip_nexthop_compile(const char *arg)
 	//  int ret;
 	//  struct in_addr *address;
 	//
-	//  address = XMALLOC (MTYPE_ROUTE_MAP_COMPILED, sizeof (struct
+	//  address = XMALLOC (MTYPE_ROUTE_MAP_COMPILED, sizeof(struct
 	//  in_addr));
 	//
 	//  ret = inet_aton (arg, address);
@@ -729,15 +739,19 @@ static void route_set_ip_nexthop_free(void *rule)
 }
 
 /* Route map commands for ip nexthop set. */
-static struct route_map_rule_cmd route_set_ip_nexthop_cmd = {
-	"ip next-hop", route_set_ip_nexthop, route_set_ip_nexthop_compile,
-	route_set_ip_nexthop_free};
+static const struct route_map_rule_cmd route_set_ip_nexthop_cmd = {
+	"ip next-hop",
+	route_set_ip_nexthop,
+	route_set_ip_nexthop_compile,
+	route_set_ip_nexthop_free
+};
 
 /* `set tag TAG' */
 
 /* Set tag to object.  ojbect must be pointer to struct attr. */
-static route_map_result_t route_set_tag(void *rule, struct prefix *prefix,
-					route_map_object_t type, void *object)
+static enum route_map_cmd_result_t
+route_set_tag(void *rule, struct prefix *prefix,
+	      route_map_object_t type, void *object)
 {
 	//  unsigned short *tag;
 	//  struct rip_info *rinfo;
@@ -761,7 +775,7 @@ static void *route_set_tag_compile(const char *arg)
 {
 	//  unsigned short *tag;
 	//
-	//  tag = XMALLOC (MTYPE_ROUTE_MAP_COMPILED, sizeof (unsigned short));
+	//  tag = XMALLOC (MTYPE_ROUTE_MAP_COMPILED, sizeof(unsigned short));
 	//  *tag = atoi (arg);
 	//
 	//  return tag;
@@ -774,8 +788,12 @@ static void route_set_tag_free(void *rule)
 }
 
 /* Route map commands for tag set. */
-static struct route_map_rule_cmd route_set_tag_cmd = {
-	"tag", route_set_tag, route_set_tag_compile, route_set_tag_free};
+static const struct route_map_rule_cmd route_set_tag_cmd = {
+	"tag",
+	route_set_tag,
+	route_set_tag_compile,
+	route_set_tag_free
+};
 
 #define MATCH_STR "Match values from routing table\n"
 #define SET_STR "Set values in destination routing protocol\n"

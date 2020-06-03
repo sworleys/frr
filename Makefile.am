@@ -125,11 +125,11 @@ include doc/manpages/subdir.am
 include doc/developer/subdir.am
 include include/subdir.am
 include lib/subdir.am
+include mlag/subdir.am
 include zebra/subdir.am
 include watchfrr/subdir.am
 include qpb/subdir.am
 include fpm/subdir.am
-include mlag/subdir.am
 include grpc/subdir.am
 include tools/subdir.am
 include solaris/subdir.am
@@ -184,13 +184,9 @@ EXTRA_DIST += \
 	python/clidef.py \
 	python/clippy/__init__.py \
 	\
-	redhat/frr.init \
-	redhat/frr.service \
-	redhat/daemons \
 	redhat/frr.logrotate \
 	redhat/frr.pam \
 	redhat/frr.spec \
-	redhat/README.rpm_build.md \
 	\
 	snapcraft/snapcraft.yaml \
 	snapcraft/README.snap_build.md \
@@ -221,7 +217,6 @@ EXTRA_DIST += \
 	ospfd/Makefile \
 	pbrd/Makefile \
 	pimd/Makefile \
-	ports/Makefile \
 	qpb/Makefile \
 	ripd/Makefile \
 	ripngd/Makefile \
@@ -234,13 +229,11 @@ EXTRA_DIST += \
 	vrrpd/Makefile \
 	# end
 
-noinst_HEADERS += defaults.h
-
 clean-local: clean-python
 .PHONY: clean-python
 clean-python:
-	find -name __pycache__ -o -name .pytest_cache | xargs rm -rf
-	find -name "*.pyc" -o -name "*_clippy.c" | xargs rm -f
+	find . -name __pycache__ -o -name .pytest_cache | xargs rm -rf
+	find . -name "*.pyc" -o -name "*_clippy.c" | xargs rm -f
 
 redistclean:
 	$(MAKE) distclean CONFIG_CLEAN_FILES="$(filter-out $(EXTRA_DIST), $(CONFIG_CLEAN_FILES))"

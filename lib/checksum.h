@@ -1,6 +1,11 @@
 #include <stdint.h>
 #include <netinet/in.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 /* IPv4 pseudoheader */
 struct ipv4_ph {
 	struct in_addr src;
@@ -26,3 +31,7 @@ extern int in_cksum_with_ph6(struct ipv6_ph *ph, void *data, int nbytes);
 #define FLETCHER_CHECKSUM_VALIDATE 0xffff
 extern uint16_t fletcher_checksum(uint8_t *, const size_t len,
 				  const uint16_t offset);
+
+#ifdef __cplusplus
+}
+#endif

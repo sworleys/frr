@@ -27,7 +27,10 @@
 #include "prefix.h"
 #include "typesafe.h"
 
-DECLARE_MTYPE(ROUTE_TABLE)
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 DECLARE_MTYPE(ROUTE_NODE)
 
 /*
@@ -42,7 +45,7 @@ struct route_table;
  * Function vector that can be used by a client to customize the
  * behavior of one or more route tables.
  */
-typedef struct route_table_delegate_t_ route_table_delegate_t;
+typedef const struct route_table_delegate_t_ route_table_delegate_t;
 
 typedef struct route_node *(*route_table_create_node_func_t)(
 	route_table_delegate_t *, struct route_table *);
@@ -283,15 +286,12 @@ static inline struct route_node *route_table_iter_next(route_table_iter_t *iter)
 		break;
 
 	case RT_ITER_STATE_PAUSED:
-	{
-		union prefixconstptr cp = {.p = &iter->pause_prefix};
 
 		/*
 		 * Start with the node following pause_prefix.
 		 */
-		node = route_table_get_next(iter->table, cp);
-	}
-	break;
+		node = route_table_get_next(iter->table, &iter->pause_prefix);
+		break;
 
 	case RT_ITER_STATE_DONE:
 		return NULL;
@@ -330,5 +330,13 @@ static inline int route_table_iter_started(route_table_iter_t *iter)
 {
 	return iter->state != RT_ITER_STATE_INIT;
 }
+
+#ifdef _FRR_ATTRIBUTE_PRINTFRR
+#pragma FRR printfrr_ext "%pRN"  (struct route_node *)
+#endif
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _ZEBRA_TABLE_H */

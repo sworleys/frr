@@ -25,7 +25,7 @@
 #include "vty.h"
 #include "command.h"
 #include "memory.h"
-#include "memory_vty.h"
+#include "lib_vty.h"
 #include "log.h"
 
 #include "common_cli.h"
@@ -82,9 +82,9 @@ int main(int argc, char **argv)
 	cmd_hostname_set("test");
 	cmd_domainname_set("test.domain");
 
-	vty_init(master);
-	memory_init();
-	yang_init();
+	vty_init(master, false);
+	lib_cmd_init();
+	yang_init(true);
 	nb_init(master, NULL, 0);
 
 	test_init(argc, argv);

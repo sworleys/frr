@@ -117,7 +117,8 @@ int dotformat2buff(uint8_t *buff, const char *dotted)
 			break;
 		}
 
-		if ((isxdigit((int)*pos)) && (isxdigit((int)*(pos + 1)))) {
+		if ((isxdigit((unsigned char)*pos)) &&
+		    (isxdigit((unsigned char)*(pos + 1)))) {
 			memcpy(number, pos, 2);
 			pos += 2;
 		} else {
@@ -157,7 +158,8 @@ int sysid2buff(uint8_t *buff, const char *dotted)
 			pos++;
 			continue;
 		}
-		if ((isxdigit((int)*pos)) && (isxdigit((int)*(pos + 1)))) {
+		if ((isxdigit((unsigned char)*pos)) &&
+		    (isxdigit((unsigned char)*(pos + 1)))) {
 			memcpy(number, pos, 2);
 			pos += 2;
 		} else {
@@ -560,19 +562,12 @@ void vty_multiline(struct vty *vty, const char *prefix, const char *format, ...)
 
 void vty_out_timestr(struct vty *vty, time_t uptime)
 {
-	struct tm *tm;
 	time_t difftime = time(NULL);
-	difftime -= uptime;
-	tm = gmtime(&difftime);
+	char buf[MONOTIME_STRLEN];
 
-	if (difftime < ONE_DAY_SECOND)
-		vty_out(vty, "%02d:%02d:%02d", tm->tm_hour, tm->tm_min,
-			tm->tm_sec);
-	else if (difftime < ONE_WEEK_SECOND)
-		vty_out(vty, "%dd%02dh%02dm", tm->tm_yday, tm->tm_hour,
-			tm->tm_min);
-	else
-		vty_out(vty, "%02dw%dd%02dh", tm->tm_yday / 7,
-			tm->tm_yday - ((tm->tm_yday / 7) * 7), tm->tm_hour);
-	vty_out(vty, " ago");
+	difftime -= uptime;
+
+	frrtime_to_interval(difftime, buf, sizeof(buf));
+
+	vty_out(vty, "%s ago", buf);
 }

@@ -1516,15 +1516,8 @@ int ospf6_iobuf_size(unsigned int size)
 
 void ospf6_message_terminate(void)
 {
-	if (recvbuf) {
-		XFREE(MTYPE_OSPF6_MESSAGE, recvbuf);
-		recvbuf = NULL;
-	}
-
-	if (sendbuf) {
-		XFREE(MTYPE_OSPF6_MESSAGE, sendbuf);
-		sendbuf = NULL;
-	}
+	XFREE(MTYPE_OSPF6_MESSAGE, recvbuf);
+	XFREE(MTYPE_OSPF6_MESSAGE, sendbuf);
 
 	iobuflen = 0;
 }
@@ -2186,9 +2179,8 @@ int ospf6_lsupdate_send_neighbor_now(struct ospf6_neighbor *on,
 
 	if (IS_OSPF6_DEBUG_FLOODING
 	    || IS_OSPF6_DEBUG_MESSAGE(OSPF6_MESSAGE_TYPE_LSUPDATE, SEND))
-		zlog_debug("%s: Send lsupdate with lsa %s (age %u)",
-			   __PRETTY_FUNCTION__, lsa->name,
-			   ntohs(lsa->header->age));
+		zlog_debug("%s: Send lsupdate with lsa %s (age %u)", __func__,
+			   lsa->name, ntohs(lsa->header->age));
 
 	ospf6_send_lsupdate(on, NULL, oh);
 
@@ -2241,8 +2233,7 @@ int ospf6_lsupdate_send_interface(struct thread *thread)
 				if (IS_OSPF6_DEBUG_MESSAGE(
 					    OSPF6_MESSAGE_TYPE_LSUPDATE, SEND))
 					zlog_debug("%s: LSUpdate length %d",
-						   __PRETTY_FUNCTION__,
-						   ntohs(oh->length));
+						   __func__, ntohs(oh->length));
 
 				memset(sendbuf, 0, iobuflen);
 				oh = (struct ospf6_header *)sendbuf;

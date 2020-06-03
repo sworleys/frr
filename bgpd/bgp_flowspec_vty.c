@@ -252,7 +252,7 @@ void bgp_fs_nlri_get_string(unsigned char *nlri_content, size_t len,
 	}
 }
 
-void route_vty_out_flowspec(struct vty *vty, struct prefix *p,
+void route_vty_out_flowspec(struct vty *vty, const struct prefix *p,
 			    struct bgp_path_info *path, int display,
 			    json_object *json_paths)
 {
@@ -294,7 +294,7 @@ void route_vty_out_flowspec(struct vty *vty, struct prefix *p,
 	}
 	if (!path)
 		return;
-	if (path->attr && path->attr->ecommunity) {
+	if (path->attr->ecommunity) {
 		/* Print attribute */
 		attr = path->attr;
 		s = ecommunity_ecom2str(attr->ecommunity,
@@ -332,17 +332,16 @@ void route_vty_out_flowspec(struct vty *vty, struct prefix *p,
 	if (display == NLRI_STRING_FORMAT_LARGE) {
 		struct bgp_path_info_extra *extra =
 			bgp_path_info_extra_get(path);
+		bool list_began = false;
 
-		if (extra->bgp_fs_pbr) {
+		if (extra->bgp_fs_pbr && listcount(extra->bgp_fs_pbr)) {
 			struct listnode *node;
 			struct bgp_pbr_match_entry *bpme;
 			struct bgp_pbr_match *bpm;
-			bool list_began = false;
 			struct list *list_bpm;
 
 			list_bpm = list_new();
-			if (listcount(extra->bgp_fs_pbr))
-				vty_out(vty, "\tinstalled in PBR");
+			vty_out(vty, "\tinstalled in PBR");
 			for (ALL_LIST_ELEMENTS_RO(extra->bgp_fs_pbr,
 						  node, bpme)) {
 				bpm = bpme->backpointer;
@@ -356,11 +355,32 @@ void route_vty_out_flowspec(struct vty *vty, struct prefix *p,
 					vty_out(vty, ", ");
 				vty_out(vty, "%s", bpm->ipset_name);
 			}
+			list_delete(&list_bpm);
+		}
+		if (extra->bgp_fs_iprule && listcount(extra->bgp_fs_iprule)) {
+			struct listnode *node;
+			struct bgp_pbr_rule *bpr;
+
+			if (!list_began)
+				vty_out(vty, "\tinstalled in PBR");
+			for (ALL_LIST_ELEMENTS_RO(extra->bgp_fs_iprule,
+						  node, bpr)) {
+				if (!bpr->action)
+					continue;
+				if (!list_began) {
+					vty_out(vty, " (");
+					list_began = true;
+				} else
+					vty_out(vty, ", ");
+				vty_out(vty, "-ipv4-rule %d action lookup %u-",
+					bpr->priority,
+					bpr->action->table_id);
+			}
 			if (list_began)
 				vty_out(vty, ")");
 			vty_out(vty, "\n");
-			list_delete(&list_bpm);
-		} else
+		}
+		if (!list_began)
 			vty_out(vty, "\tnot installed in PBR\n");
 	}
 }
@@ -389,8 +409,8 @@ int bgp_show_table_flowspec(struct vty *vty, struct bgp *bgp, afi_t afi,
 		}
 		for (; pi; pi = pi->next) {
 			total_count++;
-			route_vty_out_flowspec(vty, &rn->p, pi, display,
-					       json_paths);
+			route_vty_out_flowspec(vty, bgp_node_get_prefix(rn), pi,
+					       display, json_paths);
 		}
 		if (use_json) {
 			vty_out(vty, "%s\n",
@@ -534,18 +554,18 @@ extern int bgp_flowspec_display_match_per_ip(afi_t afi, struct bgp_table *rib,
 					     json_object *json_paths)
 {
 	struct bgp_node *rn;
-	struct prefix *prefix;
+	const struct prefix *prefix;
 	int display = 0;
 
 	for (rn = bgp_table_top(rib); rn; rn = bgp_route_next(rn)) {
-		prefix = &rn->p;
+		prefix = bgp_node_get_prefix(rn);
 
 		if (prefix->family != AF_FLOWSPEC)
 			continue;
 
 		if (bgp_flowspec_contains_prefix(prefix, match, prefix_check)) {
 			route_vty_out_flowspec(
-				vty, &rn->p, bgp_node_get_bgp_path_info(rn),
+				vty, prefix, bgp_node_get_bgp_path_info(rn),
 				use_json ? NLRI_STRING_FORMAT_JSON
 					 : NLRI_STRING_FORMAT_LARGE,
 				json_paths);

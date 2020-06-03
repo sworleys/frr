@@ -45,7 +45,6 @@
 #include "command.h"
 #include "memory.h"
 #include "linklist.h"
-#include "memory_vty.h"
 #include "libfrr.h"
 #include "ferr.h"
 #include "lib_errors.h"
@@ -230,14 +229,15 @@ static char *vtysh_rl_gets(void)
 static void log_it(const char *line)
 {
 	time_t t = time(NULL);
-	struct tm *tmp = localtime(&t);
+	struct tm tmp;
 	const char *user = getenv("USER");
 	char tod[64];
 
+	localtime_r(&t, &tmp);
 	if (!user)
 		user = "boot";
 
-	strftime(tod, sizeof tod, "%Y%m%d-%H:%M.%S", tmp);
+	strftime(tod, sizeof(tod), "%Y%m%d-%H:%M.%S", &tmp);
 
 	fprintf(logfile, "%s:%s %s\n", tod, user, line);
 }
@@ -334,6 +334,8 @@ int main(int argc, char **argv, char **env)
 	progname = ((p = strrchr(argv[0], '/')) ? ++p : argv[0]);
 
 	strlcpy(sysconfdir, frr_sysconfdir, sizeof(sysconfdir));
+
+	frr_init_vtydir();
 	strlcpy(vtydir, frr_vtydir, sizeof(vtydir));
 
 	/* Option handling. */
@@ -469,7 +471,7 @@ int main(int argc, char **argv, char **env)
 		if (!inputfile) {
 			fprintf(stderr,
 				"-f option MUST be specified with -m option\n");
-			return (1);
+			return 1;
 		}
 		return (vtysh_mark_file(inputfile));
 	}

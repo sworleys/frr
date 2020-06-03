@@ -235,7 +235,7 @@ static const char *next_dirname(const char *s)
 {
 	const char *cur;
 
-	cur = (const char *)s;
+	cur = s;
 
 	if (*cur != '\0') {
 		for (; *cur != '/'; ++cur)
@@ -255,7 +255,7 @@ static void add_namespace(const char *path)
 	const char *nsdirname, *nsname, *cur;
 	struct namespace *namespace;
 
-	cur = (const char *)path;
+	cur = path;
 	nsdirname = nsname = "";
 
 	while ((cur = next_dirname(cur))[0] != '\0') {
@@ -273,7 +273,7 @@ static void add_namespace(const char *path)
 		badusage("invalid namepspace path");
 
 	namespace = xmalloc(sizeof(*namespace));
-	namespace->path = (const char *)path;
+	namespace->path = path;
 	namespace->nstype = nstype;
 	LIST_INSERT_HEAD(&namespace_head, namespace, list);
 }
@@ -401,7 +401,7 @@ static void parse_schedule_item(const char *string, struct schedule_item *item)
 
 	if (!strcmp(string, "forever")) {
 		item->type = sched_forever;
-	} else if (isdigit((int)string[0])) {
+	} else if (isdigit((unsigned char)string[0])) {
 		item->type = sched_timeout;
 		if (parse_integer(string, &item->value) != 0)
 			badusage("invalid timeout value in schedule");

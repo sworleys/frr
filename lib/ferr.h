@@ -27,6 +27,10 @@
 
 #include "vty.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* return type when this error indication stuff is used.
  *
  * guaranteed to have boolean evaluation to "false" when OK, "true" when error
@@ -253,5 +257,9 @@ DEFUN("bla")
 }
 
 #endif /* THIS_IS_AN_EXAMPLE */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _FERR_H */

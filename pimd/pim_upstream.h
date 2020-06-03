@@ -74,8 +74,7 @@
  * blackholing the traffic pulled down to the LHR.
  */
 #define PIM_UPSTREAM_FLAG_MASK_MLAG_NON_DF             (1 << 17)
-/* MLAG mroute rxed from the peer MLAG switch
- */
+/* MLAG mroute rxed from the peer MLAG switch */
 #define PIM_UPSTREAM_FLAG_MASK_MLAG_PEER               (1 << 18)
 /*
  * We are creating a non-joined upstream data structure
@@ -89,12 +88,13 @@
  * This flag is only relevant for (S,G) entries.
  */
 #define PIM_UPSTREAM_FLAG_MASK_USE_RPT                 (1 << 20)
-/*
- * PIM Syncs upstream entries to peer Nodes via MLAG in 2 cases.
+/* PIM Syncs upstream entries to peer Nodes via MLAG in 2 cases.
  * one is to support plain PIM Redundancy and another one is to support
  * PIM REdundancy.
  */
-#define PIM_UPSTREAM_FLAG_MASK_MLAG_INTERFACE (1 << 21)
+#define PIM_UPSTREAM_FLAG_MASK_MLAG_INTERFACE          (1 << 21)
+
+
 #define PIM_UPSTREAM_FLAG_ALL 0xFFFFFFFF
 
 #define PIM_UPSTREAM_FLAG_TEST_DR_JOIN_DESIRED(flags) ((flags) & PIM_UPSTREAM_FLAG_MASK_DR_JOIN_DESIRED)
@@ -117,9 +117,10 @@
 #define PIM_UPSTREAM_FLAG_TEST_MLAG_VXLAN(flags) ((flags) & PIM_UPSTREAM_FLAG_MASK_MLAG_VXLAN)
 #define PIM_UPSTREAM_FLAG_TEST_MLAG_NON_DF(flags) ((flags) & PIM_UPSTREAM_FLAG_MASK_MLAG_NON_DF)
 #define PIM_UPSTREAM_FLAG_TEST_MLAG_PEER(flags) ((flags) & PIM_UPSTREAM_FLAG_MASK_MLAG_PEER)
-#define PIM_UPSTREAM_FLAG_TEST_CAN_BE_LHR(flags) ((flags) & (PIM_UPSTREAM_FLAG_MASK_SRC_IGMP | PIM_UPSTREAM_FLAG_MASK_SRC_VXLAN_TERM))
 #define PIM_UPSTREAM_FLAG_TEST_SRC_NOCACHE(flags) ((flags) &PIM_UPSTREAM_FLAG_MASK_SRC_NOCACHE)
 #define PIM_UPSTREAM_FLAG_TEST_USE_RPT(flags) ((flags) & PIM_UPSTREAM_FLAG_MASK_USE_RPT)
+#define PIM_UPSTREAM_FLAG_TEST_CAN_BE_LHR(flags) ((flags) & (PIM_UPSTREAM_FLAG_MASK_SRC_IGMP | PIM_UPSTREAM_FLAG_MASK_SRC_VXLAN_TERM))
+#define PIM_UPSTREAM_FLAG_TEST_MLAG_INTERFACE(flags) ((flags)&PIM_UPSTREAM_FLAG_MASK_MLAG_INTERFACE)
 
 #define PIM_UPSTREAM_FLAG_SET_DR_JOIN_DESIRED(flags) ((flags) |= PIM_UPSTREAM_FLAG_MASK_DR_JOIN_DESIRED)
 #define PIM_UPSTREAM_FLAG_SET_DR_JOIN_DESIRED_UPDATED(flags) ((flags) |= PIM_UPSTREAM_FLAG_MASK_DR_JOIN_DESIRED_UPDATED)
@@ -141,6 +142,7 @@
 #define PIM_UPSTREAM_FLAG_SET_MLAG_NON_DF(flags) ((flags) |= PIM_UPSTREAM_FLAG_MASK_MLAG_NON_DF)
 #define PIM_UPSTREAM_FLAG_SET_MLAG_PEER(flags) ((flags) |= PIM_UPSTREAM_FLAG_MASK_MLAG_PEER)
 #define PIM_UPSTREAM_FLAG_SET_USE_RPT(flags) ((flags) |= PIM_UPSTREAM_FLAG_MASK_USE_RPT)
+#define PIM_UPSTREAM_FLAG_SET_MLAG_INTERFACE(flags) ((flags) |= PIM_UPSTREAM_FLAG_MASK_MLAG_INTERFACE)
 
 #define PIM_UPSTREAM_FLAG_UNSET_DR_JOIN_DESIRED(flags) ((flags) &= ~PIM_UPSTREAM_FLAG_MASK_DR_JOIN_DESIRED)
 #define PIM_UPSTREAM_FLAG_UNSET_DR_JOIN_DESIRED_UPDATED(flags) ((flags) &= ~PIM_UPSTREAM_FLAG_MASK_DR_JOIN_DESIRED_UPDATED)
@@ -163,13 +165,7 @@
 #define PIM_UPSTREAM_FLAG_UNSET_MLAG_PEER(flags) ((flags) &= ~PIM_UPSTREAM_FLAG_MASK_MLAG_PEER)
 #define PIM_UPSTREAM_FLAG_UNSET_SRC_NOCACHE(flags) ((flags) &= ~PIM_UPSTREAM_FLAG_MASK_SRC_NOCACHE)
 #define PIM_UPSTREAM_FLAG_UNSET_USE_RPT(flags) ((flags) &= ~PIM_UPSTREAM_FLAG_MASK_USE_RPT)
-
-#define PIM_UPSTREAM_FLAG_SET_MLAG_INTERFACE(flags)                            \
-	((flags) |= PIM_UPSTREAM_FLAG_MASK_MLAG_INTERFACE)
-#define PIM_UPSTREAM_FLAG_UNSET_MLAG_INTERFACE(flags)                          \
-	((flags) &= ~PIM_UPSTREAM_FLAG_MASK_MLAG_INTERFACE)
-#define PIM_UPSTREAM_FLAG_TEST_MLAG_INTERFACE(flags)                           \
-	((flags)&PIM_UPSTREAM_FLAG_MASK_MLAG_INTERFACE)
+#define PIM_UPSTREAM_FLAG_UNSET_MLAG_INTERFACE(flags) ((flags) &= ~PIM_UPSTREAM_FLAG_MASK_MLAG_INTERFACE)
 
 /* The RPF cost is incremented by 10 if the RPF interface is the peerlink-rif.
  * This is used to force the MLAG switch with the lowest cost to the RPF
@@ -200,6 +196,8 @@ struct pim_up_mlag {
 	 */
 	uint32_t peer_mrib_metric;
 };
+
+PREDECL_RBTREE_UNIQ(rb_pim_upstream);
 /*
   Upstream (S,G) channel in Joined state
   (S,G) in the "Not Joined" state is not represented
@@ -229,6 +227,7 @@ struct pim_up_mlag {
 */
 struct pim_upstream {
 	struct pim_instance *pim;
+	struct rb_pim_upstream_item upstream_rb;
 	struct pim_upstream *parent;
 	struct in_addr upstream_addr;     /* Who we are talking to */
 	struct in_addr upstream_register; /*Who we received a register from*/
@@ -277,19 +276,17 @@ struct pim_upstream {
 	int64_t state_transition; /* Record current state uptime */
 };
 
+static inline bool pim_upstream_is_kat_running(struct pim_upstream *up)
+{
+	return (up->t_ka_timer != NULL);
+}
+
 static inline bool pim_up_mlag_is_local(struct pim_upstream *up)
 {
 	/* XXX: extend this to also return true if the channel-oil has
 	 * any AA devices
 	 */
-	return (up->flags
-		& (PIM_UPSTREAM_FLAG_MASK_MLAG_VXLAN
-		   | PIM_UPSTREAM_FLAG_MASK_MLAG_INTERFACE));
-}
-
-static inline bool pim_upstream_is_kat_running(struct pim_upstream *up)
-{
-	return (up->t_ka_timer != NULL);
+	return (up->flags & PIM_UPSTREAM_FLAG_MASK_MLAG_VXLAN);
 }
 
 struct pim_upstream *pim_upstream_find(struct pim_instance *pim,
@@ -302,14 +299,14 @@ struct pim_upstream *pim_upstream_add(struct pim_instance *pim,
 				      struct interface *ifp, int flags,
 				      const char *name,
 				      struct pim_ifchannel *ch);
-void pim_upstream_ref(struct pim_instance *pim, struct pim_upstream *up,
+void pim_upstream_ref(struct pim_upstream *up,
 		int flags, const char *name);
 struct pim_upstream *pim_upstream_del(struct pim_instance *pim,
 				      struct pim_upstream *up,
 				      const char *name);
 
-int pim_upstream_evaluate_join_desired(struct pim_instance *pim,
-				       struct pim_upstream *up);
+bool pim_upstream_evaluate_join_desired(struct pim_instance *pim,
+					struct pim_upstream *up);
 int pim_upstream_evaluate_join_desired_interface(struct pim_upstream *up,
 						 struct pim_ifchannel *ch,
 						 struct pim_ifchannel *starch);
@@ -372,7 +369,11 @@ void pim_upstream_init(struct pim_instance *pim);
 void pim_upstream_terminate(struct pim_instance *pim);
 
 void join_timer_start(struct pim_upstream *up);
-int pim_upstream_compare(void *arg1, void *arg2);
+int pim_upstream_compare(const struct pim_upstream *up1,
+			 const struct pim_upstream *up2);
+DECLARE_RBTREE_UNIQ(rb_pim_upstream, struct pim_upstream, upstream_rb,
+		    pim_upstream_compare)
+
 void pim_upstream_register_reevaluate(struct pim_instance *pim);
 
 void pim_upstream_add_lhr_star_pimreg(struct pim_instance *pim);
@@ -388,10 +389,9 @@ struct pim_upstream *pim_upstream_keep_alive_timer_proc(
 		struct pim_upstream *up);
 void pim_upstream_fill_static_iif(struct pim_upstream *up,
 				struct interface *incoming);
-uint32_t pim_up_mlag_local_cost(struct pim_instance *pim,
-		struct pim_upstream *up);
-uint32_t pim_up_mlag_peer_cost(struct pim_upstream *up);
 void pim_upstream_update_use_rpt(struct pim_upstream *up,
-			bool update_mroute);
+		bool update_mroute);
+uint32_t pim_up_mlag_local_cost(struct pim_upstream *up);
+uint32_t pim_up_mlag_peer_cost(struct pim_upstream *up);
 void pim_upstream_reeval_use_rpt(struct pim_instance *pim);
 #endif /* PIM_UPSTREAM_H */

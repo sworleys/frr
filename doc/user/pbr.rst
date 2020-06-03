@@ -39,7 +39,7 @@ listing of ECMP nexthops used to forward packets for when a pbr-map is matched.
    sub-mode where you can specify individual nexthops.  To exit this mode type
    exit or end as per normal conventions for leaving a sub-mode.
 
-.. clicmd:: nexthop [A.B.C.D|X:X::X:XX] [interface] [nexthop-vrf NAME]
+.. clicmd:: nexthop [A.B.C.D|X:X::X:XX] [interface [onlink]] [nexthop-vrf NAME] [label LABELS]
 
    Create a v4 or v6 nexthop.  All normal rules for creating nexthops that you
    are used to are allowed here.  The syntax was intentionally kept the same as
@@ -88,8 +88,14 @@ end destination.
 
    When a incoming packet matches the destination prefix specified, take the
    packet and forward according to the nexthops specified.  This command accepts
-   both v4 and v6 prefixes.  This command is used in conjuction of the
+   both v4 and v6 prefixes.  This command is used in conjunction of the
    :clicmd:`match src-ip PREFIX` command for matching.
+
+.. clicmd:: match mark (1-4294967295)
+
+   Select the mark to match.  This is a linux only command and if attempted
+   on another platform it will be denied.  This mark translates to the
+   underlying `ip rule .... fwmark XXXX` command.
 
 .. clicmd:: set nexthop-group NAME
 
@@ -129,6 +135,11 @@ causes the policy to be installed into the kernel.
 
    This command is available under interface sub-mode.  This turns
    on the PBR map NAME and allows it to work properly.
+
+.. note::
+   This will not dynamically create PBR maps on sub-interfaces (i.e. vlans)
+   even if one is on the master. Each must have the PBR map explicitly added
+   to the interface.
 
 .. _pbr-details:
 

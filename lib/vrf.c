@@ -56,6 +56,7 @@ struct vrf_id_head vrfs_by_id = RB_INITIALIZER(&vrfs_by_id);
 struct vrf_name_head vrfs_by_name = RB_INITIALIZER(&vrfs_by_name);
 
 static int vrf_backend;
+static int vrf_backend_configured;
 static struct zebra_privs_t *vrf_daemon_privs;
 static char vrf_default_name[VRF_NAMSIZ] = VRF_DEFAULT_NAME_INTERNAL;
 
@@ -66,7 +67,7 @@ static char vrf_default_name[VRF_NAMSIZ] = VRF_DEFAULT_NAME_INTERNAL;
 static int debug_vrf = 0;
 
 /* Holding VRF hooks  */
-struct vrf_master {
+static struct vrf_master {
 	int (*vrf_new_hook)(struct vrf *);
 	int (*vrf_delete_hook)(struct vrf *);
 	int (*vrf_enable_hook)(struct vrf *);
@@ -115,7 +116,7 @@ static void vrf_update_vrf_id(ns_id_t ns_id, void *opaqueptr)
 	vrf->vrf_id = vrf_id;
 	RB_INSERT(vrf_id_head, &vrfs_by_id, vrf);
 	if (old_vrf_id == VRF_UNKNOWN)
-		vrf_enable((struct vrf *)vrf);
+		vrf_enable(vrf);
 }
 
 int vrf_switch_to_netns(vrf_id_t vrf_id)
@@ -198,9 +199,14 @@ struct vrf *vrf_get(vrf_id_t vrf_id, const char *name)
 
 	/* Set name */
 	if (name && vrf->name[0] != '\0' && strcmp(name, vrf->name)) {
+		/* update the vrf name */
 		RB_REMOVE(vrf_name_head, &vrfs_by_name, vrf);
+		strlcpy(vrf->data.l.netns_name,
+			name, NS_NAMSIZ);
 		strlcpy(vrf->name, name, sizeof(vrf->name));
 		RB_INSERT(vrf_name_head, &vrfs_by_name, vrf);
+		if (vrf->vrf_id == VRF_DEFAULT)
+			vrf_set_default_name(vrf->name, false);
 	} else if (name && vrf->name[0] == '\0') {
 		strlcpy(vrf->name, name, sizeof(vrf->name));
 		RB_INSERT(vrf_name_head, &vrfs_by_name, vrf);
@@ -318,10 +324,7 @@ const char *vrf_id_to_name(vrf_id_t vrf_id)
 	struct vrf *vrf;
 
 	vrf = vrf_lookup_by_id(vrf_id);
-	if (vrf)
-		return vrf->name;
-
-	return "n/a";
+	return VRF_LOGNAME(vrf);
 }
 
 vrf_id_t vrf_name_to_id(const char *name)
@@ -466,6 +469,14 @@ static const struct cmd_variable_handler vrf_var_handlers[] = {
 		.varname = "vrf",
 		.completions = vrf_autocomplete,
 	},
+	{
+		.varname = "vrf_name",
+		.completions = vrf_autocomplete,
+	},
+	{
+		.varname = "nexthop_vrf",
+		.completions = vrf_autocomplete,
+	},
 	{.completions = NULL},
 };
 
@@ -479,8 +490,7 @@ void vrf_init(int (*create)(struct vrf *), int (*enable)(struct vrf *),
 	/* initialise NS, in case VRF backend if NETNS */
 	ns_init();
 	if (debug_vrf)
-		zlog_debug("%s: Initializing VRF subsystem",
-			   __PRETTY_FUNCTION__);
+		zlog_debug("%s: Initializing VRF subsystem", __func__);
 
 	vrf_master.vrf_new_hook = create;
 	vrf_master.vrf_enable_hook = enable;
@@ -521,8 +531,7 @@ void vrf_terminate(void)
 	struct vrf *vrf;
 
 	if (debug_vrf)
-		zlog_debug("%s: Shutting down vrf subsystem",
-			   __PRETTY_FUNCTION__);
+		zlog_debug("%s: Shutting down vrf subsystem", __func__);
 
 	while (!RB_EMPTY(vrf_id_head, &vrfs_by_id)) {
 		vrf = RB_ROOT(vrf_id_head, &vrfs_by_id);
@@ -576,12 +585,27 @@ int vrf_is_backend_netns(void)
 
 int vrf_get_backend(void)
 {
+	if (!vrf_backend_configured)
+		return VRF_BACKEND_UNKNOWN;
 	return vrf_backend;
 }
 
-void vrf_configure_backend(int vrf_backend_netns)
+int vrf_configure_backend(enum vrf_backend_type backend)
 {
-	vrf_backend = vrf_backend_netns;
+	/* Work around issue in old gcc */
+	switch (backend) {
+	case VRF_BACKEND_UNKNOWN:
+	case VRF_BACKEND_NETNS:
+	case VRF_BACKEND_VRF_LITE:
+		break;
+	default:
+		return -1;
+	}
+
+	vrf_backend = backend;
+	vrf_backend_configured = 1;
+
+	return 0;
 }
 
 int vrf_handler_create(struct vty *vty, const char *vrfname,
@@ -734,7 +758,7 @@ DEFUN (no_vrf,
 }
 
 
-struct cmd_node vrf_node = {VRF_NODE, "%s(config-vrf)# ", 1};
+static struct cmd_node vrf_node = {VRF_NODE, "%s(config-vrf)# ", 1};
 
 DEFUN_NOSH (vrf_netns,
        vrf_netns_cmd,
@@ -750,7 +774,7 @@ DEFUN_NOSH (vrf_netns,
 	if (!pathname)
 		return CMD_WARNING_CONFIG_FAILED;
 
-	frr_elevate_privs(vrf_daemon_privs) {
+	frr_with_privs(vrf_daemon_privs) {
 		ret = vrf_netns_handler_create(vty, vrf, pathname,
 					       NS_UNKNOWN, NS_UNKNOWN);
 	}
@@ -865,7 +889,8 @@ void vrf_set_default_name(const char *default_name, bool force)
 			   def_vrf->vrf_id);
 		return;
 	}
-
+	if (strmatch(vrf_default_name, default_name))
+		return;
 	snprintf(vrf_default_name, VRF_NAMSIZ, "%s", default_name);
 	if (def_vrf) {
 		if (force)
@@ -899,10 +924,16 @@ vrf_id_t vrf_get_default_id(void)
 int vrf_bind(vrf_id_t vrf_id, int fd, const char *name)
 {
 	int ret = 0;
+	struct interface *ifp;
 
 	if (fd < 0 || name == NULL)
 		return fd;
-	if (vrf_is_backend_netns())
+	/* the device should exist
+	 * otherwise we should return
+	 * case ifname = vrf in netns mode => return
+	 */
+	ifp = if_lookup_by_name(name, vrf_id);
+	if (!ifp)
 		return fd;
 #ifdef SO_BINDTODEVICE
 	ret = setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, name, strlen(name)+1);

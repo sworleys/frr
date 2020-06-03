@@ -25,7 +25,6 @@
 #include <sigevent.h>
 #include <lib/version.h>
 #include "command.h"
-#include "memory_vty.h"
 #include "libfrr.h"
 #include "lib_errors.h"
 
@@ -76,7 +75,7 @@ typedef enum {
 	PHASE_WAITING_ZEBRA_UP
 } restart_phase_t;
 
-static const char *phase_str[] = {
+static const char *const phase_str[] = {
 	"Idle",
 	"Startup",
 	"Stop jobs running",
@@ -144,7 +143,7 @@ typedef enum {
 #define IS_UP(DMN)                                                             \
 	(((DMN)->state == DAEMON_UP) || ((DMN)->state == DAEMON_UNRESPONSIVE))
 
-static const char *state_str[] = {
+static const char *const state_str[] = {
 	"Init", "Down", "Connecting", "Up", "Unresponsive",
 };
 
@@ -319,9 +318,8 @@ static pid_t run_background(char *shell_cmd)
 		}
 	default:
 		/* Parent process: we will reap the child later. */
-		flog_err_sys(EC_LIB_SYSTEM_CALL,
-			     "Forked background command [pid %d]: %s",
-			     (int)child, shell_cmd);
+		zlog_info("Forked background command [pid %d]: %s", (int)child,
+			  shell_cmd);
 		return child;
 	}
 }
@@ -460,12 +458,20 @@ static int run_job(struct restart_info *restart, const char *cmdtype,
 		return -1;
 	}
 
+#if defined HAVE_SYSTEMD
+	char buffer[512];
+
+	snprintf(buffer, sizeof(buffer), "restarting %s", restart->name);
+	systemd_send_status(buffer);
+#endif
+
 	/* Note: time_elapsed test must come before the force test, since we
 	   need
 	   to make sure that delay is initialized for use below in updating the
 	   restart interval. */
 	if ((time_elapsed(&delay, &restart->time)->tv_sec < restart->interval)
 	    && !force) {
+
 		if (gs.loglevel > LOG_DEBUG + 1)
 			zlog_debug(
 				"postponing %s %s: "
@@ -490,6 +496,9 @@ static int run_job(struct restart_info *restart, const char *cmdtype,
 			restart->pid = 0;
 	}
 
+#if defined HAVE_SYSTEMD
+	systemd_send_status("FRR Operational");
+#endif
 	/* Calculate the new restart interval. */
 	if (update_interval) {
 		if (delay.tv_sec > 2 * gs.max_restart_interval)
@@ -549,9 +558,9 @@ static int wakeup_init(struct thread *t_wakeup)
 
 	dmn->t_wakeup = NULL;
 	if (try_connect(dmn) < 0) {
-		flog_err(EC_WATCHFRR_CONNECTION,
-			 "%s state -> down : initial connection attempt failed",
-			 dmn->name);
+		zlog_info(
+			"%s state -> down : initial connection attempt failed",
+			dmn->name);
 		dmn->state = DAEMON_DOWN;
 	}
 	phase_check();
@@ -678,6 +687,7 @@ static void daemon_send_ready(int exitcode)
 {
 	FILE *fp;
 	static int sent = 0;
+	char started[1024];
 
 	if (sent)
 		return;
@@ -699,11 +709,14 @@ static void daemon_send_ready(int exitcode)
 
 	frr_detach();
 
-	fp = fopen(DAEMON_VTY_DIR "/watchfrr.started", "w");
+	snprintf(started, sizeof(started), "%s%s", frr_vtydir,
+		 "watchfrr.started");
+	fp = fopen(started, "w");
 	if (fp)
 		fclose(fp);
 #if defined HAVE_SYSTEMD
 	systemd_send_started(master, 0);
+	systemd_send_status("FRR Operational");
 #endif
 	sent = 1;
 }
@@ -1051,10 +1064,11 @@ void watchfrr_status(struct vty *vty)
 		else if (dmn->state == DAEMON_DOWN &&
 			time_elapsed(&delay, &dmn->restart.time)->tv_sec
 				< dmn->restart.interval)
-			vty_out(vty, "      restarting in %ld seconds"
-				" (%lds backoff interval)\n",
-				dmn->restart.interval - delay.tv_sec,
-				dmn->restart.interval);
+			vty_out(vty, "      restarting in %jd seconds"
+				" (%jds backoff interval)\n",
+				(intmax_t)dmn->restart.interval
+					- (intmax_t)delay.tv_sec,
+				(intmax_t)dmn->restart.interval);
 	}
 }
 

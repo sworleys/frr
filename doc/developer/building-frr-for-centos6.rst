@@ -1,9 +1,10 @@
+.. _building-centos6:
+
 CentOS 6
 ========================================
 
-(As an alternative to this installation, you may prefer to create a FRR
-rpm package yourself and install that package instead. See instructions
-in redhat/README.rpm\_build.md on how to build a rpm package)
+This document describes installation from source. If you want to build an RPM,
+see :ref:`packaging-redhat`.
 
 Instructions are tested with ``CentOS 6.8`` on ``x86_64`` platform
 
@@ -24,7 +25,7 @@ CentOS 6 restrictions:
    PIMd is needed
 -  MPLS is not supported on ``CentOS 6``. MPLS requires Linux Kernel 4.5
    or higher (LDP can be built, but may have limited use without MPLS)
--  Zebra is unable to detect what bridge/vrf an interface is associcated
+-  Zebra is unable to detect what bridge/vrf an interface is associated
    with (IFLA\_INFO\_SLAVE\_KIND does not exist in the kernel headers,
    you can use a newer kernel + headers to get this functionality)
 -  frr\_reload.py will not work, as this requires Python 2.7, and CentOS
@@ -42,9 +43,9 @@ Add packages:
 
 .. code-block:: shell
 
-   sudo yum install git autoconf automake libtool make gawk \
+   sudo yum install git autoconf automake libtool make \
       readline-devel texinfo net-snmp-devel groff pkgconfig \
-      json-c-devel pam-devel flex epel-release c-ares-devel
+      json-c-devel pam-devel flex epel-release c-ares-devel libcap-devel
 
 Install newer version of bison (CentOS 6 package source is too old) from CentOS
 7:
@@ -115,7 +116,19 @@ Update rpm database & Install newer sphinx
    sudo yum update
    sudo yum install python27-sphinx
 
-.. include:: building-libyang.rst
+Install libyang and its dependencies:
+
+.. code-block:: shell
+
+   sudo yum install pcre-devel doxygen cmake
+   git clone https://github.com/CESNET/libyang.git
+   cd libyang
+   git checkout 090926a89d59a3c4000719505d563aaf6ac60f2
+   mkdir build ; cd build
+   cmake -DENABLE_LYD_PRIV=ON -DCMAKE_INSTALL_PREFIX:PATH=/usr -D CMAKE_BUILD_TYPE:String="Release" ..
+   make build-rpm
+   sudo yum install ./rpms/RPMS/x86_64/libyang-0.16.111-0.x86_64.rpm ./rpms/RPMS/x86_64/libyang-devel-0.16.111-0.x86_64.rpm
+   cd ../..
 
 Get FRR, compile it and install it (from Git)
 ---------------------------------------------
@@ -162,10 +175,9 @@ an example.)
         --disable-ldpd \
         --enable-fpm \
         --with-pkg-git-version \
-        --with-pkg-extra-version=-MyOwnFRRVersion \
-        SPHINXBUILD=sphinx-build2.7
+        --with-pkg-extra-version=-MyOwnFRRVersion
     make
-    make check PYTHON=/usr/bin/python2.7
+    make check
     sudo make install
 
 Create empty FRR configuration files
@@ -213,7 +225,7 @@ Install daemon config file
 
 .. code-block:: shell
 
-   sudo install -p -m 644 redhat/daemons /etc/frr/
+   sudo install -p -m 644 tools/etc/frr/daemons /etc/frr/
    sudo chown frr:frr /etc/frr/daemons
 
 Edit /etc/frr/daemons as needed to select the required daemons
@@ -235,18 +247,18 @@ settings)::
    # Controls source route verification
    net.ipv4.conf.default.rp_filter = 0
 
-Load the modifed sysctl's on the system:
+Load the modified sysctl's on the system:
 
 .. code-block:: shell
 
    sudo sysctl -p /etc/sysctl.d/90-routing-sysctl.conf
 
-Add init.d startup files
-^^^^^^^^^^^^^^^^^^^^^^^^
+Add init.d startup file
+^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: shell
 
-   sudo install -p -m 755 redhat/frr.init /etc/init.d/frr
+   sudo install -p -m 755 tools/frr /etc/init.d/frr
    sudo chkconfig --add frr
 
 Enable FRR daemon at startup

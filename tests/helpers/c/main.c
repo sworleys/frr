@@ -24,7 +24,7 @@
 #include "vty.h"
 #include "command.h"
 #include "memory.h"
-#include "memory_vty.h"
+#include "lib_vty.h"
 
 extern void test_init(void);
 
@@ -153,9 +153,9 @@ int main(int argc, char **argv)
 
 	/* Library inits. */
 	cmd_init(1);
-	vty_init(master);
-	memory_init();
-	yang_init();
+	vty_init(master, false);
+	lib_cmd_init();
+	yang_init(true);
 	nb_init(master, NULL, 0);
 
 	/* OSPF vty inits. */

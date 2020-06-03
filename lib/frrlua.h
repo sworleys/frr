@@ -5,7 +5,7 @@
  * Copyright (C) 2016 Cumulus Networks, Inc.
  * Donald Sharp
  *
- * This file is part of FreeRangeRouting (FRR).
+ * This file is part of FRRouting (FRR).
  *
  * FRR is free software; you can redistribute it and/or modify it under the
  * terms of the GNU General Public License as published by the Free Software
@@ -28,6 +28,10 @@
 #include "lua.h"
 #include "lualib.h"
 #include "lauxlib.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /*
  * These functions are helper functions that
@@ -75,5 +79,10 @@ enum lua_rm_status lua_run_rm_rule(lua_State *L, const char *rule);
  */
 const char *get_string(lua_State *L, const char *key);
 int get_integer(lua_State *L, const char *key);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif
 #endif

@@ -21,6 +21,7 @@
 #ifndef _QUAGGA_BGP_ECOMMUNITY_H
 #define _QUAGGA_BGP_ECOMMUNITY_H
 
+#include "bgpd/bgp_route.h"
 #include "bgpd/bgpd.h"
 
 /* Refer to rfc7153 for the IANA registry definitions. These are
@@ -68,12 +69,20 @@
 #define ECOMMUNITY_EVPN_SUBTYPE_ESI_LABEL    0x01
 #define ECOMMUNITY_EVPN_SUBTYPE_ES_IMPORT_RT 0x02
 #define ECOMMUNITY_EVPN_SUBTYPE_ROUTERMAC    0x03
+#define ECOMMUNITY_EVPN_SUBTYPE_DF_ELECTION  0x06
 #define ECOMMUNITY_EVPN_SUBTYPE_DEF_GW       0x0d
 #define ECOMMUNITY_EVPN_SUBTYPE_ND           0x08
 
 #define ECOMMUNITY_EVPN_SUBTYPE_MACMOBILITY_FLAG_STICKY 0x01
-#define ECOMMUNITY_EVPN_SUBTYPE_ND_ROUTER_FLAG		0x01
-#define ECOMMUNITY_EVPN_SUBTYPE_ND_OVERRIDE_FLAG	0x02
+
+/* DF alg bits - only lower 5 bits are applicable */
+#define ECOMMUNITY_EVPN_SUBTYPE_DF_ALG_BITS 0x1f
+
+#define ECOMMUNITY_EVPN_SUBTYPE_ND_ROUTER_FLAG   0x01
+#define ECOMMUNITY_EVPN_SUBTYPE_ND_OVERRIDE_FLAG 0x02
+#define ECOMMUNITY_EVPN_SUBTYPE_PROXY_FLAG       0x04
+
+#define ECOMMUNITY_EVPN_SUBTYPE_ESI_SA_FLAG (1 << 0) /* single-active */
 
 /* Low-order octet of the Extended Communities type field for OPAQUE types */
 #define ECOMMUNITY_OPAQUE_SUBTYPE_ENCAP     0x0c
@@ -199,38 +208,58 @@ extern unsigned int ecommunity_hash_make(const void *);
 extern struct ecommunity *ecommunity_str2com(const char *, int, int);
 extern char *ecommunity_ecom2str(struct ecommunity *, int, int);
 extern void ecommunity_strfree(char **s);
-extern int ecommunity_match(const struct ecommunity *,
-			    const struct ecommunity *);
+extern bool ecommunity_match(const struct ecommunity *,
+			     const struct ecommunity *);
 extern char *ecommunity_str(struct ecommunity *);
 extern struct ecommunity_val *ecommunity_lookup(const struct ecommunity *,
 						uint8_t, uint8_t);
-extern int ecommunity_add_val(struct ecommunity *ecom,
-			      struct ecommunity_val *eval,
-			      bool unique, bool overwrite);
+extern bool ecommunity_add_val(struct ecommunity *ecom,
+			       struct ecommunity_val *eval,
+			       bool unique, bool overwrite);
 
 /* for vpn */
 extern struct ecommunity *ecommunity_new(void);
-extern int ecommunity_strip(struct ecommunity *ecom, uint8_t type,
+extern bool ecommunity_strip(struct ecommunity *ecom, uint8_t type,
 			    uint8_t subtype);
 extern struct ecommunity *ecommunity_new(void);
-extern int ecommunity_del_val(struct ecommunity *ecom,
-			      struct ecommunity_val *eval);
+extern bool ecommunity_del_val(struct ecommunity *ecom,
+			       struct ecommunity_val *eval);
 struct bgp_pbr_entry_action;
 extern int ecommunity_fill_pbr_action(struct ecommunity_val *ecom_eval,
 			       struct bgp_pbr_entry_action *api);
 
-extern uint8_t *ecommunity_linkbw_present(struct ecommunity *ecom,
-					  uint32_t *bw);
+extern const uint8_t *ecommunity_linkbw_present(struct ecommunity *ecom,
+						uint32_t *bw);
 extern struct ecommunity *ecommunity_replace_linkbw(as_t as,
 				struct ecommunity *ecom, uint64_t cum_bw);
 
-static inline int ecommunity_strip_rts(struct ecommunity *ecom)
+extern void bgp_compute_aggregate_ecommunity(
+					struct bgp_aggregate *aggregate,
+					struct ecommunity *ecommunity);
+
+extern void bgp_compute_aggregate_ecommunity_hash(
+					struct bgp_aggregate *aggregate,
+					struct ecommunity *ecommunity);
+extern void bgp_compute_aggregate_ecommunity_val(
+					struct bgp_aggregate *aggregate);
+extern void bgp_remove_ecommunity_from_aggregate(
+					struct bgp_aggregate *aggregate,
+					struct ecommunity *ecommunity);
+extern void bgp_remove_ecomm_from_aggregate_hash(
+					struct bgp_aggregate *aggregate,
+					struct ecommunity *ecommunity);
+extern void bgp_aggr_ecommunity_remove(void *arg);
+extern const uint8_t *ecommunity_linkbw_present(struct ecommunity *ecom,
+						uint32_t *bw);
+extern struct ecommunity *ecommunity_replace_linkbw(as_t as,
+				struct ecommunity *ecom, uint64_t cum_bw);
+
+static inline void ecommunity_strip_rts(struct ecommunity *ecom)
 {
 	uint8_t subtype = ECOMMUNITY_ROUTE_TARGET;
 
-	return(ecommunity_strip(ecom, ECOMMUNITY_ENCODE_AS, subtype) ||
-		ecommunity_strip(ecom, ECOMMUNITY_ENCODE_IP, subtype) ||
-		ecommunity_strip(ecom, ECOMMUNITY_ENCODE_AS4, subtype));
+	ecommunity_strip(ecom, ECOMMUNITY_ENCODE_AS, subtype);
+	ecommunity_strip(ecom, ECOMMUNITY_ENCODE_IP, subtype);
+	ecommunity_strip(ecom, ECOMMUNITY_ENCODE_AS4, subtype);
 }
-
 #endif /* _QUAGGA_BGP_ECOMMUNITY_H */

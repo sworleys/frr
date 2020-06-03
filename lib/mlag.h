@@ -21,6 +21,11 @@
  */
 #ifndef __MLAG_H__
 #define __MLAG_H__
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "lib/if.h"
 #include "lib/vrf.h"
 #include "lib/stream.h"
@@ -116,6 +121,7 @@ struct mlag_msg {
 	uint8_t data[0];
 } __attribute__((packed));
 
+
 extern char *mlag_role2str(enum mlag_role role, char *buf, size_t size);
 extern char *mlag_lib_msgid_to_str(enum mlag_msg_type msg_type, char *buf,
 				   size_t size);
@@ -133,4 +139,8 @@ extern int mlag_lib_decode_vxlan_update(struct stream *s,
 					struct mlag_vxlan *msg);
 extern int mlag_lib_decode_frr_status(struct stream *s,
 				      struct mlag_frr_status *msg);
+#ifdef __cplusplus
+}
+#endif
+
 #endif

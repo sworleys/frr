@@ -51,6 +51,7 @@ const char *const PIM_ALL_IGMP_ROUTERS = MCAST_ALL_IGMP_ROUTERS;
 DEFINE_MTYPE_STATIC(PIMD, ROUTER, "PIM Router information");
 
 struct pim_router *router = NULL;
+struct in_addr qpim_all_pim_routers_addr;
 
 void pim_prefix_list_update(struct prefix_list *plist)
 {
@@ -117,8 +118,8 @@ void pim_init(void)
 		flog_err(
 			EC_LIB_SOCKET,
 			"%s %s: could not solve %s to group address: errno=%d: %s",
-			__FILE__, __PRETTY_FUNCTION__, PIM_ALL_PIM_ROUTERS,
-			errno, safe_strerror(errno));
+			__FILE__, __func__, PIM_ALL_PIM_ROUTERS, errno,
+			safe_strerror(errno));
 		zassert(0);
 		return;
 	}

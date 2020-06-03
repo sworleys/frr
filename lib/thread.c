@@ -25,14 +25,15 @@
 
 #include "thread.h"
 #include "memory.h"
+#include "frrcu.h"
 #include "log.h"
 #include "hash.h"
-#include "pqueue.h"
 #include "command.h"
 #include "sigevent.h"
 #include "network.h"
 #include "jhash.h"
 #include "frratomic.h"
+#include "frr_pthread.h"
 #include "lib_errors.h"
 
 DEFINE_MTYPE_STATIC(LIB, THREAD, "Thread")
@@ -42,6 +43,22 @@ DEFINE_MTYPE_STATIC(LIB, THREAD_STATS, "Thread stats")
 
 DECLARE_LIST(thread_list, struct thread, threaditem)
 
+static int thread_timer_cmp(const struct thread *a, const struct thread *b)
+{
+	if (a->u.sands.tv_sec < b->u.sands.tv_sec)
+		return -1;
+	if (a->u.sands.tv_sec > b->u.sands.tv_sec)
+		return 1;
+	if (a->u.sands.tv_usec < b->u.sands.tv_usec)
+		return -1;
+	if (a->u.sands.tv_usec > b->u.sands.tv_usec)
+		return 1;
+	return 0;
+}
+
+DECLARE_HEAP(thread_timer_list, struct thread, timeritem,
+		thread_timer_cmp)
+
 #if defined(__APPLE__)
 #include <mach/mach.h>
 #include <mach/mach_time.h>
@@ -49,7 +66,7 @@ DECLARE_LIST(thread_list, struct thread, threaditem)
 
 #define AWAKEN(m)                                                              \
 	do {                                                                   \
-		static unsigned char wakebyte = 0x01;                          \
+		const unsigned char wakebyte = 0x01;                           \
 		write(m->io_pipe[1], &wakebyte, 1);                            \
 	} while (0);
 
@@ -92,13 +109,15 @@ static void cpu_record_hash_free(void *a)
 	XFREE(MTYPE_THREAD_STATS, hist);
 }
 
+#ifndef EXCLUDE_CPU_TIME
 static void vty_out_cpu_thread_history(struct vty *vty,
 				       struct cpu_thread_history *a)
 {
-	vty_out(vty, "%5d %10lu.%03lu %9u %8lu %9lu %8lu %9lu", a->total_active,
-		a->cpu.total / 1000, a->cpu.total % 1000, a->total_calls,
-		a->cpu.total / a->total_calls, a->cpu.max,
-		a->real.total / a->total_calls, a->real.max);
+	vty_out(vty, "%5zu %10zu.%03zu %9zu %8zu %9zu %8zu %9zu",
+		(size_t)a->total_active, a->cpu.total / 1000,
+		a->cpu.total % 1000, (size_t)a->total_calls,
+		(size_t)(a->cpu.total / a->total_calls), a->cpu.max,
+		(size_t)(a->real.total / a->total_calls), a->real.max);
 	vty_out(vty, " %c%c%c%c%c %s\n",
 		a->types & (1 << THREAD_READ) ? 'R' : ' ',
 		a->types & (1 << THREAD_WRITE) ? 'W' : ' ',
@@ -151,12 +170,11 @@ static void cpu_record_print(struct vty *vty, uint8_t filter)
 	struct thread_master *m;
 	struct listnode *ln;
 
-	memset(&tmp, 0, sizeof tmp);
+	memset(&tmp, 0, sizeof(tmp));
 	tmp.funcname = "TOTAL";
 	tmp.types = filter;
 
-	pthread_mutex_lock(&masters_mtx);
-	{
+	frr_with_mutex(&masters_mtx) {
 		for (ALL_LIST_ELEMENTS_RO(masters, ln, m)) {
 			const char *name = m->name ? m->name : "main";
 
@@ -188,7 +206,6 @@ static void cpu_record_print(struct vty *vty, uint8_t filter)
 			vty_out(vty, "\n");
 		}
 	}
-	pthread_mutex_unlock(&masters_mtx);
 
 	vty_out(vty, "\n");
 	vty_out(vty, "Total thread statistics\n");
@@ -202,6 +219,7 @@ static void cpu_record_print(struct vty *vty, uint8_t filter)
 	if (tmp.total_calls > 0)
 		vty_out_cpu_thread_history(vty, &tmp);
 }
+#endif
 
 static void cpu_record_hash_clear(struct hash_bucket *bucket, void *args[])
 {
@@ -222,11 +240,9 @@ static void cpu_record_clear(uint8_t filter)
 	struct thread_master *m;
 	struct listnode *ln;
 
-	pthread_mutex_lock(&masters_mtx);
-	{
+	frr_with_mutex(&masters_mtx) {
 		for (ALL_LIST_ELEMENTS_RO(masters, ln, m)) {
-			pthread_mutex_lock(&m->mtx);
-			{
+			frr_with_mutex(&m->mtx) {
 				void *args[2] = {tmp, m->cpu_record};
 				hash_iterate(
 					m->cpu_record,
@@ -234,10 +250,8 @@ static void cpu_record_clear(uint8_t filter)
 						  void *))cpu_record_hash_clear,
 					args);
 			}
-			pthread_mutex_unlock(&m->mtx);
 		}
 	}
-	pthread_mutex_unlock(&masters_mtx);
 }
 
 static uint8_t parse_filter(const char *filterstr)
@@ -275,6 +289,7 @@ static uint8_t parse_filter(const char *filterstr)
 	return filter;
 }
 
+#ifndef EXCLUDE_CPU_TIME
 DEFUN (show_thread_cpu,
        show_thread_cpu_cmd,
        "show thread cpu [FILTER]",
@@ -300,6 +315,7 @@ DEFUN (show_thread_cpu,
 	cpu_record_print(vty, filter);
 	return CMD_SUCCESS;
 }
+#endif
 
 static void show_thread_poll_helper(struct vty *vty, struct thread_master *m)
 {
@@ -352,13 +368,11 @@ DEFUN (show_thread_poll,
 	struct listnode *node;
 	struct thread_master *m;
 
-	pthread_mutex_lock(&masters_mtx);
-	{
+	frr_with_mutex(&masters_mtx) {
 		for (ALL_LIST_ELEMENTS_RO(masters, node, m)) {
 			show_thread_poll_helper(vty, m);
 		}
 	}
-	pthread_mutex_unlock(&masters_mtx);
 
 	return CMD_SUCCESS;
 }
@@ -392,31 +406,14 @@ DEFUN (clear_thread_cpu,
 
 void thread_cmd_init(void)
 {
+#ifndef EXCLUDE_CPU_TIME
 	install_element(VIEW_NODE, &show_thread_cpu_cmd);
+#endif
 	install_element(VIEW_NODE, &show_thread_poll_cmd);
 	install_element(ENABLE_NODE, &clear_thread_cpu_cmd);
 }
 /* CLI end ------------------------------------------------------------------ */
 
-
-static int thread_timer_cmp(void *a, void *b)
-{
-	struct thread *thread_a = a;
-	struct thread *thread_b = b;
-
-	if (timercmp(&thread_a->u.sands, &thread_b->u.sands, <))
-		return -1;
-	if (timercmp(&thread_a->u.sands, &thread_b->u.sands, >))
-		return 1;
-	return 0;
-}
-
-static void thread_timer_update(void *node, int actual_position)
-{
-	struct thread *thread = node;
-
-	thread->index = actual_position;
-}
 
 static void cancelreq_del(void *cr)
 {
@@ -462,11 +459,7 @@ struct thread_master *thread_master_create(const char *name)
 	thread_list_init(&rv->event);
 	thread_list_init(&rv->ready);
 	thread_list_init(&rv->unuse);
-
-	/* Initialize the timer queues */
-	rv->timer = pqueue_create();
-	rv->timer->cmp = thread_timer_cmp;
-	rv->timer->update = thread_timer_update;
+	thread_timer_list_init(&rv->timer);
 
 	/* Initialize thread_fetch() settings */
 	rv->spin = true;
@@ -492,26 +485,22 @@ struct thread_master *thread_master_create(const char *name)
 				   sizeof(struct pollfd) * rv->handler.pfdsize);
 
 	/* add to list of threadmasters */
-	pthread_mutex_lock(&masters_mtx);
-	{
+	frr_with_mutex(&masters_mtx) {
 		if (!masters)
 			masters = list_new();
 
 		listnode_add(masters, rv);
 	}
-	pthread_mutex_unlock(&masters_mtx);
 
 	return rv;
 }
 
 void thread_master_set_name(struct thread_master *master, const char *name)
 {
-	pthread_mutex_lock(&master->mtx);
-	{
+	frr_with_mutex(&master->mtx) {
 		XFREE(MTYPE_THREAD_MASTER, master->name);
 		master->name = XSTRDUP(MTYPE_THREAD_MASTER, name);
 	}
-	pthread_mutex_unlock(&master->mtx);
 }
 
 #define THREAD_UNUSED_DEPTH 10
@@ -564,16 +553,6 @@ static void thread_array_free(struct thread_master *m,
 	XFREE(MTYPE_THREAD_POLL, thread_array);
 }
 
-static void thread_queue_free(struct thread_master *m, struct pqueue *queue)
-{
-	int i;
-
-	for (i = 0; i < queue->size; i++)
-		thread_free(m, queue->array[i]);
-
-	pqueue_delete(queue);
-}
-
 /*
  * thread_master_free_unused
  *
@@ -584,30 +563,29 @@ static void thread_queue_free(struct thread_master *m, struct pqueue *queue)
  */
 void thread_master_free_unused(struct thread_master *m)
 {
-	pthread_mutex_lock(&m->mtx);
-	{
+	frr_with_mutex(&m->mtx) {
 		struct thread *t;
 		while ((t = thread_list_pop(&m->unuse)))
 			thread_free(m, t);
 	}
-	pthread_mutex_unlock(&m->mtx);
 }
 
 /* Stop thread scheduler. */
 void thread_master_free(struct thread_master *m)
 {
-	pthread_mutex_lock(&masters_mtx);
-	{
+	struct thread *t;
+
+	frr_with_mutex(&masters_mtx) {
 		listnode_delete(masters, m);
 		if (masters->count == 0) {
 			list_delete(&masters);
 		}
 	}
-	pthread_mutex_unlock(&masters_mtx);
 
 	thread_array_free(m, m->read);
 	thread_array_free(m, m->write);
-	thread_queue_free(m, m->timer);
+	while ((t = thread_timer_list_pop(&m->timer)))
+		thread_free(m, t);
 	thread_list_free(m, &m->event);
 	thread_list_free(m, &m->ready);
 	thread_list_free(m, &m->unuse);
@@ -633,11 +611,9 @@ unsigned long thread_timer_remain_msec(struct thread *thread)
 {
 	int64_t remain;
 
-	pthread_mutex_lock(&thread->mtx);
-	{
+	frr_with_mutex(&thread->mtx) {
 		remain = monotime_until(&thread->u.sands, NULL) / 1000LL;
 	}
-	pthread_mutex_unlock(&thread->mtx);
 
 	return remain < 0 ? 0 : remain;
 }
@@ -654,12 +630,40 @@ unsigned long thread_timer_remain_second(struct thread *thread)
 struct timeval thread_timer_remain(struct thread *thread)
 {
 	struct timeval remain;
-	pthread_mutex_lock(&thread->mtx);
-	{
+	frr_with_mutex(&thread->mtx) {
 		monotime_until(&thread->u.sands, &remain);
 	}
-	pthread_mutex_unlock(&thread->mtx);
 	return remain;
+}
+
+static int time_hhmmss(char *buf, int buf_size, long sec)
+{
+	long hh;
+	long mm;
+	int wr;
+
+	zassert(buf_size >= 8);
+
+	hh = sec / 3600;
+	sec %= 3600;
+	mm = sec / 60;
+	sec %= 60;
+
+	wr = snprintf(buf, buf_size, "%02ld:%02ld:%02ld", hh, mm, sec);
+
+	return wr != 8;
+}
+
+char *thread_timer_to_hhmmss(char *buf, int buf_size,
+		struct thread *t_timer)
+{
+	if (t_timer) {
+		time_hhmmss(buf, buf_size,
+				thread_timer_remain_second(t_timer));
+	} else {
+		snprintf(buf, buf_size, "--:--:--");
+	}
+	return buf;
 }
 
 /* Get new thread.  */
@@ -681,7 +685,6 @@ static struct thread *thread_get(struct thread_master *m, uint8_t type,
 	thread->add_type = type;
 	thread->master = m;
 	thread->arg = arg;
-	thread->index = -1;
 	thread->yield = THREAD_YIELD_TIME_SLOT; /* default */
 	thread->ref = NULL;
 
@@ -751,6 +754,9 @@ static int fd_poll(struct thread_master *m, struct pollfd *pfds, nfds_t pfdsize,
 		 < 0) // effect a poll (return immediately)
 		timeout = 0;
 
+	rcu_read_unlock();
+	rcu_assert_read_unlocked();
+
 	/* add poll pipe poker */
 	assert(count + 1 < pfdsize);
 	pfds[count].fd = m->io_pipe[0];
@@ -763,6 +769,8 @@ static int fd_poll(struct thread_master *m, struct pollfd *pfds, nfds_t pfdsize,
 	if (num > 0 && pfds[count].revents != 0 && num--)
 		while (read(m->io_pipe[0], &trash, sizeof(trash)) > 0)
 			;
+
+	rcu_read_lock();
 
 	return num;
 }
@@ -778,14 +786,10 @@ struct thread *funcname_thread_add_read_write(int dir, struct thread_master *m,
 	struct thread **thread_array;
 
 	assert(fd >= 0 && fd < m->fd_limit);
-	pthread_mutex_lock(&m->mtx);
-	{
-		if (t_ptr
-		    && *t_ptr) // thread is already scheduled; don't reschedule
-		{
-			pthread_mutex_unlock(&m->mtx);
-			return NULL;
-		}
+	frr_with_mutex(&m->mtx) {
+		if (t_ptr && *t_ptr)
+			// thread is already scheduled; don't reschedule
+			break;
 
 		/* default to a new pollfd */
 		nfds_t queuepos = m->handler.pfdcount;
@@ -825,12 +829,10 @@ struct thread *funcname_thread_add_read_write(int dir, struct thread_master *m,
 			m->handler.pfdcount++;
 
 		if (thread) {
-			pthread_mutex_lock(&thread->mtx);
-			{
+			frr_with_mutex(&thread->mtx) {
 				thread->u.fd = fd;
 				thread_array[thread->u.fd] = thread;
 			}
-			pthread_mutex_unlock(&thread->mtx);
 
 			if (t_ptr) {
 				*t_ptr = thread;
@@ -840,7 +842,6 @@ struct thread *funcname_thread_add_read_write(int dir, struct thread_master *m,
 
 		AWAKEN(m);
 	}
-	pthread_mutex_unlock(&m->mtx);
 
 	return thread;
 }
@@ -852,41 +853,32 @@ funcname_thread_add_timer_timeval(struct thread_master *m,
 				  struct thread **t_ptr, debugargdef)
 {
 	struct thread *thread;
-	struct pqueue *queue;
 
 	assert(m != NULL);
 
 	assert(type == THREAD_TIMER);
 	assert(time_relative);
 
-	pthread_mutex_lock(&m->mtx);
-	{
-		if (t_ptr
-		    && *t_ptr) // thread is already scheduled; don't reschedule
-		{
-			pthread_mutex_unlock(&m->mtx);
+	frr_with_mutex(&m->mtx) {
+		if (t_ptr && *t_ptr)
+			// thread is already scheduled; don't reschedule
 			return NULL;
-		}
 
-		queue = m->timer;
 		thread = thread_get(m, type, func, arg, debugargpass);
 
-		pthread_mutex_lock(&thread->mtx);
-		{
+		frr_with_mutex(&thread->mtx) {
 			monotime(&thread->u.sands);
 			timeradd(&thread->u.sands, time_relative,
 				 &thread->u.sands);
-			pqueue_enqueue(thread, queue);
+			thread_timer_list_add(&m->timer, thread);
 			if (t_ptr) {
 				*t_ptr = thread;
 				thread->ref = t_ptr;
 			}
 		}
-		pthread_mutex_unlock(&thread->mtx);
 
 		AWAKEN(m);
 	}
-	pthread_mutex_unlock(&m->mtx);
 
 	return thread;
 }
@@ -943,26 +935,20 @@ struct thread *funcname_thread_add_event(struct thread_master *m,
 					 void *arg, int val,
 					 struct thread **t_ptr, debugargdef)
 {
-	struct thread *thread;
+	struct thread *thread = NULL;
 
 	assert(m != NULL);
 
-	pthread_mutex_lock(&m->mtx);
-	{
-		if (t_ptr
-		    && *t_ptr) // thread is already scheduled; don't reschedule
-		{
-			pthread_mutex_unlock(&m->mtx);
-			return NULL;
-		}
+	frr_with_mutex(&m->mtx) {
+		if (t_ptr && *t_ptr)
+			// thread is already scheduled; don't reschedule
+			break;
 
 		thread = thread_get(m, THREAD_EVENT, func, arg, debugargpass);
-		pthread_mutex_lock(&thread->mtx);
-		{
+		frr_with_mutex(&thread->mtx) {
 			thread->u.val = val;
 			thread_list_add_tail(&m->event, thread);
 		}
-		pthread_mutex_unlock(&thread->mtx);
 
 		if (t_ptr) {
 			*t_ptr = thread;
@@ -971,7 +957,6 @@ struct thread *funcname_thread_add_event(struct thread_master *m,
 
 		AWAKEN(m);
 	}
-	pthread_mutex_unlock(&m->mtx);
 
 	return thread;
 }
@@ -1057,7 +1042,6 @@ static void thread_cancel_rw(struct thread_master *master, int fd, short state)
 static void do_thread_cancel(struct thread_master *master)
 {
 	struct thread_list_head *list = NULL;
-	struct pqueue *queue = NULL;
 	struct thread **thread_array = NULL;
 	struct thread *thread;
 
@@ -1113,7 +1097,7 @@ static void do_thread_cancel(struct thread_master *master)
 			thread_array = master->write;
 			break;
 		case THREAD_TIMER:
-			queue = master->timer;
+			thread_timer_list_del(&master->timer, thread);
 			break;
 		case THREAD_EVENT:
 			list = &master->event;
@@ -1126,16 +1110,10 @@ static void do_thread_cancel(struct thread_master *master)
 			break;
 		}
 
-		if (queue) {
-			assert(thread->index >= 0);
-			assert(thread == queue->array[thread->index]);
-			pqueue_remove_at(thread->index, queue);
-		} else if (list) {
+		if (list) {
 			thread_list_del(list, thread);
 		} else if (thread_array) {
 			thread_array[thread->u.fd] = NULL;
-		} else {
-			assert(!"Thread should be either in queue or list or array!");
 		}
 
 		if (thread->ref)
@@ -1164,15 +1142,13 @@ void thread_cancel_event(struct thread_master *master, void *arg)
 {
 	assert(master->owner == pthread_self());
 
-	pthread_mutex_lock(&master->mtx);
-	{
+	frr_with_mutex(&master->mtx) {
 		struct cancel_req *cr =
 			XCALLOC(MTYPE_TMP, sizeof(struct cancel_req));
 		cr->eventobj = arg;
 		listnode_add(master->cancel_req, cr);
 		do_thread_cancel(master);
 	}
-	pthread_mutex_unlock(&master->mtx);
 }
 
 /**
@@ -1188,15 +1164,13 @@ void thread_cancel(struct thread *thread)
 
 	assert(master->owner == pthread_self());
 
-	pthread_mutex_lock(&master->mtx);
-	{
+	frr_with_mutex(&master->mtx) {
 		struct cancel_req *cr =
 			XCALLOC(MTYPE_TMP, sizeof(struct cancel_req));
 		cr->thread = thread;
 		listnode_add(master->cancel_req, cr);
 		do_thread_cancel(master);
 	}
-	pthread_mutex_unlock(&master->mtx);
 }
 
 /**
@@ -1229,8 +1203,7 @@ void thread_cancel_async(struct thread_master *master, struct thread **thread,
 	assert(!(thread && eventobj) && (thread || eventobj));
 	assert(master->owner != pthread_self());
 
-	pthread_mutex_lock(&master->mtx);
-	{
+	frr_with_mutex(&master->mtx) {
 		master->canceled = false;
 
 		if (thread) {
@@ -1249,19 +1222,18 @@ void thread_cancel_async(struct thread_master *master, struct thread **thread,
 		while (!master->canceled)
 			pthread_cond_wait(&master->cancel_cond, &master->mtx);
 	}
-	pthread_mutex_unlock(&master->mtx);
 }
 /* ------------------------------------------------------------------------- */
 
-static struct timeval *thread_timer_wait(struct pqueue *queue,
+static struct timeval *thread_timer_wait(struct thread_timer_list_head *timers,
 					 struct timeval *timer_val)
 {
-	if (queue->size) {
-		struct thread *next_timer = queue->array[0];
-		monotime_until(&next_timer->u.sands, timer_val);
-		return timer_val;
-	}
-	return NULL;
+	if (!thread_timer_list_count(timers))
+		return NULL;
+
+	struct thread *next_timer = thread_timer_list_first(timers);
+	monotime_until(&next_timer->u.sands, timer_val);
+	return timer_val;
 }
 
 static struct thread *thread_run(struct thread_master *m, struct thread *thread,
@@ -1375,17 +1347,16 @@ static void thread_process_io(struct thread_master *m, unsigned int num)
 }
 
 /* Add all timers that have popped to the ready list. */
-static unsigned int thread_process_timers(struct pqueue *queue,
+static unsigned int thread_process_timers(struct thread_timer_list_head *timers,
 					  struct timeval *timenow)
 {
 	struct thread *thread;
 	unsigned int ready = 0;
 
-	while (queue->size) {
-		thread = queue->array[0];
+	while ((thread = thread_timer_list_first(timers))) {
 		if (timercmp(timenow, &thread->u.sands, <))
 			return ready;
-		pqueue_dequeue(queue);
+		thread_timer_list_pop(timers);
 		thread->type = THREAD_READY;
 		thread_list_add_tail(&thread->master->ready, thread);
 		ready++;
@@ -1467,7 +1438,7 @@ struct thread *thread_fetch(struct thread_master *m, struct thread *fetch)
 		 * once per loop to avoid starvation by events
 		 */
 		if (!thread_list_count(&m->ready))
-			tw = thread_timer_wait(m->timer, &tv);
+			tw = thread_timer_wait(&m->timer, &tv);
 
 		if (thread_list_count(&m->ready) ||
 				(tw && !timercmp(tw, &zerotime, >)))
@@ -1512,7 +1483,7 @@ struct thread *thread_fetch(struct thread_master *m, struct thread *fetch)
 
 		/* Post timers to ready queue. */
 		monotime(&now);
-		thread_process_timers(m->timer, &now);
+		thread_process_timers(&m->timer, &now);
 
 		/* Post I/O to ready queue. */
 		if (num > 0)
@@ -1553,22 +1524,18 @@ unsigned long thread_consumed_time(RUSAGE_T *now, RUSAGE_T *start,
 int thread_should_yield(struct thread *thread)
 {
 	int result;
-	pthread_mutex_lock(&thread->mtx);
-	{
+	frr_with_mutex(&thread->mtx) {
 		result = monotime_since(&thread->real, NULL)
 			 > (int64_t)thread->yield;
 	}
-	pthread_mutex_unlock(&thread->mtx);
 	return result;
 }
 
 void thread_set_yield_time(struct thread *thread, unsigned long yield_time)
 {
-	pthread_mutex_lock(&thread->mtx);
-	{
+	frr_with_mutex(&thread->mtx) {
 		thread->yield = yield_time;
 	}
-	pthread_mutex_unlock(&thread->mtx);
 }
 
 void thread_getrusage(RUSAGE_T *r)
@@ -1579,7 +1546,9 @@ void thread_getrusage(RUSAGE_T *r)
 #define FRR_RUSAGE RUSAGE_SELF
 #endif
 	monotime(&r->real);
+#ifndef EXCLUDE_CPU_TIME
 	getrusage(FRR_RUSAGE, &(r->cpu));
+#endif
 }
 
 /*
@@ -1595,9 +1564,11 @@ void thread_getrusage(RUSAGE_T *r)
  */
 void thread_call(struct thread *thread)
 {
+#ifndef EXCLUDE_CPU_TIME
 	_Atomic unsigned long realtime, cputime;
 	unsigned long exp;
 	unsigned long helper;
+#endif
 	RUSAGE_T before, after;
 
 	GETRUSAGE(&before);
@@ -1609,6 +1580,7 @@ void thread_call(struct thread *thread)
 
 	GETRUSAGE(&after);
 
+#ifndef EXCLUDE_CPU_TIME
 	realtime = thread_consumed_time(&after, &before, &helper);
 	cputime = helper;
 
@@ -1653,6 +1625,7 @@ void thread_call(struct thread *thread)
 			realtime / 1000, cputime / 1000);
 	}
 #endif /* CONSUMED_TIME_CHECK */
+#endif /* Exclude CPU Time */
 }
 
 /* Execute thread */
@@ -1663,20 +1636,16 @@ void funcname_thread_execute(struct thread_master *m,
 	struct thread *thread;
 
 	/* Get or allocate new thread to execute. */
-	pthread_mutex_lock(&m->mtx);
-	{
+	frr_with_mutex(&m->mtx) {
 		thread = thread_get(m, THREAD_EVENT, func, arg, debugargpass);
 
 		/* Set its event value. */
-		pthread_mutex_lock(&thread->mtx);
-		{
+		frr_with_mutex(&thread->mtx) {
 			thread->add_type = THREAD_EXECUTE;
 			thread->u.val = val;
 			thread->ref = &thread;
 		}
-		pthread_mutex_unlock(&thread->mtx);
 	}
-	pthread_mutex_unlock(&m->mtx);
 
 	/* Execute thread doing all accounting. */
 	thread_call(thread);

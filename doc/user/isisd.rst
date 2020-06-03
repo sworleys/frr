@@ -111,6 +111,12 @@ writing, *isisd* does not support multiple ISIS processes.
 
    Enable or disable :rfc:`6232` purge originator identification.
 
+.. index:: [no] lsp-mtu (128-4352)
+.. clicmd:: [no] lsp-mtu (128-4352)
+
+   Configure the maximum size of generated LSPs, in bytes.
+
+
 .. _isis-timer:
 
 ISIS Timer
@@ -422,6 +428,12 @@ Showing ISIS information
 
 Traffic Engineering
 ===================
+
+.. note::
+
+   At this time, FRR offers partial support for some of the routing
+   protocol extensions that can be used with MPLS-TE. FRR does not
+   support a complete RSVP-TE solution currently.
 
 .. index:: mpls-te on
 .. clicmd:: mpls-te on

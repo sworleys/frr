@@ -22,10 +22,19 @@
 #define _FRRSTR_H_
 
 #include <sys/types.h>
+#include <sys/types.h>
+#ifdef HAVE_LIBPCREPOSIX
+#include <pcreposix.h>
+#else
 #include <regex.h>
+#endif /* HAVE_LIBPCREPOSIX */
 #include <stdbool.h>
 
 #include "vector.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /*
  * Tokenizes a string, storing tokens in a vector. Whitespace is ignored.
@@ -144,5 +153,9 @@ bool frrstr_endswith(const char *str, const char *suffix);
  *    1 str only contains digit characters, 0 otherwise
  */
 int all_digit(const char *str);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _FRRSTR_H_ */

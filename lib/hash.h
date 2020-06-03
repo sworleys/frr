@@ -24,8 +24,9 @@
 #include "memory.h"
 #include "frratomic.h"
 
-DECLARE_MTYPE(HASH)
-DECLARE_MTYPE(HASH_BACKET)
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* Default hash table size.  */
 #define HASH_INITIAL_SIZE 256
@@ -34,11 +35,6 @@ DECLARE_MTYPE(HASH_BACKET)
 
 #define HASHWALK_CONTINUE 0
 #define HASHWALK_ABORT -1
-
-#if CONFDATE > 20200225
-CPP_NOTICE("hash.h: time to remove hash_backet #define")
-#endif
-#define hash_backet hash_bucket
 
 struct hash_bucket {
 	/*
@@ -59,9 +55,9 @@ struct hash_bucket {
 
 struct hashstats {
 	/* number of empty hash buckets */
-	_Atomic uint_fast32_t empty;
+	atomic_uint_fast32_t empty;
 	/* sum of squares of bucket length */
-	_Atomic uint_fast32_t ssq;
+	atomic_uint_fast32_t ssq;
 };
 
 struct hash {
@@ -329,5 +325,9 @@ extern unsigned int string_hash_make(const char *);
  * Install CLI commands for viewing global hash table statistics.
  */
 extern void hash_cmd_init(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _ZEBRA_HASH_H */

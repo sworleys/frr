@@ -10,13 +10,15 @@ vtysh_scan += \
 	$(top_srcdir)/zebra/interface.c \
 	$(top_srcdir)/zebra/router-id.c \
 	$(top_srcdir)/zebra/rtadv.c \
-	$(top_srcdir)/zebra/zebra_mlag.c \
+	$(top_srcdir)/zebra/zebra_mlag_vty.c \
 	$(top_srcdir)/zebra/zebra_mpls_vty.c \
 	$(top_srcdir)/zebra/zebra_ptm.c \
 	$(top_srcdir)/zebra/zebra_pw.c \
 	$(top_srcdir)/zebra/zebra_routemap.c \
 	$(top_srcdir)/zebra/zebra_vty.c \
+	$(top_srcdir)/zebra/zebra_evpn_mh.c \
 	$(top_srcdir)/zebra/zserv.c \
+	$(top_srcdir)/zebra/zebra_gr.c \
 	# end
 
 # can be loaded as DSO - always include for vtysh
@@ -32,13 +34,16 @@ endif
 if FPM
 module_LTLIBRARIES += zebra/zebra_fpm.la
 endif
+if LINUX
+module_LTLIBRARIES += zebra/zebra_cumulus_mlag.la
+endif
 
-man8 += $(MANBUILD)/zebra.8
+man8 += $(MANBUILD)/frr-zebra.8
 ## endif ZEBRA
 endif
 
 zebra_zebra_LDADD = lib/libfrr.la $(LIBCAP)
-if HAVE_PROTOBUF
+if HAVE_PROTOBUF3
 zebra_zebra_LDADD += mlag/libmlag_pb.la $(PROTOBUF_C_LIBS)
 endif
 zebra_zebra_SOURCES = \
@@ -68,10 +73,14 @@ zebra_zebra_SOURCES = \
 	zebra/rtread_sysctl.c \
 	zebra/rule_netlink.c \
 	zebra/rule_socket.c \
-	zebra/zebra_l2.c \
-	zebra/zebra_memory.c \
+	zebra/zebra_evpn.c \
+	zebra/zebra_evpn_mac.c \
+	zebra/zebra_evpn_neigh.c \
 	zebra/zebra_mlag.c \
-	zebra/zebra_mlag_private.c \
+	zebra/zebra_mlag_vty.c \
+	zebra/zebra_l2.c \
+	zebra/zebra_northbound.c \
+	zebra/zebra_memory.c \
 	zebra/zebra_dplane.c \
 	zebra/zebra_mpls.c \
 	zebra/zebra_mpls_netlink.c \
@@ -92,28 +101,35 @@ zebra_zebra_SOURCES = \
 	zebra/zebra_vrf.c \
 	zebra/zebra_vty.c \
 	zebra/zebra_vxlan.c \
+	zebra/zebra_evpn_mh.c \
 	zebra/zserv.c \
 	zebra/zebra_netns_id.c \
 	zebra/zebra_netns_notify.c \
 	zebra/table_manager.c \
 	zebra/zapi_msg.c \
 	zebra/zebra_errors.c \
+	zebra/zebra_gr.c \
 	# end
 
 zebra/debug_clippy.c: $(CLIPPY_DEPS)
 zebra/debug.$(OBJEXT): zebra/debug_clippy.c
+
+zebra/zebra_mlag_vty_clippy.c: $(CLIPPY_DEPS)
+zebra/zebra_mlag_vty.$(OBJEXT): zebra/zebra_mlag_vty_clippy.c
 
 zebra/zebra_vty_clippy.c: $(CLIPPY_DEPS)
 zebra/interface_clippy.c: $(CLIPPY_DEPS)
 zebra/interface.$(OBJEXT): zebra/interface_clippy.c
 zebra/zebra_vty.$(OBJEXT): zebra/zebra_vty_clippy.c
 
-
 zebra/zebra_routemap_clippy.c: $(CLIPPY_DEPS)
 zebra/zebra_routemap.$(OBJEXT): zebra/zebra_routemap_clippy.c
 
-zebra/zebra_mlag_clippy.c: $(CLIPPY_DEPS)
-zebra/zebra_mlag.$(OBJEXT): zebra/zebra_mlag_clippy.c
+zebra/rtadv_clippy.c: $(CLIPPY_DEPS)
+zebra/rtadv.$(OBJEXT): zebra/rtadv_clippy.c
+
+zebra/zebra_evpn_mh_clippy.c: $(CLIPPY_DEPS)
+zebra/zebra_evpn_mh.$(OBJEXT): zebra/zebra_evpn_mh_clippy.c
 
 noinst_HEADERS += \
 	zebra/connected.h \
@@ -134,12 +150,16 @@ noinst_HEADERS += \
 	zebra/rt_netlink.h \
 	zebra/rtadv.h \
 	zebra/rule_netlink.h \
+	zebra/zebra_evpn.h \
+	zebra/zebra_evpn_mac.h \
+	zebra/zebra_evpn_neigh.h \
+	zebra/zebra_evpn_vxlan.h \
+	zebra/zebra_mlag.h \
+	zebra/zebra_mlag_vty.h \
 	zebra/zebra_fpm_private.h \
 	zebra/zebra_l2.h \
 	zebra/zebra_dplane.h \
 	zebra/zebra_memory.h \
-	zebra/zebra_mlag.h \
-	zebra/zebra_mlag_private.h \
 	zebra/zebra_mpls.h \
 	zebra/zebra_mroute.h \
 	zebra/zebra_nhg.h \
@@ -155,6 +175,7 @@ noinst_HEADERS += \
 	zebra/zebra_vrf.h \
 	zebra/zebra_vxlan.h \
 	zebra/zebra_vxlan_private.h \
+	zebra/zebra_evpn_mh.h \
 	zebra/zserv.h \
 	zebra/zebra_netns_id.h \
 	zebra/zebra_netns_notify.h \
@@ -185,4 +206,22 @@ zebra_zebra_fpm_la_SOURCES += zebra/zebra_fpm_protobuf.c
 if DEV_BUILD
 zebra_zebra_fpm_la_SOURCES += zebra/zebra_fpm_dt.c
 endif
+endif
+
+nodist_zebra_zebra_SOURCES = \
+	yang/frr-nexthop.yang.c \
+	yang/frr-zebra.yang.c \
+	# end
+
+zebra_zebra_cumulus_mlag_la_SOURCES = zebra/zebra_mlag_private.c
+zebra_zebra_cumulus_mlag_la_LDFLAGS = -avoid-version -module -shared -export-dynamic
+
+if LINUX
+module_LTLIBRARIES += zebra/dplane_fpm_nl.la
+
+zebra_dplane_fpm_nl_la_SOURCES = zebra/dplane_fpm_nl.c
+zebra_dplane_fpm_nl_la_LDFLAGS = -avoid-version -module -shared -export-dynamic
+zebra_dplane_fpm_nl_la_LIBADD  =
+
+vtysh_scan += $(top_srcdir)/zebra/dplane_fpm_nl.c
 endif

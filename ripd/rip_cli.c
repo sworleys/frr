@@ -29,7 +29,7 @@
 #include "libfrr.h"
 
 #include "ripd/ripd.h"
-#include "ripd/rip_cli.h"
+#include "ripd/rip_nb.h"
 #ifndef VTYSH_EXTRACT_PL
 #include "ripd/rip_cli_clippy.c"
 #endif
@@ -39,31 +39,46 @@
  */
 DEFPY_NOSH (router_rip,
        router_rip_cmd,
-       "router rip",
+       "router rip [vrf NAME]",
        "Enable a routing process\n"
-       "Routing Information Protocol (RIP)\n")
+       "Routing Information Protocol (RIP)\n"
+       VRF_CMD_HELP_STR)
 {
+	char xpath[XPATH_MAXLEN];
 	int ret;
 
-	nb_cli_enqueue_change(vty, "/frr-ripd:ripd/instance", NB_OP_CREATE,
-			      NULL);
+	/* Build RIP instance XPath. */
+	if (!vrf)
+		vrf = VRF_DEFAULT_NAME;
+	snprintf(xpath, sizeof(xpath), "/frr-ripd:ripd/instance[vrf='%s']",
+		 vrf);
+
+	nb_cli_enqueue_change(vty, xpath, NB_OP_CREATE, NULL);
 
 	ret = nb_cli_apply_changes(vty, NULL);
 	if (ret == CMD_SUCCESS)
-		VTY_PUSH_XPATH(RIP_NODE, "/frr-ripd:ripd/instance");
+		VTY_PUSH_XPATH(RIP_NODE, xpath);
 
 	return ret;
 }
 
 DEFPY (no_router_rip,
        no_router_rip_cmd,
-       "no router rip",
+       "no router rip [vrf NAME]",
        NO_STR
        "Enable a routing process\n"
-       "Routing Information Protocol (RIP)\n")
+       "Routing Information Protocol (RIP)\n"
+       VRF_CMD_HELP_STR)
 {
-	nb_cli_enqueue_change(vty, "/frr-ripd:ripd/instance", NB_OP_DESTROY,
-			      NULL);
+	char xpath[XPATH_MAXLEN];
+
+	/* Build RIP instance XPath. */
+	if (!vrf)
+		vrf = VRF_DEFAULT_NAME;
+	snprintf(xpath, sizeof(xpath), "/frr-ripd:ripd/instance[vrf='%s']",
+		 vrf);
+
+	nb_cli_enqueue_change(vty, xpath, NB_OP_DESTROY, NULL);
 
 	return nb_cli_apply_changes(vty, NULL);
 }
@@ -71,8 +86,15 @@ DEFPY (no_router_rip,
 void cli_show_router_rip(struct vty *vty, struct lyd_node *dnode,
 			 bool show_defaults)
 {
+	const char *vrf_name;
+
+	vrf_name = yang_dnode_get_string(dnode, "./vrf");
+
 	vty_out(vty, "!\n");
-	vty_out(vty, "router rip\n");
+	vty_out(vty, "router rip");
+	if (!strmatch(vrf_name, VRF_DEFAULT_NAME))
+		vty_out(vty, " vrf %s", vrf_name);
+	vty_out(vty, "\n");
 }
 
 /*
@@ -378,10 +400,19 @@ DEFPY (rip_passive_interface,
        "Suppress routing updates on an interface\n"
        "Interface name\n")
 {
-	nb_cli_enqueue_change(vty, "./passive-interface",
-			      no ? NB_OP_DESTROY : NB_OP_CREATE, ifname);
-	nb_cli_enqueue_change(vty, "./non-passive-interface",
-			      no ? NB_OP_CREATE : NB_OP_DESTROY, ifname);
+	bool passive_default =
+		yang_dnode_get_bool(vty->candidate_config->dnode, "%s%s",
+				    VTY_CURR_XPATH, "/passive-default");
+
+	if (passive_default) {
+		nb_cli_enqueue_change(vty, "./non-passive-interface",
+				      no ? NB_OP_CREATE : NB_OP_DESTROY,
+				      ifname);
+	} else {
+		nb_cli_enqueue_change(vty, "./passive-interface",
+				      no ? NB_OP_DESTROY : NB_OP_CREATE,
+				      ifname);
+	}
 
 	return nb_cli_apply_changes(vty, NULL);
 }
@@ -798,8 +829,10 @@ DEFPY (ip_rip_authentication_mode,
 
 	nb_cli_enqueue_change(vty, "./authentication-scheme/mode", NB_OP_MODIFY,
 			      strmatch(mode, "md5") ? "md5" : "plain-text");
-	nb_cli_enqueue_change(vty, "./authentication-scheme/md5-auth-length",
-			      NB_OP_MODIFY, value);
+	if (strmatch(mode, "md5"))
+		nb_cli_enqueue_change(vty,
+				      "./authentication-scheme/md5-auth-length",
+				      NB_OP_MODIFY, value);
 
 	return nb_cli_apply_changes(vty, "./frr-ripd:rip");
 }
@@ -821,7 +854,7 @@ DEFPY (no_ip_rip_authentication_mode,
 	nb_cli_enqueue_change(vty, "./authentication-scheme/mode", NB_OP_MODIFY,
 			      NULL);
 	nb_cli_enqueue_change(vty, "./authentication-scheme/md5-auth-length",
-			      NB_OP_MODIFY, NULL);
+			      NB_OP_DESTROY, NULL);
 
 	return nb_cli_apply_changes(vty, "./frr-ripd:rip");
 }
@@ -893,7 +926,7 @@ DEFPY (no_ip_rip_authentication_string,
        "Authentication string\n"
        "Authentication string\n")
 {
-	nb_cli_enqueue_change(vty, "./authentication-password", NB_OP_MODIFY,
+	nb_cli_enqueue_change(vty, "./authentication-password", NB_OP_DESTROY,
 			      NULL);
 
 	return nb_cli_apply_changes(vty, "./frr-ripd:rip");
@@ -961,12 +994,29 @@ void cli_show_ip_rip_authentication_key_chain(struct vty *vty,
  */
 DEFPY (clear_ip_rip,
        clear_ip_rip_cmd,
-       "clear ip rip",
+       "clear ip rip [vrf WORD]",
        CLEAR_STR
        IP_STR
-       "Clear IP RIP database\n")
+       "Clear IP RIP database\n"
+       VRF_CMD_HELP_STR)
 {
-	return nb_cli_rpc("/frr-ripd:clear-rip-route", NULL, NULL);
+	struct list *input;
+	int ret;
+
+	input = list_new();
+	if (vrf) {
+		struct yang_data *yang_vrf;
+
+		yang_vrf = yang_data_new("/frr-ripd:clear-rip-route/input/vrf",
+					 vrf);
+		listnode_add(input, yang_vrf);
+	}
+
+	ret = nb_cli_rpc("/frr-ripd:clear-rip-route", input, NULL);
+
+	list_delete(&input);
+
+	return ret;
 }
 
 void rip_cli_init(void)

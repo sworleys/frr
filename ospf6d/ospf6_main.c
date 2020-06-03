@@ -28,7 +28,6 @@
 #include "command.h"
 #include "vty.h"
 #include "memory.h"
-#include "memory_vty.h"
 #include "if.h"
 #include "filter.h"
 #include "prefix.h"
@@ -43,6 +42,7 @@
 #include "ospf6d.h"
 #include "ospf6_top.h"
 #include "ospf6_message.h"
+#include "ospf6_network.h"
 #include "ospf6_asbr.h"
 #include "ospf6_lsa.h"
 #include "ospf6_interface.h"
@@ -84,8 +84,10 @@ static void __attribute__((noreturn)) ospf6_exit(int status)
 
 	frr_early_fini();
 
-	if (ospf6)
+	if (ospf6) {
 		ospf6_delete(ospf6);
+		ospf6 = NULL;
+	}
 
 	bfd_gbl_exit();
 
@@ -97,6 +99,7 @@ static void __attribute__((noreturn)) ospf6_exit(int status)
 	ospf6_asbr_terminate();
 	ospf6_lsa_terminate();
 
+	ospf6_serv_close();
 	/* reverse access_list_init */
 	access_list_reset();
 
@@ -162,8 +165,9 @@ struct quagga_signal_t ospf6_signals[] = {
 	},
 };
 
-static const struct frr_yang_module_info *ospf6d_yang_modules[] = {
+static const struct frr_yang_module_info *const ospf6d_yang_modules[] = {
 	&frr_interface_info,
+	&frr_route_map_info,
 };
 
 FRR_DAEMON_INFO(ospf6d, OSPF6, .vty_port = OSPF6_VTY_PORT,

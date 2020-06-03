@@ -76,9 +76,8 @@ static int bgp_flowspec_call_non_opaque_decode(uint8_t *nlri_content, int len,
 	return ret;
 }
 
-bool bgp_flowspec_contains_prefix(struct prefix *pfs,
-				 struct prefix *input,
-				 int prefix_check)
+bool bgp_flowspec_contains_prefix(const struct prefix *pfs,
+				  struct prefix *input, int prefix_check)
 {
 	uint32_t offset = 0;
 	int type;
@@ -455,9 +454,8 @@ int bgp_flowspec_match_rules_fill(uint8_t *nlri_content, int len,
 				 * ignore that rule
 				 */
 				if (prefix->family == AF_INET
-				    && prefix->u.prefix4.s_addr == 0)
-					memset(prefix, 0,
-					       sizeof(struct prefix));
+				    && prefix->u.prefix4.s_addr == INADDR_ANY)
+					bpem->match_bitmask_iprule |= bitmask;
 				else
 					bpem->match_bitmask |= bitmask;
 			}
@@ -580,12 +578,28 @@ int bgp_flowspec_match_rules_fill(uint8_t *nlri_content, int len,
 				 __func__, type);
 		}
 	}
+	if (bpem->match_packet_length_num || bpem->match_fragment_num ||
+	    bpem->match_tcpflags_num || bpem->match_dscp_num ||
+	    bpem->match_packet_length_num || bpem->match_icmp_code_num ||
+	    bpem->match_icmp_type_num || bpem->match_port_num ||
+	    bpem->match_src_port_num || bpem->match_dst_port_num ||
+	    bpem->match_protocol_num || bpem->match_bitmask)
+		bpem->type = BGP_PBR_IPSET;
+	else if ((bpem->match_bitmask_iprule & PREFIX_SRC_PRESENT) ||
+		 (bpem->match_bitmask_iprule & PREFIX_DST_PRESENT))
+		/* the extracted policy rule may not need an
+		 * iptables/ipset filtering. check this may not be
+		 * a standard ip rule : permit any to any ( eg)
+		 */
+		bpem->type = BGP_PBR_IPRULE;
+	else
+		bpem->type = BGP_PBR_UNDEFINED;
 	return error;
 }
 
 /* return 1 if FS entry invalid or no NH IP */
-int bgp_flowspec_get_first_nh(struct bgp *bgp, struct bgp_path_info *pi,
-			      struct prefix *p)
+bool bgp_flowspec_get_first_nh(struct bgp *bgp, struct bgp_path_info *pi,
+			       struct prefix *p)
 {
 	struct bgp_pbr_entry_main api;
 	int i;
@@ -593,8 +607,9 @@ int bgp_flowspec_get_first_nh(struct bgp *bgp, struct bgp_path_info *pi,
 	struct bgp_pbr_entry_action *api_action;
 
 	memset(&api, 0, sizeof(struct bgp_pbr_entry_main));
-	if (bgp_pbr_build_and_validate_entry(&rn->p, pi, &api) < 0)
-		return 1;
+	if (bgp_pbr_build_and_validate_entry(bgp_node_get_prefix(rn), pi, &api)
+	    < 0)
+		return true;
 	for (i = 0; i < api.action_num; i++) {
 		api_action = &api.actions[i];
 		if (api_action->action != ACTION_REDIRECT_IP)
@@ -602,7 +617,7 @@ int bgp_flowspec_get_first_nh(struct bgp *bgp, struct bgp_path_info *pi,
 		p->family = AF_INET;
 		p->prefixlen = IPV4_MAX_BITLEN;
 		p->u.prefix4 = api_action->u.zr.redirect_ip_v4;
-		return 0;
+		return false;
 	}
-	return 1;
+	return true;
 }

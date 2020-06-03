@@ -30,6 +30,10 @@
 #include "hook.h"
 #include "northbound.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* The following options disable specific command line options that
  * are not applicable for a particular daemon.
  */
@@ -77,7 +81,10 @@ struct frr_daemon_info {
 #endif
 	const char *vty_path;
 	const char *module_path;
+
 	const char *pathspace;
+	bool zpathspace;
+
 	const char *early_logging;
 	const char *early_loglevel;
 
@@ -91,8 +98,10 @@ struct frr_daemon_info {
 
 	struct zebra_privs_t *privs;
 
-	const struct frr_yang_module_info **yang_modules;
+	const struct frr_yang_module_info *const *yang_modules;
 	size_t n_yang_modules;
+
+	bool log_always;
 };
 
 /* execname is the daemon's executable (and pidfile and configfile) name,
@@ -114,11 +123,13 @@ struct frr_daemon_info {
 			  .version = FRR_VERSION, )                            \
 /* end */
 
+extern void frr_init_vtydir(void);
 extern void frr_preinit(struct frr_daemon_info *daemon, int argc, char **argv);
 extern void frr_opt_add(const char *optstr, const struct option *longopts,
 			const char *helpstr);
 extern int frr_getopt(int argc, char *const argv[], int *longindex);
-extern void frr_help_exit(int status);
+
+extern __attribute__((__noreturn__)) void frr_help_exit(int status);
 
 extern struct thread_master *frr_init(void);
 extern const char *frr_get_progname(void);
@@ -144,12 +155,16 @@ extern void frr_fini(void);
 extern char config_default[512];
 extern char frr_zclientpath[256];
 extern const char frr_sysconfdir[];
-extern const char frr_vtydir[];
+extern char frr_vtydir[256];
 extern const char frr_moduledir[];
 
 extern char frr_protoname[];
 extern char frr_protonameinst[];
 
 extern bool debug_memstats_at_exit;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _ZEBRA_FRR_H */

@@ -33,6 +33,10 @@
 /Makefile
 /Makefile.in
 
+/symalyzer_report.html
+/jquery-3.4.1.min.js
+/jquery-3.4.1.min.js.tmp
+
 ### autoconf/automake subdir stuff
 
 .deps
@@ -51,6 +55,12 @@
 *.pb-c.c
 *.pb.cc
 *_clippy.c
+
+### gcov outputs
+
+*.gcno
+*.gcov
+*.gcda
 
 ### dist
 
@@ -76,6 +86,7 @@ build
 *.bak
 *.swp
 *.pyc
+*.dmp
 __pycache__
 *.patch
 *.diff
@@ -90,3 +101,5 @@ compile_commands.json
 .ccls-cache
 .dirstamp
 refix
+.vscode
+.kitchen

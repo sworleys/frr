@@ -28,6 +28,10 @@
 #include <zebra/zebra_pw.h>
 #include <lib/vxlan.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* MPLS (Segment Routing) global block */
 typedef struct mpls_srgb_t_ {
 	uint32_t start_label;
@@ -121,9 +125,9 @@ struct zebra_vrf {
 #define MPLS_FLAG_SCHEDULE_LSPS    (1 << 0)
 
 	/*
-	 * VNI hash table (for EVPN). Only in the EVPN instance.
+	 * EVPN hash table. Only in the EVPN instance.
 	 */
-	struct hash *vni_table;
+	struct hash *evpn_table;
 
 	/*
 	 * Whether EVPN is enabled or not. Only in the EVPN instance.
@@ -166,6 +170,13 @@ struct zebra_vrf {
 	uint64_t lsp_removals_queued;
 	uint64_t lsp_installs;
 	uint64_t lsp_removals;
+
+#if defined(HAVE_RTADV)
+	struct rtadv rtadv;
+#endif /* HAVE_RTADV */
+
+	int zebra_rnh_ip_default_route;
+	int zebra_rnh_ipv6_default_route;
 };
 #define PROTO_RM_NAME(zvrf, afi, rtype) zvrf->proto_rm[afi][rtype].name
 #define NHT_RM_NAME(zvrf, afi, rtype) zvrf->nht_rm[afi][rtype].name
@@ -182,7 +193,7 @@ struct zebra_vrf {
 static inline vrf_id_t zvrf_id(struct zebra_vrf *zvrf)
 {
 	if (!zvrf || !zvrf->vrf)
-		return VRF_UNKNOWN;
+		return VRF_DEFAULT;
 	return zvrf->vrf->vrf_id;
 }
 
@@ -195,6 +206,8 @@ static inline const char *zvrf_ns_name(struct zebra_vrf *zvrf)
 
 static inline const char *zvrf_name(struct zebra_vrf *zvrf)
 {
+	if (!zvrf || !zvrf->vrf)
+		return "Unknown";
 	return zvrf->vrf->name;
 }
 
@@ -241,4 +254,9 @@ extern void zebra_vrf_init(void);
 
 extern void zebra_rtable_node_cleanup(struct route_table *table,
 				      struct route_node *node);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif /* ZEBRA_VRF_H */

@@ -27,6 +27,10 @@
 #include "yang.h"
 #include "yang_translator.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Forward declaration(s). */
 struct vty;
 struct debug;
@@ -68,6 +72,7 @@ enum nb_operation {
 	NB_OP_MODIFY,
 	NB_OP_DESTROY,
 	NB_OP_MOVE,
+	NB_OP_PRE_VALIDATE,
 	NB_OP_APPLY_FINISH,
 	NB_OP_GET_ELEM,
 	NB_OP_GET_NEXT,
@@ -191,6 +196,19 @@ struct nb_callbacks {
 	 *    - NB_ERR for other errors.
 	 */
 	int (*move)(enum nb_event event, const struct lyd_node *dnode);
+
+	/*
+	 * Optional configuration callback.
+	 *
+	 * This callback can be used to validate subsections of the
+	 * configuration being committed before validating the configuration
+	 * changes themselves. It's useful to perform more complex validations
+	 * that depend on the relationship between multiple nodes.
+	 *
+	 * dnode
+	 *    libyang data node associated with the 'pre_validate' callback.
+	 */
+	int (*pre_validate)(const struct lyd_node *dnode);
 
 	/*
 	 * Optional configuration callback.
@@ -333,6 +351,18 @@ struct nb_callbacks {
 	 */
 	void (*cli_show)(struct vty *vty, struct lyd_node *dnode,
 			 bool show_defaults);
+
+	/*
+	 * Optional callback to show the CLI node end for lists or containers.
+	 *
+	 * vty
+	 *    The vty terminal to dump the configuration to.
+	 *
+	 * dnode
+	 *    libyang data node that should be shown in the form of a CLI
+	 *    command.
+	 */
+	void (*cli_show_end)(struct vty *vty, struct lyd_node *dnode);
 };
 
 /*
@@ -373,6 +403,13 @@ struct nb_node {
 /* The YANG list doesn't contain key leafs. */
 #define F_NB_NODE_KEYLESS_LIST 0x02
 
+/*
+ * HACK: old gcc versions (< 5.x) have a bug that prevents C99 flexible arrays
+ * from working properly on shared libraries. For those compilers, use a fixed
+ * size array to work around the problem.
+ */
+#define YANG_MODULE_MAX_NODES 1024
+
 struct frr_yang_module_info {
 	/* YANG module name. */
 	const char *name;
@@ -387,7 +424,11 @@ struct frr_yang_module_info {
 
 		/* Priority - lower priorities are processed first. */
 		uint32_t priority;
+#if defined(__GNUC__) && ((__GNUC__ - 0) < 5) && !defined(__clang__)
+	} nodes[YANG_MODULE_MAX_NODES + 1];
+#else
 	} nodes[];
+#endif
 };
 
 /* Northbound error codes. */
@@ -419,26 +460,15 @@ enum nb_client {
 
 /* Northbound configuration. */
 struct nb_config {
-	/* Configuration data. */
 	struct lyd_node *dnode;
-
-	/* Configuration version. */
 	uint32_t version;
-
-	/*
-	 * Lock protecting this structure. The use of this lock is always
-	 * necessary when reading or modifying the global running configuration.
-	 * For candidate configurations, use of this lock is optional depending
-	 * on the threading scheme of the northbound plugin.
-	 */
-	pthread_rwlock_t lock;
 };
 
 /* Northbound configuration callback. */
 struct nb_config_cb {
 	RB_ENTRY(nb_config_cb) entry;
 	enum nb_operation operation;
-	char xpath[XPATH_MAXLEN];
+	uint32_t seq;
 	const struct nb_node *nb_node;
 	const struct lyd_node *dnode;
 };
@@ -991,7 +1021,8 @@ extern const char *nb_client_name(enum nb_client client);
  * nmodules
  *    Size of the modules array.
  */
-extern void nb_init(struct thread_master *tm, const struct frr_yang_module_info *modules[],
+extern void nb_init(struct thread_master *tm,
+		    const struct frr_yang_module_info *const modules[],
 		    size_t nmodules);
 
 /*
@@ -999,5 +1030,9 @@ extern void nb_init(struct thread_master *tm, const struct frr_yang_module_info 
  * is exiting.
  */
 extern void nb_terminate(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _FRR_NORTHBOUND_H_ */

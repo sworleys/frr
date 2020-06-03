@@ -33,7 +33,9 @@
 #include "log.h"
 #include "sockopt.h"
 #include "checksum.h"
+#ifdef CRYPTO_INTERNAL
 #include "md5.h"
+#endif
 #include "vrf.h"
 #include "lib_errors.h"
 
@@ -304,7 +306,11 @@ static unsigned int ospf_packet_max(struct ospf_interface *oi)
 static int ospf_check_md5_digest(struct ospf_interface *oi,
 				 struct ospf_header *ospfh)
 {
+#ifdef CRYPTO_OPENSSL
+	EVP_MD_CTX *ctx;
+#elif CRYPTO_INTERNAL
 	MD5_CTX ctx;
+#endif
 	unsigned char digest[OSPF_AUTH_MD5_SIZE];
 	struct crypt_key *ck;
 	struct ospf_neighbor *nbr;
@@ -333,11 +339,21 @@ static int ospf_check_md5_digest(struct ospf_interface *oi,
 	}
 
 	/* Generate a digest for the ospf packet - their digest + our digest. */
+#ifdef CRYPTO_OPENSSL
+	unsigned int md5_size = OSPF_AUTH_MD5_SIZE;
+	ctx = EVP_MD_CTX_new();
+	EVP_DigestInit(ctx, EVP_md5());
+	EVP_DigestUpdate(ctx, ospfh, length);
+	EVP_DigestUpdate(ctx, ck->auth_key, OSPF_AUTH_MD5_SIZE);
+	EVP_DigestFinal(ctx, digest, &md5_size);
+	EVP_MD_CTX_free(ctx);
+#elif CRYPTO_INTERNAL
 	memset(&ctx, 0, sizeof(ctx));
 	MD5Init(&ctx);
 	MD5Update(&ctx, ospfh, length);
 	MD5Update(&ctx, ck->auth_key, OSPF_AUTH_MD5_SIZE);
 	MD5Final(digest, &ctx);
+#endif
 
 	/* compare the two */
 	if (memcmp((caddr_t)ospfh + length, digest, OSPF_AUTH_MD5_SIZE)) {
@@ -361,7 +377,11 @@ static int ospf_make_md5_digest(struct ospf_interface *oi,
 {
 	struct ospf_header *ospfh;
 	unsigned char digest[OSPF_AUTH_MD5_SIZE] = {0};
+#ifdef CRYPTO_OPENSSL
+	EVP_MD_CTX *ctx;
+#elif CRYPTO_INTERNAL
 	MD5_CTX ctx;
+#endif
 	void *ibuf;
 	uint32_t t;
 	struct crypt_key *ck;
@@ -394,11 +414,21 @@ static int ospf_make_md5_digest(struct ospf_interface *oi,
 	}
 
 	/* Generate a digest for the entire packet + our secret key. */
+#ifdef CRYPTO_OPENSSL
+	unsigned int md5_size = OSPF_AUTH_MD5_SIZE;
+	ctx = EVP_MD_CTX_new();
+	EVP_DigestInit(ctx, EVP_md5());
+	EVP_DigestUpdate(ctx, ibuf, ntohs(ospfh->length));
+	EVP_DigestUpdate(ctx, auth_key, OSPF_AUTH_MD5_SIZE);
+	EVP_DigestFinal(ctx, digest, &md5_size);
+	EVP_MD_CTX_free(ctx);
+#elif CRYPTO_INTERNAL
 	memset(&ctx, 0, sizeof(ctx));
 	MD5Init(&ctx);
 	MD5Update(&ctx, ibuf, ntohs(ospfh->length));
 	MD5Update(&ctx, auth_key, OSPF_AUTH_MD5_SIZE);
 	MD5Final(digest, &ctx);
+#endif
 
 	/* Append md5 digest to the end of the stream. */
 	stream_put(op->s, digest, OSPF_AUTH_MD5_SIZE);
@@ -581,7 +611,7 @@ static void ospf_write_frags(int fd, struct ospf_packet *op, struct ip *iph,
 
 		if (IS_DEBUG_OSPF_PACKET(type - 1, SEND)) {
 			zlog_debug(
-				"ospf_write_frags: sent id %d, off %d, len %d to %s\n",
+				"ospf_write_frags: sent id %d, off %d, len %d to %s",
 				iph->ip_id, iph->ip_off, iph->ip_len,
 				inet_ntoa(iph->ip_dst));
 		}
@@ -695,7 +725,7 @@ static int ospf_write(struct thread *thread)
 		 * but.. */
 		if (sizeof(struct ip)
 		    > (unsigned int)(iph.ip_hl << OSPF_WRITE_IPHL_SHIFT))
-			iph.ip_hl++; /* we presume sizeof struct ip cant
+			iph.ip_hl++; /* we presume sizeof(struct ip) cant
 					overflow ip_hl.. */
 
 		iph.ip_v = IPVERSION;
@@ -1044,7 +1074,8 @@ static void ospf_hello(struct ip *iph, struct ospf_header *ospfh,
 	/* If neighbor itself declares DR and no BDR exists,
 	   cause event BackupSeen */
 	if (IPV4_ADDR_SAME(&nbr->address.u.prefix4, &hello->d_router))
-		if (hello->bd_router.s_addr == 0 && oi->state == ISM_Waiting)
+		if (hello->bd_router.s_addr == INADDR_ANY
+		    && oi->state == ISM_Waiting)
 			OSPF_ISM_EVENT_SCHEDULE(oi, ISM_BackupSeen);
 
 	/* neighbor itself declares BDR. */
@@ -2007,10 +2038,10 @@ static void ospf_ls_upd(struct ospf *ospf, struct ip *iph,
 
 				SET_FLAG(lsa->flags, OSPF_LSA_SELF);
 
-				ospf_opaque_self_originated_lsa_received(nbr,
-									 lsa);
 				ospf_ls_ack_send(nbr, lsa);
 
+				ospf_opaque_self_originated_lsa_received(nbr,
+									 lsa);
 				continue;
 			}
 		}
@@ -2288,8 +2319,7 @@ static struct stream *ospf_recv_packet(struct ospf *ospf, int fd,
 				  safe_strerror(errno));
 		return NULL;
 	}
-	if ((unsigned int)ret < sizeof(struct ip))
-	{
+	if ((unsigned int)ret < sizeof(struct ip)) {
 		flog_warn(
 			EC_OSPF_PACKET,
 			"ospf_recv_packet: discarding runt packet of length %d "
@@ -2305,7 +2335,7 @@ static struct stream *ospf_recv_packet(struct ospf *ospf, int fd,
 
 	ip_len = iph->ip_len;
 
-#if !defined(GNU_LINUX) && (OpenBSD < 200311) && (__FreeBSD_version < 1000000)
+#if defined(__FreeBSD__) && (__FreeBSD_version < 1000000)
 	/*
 	 * Kernel network code touches incoming IP header parameters,
 	 * before protocol specific processing.
@@ -2346,9 +2376,9 @@ static struct stream *ospf_recv_packet(struct ospf *ospf, int fd,
 	}
 
 	if (IS_DEBUG_OSPF_PACKET(0, RECV))
-		zlog_debug("%s: fd %d(%s) on interface %d(%s)",
-			   __PRETTY_FUNCTION__, fd, ospf_get_name(ospf),
-			   ifindex, *ifp ? (*ifp)->name : "Unknown");
+		zlog_debug("%s: fd %d(%s) on interface %d(%s)", __func__, fd,
+			   ospf_get_name(ospf), ifindex,
+			   *ifp ? (*ifp)->name : "Unknown");
 	return ibuf;
 }
 
@@ -2574,7 +2604,7 @@ static unsigned ospf_router_lsa_links_examin(struct router_lsa_link *link,
 {
 	unsigned counted_links = 0, thislinklen;
 
-	while (linkbytes) {
+	while (linkbytes >= OSPF_ROUTER_LSA_LINK_SIZE) {
 		thislinklen =
 			OSPF_ROUTER_LSA_LINK_SIZE + 4 * link->m[0].tos_count;
 		if (thislinklen > linkbytes) {
@@ -2612,26 +2642,32 @@ static unsigned ospf_lsa_examin(struct lsa_header *lsah, const uint16_t lsalen,
 		return MSG_NG;
 	}
 	switch (lsah->type) {
-	case OSPF_ROUTER_LSA:
-		/* RFC2328 A.4.2, LSA header + 4 bytes followed by N>=1
-		 * (12+)-byte link blocks */
-		if (headeronly) {
-			ret = (lsalen - OSPF_LSA_HEADER_SIZE
-			       - OSPF_ROUTER_LSA_MIN_SIZE)
-					      % 4
-				      ? MSG_NG
-				      : MSG_OK;
-			break;
-		}
+	case OSPF_ROUTER_LSA: {
+		/*
+		 * RFC2328 A.4.2, LSA header + 4 bytes followed by N>=0
+		 * (12+)-byte link blocks
+		 */
+		size_t linkbytes_len = lsalen - OSPF_LSA_HEADER_SIZE
+				       - OSPF_ROUTER_LSA_MIN_SIZE;
+
+		/*
+		 * LSA link blocks are variable length but always multiples of
+		 * 4; basic sanity check
+		 */
+		if (linkbytes_len % 4 != 0)
+			return MSG_NG;
+
+		if (headeronly)
+			return MSG_OK;
+
 		rlsa = (struct router_lsa *)lsah;
+
 		ret = ospf_router_lsa_links_examin(
 			(struct router_lsa_link *)rlsa->link,
-			lsalen - OSPF_LSA_HEADER_SIZE - 4, /* skip: basic
-							      header, "flags",
-							      0, "# links" */
-			ntohs(rlsa->links)		   /* 16 bits */
-			);
+			linkbytes_len,
+			ntohs(rlsa->links));
 		break;
+	}
 	case OSPF_AS_EXTERNAL_LSA:
 	/* RFC2328 A.4.5, LSA header + 4 bytes followed by N>=1 12-bytes long
 	 * blocks */
@@ -2954,8 +2990,7 @@ static enum ospf_read_return_enum ospf_read_helper(struct ospf *ospf)
 			if (IS_DEBUG_OSPF_PACKET(0, RECV))
 				zlog_debug(
 					"%s: Unable to determine incoming interface from: %s(%s)",
-					__PRETTY_FUNCTION__,
-					inet_ntoa(iph->ip_src),
+					__func__, inet_ntoa(iph->ip_src),
 					ospf_get_name(ospf));
 			return OSPF_READ_CONTINUE;
 		}
@@ -2985,7 +3020,7 @@ static enum ospf_read_return_enum ospf_read_helper(struct ospf *ospf)
 				STREAM_READABLE(ibuf));
 		}
 
-		return -1;
+		return OSPF_READ_ERROR;
 	}
 	stream_forward_getp(ibuf, iph->ip_hl << 2);
 
@@ -3184,7 +3219,6 @@ int ospf_read(struct thread *thread)
 		switch (ret) {
 		case OSPF_READ_ERROR:
 			return -1;
-			break;
 		case OSPF_READ_CONTINUE:
 			break;
 		}
@@ -3222,7 +3256,7 @@ static int ospf_make_auth(struct ospf_interface *oi, struct ospf_header *ospfh)
 
 	switch (ospf_auth_type(oi)) {
 	case OSPF_AUTH_NULL:
-		/* memset (ospfh->u.auth_data, 0, sizeof (ospfh->u.auth_data));
+		/* memset (ospfh->u.auth_data, 0, sizeof(ospfh->u.auth_data));
 		 */
 		break;
 	case OSPF_AUTH_SIMPLE:
@@ -3245,7 +3279,7 @@ static int ospf_make_auth(struct ospf_interface *oi, struct ospf_header *ospfh)
 		/* note: the seq is done in ospf_make_md5_digest() */
 		break;
 	default:
-		/* memset (ospfh->u.auth_data, 0, sizeof (ospfh->u.auth_data));
+		/* memset (ospfh->u.auth_data, 0, sizeof(ospfh->u.auth_data));
 		 */
 		break;
 	}
@@ -3323,7 +3357,7 @@ static int ospf_make_hello(struct ospf_interface *oi, struct stream *s)
 	for (rn = route_top(oi->nbrs); rn; rn = route_next(rn))
 		if ((nbr = rn->info))
 			if (nbr->router_id.s_addr
-			    != 0) /* Ignore 0.0.0.0 node. */
+			    != INADDR_ANY) /* Ignore 0.0.0.0 node. */
 				if (nbr->state
 				    != NSM_Attempt) /* Ignore Down neighbor. */
 					if (nbr->state
@@ -3335,17 +3369,17 @@ static int ospf_make_hello(struct ospf_interface *oi, struct stream *s)
 							/* Check neighbor is
 							 * sane? */
 							if (nbr->d_router.s_addr
-								    != 0
+								    != INADDR_ANY
 							    && IPV4_ADDR_SAME(
-								       &nbr->d_router,
-								       &oi->address
-										->u
-										.prefix4)
+								    &nbr->d_router,
+								    &oi->address
+									     ->u
+									     .prefix4)
 							    && IPV4_ADDR_SAME(
-								       &nbr->bd_router,
-								       &oi->address
-										->u
-										.prefix4))
+								    &nbr->bd_router,
+								    &oi->address
+									     ->u
+									     .prefix4))
 								flag = 1;
 
 							/* Hello packet overflows interface MTU. */
@@ -3474,7 +3508,14 @@ static int ospf_make_ls_req_func(struct stream *s, uint16_t *length,
 
 	oi = nbr->oi;
 
-	/* LS Request packet overflows interface MTU. */
+	/* LS Request packet overflows interface MTU
+	 * delta is just number of bytes required for 1 LS Req
+	 * ospf_packet_max will return the number of bytes can
+	 * be accomodated without ospf header. So length+delta
+	 * can be compared to ospf_packet_max
+	 * to check if it can fit another lsreq in the same packet.
+	 */
+
 	if (*length + delta > ospf_packet_max(oi))
 		return 0;
 
@@ -3493,7 +3534,7 @@ static int ospf_make_ls_req(struct ospf_neighbor *nbr, struct stream *s)
 {
 	struct ospf_lsa *lsa;
 	uint16_t length = OSPF_LS_REQ_MIN_SIZE;
-	unsigned long delta = stream_get_endp(s) + 12;
+	unsigned long delta = 12;
 	struct route_table *table;
 	struct route_node *rn;
 	int i;
@@ -3557,8 +3598,9 @@ static int ospf_make_ls_upd(struct ospf_interface *oi, struct list *update,
 
 		assert(lsa->data);
 
-		/* Will it fit? */
-		if (length + delta + ntohs(lsa->data->length) > size_noauth)
+		/* Will it fit? Minimum it has to fit atleast one */
+		if ((length + delta + ntohs(lsa->data->length) > size_noauth) &&
+				(count > 0))
 			break;
 
 		/* Keep pointer to LS age. */
@@ -3595,13 +3637,21 @@ static int ospf_make_ls_ack(struct ospf_interface *oi, struct list *ack,
 {
 	struct listnode *node, *nnode;
 	uint16_t length = OSPF_LS_ACK_MIN_SIZE;
-	unsigned long delta = stream_get_endp(s) + 24;
+	unsigned long delta = OSPF_LSA_HEADER_SIZE;
 	struct ospf_lsa *lsa;
 
 	for (ALL_LIST_ELEMENTS(ack, node, nnode, lsa)) {
 		assert(lsa);
 
-		if (length + delta > ospf_packet_max(oi))
+		/* LS Ack packet overflows interface MTU
+		 * delta is just number of bytes required for
+		 * 1 LS Ack(1 LS Hdr) ospf_packet_max will return
+		 * the number of bytes can be accomodated without
+		 * ospf header. So length+delta can be compared
+		 * against ospf_packet_max to check if it can fit
+		 * another ls header in the same packet.
+		 */
+		if ((length + delta) > ospf_packet_max(oi))
 			break;
 
 		stream_put(s, lsa->data, OSPF_LSA_HEADER_SIZE);
@@ -3644,7 +3694,7 @@ static void ospf_hello_send_sub(struct ospf_interface *oi, in_addr_t addr)
 		if (oi->ospf->vrf_id)
 			zlog_debug(
 				"%s: Hello Tx interface %s ospf vrf %s id %u",
-				__PRETTY_FUNCTION__, oi->ifp->name,
+				__func__, oi->ifp->name,
 				ospf_vrf_id_to_name(oi->ospf->vrf_id),
 				oi->ospf->vrf_id);
 	}
@@ -3711,8 +3761,6 @@ int ospf_hello_reply_timer(struct thread *thread)
 
 	nbr = THREAD_ARG(thread);
 	nbr->t_hello_reply = NULL;
-
-	assert(nbr->oi);
 
 	if (IS_DEBUG_OSPF(nsm, NSM_TIMERS))
 		zlog_debug("NSM[%s:%s]: Timer (hello-reply timer expire)",
@@ -4301,7 +4349,7 @@ void ospf_proactively_arp(struct ospf_neighbor *nbr)
 	char ping_nbr[OSPF_PING_NBR_STR_MAX];
 	int ret;
 
-	if (!nbr || !nbr->oi || !nbr->oi->ifp)
+	if (!nbr)
 		return;
 
 	snprintf(ping_nbr, sizeof(ping_nbr),

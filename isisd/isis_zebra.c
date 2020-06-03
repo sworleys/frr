@@ -27,6 +27,7 @@
 #include "command.h"
 #include "memory.h"
 #include "log.h"
+#include "lib_errors.h"
 #include "if.h"
 #include "network.h"
 #include "prefix.h"
@@ -58,13 +59,6 @@ static int isis_router_id_update_zebra(ZAPI_CALLBACK_ARGS)
 	struct isis_area *area;
 	struct listnode *node;
 	struct prefix router_id;
-
-	/*
-	 * If ISIS TE is enable, TE Router ID is set through specific command.
-	 * See mpls_te_router_addr() command in isis_te.c
-	 */
-	if (IS_MPLS_TE(isisMplsTE))
-		return 0;
 
 	zebra_router_id_update_read(zclient->ibuf, &router_id);
 	if (isis->router_id == router_id.u.prefix4.s_addr)
@@ -134,7 +128,7 @@ static int isis_zebra_if_address_del(ZAPI_CALLBACK_ARGS)
 
 	if (if_is_operative(ifp))
 		isis_circuit_del_addr(circuit_scan_by_ifp(ifp), c);
-	connected_free(c);
+	connected_free(&c);
 
 	return 0;
 }
@@ -154,18 +148,17 @@ static int isis_zebra_link_params(ZAPI_CALLBACK_ARGS)
 	return 0;
 }
 
-static void isis_zebra_route_add_route(struct prefix *prefix,
-				       struct prefix_ipv6 *src_p,
-				       struct isis_route_info *route_info)
+void isis_zebra_route_add_route(struct prefix *prefix,
+				struct prefix_ipv6 *src_p,
+				struct isis_route_info *route_info)
 {
 	struct zapi_route api;
 	struct zapi_nexthop *api_nh;
 	struct isis_nexthop *nexthop;
-	struct isis_nexthop6 *nexthop6;
 	struct listnode *node;
 	int count = 0;
 
-	if (CHECK_FLAG(route_info->flag, ISIS_ROUTE_FLAG_ZEBRA_SYNCED))
+	if (zclient->sock < 0)
 		return;
 
 	memset(&api, 0, sizeof(api));
@@ -186,47 +179,41 @@ static void isis_zebra_route_add_route(struct prefix *prefix,
 #endif
 
 	/* Nexthops */
-	switch (prefix->family) {
-	case AF_INET:
-		for (ALL_LIST_ELEMENTS_RO(route_info->nexthops, node,
-					  nexthop)) {
-			if (count >= MULTIPATH_NUM)
-				break;
-			api_nh = &api.nexthops[count];
-			if (fabricd)
-				api_nh->onlink = true;
-			api_nh->vrf_id = VRF_DEFAULT;
+	for (ALL_LIST_ELEMENTS_RO(route_info->nexthops, node, nexthop)) {
+		if (count >= MULTIPATH_NUM)
+			break;
+		api_nh = &api.nexthops[count];
+		if (fabricd)
+			SET_FLAG(api_nh->flags, ZAPI_NEXTHOP_FLAG_ONLINK);
+		api_nh->vrf_id = VRF_DEFAULT;
+
+		switch (nexthop->family) {
+		case AF_INET:
 			/* FIXME: can it be ? */
-			if (nexthop->ip.s_addr != INADDR_ANY) {
+			if (nexthop->ip.ipv4.s_addr != INADDR_ANY) {
 				api_nh->type = NEXTHOP_TYPE_IPV4_IFINDEX;
-				api_nh->gate.ipv4 = nexthop->ip;
+				api_nh->gate.ipv4 = nexthop->ip.ipv4;
 			} else {
 				api_nh->type = NEXTHOP_TYPE_IFINDEX;
 			}
-			api_nh->ifindex = nexthop->ifindex;
-			count++;
-		}
-		break;
-	case AF_INET6:
-		for (ALL_LIST_ELEMENTS_RO(route_info->nexthops6, node,
-					  nexthop6)) {
-			if (count >= MULTIPATH_NUM)
-				break;
-			if (!IN6_IS_ADDR_LINKLOCAL(&nexthop6->ip6)
-			    && !IN6_IS_ADDR_UNSPECIFIED(&nexthop6->ip6)) {
+			break;
+		case AF_INET6:
+			if (!IN6_IS_ADDR_LINKLOCAL(&nexthop->ip.ipv6)
+			    && !IN6_IS_ADDR_UNSPECIFIED(&nexthop->ip.ipv6)) {
 				continue;
 			}
-
-			api_nh = &api.nexthops[count];
-			if (fabricd)
-				api_nh->onlink = true;
-			api_nh->vrf_id = VRF_DEFAULT;
-			api_nh->gate.ipv6 = nexthop6->ip6;
-			api_nh->ifindex = nexthop6->ifindex;
+			api_nh->gate.ipv6 = nexthop->ip.ipv6;
 			api_nh->type = NEXTHOP_TYPE_IPV6_IFINDEX;
-			count++;
+			break;
+		default:
+			flog_err(EC_LIB_DEVELOPMENT,
+				 "%s: unknown address family [%d]", __func__,
+				 nexthop->family);
+			exit(1);
 		}
-		break;
+
+		api_nh->ifindex = nexthop->ifindex;
+		count++;
 	}
 	if (!count)
 		return;
@@ -234,17 +221,15 @@ static void isis_zebra_route_add_route(struct prefix *prefix,
 	api.nexthop_num = count;
 
 	zclient_route_send(ZEBRA_ROUTE_ADD, zclient, &api);
-	SET_FLAG(route_info->flag, ISIS_ROUTE_FLAG_ZEBRA_SYNCED);
-	UNSET_FLAG(route_info->flag, ISIS_ROUTE_FLAG_ZEBRA_RESYNC);
 }
 
-static void isis_zebra_route_del_route(struct prefix *prefix,
-				       struct prefix_ipv6 *src_p,
-				       struct isis_route_info *route_info)
+void isis_zebra_route_del_route(struct prefix *prefix,
+				struct prefix_ipv6 *src_p,
+				struct isis_route_info *route_info)
 {
 	struct zapi_route api;
 
-	if (!CHECK_FLAG(route_info->flag, ISIS_ROUTE_FLAG_ZEBRA_SYNCED))
+	if (zclient->sock < 0)
 		return;
 
 	memset(&api, 0, sizeof(api));
@@ -258,20 +243,6 @@ static void isis_zebra_route_del_route(struct prefix *prefix,
 	}
 
 	zclient_route_send(ZEBRA_ROUTE_DELETE, zclient, &api);
-	UNSET_FLAG(route_info->flag, ISIS_ROUTE_FLAG_ZEBRA_SYNCED);
-}
-
-void isis_zebra_route_update(struct prefix *prefix,
-			     struct prefix_ipv6 *src_p,
-			     struct isis_route_info *route_info)
-{
-	if (zclient->sock < 0)
-		return;
-
-	if (CHECK_FLAG(route_info->flag, ISIS_ROUTE_FLAG_ACTIVE))
-		isis_zebra_route_add_route(prefix, src_p, route_info);
-	else
-		isis_zebra_route_del_route(prefix, src_p, route_info);
 }
 
 static int isis_zebra_read(ZAPI_CALLBACK_ARGS)

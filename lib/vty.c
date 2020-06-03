@@ -23,7 +23,12 @@
 
 #include <lib/version.h>
 #include <sys/types.h>
+#include <sys/types.h>
+#ifdef HAVE_LIBPCREPOSIX
+#include <pcreposix.h>
+#else
 #include <regex.h>
+#endif /* HAVE_LIBPCREPOSIX */
 #include <stdio.h>
 
 #include "linklist.h"
@@ -46,6 +51,10 @@
 
 #include <arpa/telnet.h>
 #include <termios.h>
+
+#ifndef VTYSH_EXTRACT_PL
+#include "lib/vty_clippy.c"
+#endif
 
 DEFINE_MTYPE_STATIC(LIB, VTY, "VTY")
 DEFINE_MTYPE_STATIC(LIB, VTY_OUT_BUF, "VTY output buffer")
@@ -85,7 +94,7 @@ static char *vty_ipv6_accesslist_name = NULL;
 static vector Vvty_serv_thread;
 
 /* Current directory. */
-char vty_cwd[MAXPATHLEN];
+static char vty_cwd[MAXPATHLEN];
 
 /* Login password check. */
 static int no_password_check = 0;
@@ -93,7 +102,8 @@ static int no_password_check = 0;
 /* Integrated configuration file path */
 static char integrate_default[] = SYSCONFDIR INTEGRATE_DEFAULT_CONFIG;
 
-static int do_log_commands = 0;
+static bool do_log_commands;
+static bool do_log_commands_perm;
 
 void vty_frame(struct vty *vty, const char *format, ...)
 {
@@ -221,8 +231,13 @@ int vty_out(struct vty *vty, const char *format, ...)
 				strlen(filtered));
 		break;
 	case VTY_SHELL:
-		fprintf(vty->of, "%s", filtered);
-		fflush(vty->of);
+		if (vty->of) {
+			fprintf(vty->of, "%s", filtered);
+			fflush(vty->of);
+		} else if (vty->of_saved) {
+			fprintf(vty->of_saved, "%s", filtered);
+			fflush(vty->of_saved);
+		}
 		break;
 	case VTY_SHELL_SERV:
 	case VTY_FILE:
@@ -332,7 +347,8 @@ void vty_hello(struct vty *vty)
 				/* work backwards to ignore trailling isspace()
 				 */
 				for (s = buf + strlen(buf);
-				     (s > buf) && isspace((int)*(s - 1)); s--)
+				     (s > buf) && isspace((unsigned char)s[-1]);
+				     s--)
 					;
 				*s = '\0';
 				vty_out(vty, "%s\n", buf);
@@ -342,6 +358,15 @@ void vty_hello(struct vty *vty)
 			vty_out(vty, "MOTD file not found\n");
 	} else if (host.motd)
 		vty_out(vty, "%s", host.motd);
+
+#if CONFDATE > 20200901
+	CPP_NOTICE("Please remove solaris code from system as it is deprecated");
+#endif
+#ifdef SUNOS_5
+	zlog_warn("If you are using FRR on Solaris, the FRR developers would love to hear from you\n");
+	zlog_warn("Please send email to dev@lists.frrouting.org about this message\n");
+	zlog_warn("We are considering deprecating Solaris and want to find users of Solaris systems\n");
+#endif
 }
 
 /* Put out prompt and wait input from user. */
@@ -463,7 +488,7 @@ static int vty_command(struct vty *vty, char *buf)
 		cp = buf;
 	if (cp != NULL) {
 		/* Skip white spaces. */
-		while (isspace((int)*cp) && *cp != '\0')
+		while (isspace((unsigned char)*cp) && *cp != '\0')
 			cp++;
 	}
 	if (cp != NULL && *cp != '\0') {
@@ -887,7 +912,7 @@ static void vty_complete_command(struct vty *vty)
 		return;
 
 	/* In case of 'help \t'. */
-	if (isspace((int)vty->buf[vty->length - 1]))
+	if (isspace((unsigned char)vty->buf[vty->length - 1]))
 		vector_set(vline, NULL);
 
 	matched = cmd_complete_command(vline, vty, &ret);
@@ -1001,7 +1026,7 @@ static void vty_describe_command(struct vty *vty)
 	if (vline == NULL) {
 		vline = vector_init(1);
 		vector_set(vline, NULL);
-	} else if (isspace((int)vty->buf[vty->length - 1]))
+	} else if (isspace((unsigned char)vty->buf[vty->length - 1]))
 		vector_set(vline, NULL);
 
 	describe = cmd_describe_command(vline, vty, &ret);
@@ -1206,7 +1231,6 @@ static int vty_telnet_option(struct vty *vty, unsigned char *buf, int nbytes)
 		vty->sb_len = 0;
 		vty->iac_sb_in_progress = 1;
 		return 0;
-		break;
 	case SE: {
 		if (!vty->iac_sb_in_progress)
 			return 0;
@@ -1246,7 +1270,6 @@ static int vty_telnet_option(struct vty *vty, unsigned char *buf, int nbytes)
 		}
 		vty->iac_sb_in_progress = 0;
 		return 0;
-		break;
 	}
 	default:
 		break;
@@ -2045,7 +2068,6 @@ static int vtysh_flush(struct vty *vty)
 		buffer_reset(vty->obuf);
 		vty_close(vty);
 		return -1;
-		break;
 	case BUFFER_EMPTY:
 		break;
 	}
@@ -2326,8 +2348,7 @@ static void vty_read_file(struct nb_config *config, FILE *confp)
 	 * Automatically commit the candidate configuration after
 	 * reading the configuration file.
 	 */
-	if (config == NULL && vty->candidate_config
-	    && frr_get_cli_mode() == FRR_CLI_TRANSACTIONAL) {
+	if (config == NULL) {
 		ret = nb_candidate_commit(vty->candidate_config, NB_CLIENT_CLI,
 					  vty, true, "Read configuration file",
 					  NULL);
@@ -2567,22 +2588,17 @@ int vty_config_enter(struct vty *vty, bool private_config, bool exclusive)
 	vty->private_config = private_config;
 	vty->xpath_index = 0;
 
-	pthread_rwlock_rdlock(&running_config->lock);
-	{
-		if (private_config) {
-			vty->candidate_config = nb_config_dup(running_config);
+	if (private_config) {
+		vty->candidate_config = nb_config_dup(running_config);
+		vty->candidate_config_base = nb_config_dup(running_config);
+		vty_out(vty,
+			"Warning: uncommitted changes will be discarded on exit.\n\n");
+	} else {
+		vty->candidate_config = vty_shared_candidate_config;
+		if (frr_get_cli_mode() == FRR_CLI_TRANSACTIONAL)
 			vty->candidate_config_base =
 				nb_config_dup(running_config);
-			vty_out(vty,
-				"Warning: uncommitted changes will be discarded on exit.\n\n");
-		} else {
-			vty->candidate_config = vty_shared_candidate_config;
-			if (frr_get_cli_mode() == FRR_CLI_TRANSACTIONAL)
-				vty->candidate_config_base =
-					nb_config_dup(running_config);
-		}
 	}
-	pthread_rwlock_unlock(&running_config->lock);
 
 	return CMD_SUCCESS;
 }
@@ -2923,13 +2939,24 @@ DEFUN_NOSH (show_history,
 }
 
 /* vty login. */
-DEFUN (log_commands,
+DEFPY (log_commands,
        log_commands_cmd,
-       "log commands",
+       "[no] log commands",
+       NO_STR
        "Logging control\n"
-       "Log all commands (can't be unset without restart)\n")
+       "Log all commands\n")
 {
-	do_log_commands = 1;
+	if (no) {
+		if (do_log_commands_perm) {
+			vty_out(vty,
+				"Daemon started with permanent logging turned on for commands, ignoring\n");
+			return CMD_WARNING;
+		}
+
+		do_log_commands = false;
+	} else
+		do_log_commands = true;
+
 	return CMD_SUCCESS;
 }
 
@@ -2991,15 +3018,8 @@ void vty_reset(void)
 
 	vty_timeout_val = VTY_TIMEOUT_DEFAULT;
 
-	if (vty_accesslist_name) {
-		XFREE(MTYPE_VTY, vty_accesslist_name);
-		vty_accesslist_name = NULL;
-	}
-
-	if (vty_ipv6_accesslist_name) {
-		XFREE(MTYPE_VTY, vty_ipv6_accesslist_name);
-		vty_ipv6_accesslist_name = NULL;
-	}
+	XFREE(MTYPE_VTY, vty_accesslist_name);
+	XFREE(MTYPE_VTY, vty_ipv6_accesslist_name);
 }
 
 static void vty_save_cwd(void)
@@ -3049,7 +3069,7 @@ void vty_init_vtysh(void)
 }
 
 /* Install vty's own commands like `who' command. */
-void vty_init(struct thread_master *master_thread)
+void vty_init(struct thread_master *master_thread, bool do_command_logging)
 {
 	/* For further configuration read, preserve current directory. */
 	vty_save_cwd();
@@ -3073,6 +3093,12 @@ void vty_init(struct thread_master *master_thread)
 	install_element(CONFIG_NODE, &no_service_advanced_vty_cmd);
 	install_element(CONFIG_NODE, &show_history_cmd);
 	install_element(CONFIG_NODE, &log_commands_cmd);
+
+	if (do_command_logging) {
+		do_log_commands = true;
+		do_log_commands_perm = true;
+	}
+
 	install_element(ENABLE_NODE, &terminal_monitor_cmd);
 	install_element(ENABLE_NODE, &terminal_no_monitor_cmd);
 	install_element(ENABLE_NODE, &no_terminal_monitor_cmd);

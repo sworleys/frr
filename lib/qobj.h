@@ -23,6 +23,10 @@
 
 #include "typesafe.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* reserve a specific amount of bytes for a struct, which can grow up to
  * that size (or be dummy'd out if not needed)
  *
@@ -30,11 +34,17 @@
  * this is intentional to prevent the struct from growing beyond the allocated
  * space.
  */
+#ifndef __cplusplus
 #define RESERVED_SPACE_STRUCT(name, fieldname, size)                           \
 	struct {                                                               \
 		struct name fieldname;                                         \
 		char padding##fieldname[size - sizeof(struct name)];           \
 	};
+#else
+#define RESERVED_SPACE_STRUCT(name, fieldname, size)                           \
+	struct name fieldname;                                                 \
+	char padding##fieldname[size - sizeof(struct name)];
+#endif
 
 /* don't need struct definitions for these here.  code actually using
  * these needs to define the struct *before* including this header.
@@ -79,7 +89,7 @@ PREDECL_HASH(qobj_nodes)
 struct qobj_node {
 	uint64_t nid;
 	struct qobj_nodes_item nodehash;
-	struct qobj_nodetype *type;
+	const struct qobj_nodetype *type;
 };
 
 #define QOBJ_FIELDS struct qobj_node qobj_node;
@@ -101,20 +111,20 @@ struct qobj_node {
  *
  * in the long this may need another touch, e.g. built-in per-object locking.
  */
-void qobj_reg(struct qobj_node *node, struct qobj_nodetype *type);
+void qobj_reg(struct qobj_node *node, const struct qobj_nodetype *type);
 void qobj_unreg(struct qobj_node *node);
 struct qobj_node *qobj_get(uint64_t id);
-void *qobj_get_typed(uint64_t id, struct qobj_nodetype *type);
+void *qobj_get_typed(uint64_t id, const struct qobj_nodetype *type);
 
 /* type declarations */
 #define DECLARE_QOBJ_TYPE(structname)                                          \
-	extern struct qobj_nodetype qobj_t_##structname;
+	extern const struct qobj_nodetype qobj_t_##structname;
 #define DEFINE_QOBJ_TYPE(structname)                                           \
-	struct qobj_nodetype qobj_t_##structname = {                           \
+	const struct qobj_nodetype qobj_t_##structname = {                     \
 		.node_member_offset =                                          \
 			(ptrdiff_t)offsetof(struct structname, qobj_node)};
 #define DEFINE_QOBJ_TYPE_INIT(structname, ...)                                 \
-	struct qobj_nodetype qobj_t_##structname = {                           \
+	const struct qobj_nodetype qobj_t_##structname = {                     \
 		.node_member_offset =                                          \
 			(ptrdiff_t)offsetof(struct structname, qobj_node),     \
 		__VA_ARGS__};
@@ -133,5 +143,9 @@ void *qobj_get_typed(uint64_t id, struct qobj_nodetype *type);
 
 void qobj_init(void);
 void qobj_finish(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _QOBJ_H */

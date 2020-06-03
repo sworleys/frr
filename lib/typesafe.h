@@ -23,6 +23,10 @@
 #include <assert.h>
 #include "compiler.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* generic macros for all list-like types */
 
 #define frr_each(prefix, head, item)                                           \
@@ -856,6 +860,10 @@ extern struct sskip_item *typesafe_skiplist_del(
 			const struct sskip_item *a,
 			const struct sskip_item *b));
 extern struct sskip_item *typesafe_skiplist_pop(struct sskip_head *head);
+
+#ifdef __cplusplus
+}
+#endif
 
 /* this needs to stay at the end because both files include each other.
  * the resolved order is typesafe.h before typerb.h

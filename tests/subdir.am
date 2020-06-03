@@ -38,12 +38,16 @@ else
 TESTS_OSPF6D =
 endif
 
+tests/lib/cli/test_cli_clippy.c: $(CLIPPY_DEPS)
 tests/lib/cli/tests_lib_cli_test_cli-test_cli.$(OBJEXT): tests/lib/cli/test_cli_clippy.c
 tests/lib/cli/test_cli-test_cli.$(OBJEXT): tests/lib/cli/test_cli_clippy.c
+
+tests/ospf6d/test_lsdb_clippy.c: $(CLIPPY_DEPS)
 tests/ospf6d/tests_ospf6d_test_lsdb-test_lsdb.$(OBJEXT): tests/ospf6d/test_lsdb_clippy.c
 tests/ospf6d/test_lsdb-test_lsdb.$(OBJEXT): tests/ospf6d/test_lsdb_clippy.c
 
 check_PROGRAMS = \
+	tests/lib/cxxcompat \
 	tests/lib/test_atomlist \
 	tests/lib/test_buffer \
 	tests/lib/test_checksum \
@@ -55,6 +59,7 @@ check_PROGRAMS = \
 	tests/lib/test_nexthop_iter \
 	tests/lib/test_ntop \
 	tests/lib/test_prefix2str \
+	tests/lib/test_printfrr \
 	tests/lib/test_privs \
 	tests/lib/test_ringbuf \
 	tests/lib/test_srcdest_table \
@@ -67,6 +72,7 @@ check_PROGRAMS = \
 	tests/lib/test_timer_performance \
 	tests/lib/test_ttable \
 	tests/lib/test_typelist \
+	tests/lib/test_versioncmp \
 	tests/lib/test_zlog \
 	tests/lib/test_graph \
 	tests/lib/cli/test_cli \
@@ -84,6 +90,7 @@ check_PROGRAMS += \
 endif
 
 tests/lib/cli/test_commands_defun.c: vtysh/vtysh_cmd.c
+	mkdir -p tests/lib/cli
 	sed \
 		-e 's%"vtysh/vtysh\.h"%"tests/helpers/c/tests.h"%' \
 		-e 's/vtysh_init_cmd/test_init_cmd/' \
@@ -93,6 +100,7 @@ tests/lib/cli/test_commands_defun.c: vtysh/vtysh_cmd.c
 CLEANFILES += tests/lib/cli/test_commands_defun.c
 
 tests/isisd/test_fuzz_isis_tlv_tests.h: $(top_srcdir)/tests/isisd/test_fuzz_isis_tlv_tests.h.gz
+	mkdir -p tests/isisd
 	gzip -d < $(top_srcdir)/tests/isisd/test_fuzz_isis_tlv_tests.h.gz > "$@"
 CLEANFILES += tests/isisd/test_fuzz_isis_tlv_tests.h
 
@@ -174,6 +182,10 @@ tests_isisd_test_isis_vertex_queue_CPPFLAGS = $(TESTS_CPPFLAGS)
 tests_isisd_test_isis_vertex_queue_LDADD = $(ISISD_TEST_LDADD)
 tests_isisd_test_isis_vertex_queue_SOURCES = tests/isisd/test_isis_vertex_queue.c
 
+tests_lib_cxxcompat_CFLAGS = $(TESTS_CFLAGS) $(CXX_COMPAT_CFLAGS) $(WERROR)
+tests_lib_cxxcompat_CPPFLAGS = $(TESTS_CPPFLAGS)
+tests_lib_cxxcompat_SOURCES = tests/lib/cxxcompat.c
+tests_lib_cxxcompat_LDADD = $(ALL_TESTS_LDADD)
 tests_lib_cli_test_cli_CFLAGS = $(TESTS_CFLAGS)
 tests_lib_cli_test_cli_CPPFLAGS = $(TESTS_CPPFLAGS)
 tests_lib_cli_test_cli_LDADD = $(ALL_TESTS_LDADD)
@@ -235,6 +247,10 @@ tests_lib_test_prefix2str_CFLAGS = $(TESTS_CFLAGS)
 tests_lib_test_prefix2str_CPPFLAGS = $(TESTS_CPPFLAGS)
 tests_lib_test_prefix2str_LDADD = $(ALL_TESTS_LDADD)
 tests_lib_test_prefix2str_SOURCES = tests/lib/test_prefix2str.c tests/helpers/c/prng.c
+tests_lib_test_printfrr_CFLAGS = $(TESTS_CFLAGS)
+tests_lib_test_printfrr_CPPFLAGS = $(TESTS_CPPFLAGS)
+tests_lib_test_printfrr_LDADD = $(ALL_TESTS_LDADD)
+tests_lib_test_printfrr_SOURCES = tests/lib/test_printfrr.c
 tests_lib_test_privs_CFLAGS = $(TESTS_CFLAGS)
 tests_lib_test_privs_CPPFLAGS = $(TESTS_CPPFLAGS)
 tests_lib_test_privs_LDADD = $(ALL_TESTS_LDADD)
@@ -283,6 +299,10 @@ tests_lib_test_typelist_CFLAGS = $(TESTS_CFLAGS)
 tests_lib_test_typelist_CPPFLAGS = $(TESTS_CPPFLAGS)
 tests_lib_test_typelist_LDADD = $(ALL_TESTS_LDADD)
 tests_lib_test_typelist_SOURCES = tests/lib/test_typelist.c tests/helpers/c/prng.c
+tests_lib_test_versioncmp_CFLAGS = $(TESTS_CFLAGS)
+tests_lib_test_versioncmp_CPPFLAGS = $(TESTS_CPPFLAGS)
+tests_lib_test_versioncmp_LDADD = $(ALL_TESTS_LDADD)
+tests_lib_test_versioncmp_SOURCES = tests/lib/test_versioncmp.c
 tests_lib_test_zlog_CFLAGS = $(TESTS_CFLAGS)
 tests_lib_test_zlog_CPPFLAGS = $(TESTS_CPPFLAGS)
 tests_lib_test_zlog_LDADD = $(ALL_TESTS_LDADD)
@@ -324,6 +344,7 @@ EXTRA_DIST += \
 	tests/lib/test_nexthop_iter.py \
 	tests/lib/test_ntop.py \
 	tests/lib/test_prefix2str.py \
+	tests/lib/test_printfrr.py \
 	tests/lib/test_ringbuf.py \
 	tests/lib/test_srcdest_table.py \
 	tests/lib/test_stream.py \
@@ -333,6 +354,7 @@ EXTRA_DIST += \
 	tests/lib/test_ttable.py \
 	tests/lib/test_ttable.refout \
 	tests/lib/test_typelist.py \
+	tests/lib/test_versioncmp.py \
 	tests/lib/test_zlog.py \
 	tests/lib/test_graph.py \
 	tests/lib/test_graph.refout \

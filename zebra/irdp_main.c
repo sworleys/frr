@@ -82,7 +82,7 @@ int irdp_sock_init(void)
 	int save_errno;
 	int sock;
 
-	frr_elevate_privs(&zserv_privs) {
+	frr_with_privs(&zserv_privs) {
 
 		sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
 		save_errno = errno;
@@ -190,7 +190,7 @@ static void irdp_send(struct interface *ifp, struct prefix *p, struct stream *s)
 
 	if (irdp->flags & IF_DEBUG_MESSAGES)
 		zlog_debug("IRDP: TX Advert on %s %s Holdtime=%d Preference=%d",
-			   ifp->name, prefix2str(p, buf, sizeof buf),
+			   ifp->name, prefix2str(p, buf, sizeof(buf)),
 			   irdp->flags & IF_SHUTDOWN ? 0 : irdp->Lifetime,
 			   get_pref(irdp, p));
 

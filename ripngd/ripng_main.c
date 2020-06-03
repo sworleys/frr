@@ -27,7 +27,6 @@
 #include "vty.h"
 #include "command.h"
 #include "memory.h"
-#include "memory_vty.h"
 #include "thread.h"
 #include "log.h"
 #include "prefix.h"
@@ -35,15 +34,18 @@
 #include "privs.h"
 #include "sigevent.h"
 #include "vrf.h"
+#include "if_rmap.h"
 #include "libfrr.h"
+#include "routemap.h"
 
 #include "ripngd/ripngd.h"
+#include "ripngd/ripng_nb.h"
 
 /* RIPngd options. */
 struct option longopts[] = {{0}};
 
 /* ripngd privileges */
-zebra_capabilities_t _caps_p[] = {ZCAP_NET_RAW, ZCAP_BIND};
+zebra_capabilities_t _caps_p[] = {ZCAP_NET_RAW, ZCAP_BIND, ZCAP_SYS_ADMIN};
 
 struct zebra_privs_t ripngd_privs = {
 #if defined(FRR_USER)
@@ -56,7 +58,7 @@ struct zebra_privs_t ripngd_privs = {
 	.vty_group = VTY_GROUP,
 #endif
 	.caps_p = _caps_p,
-	.cap_num_p = 2,
+	.cap_num_p = array_size(_caps_p),
 	.cap_num_i = 0};
 
 
@@ -79,8 +81,8 @@ static void sigint(void)
 {
 	zlog_notice("Terminating on signal");
 
-	ripng_clean();
-
+	ripng_vrf_terminate();
+	if_rmap_terminate();
 	ripng_zebra_stop();
 	frr_fini();
 	exit(0);
@@ -111,9 +113,10 @@ struct quagga_signal_t ripng_signals[] = {
 	},
 };
 
-static const struct frr_yang_module_info *ripngd_yang_modules[] = {
+static const struct frr_yang_module_info *const ripngd_yang_modules[] = {
 	&frr_interface_info,
 	&frr_ripngd_info,
+	&frr_route_map_info,
 };
 
 FRR_DAEMON_INFO(ripngd, RIPNG, .vty_port = RIPNG_VTY_PORT,
@@ -164,13 +167,12 @@ int main(int argc, char **argv)
 	master = frr_init();
 
 	/* Library inits. */
-	vrf_init(NULL, NULL, NULL, NULL, NULL);
+	ripng_vrf_init();
 
 	/* RIPngd inits. */
 	ripng_init();
 	ripng_cli_init();
 	zebra_init(master);
-	ripng_peer_init();
 
 	frr_config_fork();
 	frr_run(master);

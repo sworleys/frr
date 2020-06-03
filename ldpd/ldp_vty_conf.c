@@ -250,9 +250,8 @@ ldp_config_write(struct vty *vty)
 
 	vty_out (vty, "mpls ldp\n");
 
-	if (ldpd_conf->rtr_id.s_addr != 0)
-		vty_out (vty, " router-id %s\n",
-		    inet_ntoa(ldpd_conf->rtr_id));
+	if (ldpd_conf->rtr_id.s_addr != INADDR_ANY)
+		vty_out(vty, " router-id %s\n", inet_ntoa(ldpd_conf->rtr_id));
 
 	if (ldpd_conf->lhello_holdtime != LINK_DFLT_HOLDTIME &&
 	    ldpd_conf->lhello_holdtime != 0)
@@ -278,6 +277,9 @@ ldp_config_write(struct vty *vty)
 
 	if (ldpd_conf->flags & F_LDPD_DS_CISCO_INTEROP)
 		vty_out (vty, " dual-stack cisco-interop\n");
+
+	if (ldpd_conf->flags & F_LDPD_ORDERED_CONTROL)
+		vty_out (vty, " ordered-control\n");
 
 	RB_FOREACH(nbrp, nbrp_head, &ldpd_conf->nbrp_tree) {
 		if (nbrp->flags & F_NBRP_KEEPALIVE)
@@ -998,6 +1000,19 @@ ldp_vty_router_id(struct vty *vty, const char *negate, struct in_addr address)
 }
 
 int
+ldp_vty_ordered_control(struct vty *vty, const char *negate)
+{
+	if (negate)
+		vty_conf->flags &= ~F_LDPD_ORDERED_CONTROL;
+	else
+		vty_conf->flags |= F_LDPD_ORDERED_CONTROL;
+
+	ldp_config_apply(vty, vty_conf);
+
+	return (CMD_SUCCESS);
+}
+
+int
 ldp_vty_ds_cisco_interop(struct vty *vty, const char * negate)
 {
 	if (negate)
@@ -1062,7 +1077,7 @@ ldp_vty_neighbor_password(struct vty *vty, const char *negate, struct in_addr ls
 		if (password_len >= sizeof(nbrp->auth.md5key))
 			vty_out(vty, "%% password has been truncated to %zu "
 			    "characters.", sizeof(nbrp->auth.md5key) - 1);
-		nbrp->auth.md5key_len = password_len;
+		nbrp->auth.md5key_len = strlen(nbrp->auth.md5key);
 		nbrp->auth.method = AUTH_MD5SIG;
 	}
 

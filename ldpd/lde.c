@@ -61,6 +61,8 @@ static void		 lde_label_list_init(void);
 static int		 lde_get_label_chunk(void);
 static void		 on_get_label_chunk_response(uint32_t start, uint32_t end);
 static uint32_t		 lde_get_next_label(void);
+static bool		 lde_fec_connected(const struct fec_node *);
+static bool		 lde_fec_outside_mpls_network(const struct fec_node *);
 
 RB_GENERATE(nbr_tree, lde_nbr, entry, lde_nbr_compare)
 RB_GENERATE(lde_map_head, lde_map, entry, lde_map_compare)
@@ -70,9 +72,6 @@ struct nbr_tree		 lde_nbrs = RB_INITIALIZER(&lde_nbrs);
 
 static struct imsgev	*iev_ldpe;
 static struct imsgev	*iev_main, *iev_main_sync;
-
-/* Master of threads. */
-struct thread_master *master;
 
 /* lde privileges */
 static zebra_capabilities_t _caps_p [] =
@@ -520,7 +519,8 @@ lde_dispatch_parent(struct thread *thread)
 			switch (imsg.hdr.type) {
 			case IMSG_NETWORK_ADD:
 				lde_kernel_insert(&fec, kr->af, &kr->nexthop,
-				    kr->ifindex, kr->priority,
+				    kr->ifindex, kr->route_type,
+				    kr->route_instance,
 				    kr->flags & F_CONNECTED, NULL);
 				break;
 			case IMSG_NETWORK_UPDATE:
@@ -660,18 +660,31 @@ lde_acl_check(char *acl_name, int af, union ldpd_addr *addr, uint8_t prefixlen)
 	return ldp_acl_request(iev_main_sync, acl_name, af, addr, prefixlen);
 }
 
+static bool lde_fec_connected(const struct fec_node *fn)
+{
+	struct fec_nh *fnh;
+
+	LIST_FOREACH(fnh, &fn->nexthops, entry)
+		if (fnh->flags & F_FEC_NH_CONNECTED)
+			return true;
+
+	return false;
+}
+
+static bool lde_fec_outside_mpls_network(const struct fec_node *fn)
+{
+	struct fec_nh *fnh;
+
+	LIST_FOREACH(fnh, &fn->nexthops, entry)
+		if (!(fnh->flags & F_FEC_NH_NO_LDP))
+			return false;
+
+	return true;
+}
+
 uint32_t
 lde_update_label(struct fec_node *fn)
 {
-	struct fec_nh	*fnh;
-	int		 connected = 0;
-
-	LIST_FOREACH(fnh, &fn->nexthops, entry) {
-		if (fnh->flags & F_FEC_NH_CONNECTED) {
-			connected = 1;
-			break;
-		}
-	}
 
 	/* should we allocate a label for this fec? */
 	switch (fn->fec.type) {
@@ -697,7 +710,14 @@ lde_update_label(struct fec_node *fn)
 		break;
 	}
 
-	if (connected) {
+	/*
+	 * If connected interface act as egress for fec.
+	 * If LDP is not configured on an interface but there
+	 * are other NHs with interfaces configured with LDP
+	 * then don't act as an egress for the fec, otherwise
+	 * act as an egress for the fec
+	 */
+	if (lde_fec_connected(fn) || lde_fec_outside_mpls_network(fn)) {
 		/* choose implicit or explicit-null depending on configuration */
 		switch (fn->fec.type) {
 		case FEC_TYPE_IPV4:
@@ -737,6 +757,13 @@ lde_send_change_klabel(struct fec_node *fn, struct fec_nh *fnh)
 	struct zapi_pw	 zpw;
 	struct l2vpn_pw	*pw;
 
+	/*
+	 * Ordered Control: don't program label into HW until a
+	 * labelmap msg has been received from upstream router
+	 */
+	if (fnh->flags & F_FEC_NH_DEFER)
+		return;
+
 	switch (fn->fec.type) {
 	case FEC_TYPE_IPV4:
 		memset(&kr, 0, sizeof(kr));
@@ -747,7 +774,8 @@ lde_send_change_klabel(struct fec_node *fn, struct fec_nh *fnh)
 		kr.ifindex = fnh->ifindex;
 		kr.local_label = fn->local_label;
 		kr.remote_label = fnh->remote_label;
-		kr.priority = fnh->priority;
+		kr.route_type = fnh->route_type;
+		kr.route_instance = fnh->route_instance;
 
 		lde_imsg_compose_parent(IMSG_KLABEL_CHANGE, 0, &kr,
 		    sizeof(kr));
@@ -761,7 +789,8 @@ lde_send_change_klabel(struct fec_node *fn, struct fec_nh *fnh)
 		kr.ifindex = fnh->ifindex;
 		kr.local_label = fn->local_label;
 		kr.remote_label = fnh->remote_label;
-		kr.priority = fnh->priority;
+		kr.route_type = fnh->route_type;
+		kr.route_instance = fnh->route_instance;
 
 		lde_imsg_compose_parent(IMSG_KLABEL_CHANGE, 0, &kr,
 		    sizeof(kr));
@@ -798,7 +827,8 @@ lde_send_delete_klabel(struct fec_node *fn, struct fec_nh *fnh)
 		kr.ifindex = fnh->ifindex;
 		kr.local_label = fn->local_label;
 		kr.remote_label = fnh->remote_label;
-		kr.priority = fnh->priority;
+		kr.route_type = fnh->route_type;
+		kr.route_instance = fnh->route_instance;
 
 		lde_imsg_compose_parent(IMSG_KLABEL_DELETE, 0, &kr,
 		    sizeof(kr));
@@ -812,7 +842,8 @@ lde_send_delete_klabel(struct fec_node *fn, struct fec_nh *fnh)
 		kr.ifindex = fnh->ifindex;
 		kr.local_label = fn->local_label;
 		kr.remote_label = fnh->remote_label;
-		kr.priority = fnh->priority;
+		kr.route_type = fnh->route_type;
+		kr.route_instance = fnh->route_instance;
 
 		lde_imsg_compose_parent(IMSG_KLABEL_DELETE, 0, &kr,
 		    sizeof(kr));
@@ -899,6 +930,27 @@ lde_send_labelmapping(struct lde_nbr *ln, struct fec_node *fn, int single)
 	struct lde_req		*lre;
 	struct map		 map;
 	struct l2vpn_pw		*pw;
+	struct fec_nh		*fnh;
+	bool			 allow = false;
+
+	/*
+	 * Ordered Control: do not send a labelmap msg until
+	 * a labelmap message is received from downstream router
+	 * and don't send labelmap back to downstream router
+	 */
+	if (ldeconf->flags & F_LDPD_ORDERED_CONTROL) {
+		LIST_FOREACH(fnh, &fn->nexthops, entry) {
+			if (fnh->flags & F_FEC_NH_DEFER)
+				continue;
+
+			if (lde_address_find(ln, fnh->af, &fnh->nexthop))
+				return;
+			allow = true;
+			break;
+		}
+		if (!allow)
+			return;
+	}
 
 	/*
 	 * We shouldn't send a new label mapping if we have a pending
@@ -1239,6 +1291,7 @@ lde_nbr_del(struct lde_nbr *ln)
 	struct fec_node		*fn;
 	struct fec_nh		*fnh;
 	struct l2vpn_pw		*pw;
+	struct lde_nbr		*lnbr;
 
 	if (ln == NULL)
 		return;
@@ -1254,6 +1307,25 @@ lde_nbr_del(struct lde_nbr *ln)
 				if (!lde_address_find(ln, fnh->af,
 				    &fnh->nexthop))
 					continue;
+
+				/*
+				 * Ordered Control: must mark any non-connected
+				 * NH to wait until we receive a labelmap msg
+				 * before installing in kernel and sending to
+				 * peer, must do this as NHs are not removed
+				 * when lsps go down.  Also send label withdraw
+				 * to other neighbors for all fecs from neighbor
+				 * going down
+				 */
+				if (ldeconf->flags & F_LDPD_ORDERED_CONTROL) {
+					fnh->flags |= F_FEC_NH_DEFER;
+
+					RB_FOREACH(lnbr, nbr_tree, &lde_nbrs) {
+						if (ln->peerid == lnbr->peerid)
+							continue;
+						lde_send_labelwithdraw(lnbr, fn, NULL, NULL);
+					}
+				}
 				break;
 			case FEC_TYPE_PWID:
 				if (f->u.pwid.lsr_id.s_addr != ln->id.s_addr)
@@ -1565,6 +1637,56 @@ lde_change_egress_label(int af)
 		    NULL, 0);
 }
 
+void
+lde_change_host_label(int af)
+{
+	struct lde_nbr  *ln;
+	struct fec      *f;
+	struct fec_node *fn;
+	uint32_t         new_label;
+
+	RB_FOREACH(f, fec_tree, &ft) {
+		fn = (struct fec_node *)f;
+
+		switch (af) {
+		case AF_INET:
+			if (fn->fec.type != FEC_TYPE_IPV4)
+				continue;
+			break;
+		case AF_INET6:
+			if (fn->fec.type != FEC_TYPE_IPV6)
+				continue;
+			break;
+		default:
+			fatalx("lde_change_host_label: unknown af");
+		}
+
+		/*
+		 * If the local label has changed to NO_LABEL, send a label
+		 * withdraw to all peers.
+		 * If the local label has changed and it's different from
+		 * NO_LABEL, send a label mapping to all peers advertising
+		 * the new label.
+		 * If the local label hasn't changed, do nothing
+		 */
+		new_label = lde_update_label(fn);
+		if (fn->local_label != new_label) {
+			if (new_label == NO_LABEL)
+				RB_FOREACH(ln, nbr_tree, &lde_nbrs)
+					lde_send_labelwithdraw(ln, fn,
+					    NULL, NULL);
+
+			fn->local_label = new_label;
+			if (fn->local_label != NO_LABEL)
+				RB_FOREACH(ln, nbr_tree, &lde_nbrs)
+					lde_send_labelmapping(ln, fn, 0);
+		}
+	}
+	RB_FOREACH(ln, nbr_tree, &lde_nbrs)
+		lde_imsg_compose_ldpe(IMSG_MAPPING_ADD_END, ln->peerid, 0,
+		    NULL, 0);
+}
+
 static int
 lde_address_add(struct lde_nbr *ln, struct lde_addr *lde_addr)
 {
@@ -1626,8 +1748,11 @@ lde_address_list_free(struct lde_nbr *ln)
 
 static void zclient_sync_init(unsigned short instance)
 {
+	struct zclient_options options = zclient_options_default;
+	options.synchronous = true;
+
 	/* Initialize special zclient for synchronous message exchanges. */
-	zclient_sync = zclient_new(master, &zclient_options_default);
+	zclient_sync = zclient_new(master, &options);
 	zclient_sync->sock = -1;
 	zclient_sync->redist_default = ZEBRA_ROUTE_LDP;
 	zclient_sync->instance = instance;
@@ -1639,6 +1764,12 @@ static void zclient_sync_init(unsigned short instance)
 	}
 	/* make socket non-blocking */
 	sock_set_nonblock(zclient_sync->sock);
+
+	/* Send hello to notify zebra this is a synchronous client */
+	while (zclient_send_hello(zclient_sync) < 0) {
+		log_warnx("Error sending hello for synchronous zclient!");
+		sleep(1);
+	}
 
 	/* Connect to label manager */
 	while (lm_label_manager_connect(zclient_sync, 0) != 0) {
@@ -1654,13 +1785,27 @@ lde_del_label_chunk(void *val)
 }
 
 static int
+lde_release_label_chunk(uint32_t start, uint32_t end)
+{
+	int		ret;
+
+	ret = lm_release_label_chunk(zclient_sync, start, end);
+	if (ret < 0) {
+		log_warnx("Error releasing label chunk!");
+		return (-1);
+	}
+	return (0);
+}
+
+static int
 lde_get_label_chunk(void)
 {
 	int		 ret;
 	uint32_t	 start, end;
 
 	debug_labels("getting label chunk (size %u)", CHUNK_SIZE);
-	ret = lm_get_label_chunk(zclient_sync, 0, CHUNK_SIZE, &start, &end);
+	ret = lm_get_label_chunk(zclient_sync, 0, MPLS_LABEL_BASE_ANY,
+				 CHUNK_SIZE, &start, &end);
 	if (ret < 0) {
 		log_warnx("Error getting label chunk!");
 		return -1;
@@ -1706,6 +1851,32 @@ on_get_label_chunk_response(uint32_t start, uint32_t end)
 	/* let's update current if needed */
 	if (!current_label_chunk)
 		current_label_chunk = listtail(label_chunk_list);
+}
+
+void
+lde_free_label(uint32_t label)
+{
+	struct listnode	*node;
+	struct label_chunk	*label_chunk;
+	uint64_t		pos;
+
+	for (ALL_LIST_ELEMENTS_RO(label_chunk_list, node, label_chunk)) {
+		if (label <= label_chunk->end && label >= label_chunk->start) {
+			pos = 1ULL << (label - label_chunk->start);
+			label_chunk->used_mask &= ~pos;
+			/* if nobody is using this chunk and it's not current_label_chunk, then free it */
+			if (!label_chunk->used_mask && (current_label_chunk != node)) {
+				if (lde_release_label_chunk(label_chunk->start, label_chunk->end) != 0)
+					log_warnx("%s: Error releasing label chunk!", __func__);
+				else {
+					listnode_delete(label_chunk_list, label_chunk);
+					lde_del_label_chunk(label_chunk);
+				}
+			}
+			break;
+		}
+	}
+	return;
 }
 
 static uint32_t

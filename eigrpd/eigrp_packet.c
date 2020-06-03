@@ -77,11 +77,13 @@ const struct message eigrp_packet_type_str[] = {
 static unsigned char zeropad[16] = {0};
 
 /* Forward function reference*/
-static struct stream *eigrp_recv_packet(int, struct interface **,
-					struct stream *);
-static int eigrp_verify_header(struct stream *, struct eigrp_interface *,
-			       struct ip *, struct eigrp_header *);
-static int eigrp_check_network_mask(struct eigrp_interface *, struct in_addr);
+static struct stream *eigrp_recv_packet(struct eigrp *eigrp, int fd,
+					struct interface **ifp,
+					struct stream *s);
+static int eigrp_verify_header(struct stream *s, struct eigrp_interface *ei,
+			       struct ip *addr, struct eigrp_header *header);
+static int eigrp_check_network_mask(struct eigrp_interface *ei,
+				    struct in_addr mask);
 
 static int eigrp_retrans_count_exceeded(struct eigrp_packet *ep,
 					struct eigrp_neighbor *nbr)
@@ -281,7 +283,7 @@ int eigrp_make_sha256_digest(struct eigrp_interface *ei, struct stream *s,
 		return 0;
 	}
 
-	inet_ntop(AF_INET, &ei->address->u.prefix4, source_ip, PREFIX_STRLEN);
+	inet_ntop(AF_INET, &ei->address.u.prefix4, source_ip, PREFIX_STRLEN);
 
 	memset(&ctx, 0, sizeof(ctx));
 	buffer[0] = '\n';
@@ -349,20 +351,20 @@ int eigrp_write(struct thread *thread)
 	ep = eigrp_fifo_next(ei->obuf);
 	if (!ep) {
 		flog_err(EC_LIB_DEVELOPMENT,
-			 "%s: Interface %s no packet on queue?",
-			 __PRETTY_FUNCTION__, ei->ifp->name);
+			 "%s: Interface %s no packet on queue?", __func__,
+			 ei->ifp->name);
 		goto out;
 	}
 	if (ep->length < EIGRP_HEADER_LEN) {
 		flog_err(EC_EIGRP_PACKET, "%s: Packet just has a header?",
-			 __PRETTY_FUNCTION__);
+			 __func__);
 		eigrp_header_dump((struct eigrp_header *)ep->s->data);
 		eigrp_packet_delete(ei);
 		goto out;
 	}
 
 	if (ep->dst.s_addr == htonl(EIGRP_MULTICAST_ADDRESS))
-		eigrp_if_ipmulticast(eigrp, ei->address, ei->ifp->ifindex);
+		eigrp_if_ipmulticast(eigrp, &ei->address, ei->ifp->ifindex);
 
 	memset(&iph, 0, sizeof(struct ip));
 	memset(&sa_dst, 0, sizeof(sa_dst));
@@ -418,7 +420,7 @@ int eigrp_write(struct thread *thread)
 	iph.ip_ttl = EIGRP_IP_TTL;
 	iph.ip_p = IPPROTO_EIGRPIGP;
 	iph.ip_sum = 0;
-	iph.ip_src.s_addr = ei->address->u.prefix4.s_addr;
+	iph.ip_src.s_addr = ei->address.u.prefix4.s_addr;
 	iph.ip_dst.s_addr = ep->dst.s_addr;
 
 	memset(&msg, 0, sizeof(msg));
@@ -483,7 +485,7 @@ int eigrp_read(struct thread *thread)
 	struct eigrp_header *eigrph;
 	struct interface *ifp;
 	struct eigrp_neighbor *nbr;
-
+	struct in_addr srcaddr;
 	uint16_t opcode = 0;
 	uint16_t length = 0;
 
@@ -495,7 +497,7 @@ int eigrp_read(struct thread *thread)
 	thread_add_read(master, eigrp_read, eigrp, eigrp->fd, &eigrp->t_read);
 
 	stream_reset(eigrp->ibuf);
-	if (!(ibuf = eigrp_recv_packet(eigrp->fd, &ifp, eigrp->ibuf))) {
+	if (!(ibuf = eigrp_recv_packet(eigrp, eigrp->fd, &ifp, eigrp->ibuf))) {
 		/* This raw packet is known to be at least as big as its IP
 		 * header. */
 		return -1;
@@ -509,6 +511,7 @@ int eigrp_read(struct thread *thread)
 	if (iph->ip_v == 4)
 		length = (iph->ip_len) - 20U;
 
+	srcaddr = iph->ip_src;
 
 	/* IP Header dump. */
 	if (IS_DEBUG_EIGRP_TRANSMIT(0, RECV)
@@ -524,8 +527,8 @@ int eigrp_read(struct thread *thread)
 		   and also platforms (such as Solaris 8) that claim to support
 		   ifindex
 		   retrieval but do not. */
-		c = if_lookup_address((void *)&iph->ip_src, AF_INET,
-				      VRF_DEFAULT);
+		c = if_lookup_address((void *)&srcaddr, AF_INET,
+				      eigrp->vrf_id);
 
 		if (c == NULL)
 			return 0;
@@ -547,11 +550,11 @@ int eigrp_read(struct thread *thread)
 
 	/* Self-originated packet should be discarded silently. */
 	if (eigrp_if_lookup_by_local_addr(eigrp, NULL, iph->ip_src)
-	    || (IPV4_ADDR_SAME(&iph->ip_src, &ei->address->u.prefix4))) {
+	    || (IPV4_ADDR_SAME(&srcaddr, &ei->address.u.prefix4))) {
 		if (IS_DEBUG_EIGRP_TRANSMIT(0, RECV))
 			zlog_debug(
 				"eigrp_read[%s]: Dropping self-originated packet",
-				inet_ntoa(iph->ip_src));
+				inet_ntoa(srcaddr));
 		return 0;
 	}
 
@@ -581,7 +584,7 @@ int eigrp_read(struct thread *thread)
 					  sizeof(buf[0])),
 				inet_ntop(AF_INET, &iph->ip_dst, buf[1],
 					  sizeof(buf[1])),
-				inet_ntop(AF_INET, &ei->address->u.prefix4,
+				inet_ntop(AF_INET, &ei->address.u.prefix4,
 					  buf[2], sizeof(buf[2])));
 
 		if (iph->ip_dst.s_addr == htonl(EIGRP_MULTICAST_ADDRESS)) {
@@ -706,7 +709,8 @@ int eigrp_read(struct thread *thread)
 	return 0;
 }
 
-static struct stream *eigrp_recv_packet(int fd, struct interface **ifp,
+static struct stream *eigrp_recv_packet(struct eigrp *eigrp,
+					int fd, struct interface **ifp,
 					struct stream *ibuf)
 {
 	int ret;
@@ -745,7 +749,7 @@ static struct stream *eigrp_recv_packet(int fd, struct interface **ifp,
 
 	ip_len = iph->ip_len;
 
-#if !defined(GNU_LINUX) && (OpenBSD < 200311) && (__FreeBSD_version < 1000000)
+#if defined(__FreeBSD__) && (__FreeBSD_version < 1000000)
 	/*
 	 * Kernel network code touches incoming IP header parameters,
 	 * before protocol specific processing.
@@ -774,7 +778,7 @@ static struct stream *eigrp_recv_packet(int fd, struct interface **ifp,
 
 	ifindex = getsockopt_ifindex(AF_INET, &msgh);
 
-	*ifp = if_lookup_by_index(ifindex, VRF_DEFAULT);
+	*ifp = if_lookup_by_index(ifindex, eigrp->vrf_id);
 
 	if (ret != ip_len) {
 		zlog_warn(
@@ -981,9 +985,9 @@ static int eigrp_check_network_mask(struct eigrp_interface *ei,
 	if (ei->type == EIGRP_IFTYPE_POINTOPOINT)
 		return 1;
 
-	masklen2ip(ei->address->prefixlen, &mask);
+	masklen2ip(ei->address.prefixlen, &mask);
 
-	me.s_addr = ei->address->u.prefix4.s_addr & mask.s_addr;
+	me.s_addr = ei->address.u.prefix4.s_addr & mask.s_addr;
 	him.s_addr = ip_src.s_addr & mask.s_addr;
 
 	if (IPV4_ADDR_SAME(&me, &him))
@@ -1201,7 +1205,7 @@ uint16_t eigrp_add_internalTLV_to_stream(struct stream *s,
 		break;
 	default:
 		flog_err(EC_LIB_DEVELOPMENT, "%s: Unexpected prefix length: %d",
-			 __PRETTY_FUNCTION__, pe->destination->prefixlen);
+			 __func__, pe->destination->prefixlen);
 		return 0;
 	}
 	stream_putl(s, 0x00000000);

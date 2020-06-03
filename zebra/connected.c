@@ -65,7 +65,7 @@ static void connected_withdraw(struct connected *ifc)
 
 	if (!CHECK_FLAG(ifc->conf, ZEBRA_IFC_CONFIGURED)) {
 		listnode_delete(ifc->ifp->connected, ifc);
-		connected_free(ifc);
+		connected_free(&ifc);
 	}
 }
 
@@ -177,7 +177,7 @@ static void connected_update(struct interface *ifp, struct connected *ifc)
 		 */
 		if (connected_same(current, ifc)) {
 			/* nothing to do */
-			connected_free(ifc);
+			connected_free(&ifc);
 			return;
 		}
 
@@ -199,7 +199,7 @@ static void connected_update(struct interface *ifp, struct connected *ifc)
 void connected_up(struct interface *ifp, struct connected *ifc)
 {
 	afi_t afi;
-	struct prefix p;
+	struct prefix p = {0};
 	struct nexthop nh = {
 		.type = NEXTHOP_TYPE_IFINDEX,
 		.ifindex = ifp->ifindex,
@@ -210,9 +210,10 @@ void connected_up(struct interface *ifp, struct connected *ifc)
 
 	zvrf = zebra_vrf_lookup_by_id(ifp->vrf_id);
 	if (!zvrf) {
-		flog_err(EC_ZEBRA_VRF_NOT_FOUND,
-			 "%s: Received Up for interface but no associated zvrf: %d",
-			 __PRETTY_FUNCTION__, ifp->vrf_id);
+		flog_err(
+			EC_ZEBRA_VRF_NOT_FOUND,
+			"%s: Received Up for interface but no associated zvrf: %d",
+			__func__, ifp->vrf_id);
 		return;
 	}
 	if (!CHECK_FLAG(ifc->conf, ZEBRA_IFC_REAL))
@@ -235,7 +236,7 @@ void connected_up(struct interface *ifp, struct connected *ifc)
 			return;
 		break;
 	case AFI_IP6:
-#ifndef LINUX
+#ifndef GNU_LINUX
 		/* XXX: It is already done by rib_bogus_ipv6 within rib_add */
 		if (IN6_IS_ADDR_UNSPECIFIED(&p.u.prefix6))
 			return;
@@ -355,9 +356,10 @@ void connected_down(struct interface *ifp, struct connected *ifc)
 
 	zvrf = zebra_vrf_lookup_by_id(ifp->vrf_id);
 	if (!zvrf) {
-		flog_err(EC_ZEBRA_VRF_NOT_FOUND,
-			 "%s: Received Up for interface but no associated zvrf: %d",
-			 __PRETTY_FUNCTION__, ifp->vrf_id);
+		flog_err(
+			EC_ZEBRA_VRF_NOT_FOUND,
+			"%s: Received Up for interface but no associated zvrf: %d",
+			__func__, ifp->vrf_id);
 		return;
 	}
 
@@ -385,7 +387,7 @@ void connected_down(struct interface *ifp, struct connected *ifc)
 			return;
 		break;
 	default:
-		zlog_info("Unknown AFI: %s", afi2str(afi));
+		zlog_warn("Unknown AFI: %s", afi2str(afi));
 		break;
 	}
 
@@ -564,5 +566,5 @@ int connected_is_unnumbered(struct interface *ifp)
 			return CHECK_FLAG(connected->flags,
 					  ZEBRA_IFA_UNNUMBERED);
 	}
-	return 1;
+	return 0;
 }

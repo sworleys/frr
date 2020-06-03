@@ -45,11 +45,9 @@ static int downstream_jpstate_isjoined(const struct pim_ifchannel *ch)
 	case PIM_IFJOIN_PRUNE_TMP:
 	case PIM_IFJOIN_PRUNE_PENDING_TMP:
 		return 0;
-		break;
 	case PIM_IFJOIN_JOIN:
 	case PIM_IFJOIN_PRUNE_PENDING:
 		return 1;
-		break;
 	}
 	return 0;
 }
@@ -115,8 +113,7 @@ int pim_macro_ch_lost_assert(const struct pim_ifchannel *ch)
 
 	ifp = ch->interface;
 	if (!ifp) {
-		zlog_warn("%s: (S,G)=%s: null interface", __PRETTY_FUNCTION__,
-			  ch->sg_str);
+		zlog_warn("%s: (S,G)=%s: null interface", __func__, ch->sg_str);
 		return 0; /* false */
 	}
 
@@ -127,7 +124,7 @@ int pim_macro_ch_lost_assert(const struct pim_ifchannel *ch)
 	pim_ifp = ifp->info;
 	if (!pim_ifp) {
 		zlog_warn("%s: (S,G)=%s: multicast not enabled on interface %s",
-			  __PRETTY_FUNCTION__, ch->sg_str, ifp->name);
+			  __func__, ch->sg_str, ifp->name);
 		return 0; /* false */
 	}
 
@@ -164,7 +161,7 @@ int pim_macro_chisin_pim_include(const struct pim_ifchannel *ch)
 
 	if (!pim_ifp) {
 		zlog_warn("%s: (S,G)=%s: multicast not enabled on interface %s",
-			  __PRETTY_FUNCTION__, ch->sg_str, ch->interface->name);
+			  __func__, ch->sg_str, ch->interface->name);
 		return 0; /* false */
 	}
 
@@ -236,8 +233,7 @@ int pim_macro_ch_could_assert_eval(const struct pim_ifchannel *ch)
 
 	ifp = ch->interface;
 	if (!ifp) {
-		zlog_warn("%s: (S,G)=%s: null interface", __PRETTY_FUNCTION__,
-			  ch->sg_str);
+		zlog_warn("%s: (S,G)=%s: null interface", __func__, ch->sg_str);
 		return 0; /* false */
 	}
 
@@ -394,15 +390,14 @@ int pim_macro_assert_tracking_desired_eval(const struct pim_ifchannel *ch)
 
 	ifp = ch->interface;
 	if (!ifp) {
-		zlog_warn("%s: (S,G)=%s: null interface", __PRETTY_FUNCTION__,
-			  ch->sg_str);
+		zlog_warn("%s: (S,G)=%s: null interface", __func__, ch->sg_str);
 		return 0; /* false */
 	}
 
 	pim_ifp = ifp->info;
 	if (!pim_ifp) {
 		zlog_warn("%s: (S,G)=%s: multicast not enabled on interface %s",
-			  __PRETTY_FUNCTION__, ch->sg_str, ch->interface->name);
+			  __func__, ch->sg_str, ch->interface->name);
 		return 0; /* false */
 	}
 

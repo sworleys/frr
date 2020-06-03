@@ -22,7 +22,11 @@
 #define _ZEBRA_VTY_H
 
 #include <sys/types.h>
+#ifdef HAVE_LIBPCREPOSIX
+#include <pcreposix.h>
+#else
 #include <regex.h>
+#endif /* HAVE_LIBPCREPOSIX */
 
 #include "thread.h"
 #include "log.h"
@@ -30,6 +34,10 @@
 #include "qobj.h"
 #include "compiler.h"
 #include "northbound.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define VTY_BUFSIZ 4096
 #define VTY_MAXHIST 20
@@ -250,7 +258,8 @@ static inline void vty_push_context(struct vty *vty, int node, uint64_t id)
 
 #define VTY_CHECK_XPATH                                                        \
 	do {                                                                   \
-		if (vty->xpath_index > 0                                       \
+		if (vty->type != VTY_FILE && !vty->private_config              \
+		    && vty->xpath_index > 0                                    \
 		    && !yang_dnode_exists(vty->candidate_config->dnode,        \
 					  VTY_CURR_XPATH)) {                   \
 			vty_out(vty,                                           \
@@ -286,7 +295,7 @@ struct vty_arg {
 #endif
 
 /* Prototypes. */
-extern void vty_init(struct thread_master *);
+extern void vty_init(struct thread_master *, bool do_command_logging);
 extern void vty_init_vtysh(void);
 extern void vty_terminate(void);
 extern void vty_reset(void);
@@ -298,8 +307,8 @@ extern struct vty *vty_stdio(void (*atclose)(int isexit));
  * - vty_endframe() clears the buffer without printing it, and prints an
  *   extra string if the buffer was empty before (for context-end markers)
  */
-extern int vty_out(struct vty *, const char *, ...) PRINTF_ATTRIBUTE(2, 3);
-extern void vty_frame(struct vty *, const char *, ...) PRINTF_ATTRIBUTE(2, 3);
+extern int vty_out(struct vty *, const char *, ...) PRINTFRR(2, 3);
+extern void vty_frame(struct vty *, const char *, ...) PRINTFRR(2, 3);
 extern void vty_endframe(struct vty *, const char *);
 bool vty_set_include(struct vty *vty, const char *regexp);
 
@@ -326,5 +335,9 @@ extern void vty_stdio_close(void);
 /* Send a fixed-size message to all vty terminal monitors; this should be
    an async-signal-safe function. */
 extern void vty_log_fixed(char *buf, size_t len);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _ZEBRA_VTY_H */

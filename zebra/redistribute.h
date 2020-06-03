@@ -29,6 +29,10 @@
 #include "zebra/zserv.h"
 #include "zebra/rib.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* ZAPI command handlers */
 extern void zebra_redistribute_add(ZAPI_HANDLER_ARGS);
 extern void zebra_redistribute_delete(ZAPI_HANDLER_ARGS);
@@ -85,4 +89,9 @@ extern int is_zebra_import_table_enabled(afi_t, vrf_id_t vrf_id,
 extern int zebra_import_table_config(struct vty *, vrf_id_t vrf_id);
 
 extern void zebra_import_table_rm_update(const char *rmap);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif /* _ZEBRA_REDISTRIBUTE_H */

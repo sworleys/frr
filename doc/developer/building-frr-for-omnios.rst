@@ -37,7 +37,7 @@ Add packages:
       library/idnkit/header-idnkit \
       system/header \
       system/library/math/header-math \
-      git libtool gawk pkg-config
+      git libtool pkg-config
 
 Add additional Solaris packages:
 
@@ -60,7 +60,7 @@ Add pytest:
 
 ::
 
-    pip install pytest
+    pip install "pytest<5"
 
 Install Sphinx:::
 

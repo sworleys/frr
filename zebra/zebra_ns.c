@@ -23,11 +23,9 @@
 
 #include "lib/ns.h"
 #include "lib/vrf.h"
-#include "lib/logicalrouter.h"
 #include "lib/prefix.h"
 #include "lib/memory.h"
 
-#include "rtadv.h"
 #include "zebra_ns.h"
 #include "zebra_vrf.h"
 #include "zebra_memory.h"
@@ -47,7 +45,6 @@ DEFINE_MTYPE(ZEBRA, ZEBRA_NS, "Zebra Name Space")
 
 static struct zebra_ns *dzns;
 
-static int logicalrouter_config_write(struct vty *vty);
 static int zebra_ns_disable_internal(struct zebra_ns *zns, bool complete);
 
 struct zebra_ns *zebra_ns_lookup(ns_id_t ns_id)
@@ -126,13 +123,10 @@ int zebra_ns_enable(ns_id_t ns_id, void **info)
 
 	zns->ns_id = ns_id;
 
-#if defined(HAVE_RTADV)
-	rtadv_init(zns);
-#endif
-
 	kernel_init(zns);
 	interface_list(zns);
 	route_read(zns);
+	kernel_read_pbr_rules(zns);
 
 	/* Initiate Table Manager per ZNS */
 	table_manager_enable(ns_id);
@@ -146,9 +140,6 @@ int zebra_ns_enable(ns_id_t ns_id, void **info)
 static int zebra_ns_disable_internal(struct zebra_ns *zns, bool complete)
 {
 	route_table_finish(zns->if_table);
-#if defined(HAVE_RTADV)
-	rtadv_terminate(zns);
-#endif
 
 	kernel_terminate(zns, complete);
 
@@ -193,13 +184,11 @@ int zebra_ns_init(const char *optional_default_name)
 	ns_id_t ns_id;
 	ns_id_t ns_id_external;
 
-	frr_elevate_privs(&zserv_privs) {
+	frr_with_privs(&zserv_privs) {
 		ns_id = zebra_ns_id_get_default();
 	}
 	ns_id_external = ns_map_nsid_with_external(ns_id, true);
 	ns_init_management(ns_id_external, ns_id);
-
-	logicalrouter_init(logicalrouter_config_write);
 
 	default_ns = ns_lookup(ns_get_default_id());
 	if (!default_ns) {
@@ -232,21 +221,6 @@ int zebra_ns_init(const char *optional_default_name)
 	}
 
 	return 0;
-}
-
-static int logicalrouter_config_write(struct vty *vty)
-{
-	struct ns *ns;
-	int write = 0;
-
-	RB_FOREACH (ns, ns_head, &ns_tree) {
-		if (ns->ns_id == NS_DEFAULT || ns->name == NULL)
-			continue;
-		vty_out(vty, "logical-router %u netns %s\n", ns->ns_id,
-			ns->name);
-		write = 1;
-	}
-	return write;
 }
 
 int zebra_ns_config_write(struct vty *vty, struct ns *ns)

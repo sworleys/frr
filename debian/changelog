@@ -1,3 +1,9 @@
+frr (7.4+cl4u1) RELEASED; urgency=medium
+
+  * New Enabled: New Work
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Tue, 03 Mar 2020 09:14:23 -0400
+
 frr (7.0+cl4u2) RELEASED; urgency=medium
 
   * New Enabled: zebra: knob to make ra retransmit interval rfc compliant

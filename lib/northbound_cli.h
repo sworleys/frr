@@ -22,6 +22,10 @@
 
 #include "northbound.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Possible formats in which a configuration can be displayed. */
 enum nb_cfg_format {
 	NB_CFG_FMT_CMDS = 0,
@@ -105,10 +109,16 @@ extern void nb_cli_show_dnode_cmds(struct vty *vty, struct lyd_node *dnode,
 				   bool show_defaults);
 
 /* Prototypes of internal functions. */
+extern void nb_cli_show_config_prepare(struct nb_config *config,
+				       bool with_defaults);
 extern void nb_cli_confirmed_commit_clean(struct vty *vty);
 extern int nb_cli_confirmed_commit_rollback(struct vty *vty);
 extern void nb_cli_install_default(int node);
 extern void nb_cli_init(struct thread_master *tm);
 extern void nb_cli_terminate(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _FRR_NORTHBOUND_CLI_H_ */

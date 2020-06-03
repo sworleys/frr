@@ -224,7 +224,7 @@ static int ospf_db_summary_add(struct ospf_neighbor *nbr, struct ospf_lsa *lsa)
 	case OSPF_OPAQUE_LINK_LSA:
 		/* Exclude type-9 LSAs that does not have the same "oi" with
 		 * "nbr". */
-		if (nbr->oi && ospf_if_exists(lsa->oi) != nbr->oi)
+		if (ospf_if_exists(lsa->oi) != nbr->oi)
 			return 0;
 		break;
 	case OSPF_OPAQUE_AREA_LSA:
@@ -399,7 +399,7 @@ static int nsm_kill_nbr(struct ospf_neighbor *nbr)
 }
 
 /* Neighbor State Machine */
-struct {
+const struct {
 	int (*func)(struct ospf_neighbor *);
 	int next_state;
 } NSM[OSPF_NSM_STATE_MAX][OSPF_NSM_EVENT_MAX] = {
@@ -575,7 +575,7 @@ struct {
 	},
 };
 
-static const char *ospf_nsm_event_str[] = {
+static const char *const ospf_nsm_event_str[] = {
 	"NoEvent",	   "PacketReceived",  "Start",
 	"2-WayReceived",     "NegotiationDone", "ExchangeDone",
 	"BadLSReq",	  "LoadingDone",     "AdjOK?",
@@ -621,8 +621,6 @@ static void nsm_change_state(struct ospf_neighbor *nbr, int state)
 	struct ospf_interface *oi = nbr->oi;
 	struct ospf_area *vl_area = NULL;
 	uint8_t old_state;
-	int x;
-	int force = 1;
 
 	/* Preserve old status. */
 	old_state = nbr->state;
@@ -669,32 +667,6 @@ static void nsm_change_state(struct ospf_neighbor *nbr, int state)
 			if (oi->type == OSPF_IFTYPE_VIRTUALLINK && vl_area)
 				if (++vl_area->full_vls == 1)
 					ospf_schedule_abr_task(oi->ospf);
-
-			/* kevinm: refresh any redistributions */
-			for (x = ZEBRA_ROUTE_SYSTEM; x < ZEBRA_ROUTE_MAX; x++) {
-				struct list *red_list;
-				struct listnode *node;
-				struct ospf_redist *red;
-
-				if (x == ZEBRA_ROUTE_OSPF6)
-					continue;
-
-				red_list = oi->ospf->redist[x];
-				if (!red_list)
-					continue;
-
-				for (ALL_LIST_ELEMENTS_RO(red_list, node, red))
-					ospf_external_lsa_refresh_type(
-						oi->ospf, x, red->instance,
-						force);
-			}
-			/* XXX: Clearly some thing is wrong with refresh of
-			 * external LSAs
-			 * this added to hack around defaults not refreshing
-			 * after a timer
-			 * jump.
-			 */
-			ospf_external_lsa_refresh_default(oi->ospf);
 		} else {
 			oi->full_nbrs--;
 			oi->area->full_nbrs--;
@@ -712,7 +684,7 @@ static void nsm_change_state(struct ospf_neighbor *nbr, int state)
 			zlog_info(
 				"%s:[%s:%s], %s -> %s): "
 				"scheduling new router-LSA origination",
-				__PRETTY_FUNCTION__, inet_ntoa(nbr->router_id),
+				__func__, inet_ntoa(nbr->router_id),
 				ospf_get_name(oi->ospf),
 				lookup_msg(ospf_nsm_state_msg, old_state, NULL),
 				lookup_msg(ospf_nsm_state_msg, state, NULL));
@@ -759,7 +731,7 @@ static void nsm_change_state(struct ospf_neighbor *nbr, int state)
 			OSPF_DD_FLAG_I | OSPF_DD_FLAG_M | OSPF_DD_FLAG_MS;
 		if (CHECK_FLAG(oi->ospf->config, OSPF_LOG_ADJACENCY_DETAIL))
 			zlog_info(
-				"%s: Intializing [DD]: %s with seqnum:%x , flags:%x",
+				"%s: Initializing [DD]: %s with seqnum:%x , flags:%x",
 				(oi->ospf->name) ? oi->ospf->name
 						 : VRF_DEFAULT_NAME,
 				inet_ntoa(nbr->router_id), nbr->dd_seqnum,

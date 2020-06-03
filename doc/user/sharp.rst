@@ -29,20 +29,24 @@ documented elsewhere.
 Using SHARP
 ===========
 
-All sharp commands are under the enable node and preceeded by the ``sharp``
+All sharp commands are under the enable node and preceded by the ``sharp``
 keyword. At present, no sharp commands will be preserved in the config.
 
 .. index:: sharp install
-.. clicmd:: sharp install routes A.B.C.D nexthop <E.F.G.H|X:X::X:X> (1-1000000)
+.. clicmd:: sharp install routes A.B.C.D <nexthop <E.F.G.H|X:X::X:X>|nexthop-group NAME> (1-1000000) [instance (0-255)] [repeat (2-1000)]
 
    Install up to 1,000,000 (one million) /32 routes starting at ``A.B.C.D``
    with specified nexthop ``E.F.G.H`` or ``X:X::X:X``. The nexthop is
    a ``NEXTHOP_TYPE_IPV4`` or ``NEXTHOP_TYPE_IPV6`` and must be reachable
-   to be installed into the kernel. The routes are installed into zebra as
-   ``ZEBRA_ROUTE_SHARP`` and can be used as part of a normal route
+   to be installed into the kernel. Alternatively a nexthop-group NAME
+   can be specified and used as the nexthops.  The routes are installed into
+   zebra as ``ZEBRA_ROUTE_SHARP`` and can be used as part of a normal route
    redistribution. Route installation time is noted in the debug
    log. When zebra successfully installs a route into the kernel and SHARP
    receives success notifications for all routes this is logged as well.
+   Instance (0-255) if specified causes the routes to be installed in a different
+   instance. If repeat is used then we will install/uninstall the routes the
+   number of times specified.
 
 .. index:: sharp remove
 .. clicmd:: sharp remove routes A.B.C.D (1-1000000)
@@ -67,7 +71,7 @@ keyword. At present, no sharp commands will be preserved in the config.
    be used for pop and forward operations when the specified label is seen.
 
 .. index:: sharp watch
-.. clicmd:: [no] sharp watch <nexthop|import> <A.B.C.D|X:X::X:X> [connected]
+.. clicmd:: [no] sharp watch <nexthop <A.B.C.D|X:X::X:X>|import <A.B.C.D/M:X:X::X:X/M> [connected]
 
    Instruct zebra to monitor and notify sharp when the specified nexthop is
    changed. The notification from zebra is written into the debug log.
@@ -82,3 +86,20 @@ keyword. At present, no sharp commands will be preserved in the config.
 
    Allow end user to dump associated data with the nexthop tracking that
    may have been turned on.
+
+.. index:: sharp lsp
+.. clicmd:: sharp lsp (0-100000) nexthop-group NAME [prefix A.B.C.D/M TYPE [instance (0-255)]]
+
+   Install an LSP using the specified in-label, with nexthops as
+   listed in nexthop-group ``NAME``. The LSP is installed as type
+   ZEBRA_LSP_SHARP. If ``prefix`` is specified, an existing route with
+   type ``TYPE`` (and optional ``instance`` id) will be updated to use
+   the LSP.
+
+.. index:: sharp remove lsp
+.. clicmd:: sharp remove lsp (0-100000) nexthop-group NAME [prefix A.B.C.D/M TYPE [instance (0-255)]]
+
+   Remove a SHARPD LSP that uses the specified in-label, where the
+   nexthops are specified in nexthop-group ``NAME``. If ``prefix`` is
+   specified, remove label bindings from the route of type ``TYPE``
+   also.

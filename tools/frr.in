@@ -21,11 +21,13 @@ VTYSH="@vtysh_bin@" # /usr/bin/vtysh
 FRR_USER="@enable_user@" # frr
 FRR_GROUP="@enable_group@" # frr
 FRR_VTY_GROUP="@enable_vty_group@" # frrvty
+FRR_DEFAULT_PROFILE="@DFLT_NAME@" # traditional / datacenter
 
 # Local Daemon selection may be done by using /etc/frr/daemons.
 # See /usr/share/doc/frr/README.Debian.gz for further information.
 # Keep zebra first and do not list watchfrr!
-DAEMONS="zebra bgpd ripd ripngd ospfd ospf6d isisd fabricd babeld pimd ldpd nhrpd eigrpd sharpd pbrd staticd bfdd vrrpd"
+DAEMONS="zebra bgpd ripd ripngd ospfd ospf6d isisd babeld pimd ldpd nhrpd eigrpd sharpd pbrd staticd bfdd fabricd vrrpd"
+MAX_INSTANCES=5
 RELOAD_SCRIPT="$D_PATH/frr-reload.py"
 
 if [ -e /lib/lsb/init-functions ]; then
@@ -114,76 +116,80 @@ check_daemon()
 # The Frr daemons creates the pidfile when starting.
 start()
 {
-       ulimit -n $MAX_FDS
-        if [ "$1" = "watchfrr" ]; then
+	local dmn inst
+	dmn="$1"
+	inst="$2"
 
-           # We may need to restart watchfrr if new daemons are added and/or
-           # removed
-           if started "$1" ; then
-               stop watchfrr
-           else
-               # Echo only once. watchfrr is printed in the stop above
-               echo -n " $1"
-           fi
+	ulimit -n $MAX_FDS > /dev/null 2> /dev/null
+	if [ "$dmn" = "watchfrr" ]; then
 
-           ${SSD} \
-                --start \
-                --pidfile=`pidfile $1` \
-                --exec "$D_PATH/$1" \
-                -- \
-                "${watchfrr_options[@]}"
+		# We may need to restart watchfrr if new daemons are added and/or
+		# removed
+		if started "$dmn" ; then
+			stop watchfrr
+		else
+			# Echo only once. watchfrr is printed in the stop above
+			echo -n " $dmn"
+		fi
 
-        elif [ -n "$2" ]; then
-          echo -n " $1-$2"
-           if ! check_daemon $1 $2 ; then
-              echo -n " (binary does not exist)"
-              return;
-          fi
+		eval "set - $watchfrr_options"
+		${SSD} \
+			--start \
+			--pidfile=`pidfile $dmn` \
+			--exec "$D_PATH/$dmn" \
+			-- \
+			"$@"
 
-           ${SSD} \
-               --start \
-               --pidfile=`pidfile $1-$2` \
-               --exec "$D_PATH/$1" \
-               -- \
-               `eval echo "$""$1""_options"` -n "$2"
-        else
-           echo -n " $1"
-            if ! check_daemon $1; then
-               echo -n " (binary does not exist)"
-               return;
-           fi
+	elif [ -n "$inst" ]; then
+		echo -n " $dmn-$inst"
+		if ! check_daemon $dmn $inst ; then
+			echo -n " (binary does not exist)"
+			return;
+		fi
 
-           if [ "$valgrind_enable" = "yes" ]; then
-              ${SSD} \
-               --start \
-               --pidfile=`pidfile $1` \
-               --exec "$valgrind" \
-               -- --trace-children=no --leak-check=full --log-file=/var/log/frr/$1-valgrind.log $D_PATH/$1 \
-               `eval echo "$""$1""_options"`
-           else
-              ${SSD} \
-               --start \
-               --pidfile=`pidfile $1` \
-               --exec "$D_PATH/$1" \
-               -- \
-               `eval echo "$""$1""_options"`
-           fi
-        fi
+		${SSD} \
+			--start \
+			--pidfile=`pidfile $dmn-$inst` \
+			--exec "$D_PATH/$dmn" \
+			-- \
+			`eval echo "$""$dmn""_options"` $frr_global_options -n "$inst"
+	else
+		if ! check_daemon $dmn; then
+			echo -n " (binary does not exist)"
+			return;
+		fi
+
+		if [ "$valgrind_enable" = "yes" ]; then
+			${SSD} \
+				--start \
+				--pidfile=`pidfile $dmn` \
+				--exec "$valgrind" \
+				-- --trace-children=no --leak-check=full --log-file=/var/log/frr/$dmn-valgrind.log $D_PATH/$dmn \
+				`eval echo "$""$dmn""_options"` $frr_global_options
+		else
+			${SSD} \
+				--start \
+				--pidfile=`pidfile $dmn` \
+				--exec "$D_PATH/$dmn" \
+				-- \
+				`eval echo "$""$dmn""_options"` $frr_global_options
+		fi
+	fi
 
 	# Start the staticd automatically
-	if [ "$1" = "zebra" ]; then
-	    echo -n "starting staticd since zebra is running"
-	    if ! check_daemon staticd ; then
-		echo -n " (binary does not exist)"
-		return;
-	    fi
+	if [ "$dmn" = "zebra" ]; then
+		echo -n "starting staticd since zebra is running"
+		if ! check_daemon staticd ; then
+			echo -n " (binary does not exist)"
+			return;
+		fi
 
-	    ${SSD} \
-		--start \
-		--pidfile=`pidfile staticd` \
-		--exec "$D_PATH/staticd" \
-		-- \
-		`eval echo "$"staticd"_options"`
+		${SSD} \
+			--start \
+			--pidfile=`pidfile staticd` \
+			--exec "$D_PATH/staticd" \
+			-- \
+			`eval echo "$"staticd"_options"` $frr_global_options
 	fi
 }
 
@@ -509,10 +515,24 @@ check_status()
 
 # Load configuration
 . "$C_PATH/daemons"
-. "$C_PATH/daemons.conf"
+if [ -e "$C_PATH/daemons.conf" ]; then
+	. "$C_PATH/daemons.conf"
+fi
 
 # Read configuration variable file if it is present
 [ -r /etc/default/frr ] && . /etc/default/frr
+
+if test -z "$frr_profile"; then
+	# try to autodetect config profile
+	if test -d /etc/cumulus; then
+		frr_profile=datacenter
+	# elif test ...; then
+	# -- add your distro/system here
+	elif test -n "$FRR_DEFAULT_PROFILE"; then
+		frr_profile="$FRR_DEFAULT_PROFILE"
+	fi
+fi
+test -n "$frr_profile" && frr_global_options="$frr_global_options -F $frr_profile"
 
 MAX_INSTANCES=${MAX_INSTANCES:=5}
 
@@ -533,98 +553,76 @@ elif [ -n "$2" ] && [ "$2" != "all" ]; then
 fi
 
 case "$1" in
-    start)
-        # Try to load this necessary (at least for 2.6) module.
-        if [ -d /lib/modules/`uname -r` ] ; then
-          echo "Loading capability module if not yet done."
-          set +e; LC_ALL=C modprobe -a capability 2>&1 | egrep -v "(not found|Can't locate)"; set -e
-        fi
+	start)
+		# Try to load this necessary (at least for 2.6) module.
+		if [ -d /lib/modules/`uname -r` ] ; then
+			echo "Loading capability module if not yet done."
+			set +e; LC_ALL=C modprobe -a capability 2>&1 | egrep -v "(not found|Can't locate)"; set -e
+		fi
 
-        # Start all daemons
-        cd $C_PATH/
-        if [ "$2" != "watchfrr" ]; then
-          start_prio 10 $dmn
-        fi
-        start_watchfrr
-        vtysh_b
-        ;;
+		# Start all daemons
+		cd $C_PATH/
+		if [ "$2" != "watchfrr" ]; then
+			start_prio 10 $dmn
+		fi
+		start_watchfrr
+		vtysh_b
+		;;
 
-    1|2|3|4|5|6|7|8|9|10)
-        # Stop/start daemons for the appropriate priority level
-        stop_prio $1
-        start_prio $1
-        vtysh_b
-        ;;
+	1|2|3|4|5|6|7|8|9|10)
+		# Stop/start daemons for the appropriate priority level
+		stop_prio $1
+		start_prio $1
+		vtysh_b
+		;;
 
-    stop|0)
-        # Stop all daemons at level '0' or 'stop'
-        stop_watchfrr
-        if [ "$dmn" != "watchfrr" ]; then
-         [ -n "${dmn}" ] && eval "${dmn/-/_}=0"
-          stop_prio 0 $dmn
-        fi
+	stop|0)
+		# Stop all daemons at level '0' or 'stop'
+		stop_watchfrr
+		if [ "$dmn" != "watchfrr" ]; then
+			[ -n "${dmn}" ] && eval "${dmn/-/_}=0"
+			stop_prio 0 $dmn
+		fi
 
-        if [ -z "$dmn" -o "$dmn" = "zebra" ]; then
-          echo "Removing all routes made by FRR."
-	  # Specific values for each proto can be found
-	  # in /etc/iproute2/rt_protos as well as FRR
-	  # specific ones in /etc/iproute2/rt_protos.d
-	  # Additionally if a new protocol is added
-	  # we need to add it here as well as
-	  # in rt_netlink.h( follow the directions! )
-          ip route flush proto 4
-          ip route flush proto 11
-          ip route flush proto 42
-          ip route flush proto 186
-          ip route flush proto 187
-          ip route flush proto 188
-          ip route flush proto 189
-          ip route flush proto 190
-          ip route flush proto 191
-          ip route flush proto 192
-          ip route flush proto 193
-          ip route flush proto 194
-          ip route flush proto 195
-	  ip route flush proto 196
-       else
-         [ -n "$dmn" ] && eval "${dmn/-/_}=0"
-         start_watchfrr
-        fi
-        ;;
+		if [ -n "$dmn" -a "$dmn" != "zebra" ]; then
+			[ -n "$dmn" ] && eval "${dmn/-/_}=0"
+			start_watchfrr
+		fi
+		;;
 
-    reload)
-       # Just apply the commands that have changed, no restart necessary
-       if [ ! -x "$RELOAD_SCRIPT" ]; then
-          echo "Please install frr-pythontools package. Required for reload"
-          exit 0
-       fi
+	reload)
+		# Just apply the commands that have changed, no restart necessary
+		if [ ! -x "$RELOAD_SCRIPT" ]; then
+			echo "Please install frr-pythontools package. Required for reload"
+			exit 0
+		fi
 
-       NEW_CONFIG_FILE="${2:-$C_PATH/frr.conf}"
-       [ ! -r $NEW_CONFIG_FILE ] && echo "Unable to read new configuration file $NEW_CONFIG_FILE" && exit 1
-       echo "Applying only incremental changes to running configuration from frr.conf"
-       "$RELOAD_SCRIPT" --reload $C_PATH/frr.conf
-       exit $?
-       ;;
+		NEW_CONFIG_FILE="${2:-$C_PATH/frr.conf}"
+		[ ! -r $NEW_CONFIG_FILE ] && echo "Unable to read new configuration file $NEW_CONFIG_FILE" && exit 1
+		echo "Applying only incremental changes to running configuration from frr.conf"
+		"$RELOAD_SCRIPT" --reload $C_PATH/frr.conf
+		exit $?
+		;;
 
-    status)
-        check_status $dmn
-        exit $?
-        ;;
+	status)
+		check_status $dmn
+		exit $?
+		;;
 
-    restart|force-reload)
-        $0 stop $dmn
-        sleep 1
-        $0 start $dmn
-        ;;
+	restart|force-reload)
+		$0 stop $dmn
+		sleep 1
+		$0 start $dmn
+		;;
 
-    *)
-        echo "Usage: /etc/init.d/frr {start|stop|status|reload|restart|force-reload|<priority>} [daemon]"
-        echo "       E.g. '/etc/init.d/frr 5' would start all daemons with a prio 1-5."
-       echo "       reload applies only modifications from the running config to all daemons."
-       echo "       reload neither restarts starts any daemon nor starts any new ones."
-        echo "       Read /usr/share/doc/frr/README.Debian for details."
-        exit 1
-        ;;
+	*)
+		echo "Usage: /etc/init.d/frr {start|stop|status|reload|restart|force-reload|<priority>} [daemon]"
+		echo "       E.g. '/etc/init.d/frr 5' would start all daemons with a prio 1-5."
+		echo "       reload applies only modifications from the running config to all daemons."
+		echo "       reload neither restarts starts any daemon nor starts any new ones."
+		echo "       Read /usr/share/doc/frr/README.Debian for details."
+		exit 1
+		;;
 esac
 
 echo "Exiting from the script"

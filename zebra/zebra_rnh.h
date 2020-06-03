@@ -25,19 +25,11 @@
 #include "prefix.h"
 #include "vty.h"
 
-extern int zebra_rnh_ip_default_route;
-extern int zebra_rnh_ipv6_default_route;
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 extern void zebra_rnh_init(void);
-
-static inline int rnh_resolve_via_default(int family)
-{
-	if (((family == AF_INET) && zebra_rnh_ip_default_route)
-	    || ((family == AF_INET6) && zebra_rnh_ipv6_default_route))
-		return 1;
-	else
-		return 0;
-}
 
 static inline const char *rnh_type2str(rnh_type_t type)
 {
@@ -67,4 +59,11 @@ extern void zebra_evaluate_rnh(struct zebra_vrf *zvrf, afi_t afi, int force,
 extern void zebra_print_rnh_table(vrf_id_t vrfid, afi_t afi, struct vty *vty,
 				  rnh_type_t type, struct prefix *p);
 extern char *rnh_str(struct rnh *rnh, char *buf, int size);
+
+extern int rnh_resolve_via_default(struct zebra_vrf *zvrf, int family);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif /*_ZEBRA_RNH_H */

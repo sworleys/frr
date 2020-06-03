@@ -25,7 +25,11 @@
 #include <string.h>
 #include <ctype.h>
 #include <sys/types.h>
+#ifdef HAVE_LIBPCREPOSIX
+#include <pcreposix.h>
+#else
 #include <regex.h>
+#endif /* HAVE_LIBPCREPOSIX */
 
 #include "frrstr.h"
 #include "memory.h"
@@ -209,7 +213,7 @@ bool frrstr_endswith(const char *str, const char *suffix)
 int all_digit(const char *str)
 {
 	for (; *str != '\0'; str++)
-		if (!isdigit((int)*str))
+		if (!isdigit((unsigned char)*str))
 			return 0;
 	return 1;
 }

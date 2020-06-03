@@ -83,6 +83,9 @@ struct external_info *ospf_external_info_check(struct ospf *ospf,
 	struct as_external_lsa *al;
 	struct prefix_ipv4 p;
 	struct route_node *rn;
+	struct list *ext_list;
+	struct listnode *node;
+	struct ospf_external *ext;
 	int type;
 
 	al = (struct as_external_lsa *)lsa->data;
@@ -91,7 +94,7 @@ struct external_info *ospf_external_info_check(struct ospf *ospf,
 	p.prefix = lsa->data->id;
 	p.prefixlen = ip_masklen(al->mask);
 
-	for (type = 0; type <= ZEBRA_ROUTE_MAX; type++) {
+	for (type = 0; type < ZEBRA_ROUTE_MAX; type++) {
 		int redist_on = 0;
 
 		redist_on =
@@ -105,10 +108,6 @@ struct external_info *ospf_external_info_check(struct ospf *ospf,
 					      ospf->vrf_id));
 		// Pending: check for MI above.
 		if (redist_on) {
-			struct list *ext_list;
-			struct listnode *node;
-			struct ospf_external *ext;
-
 			ext_list = ospf->external[type];
 			if (!ext_list)
 				continue;
@@ -129,6 +128,22 @@ struct external_info *ospf_external_info_check(struct ospf *ospf,
 		}
 	}
 
+	if (is_prefix_default(&p) && ospf->external[DEFAULT_ROUTE]) {
+		ext_list = ospf->external[DEFAULT_ROUTE];
+
+		for (ALL_LIST_ELEMENTS_RO(ext_list, node, ext)) {
+			if (!ext->external_info)
+				continue;
+
+			rn = route_node_lookup(ext->external_info,
+					       (struct prefix *)&p);
+			if (!rn)
+				continue;
+			route_unlock_node(rn);
+			if (rn->info != NULL)
+				return (struct external_info *)rn->info;
+		}
+	}
 	return NULL;
 }
 
@@ -313,8 +328,7 @@ int ospf_flood(struct ospf *ospf, struct ospf_neighbor *nbr,
 			ospf_ls_retransmit_delete_nbr_as(ospf, current);
 			break;
 		default:
-			ospf_ls_retransmit_delete_nbr_area(nbr->oi->area,
-							   current);
+			ospf_ls_retransmit_delete_nbr_area(oi->area, current);
 			break;
 		}
 	}
@@ -330,7 +344,7 @@ int ospf_flood(struct ospf *ospf, struct ospf_neighbor *nbr,
 	   procedure cannot overwrite the newly installed LSA until
 	   MinLSArrival seconds have elapsed. */
 
-	if (!(new = ospf_lsa_install(ospf, nbr->oi, new)))
+	if (!(new = ospf_lsa_install(ospf, oi, new)))
 		return -1; /* unknown LSA type or any other error condition */
 
 	/* Acknowledge the receipt of the LSA by sending a Link State
@@ -934,7 +948,7 @@ void ospf_lsa_flush_area(struct ospf_lsa *lsa, struct ospf_area *area)
 	   retransmissions */
 	lsa->data->ls_age = htons(OSPF_LSA_MAXAGE);
 	if (IS_DEBUG_OSPF_EVENT)
-		zlog_debug("%s: MAXAGE set to LSA %s", __PRETTY_FUNCTION__,
+		zlog_debug("%s: MAXAGE set to LSA %s", __func__,
 			   inet_ntoa(lsa->data->id));
 	monotime(&lsa->tv_recv);
 	lsa->tv_orig = lsa->tv_recv;

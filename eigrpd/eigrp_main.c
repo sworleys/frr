@@ -65,6 +65,7 @@
 #include "eigrpd/eigrp_snmp.h"
 #include "eigrpd/eigrp_filter.h"
 #include "eigrpd/eigrp_errors.h"
+#include "eigrpd/eigrp_vrf.h"
 //#include "eigrpd/eigrp_routemap.h"
 
 /* eigprd privileges */
@@ -90,10 +91,16 @@ struct option longopts[] = {{0}};
 /* Master of threads. */
 struct thread_master *master;
 
+/* Forward declaration of daemon info structure. */
+static struct frr_daemon_info eigrpd_di;
+
 /* SIGHUP handler. */
 static void sighup(void)
 {
 	zlog_info("SIGHUP received");
+
+	/* Reload config file. */
+	vty_read_config(NULL, eigrpd_di.config_file, config_default);
 }
 
 /* SIGINT / SIGTERM handler. */
@@ -130,8 +137,10 @@ struct quagga_signal_t eigrp_signals[] = {
 	},
 };
 
-static const struct frr_yang_module_info *eigrpd_yang_modules[] = {
+static const struct frr_yang_module_info *const eigrpd_yang_modules[] = {
+	&frr_eigrpd_info,
 	&frr_interface_info,
+	&frr_route_map_info,
 };
 
 FRR_DAEMON_INFO(eigrpd, EIGRP, .vty_port = EIGRP_VTY_PORT,
@@ -175,6 +184,7 @@ int main(int argc, char **argv, char **envp)
 	master = eigrp_om->master;
 
 	eigrp_error_init();
+	eigrp_vrf_init();
 	vrf_init(NULL, NULL, NULL, NULL, NULL);
 
 	/*EIGRPd init*/
@@ -187,7 +197,7 @@ int main(int argc, char **argv, char **envp)
 	eigrp_vty_init();
 	keychain_init();
 	eigrp_vty_show_init();
-	eigrp_vty_if_init();
+	eigrp_cli_init();
 
 #ifdef HAVE_SNMP
 	eigrp_snmp_init();
@@ -211,10 +221,7 @@ int main(int argc, char **argv, char **envp)
 	/*eigrp_route_map_init();
 	  route_map_add_hook (eigrp_rmap_update);
 	  route_map_delete_hook (eigrp_rmap_update);*/
-	/*if_rmap_init (EIGRP_NODE);
-	  if_rmap_hook_add (eigrp_if_rmap_update);
-	  if_rmap_hook_delete (eigrp_if_rmap_update);*/
-
+	/*if_rmap_init (EIGRP_NODE); */
 	/* Distribute list install. */
 	distribute_list_init(EIGRP_NODE);
 
@@ -222,5 +229,5 @@ int main(int argc, char **argv, char **envp)
 	frr_run(master);
 
 	/* Not reached. */
-	return (0);
+	return 0;
 }

@@ -51,6 +51,7 @@
 #include "zebra/interface.h"
 #include "zebra/zebra_vxlan.h"
 #include "zebra/zebra_errors.h"
+#include "zebra/zebra_evpn_mh.h"
 
 DEFINE_MTYPE_STATIC(ZEBRA, ZINFO, "Zebra Interface Information")
 
@@ -70,14 +71,22 @@ static int if_zebra_speed_update(struct thread *thread)
 	struct zebra_if *zif = ifp->info;
 	uint32_t new_speed;
 	bool changed = false;
+	int error = 0;
 
 	zif->speed_update = NULL;
 
-	new_speed = kernel_get_speed(ifp);
+	new_speed = kernel_get_speed(ifp, &error);
+
+	/* error may indicate vrf not available or
+	 * interfaces not available.
+	 * note that loopback & virtual interfaces can return 0 as speed
+	 */
+	if (error < 0)
+		return 1;
+
 	if (new_speed != ifp->speed) {
-		zlog_info("%s: %s old speed: %u new speed: %u",
-			  __PRETTY_FUNCTION__, ifp->name, ifp->speed,
-			  new_speed);
+		zlog_info("%s: %s old speed: %u new speed: %u", __func__,
+			  ifp->name, ifp->speed, new_speed);
 		ifp->speed = new_speed;
 		if_add_update(ifp);
 		changed = true;
@@ -119,6 +128,7 @@ static int if_zebra_new_hook(struct interface *ifp)
 	struct zebra_if *zebra_if;
 
 	zebra_if = XCALLOC(MTYPE_ZINFO, sizeof(struct zebra_if));
+	zebra_if->ifp = ifp;
 
 	zebra_if->multicast = IF_ZEBRA_MULTICAST_UNSPEC;
 	zebra_if->shutdown = IF_ZEBRA_SHUTDOWN_OFF;
@@ -145,7 +155,7 @@ static int if_zebra_new_hook(struct interface *ifp)
 		rtadv->AdvLinkMTU = 0;
 		rtadv->AdvReachableTime = 0;
 		rtadv->AdvRetransTimer = 0;
-		rtadv->AdvCurHopLimit = 0;
+		rtadv->AdvCurHopLimit = RTADV_DEFAULT_HOPLIMIT;
 		rtadv->AdvDefaultLifetime =
 			-1; /* derive from MaxRtrAdvInterval */
 		rtadv->HomeAgentPreference = 0;
@@ -156,6 +166,8 @@ static int if_zebra_new_hook(struct interface *ifp)
 		rtadv->DefaultPreference = RTADV_PREF_MEDIUM;
 
 		rtadv->AdvPrefixList = list_new();
+		rtadv->AdvRDNSSList = list_new();
+		rtadv->AdvDNSSLList = list_new();
 	}
 #endif /* HAVE_RTADV */
 
@@ -224,7 +236,11 @@ static int if_zebra_delete_hook(struct interface *ifp)
 
 		rtadv = &zebra_if->rtadv;
 		list_delete(&rtadv->AdvPrefixList);
+		list_delete(&rtadv->AdvRDNSSList);
+		list_delete(&rtadv->AdvDNSSLList);
 #endif /* HAVE_RTADV */
+
+		zebra_evpn_if_cleanup(zebra_if);
 
 		if_nhg_dependents_release(ifp);
 		zebra_if_nhg_dependents_free(zebra_if);
@@ -304,8 +320,10 @@ struct interface *if_lookup_by_name_per_ns(struct zebra_ns *ns,
 
 	for (rn = route_top(ns->if_table); rn; rn = route_next(rn)) {
 		ifp = (struct interface *)rn->info;
-		if (ifp && strcmp(ifp->name, ifname) == 0)
+		if (ifp && strcmp(ifp->name, ifname) == 0) {
+			route_unlock_node(rn);
 			return (ifp);
+		}
 	}
 
 	return NULL;
@@ -602,11 +620,14 @@ void if_add_update(struct interface *ifp)
 		SET_FLAG(ifp->status, ZEBRA_INTERFACE_ACTIVE);
 
 		if (if_data->shutdown == IF_ZEBRA_SHUTDOWN_ON) {
-			if (IS_ZEBRA_DEBUG_KERNEL)
+			if (IS_ZEBRA_DEBUG_KERNEL) {
 				zlog_debug(
-					"interface %s vrf %u index %d is shutdown. "
+					"interface %s vrf %s(%u) index %d is shutdown. "
 					"Won't wake it up.",
-					ifp->name, ifp->vrf_id, ifp->ifindex);
+					ifp->name, VRF_LOGNAME(zvrf->vrf),
+					ifp->vrf_id, ifp->ifindex);
+			}
+
 			return;
 		}
 
@@ -614,13 +635,15 @@ void if_add_update(struct interface *ifp)
 
 		if (IS_ZEBRA_DEBUG_KERNEL)
 			zlog_debug(
-				"interface %s vrf %u index %d becomes active.",
-				ifp->name, ifp->vrf_id, ifp->ifindex);
+				"interface %s vrf %s(%u) index %d becomes active.",
+				ifp->name, VRF_LOGNAME(zvrf->vrf), ifp->vrf_id,
+				ifp->ifindex);
 
 	} else {
 		if (IS_ZEBRA_DEBUG_KERNEL)
-			zlog_debug("interface %s vrf %u index %d is added.",
-				   ifp->name, ifp->vrf_id, ifp->ifindex);
+			zlog_debug("interface %s vrf %s(%u) index %d is added.",
+				   ifp->name, VRF_LOGNAME(zvrf->vrf),
+				   ifp->vrf_id, ifp->ifindex);
 	}
 }
 
@@ -724,7 +747,7 @@ static void if_delete_connected(struct interface *ifp)
 							ZEBRA_IFC_CONFIGURED)) {
 						listnode_delete(ifp->connected,
 								ifc);
-						connected_free(ifc);
+						connected_free(&ifc);
 					} else
 						last = node;
 				}
@@ -745,7 +768,7 @@ static void if_delete_connected(struct interface *ifp)
 				last = node;
 			else {
 				listnode_delete(ifp->connected, ifc);
-				connected_free(ifc);
+				connected_free(&ifc);
 			}
 		} else {
 			last = node;
@@ -759,10 +782,12 @@ void if_delete_update(struct interface *ifp)
 	struct zebra_if *zif;
 
 	if (if_is_up(ifp)) {
+		struct vrf *vrf = vrf_lookup_by_id(ifp->vrf_id);
+
 		flog_err(
 			EC_LIB_INTERFACE,
-			"interface %s vrf %u index %d is still up while being deleted.",
-			ifp->name, ifp->vrf_id, ifp->ifindex);
+			"interface %s vrf %s(%u) index %d is still up while being deleted.",
+			ifp->name, VRF_LOGNAME(vrf), ifp->vrf_id, ifp->ifindex);
 		return;
 	}
 
@@ -772,9 +797,13 @@ void if_delete_update(struct interface *ifp)
 	/* Mark interface as inactive */
 	UNSET_FLAG(ifp->status, ZEBRA_INTERFACE_ACTIVE);
 
-	if (IS_ZEBRA_DEBUG_KERNEL)
-		zlog_debug("interface %s vrf %u index %d is now inactive.",
-			   ifp->name, ifp->vrf_id, ifp->ifindex);
+	if (IS_ZEBRA_DEBUG_KERNEL) {
+		struct vrf *vrf = vrf_lookup_by_id(ifp->vrf_id);
+
+		zlog_debug("interface %s vrf %s(%u) index %d is now inactive.",
+			   ifp->name, VRF_LOGNAME(vrf), ifp->vrf_id,
+			   ifp->ifindex);
+	}
 
 	/* Delete connected routes from the kernel. */
 	if_delete_connected(ifp);
@@ -809,13 +838,14 @@ void if_delete_update(struct interface *ifp)
 		memset(&zif->l2info, 0, sizeof(union zebra_l2if_info));
 		memset(&zif->brslave_info, 0,
 		       sizeof(struct zebra_l2info_brslave));
+		zebra_evpn_if_cleanup(zif);
 	}
 
 	if (!ifp->configured) {
 		if (IS_ZEBRA_DEBUG_KERNEL)
 			zlog_debug("interface %s is being deleted from the system",
 				   ifp->name);
-		if_delete(ifp);
+		if_delete(&ifp);
 	}
 }
 
@@ -1050,6 +1080,11 @@ void if_up(struct interface *ifp)
 	} else if (IS_ZEBRA_IF_MACVLAN(ifp))
 		zebra_vxlan_macvlan_up(ifp);
 
+	if (zif->es_info.es)
+		zebra_evpn_es_if_oper_state_change(zif, true /*up*/);
+
+	if (zif->flags & ZIF_FLAG_EVPN_MH_UPLINK)
+		zebra_evpn_mh_uplink_oper_update(zif);
 }
 
 /* Interface goes down.  We have to manage different behavior of based
@@ -1084,6 +1119,11 @@ void if_down(struct interface *ifp)
 	} else if (IS_ZEBRA_IF_MACVLAN(ifp))
 		zebra_vxlan_macvlan_down(ifp);
 
+	if (zif->es_info.es)
+		zebra_evpn_es_if_oper_state_change(zif, false /*up*/);
+
+	if (zif->flags & ZIF_FLAG_EVPN_MH_UPLINK)
+		zebra_evpn_mh_uplink_oper_update(zif);
 
 	/* Notify to the protocol daemons. */
 	zebra_interface_down_update(ifp);
@@ -1135,6 +1175,20 @@ void zebra_if_update_all_links(void)
 		if (!ifp)
 			continue;
 		zif = ifp->info;
+		/* update bond slave to master linkages */
+		if ((IS_ZEBRA_IF_BOND_SLAVE(ifp)) &&
+			(zif->bondslave_info.bond_ifindex
+			 != IFINDEX_INTERNAL) &&
+			!zif->bondslave_info.bond_if) {
+			if (IS_ZEBRA_DEBUG_EVPN_MH_ES ||
+					IS_ZEBRA_DEBUG_KERNEL)
+				zlog_debug("bond mbr %s map to bond %d",
+					zif->ifp->name,
+					zif->bondslave_info.bond_ifindex);
+			zebra_l2_map_slave_to_bond(zif, ifp->vrf_id);
+		}
+
+		/* update SVI linkages */
 		if ((zif->link_ifindex != IFINDEX_INTERNAL) && !zif->link) {
 			zif->link = if_lookup_by_index_per_ns(ns,
 							 zif->link_ifindex);
@@ -1216,27 +1270,21 @@ static const char *zebra_ziftype_2str(zebra_iftype_t zif_type)
 	switch (zif_type) {
 	case ZEBRA_IF_OTHER:
 		return "Other";
-		break;
 
 	case ZEBRA_IF_BRIDGE:
 		return "Bridge";
-		break;
 
 	case ZEBRA_IF_VLAN:
 		return "Vlan";
-		break;
 
 	case ZEBRA_IF_VXLAN:
 		return "Vxlan";
-		break;
 
 	case ZEBRA_IF_VRF:
 		return "VRF";
-		break;
 
 	case ZEBRA_IF_VETH:
 		return "VETH";
-		break;
 
 	case ZEBRA_IF_BOND:
 		return "bond";
@@ -1249,7 +1297,6 @@ static const char *zebra_ziftype_2str(zebra_iftype_t zif_type)
 
 	default:
 		return "Unknown";
-		break;
 	}
 }
 
@@ -1353,6 +1400,42 @@ static void ifs_dump_brief_vty(struct vty *vty, struct vrf *vrf)
 	vty_out(vty, "\n");
 }
 
+char *zebra_protodown_rc_str(enum protodown_reasons protodown_rc,
+		char *pd_buf, uint32_t pd_buf_len)
+{
+	bool first = true;
+
+	pd_buf[0] = '\0';
+
+	snprintf(pd_buf + strlen(pd_buf),
+			pd_buf_len - strlen(pd_buf), "(");
+
+	if (protodown_rc & ZEBRA_PROTODOWN_EVPN_STARTUP_DELAY) {
+		if (first)
+			first = false;
+		else
+			snprintf(pd_buf + strlen(pd_buf),
+					pd_buf_len - strlen(pd_buf), ",");
+		snprintf(pd_buf + strlen(pd_buf),
+				pd_buf_len - strlen(pd_buf), "startup-delay");
+	}
+
+	if (protodown_rc & ZEBRA_PROTODOWN_EVPN_UPLINK_DOWN) {
+		if (first)
+			first = false;
+		else
+			snprintf(pd_buf + strlen(pd_buf),
+					pd_buf_len - strlen(pd_buf), ",");
+		snprintf(pd_buf + strlen(pd_buf),
+			pd_buf_len - strlen(pd_buf), "uplinks-down");
+	}
+
+	snprintf(pd_buf + strlen(pd_buf),
+			pd_buf_len - strlen(pd_buf), ")");
+
+	return pd_buf;
+}
+
 /* Interface's information print out to vty interface. */
 static void if_dump_vty(struct vty *vty, struct interface *ifp)
 {
@@ -1362,6 +1445,7 @@ static void if_dump_vty(struct vty *vty, struct interface *ifp)
 	struct route_node *rn;
 	struct zebra_if *zebra_if;
 	struct vrf *vrf;
+	char pd_buf[ZEBRA_PROTODOWN_RC_STR_LEN];
 
 	zebra_if = ifp->info;
 
@@ -1501,6 +1585,17 @@ static void if_dump_vty(struct vty *vty, struct interface *ifp)
 		}
 	}
 
+	zebra_evpn_if_es_print(vty, zebra_if);
+	vty_out(vty, "  protodown: %s",
+		(zebra_if->flags & ZIF_FLAG_PROTODOWN) ?
+		"on" : "off");
+	if (zebra_if->protodown_rc)
+		vty_out(vty, " rc: %s\n",
+			zebra_protodown_rc_str(zebra_if->protodown_rc,
+				pd_buf, sizeof(pd_buf)));
+	else
+		vty_out(vty, "\n");
+
 	if (zebra_if->link_ifindex != IFINDEX_INTERNAL) {
 		if (zebra_if->link)
 			vty_out(vty, "  Parent interface: %s\n", zebra_if->link->name);
@@ -1607,7 +1702,6 @@ static void if_dump_vty(struct vty *vty, struct interface *ifp)
 #endif /* HAVE_PROC_NET_DEV */
 
 #ifdef HAVE_NET_RT_IFLIST
-#if defined(__bsdi__) || defined(__NetBSD__)
 	/* Statistics print out using sysctl (). */
 	vty_out(vty,
 		"    input packets %llu, bytes %llu, dropped %llu,"
@@ -1632,25 +1726,6 @@ static void if_dump_vty(struct vty *vty, struct interface *ifp)
 
 	vty_out(vty, "    collisions %llu\n",
 		(unsigned long long)ifp->stats.ifi_collisions);
-#else
-	/* Statistics print out using sysctl (). */
-	vty_out(vty,
-		"    input packets %lu, bytes %lu, dropped %lu,"
-		" multicast packets %lu\n",
-		ifp->stats.ifi_ipackets, ifp->stats.ifi_ibytes,
-		ifp->stats.ifi_iqdrops, ifp->stats.ifi_imcasts);
-
-	vty_out(vty, "    input errors %lu\n", ifp->stats.ifi_ierrors);
-
-	vty_out(vty,
-		"    output packets %lu, bytes %lu, multicast packets %lu\n",
-		ifp->stats.ifi_opackets, ifp->stats.ifi_obytes,
-		ifp->stats.ifi_omcasts);
-
-	vty_out(vty, "    output errors %lu\n", ifp->stats.ifi_oerrors);
-
-	vty_out(vty, "    collisions %lu\n", ifp->stats.ifi_collisions);
-#endif /* __bsdi__ || __NetBSD__ */
 #endif /* HAVE_NET_RT_IFLIST */
 }
 
@@ -1673,7 +1748,7 @@ struct cmd_node interface_node = {INTERFACE_NODE, "%s(config-if)# ", 1};
 #endif
 /* Show all interfaces to vty. */
 DEFPY(show_interface, show_interface_cmd,
-      "show interface [vrf NAME$name] [brief$brief]",
+      "show interface [vrf NAME$vrf_name] [brief$brief]",
       SHOW_STR
       "Interface status and configuration\n"
       VRF_CMD_HELP_STR
@@ -1685,8 +1760,8 @@ DEFPY(show_interface, show_interface_cmd,
 
 	interface_update_stats();
 
-	if (name)
-		VRF_GET_ID(vrf_id, name, false);
+	if (vrf_name)
+		VRF_GET_ID(vrf_id, vrf_name, false);
 
 	/* All interface print. */
 	vrf = vrf_lookup_by_id(vrf_id);
@@ -1875,7 +1950,8 @@ DEFUN (show_interface_desc_vrf_all,
 
 	RB_FOREACH (vrf, vrf_name_head, &vrfs_by_name)
 		if (!RB_EMPTY(if_name_head, &vrf->ifaces_by_name)) {
-			vty_out(vty, "\n\tVRF %u\n\n", vrf->vrf_id);
+			vty_out(vty, "\n\tVRF %s(%u)\n\n", VRF_LOGNAME(vrf),
+				vrf->vrf_id);
 			if_show_description(vty, vrf->vrf_id);
 		}
 
@@ -2153,13 +2229,13 @@ DEFUN (link_params_enable,
 	/* This command could be issue at startup, when activate MPLS TE */
 	/* on a new interface or after a ON / OFF / ON toggle */
 	/* In all case, TE parameters are reset to their default factory */
-	if (IS_ZEBRA_DEBUG_EVENT)
+	if (IS_ZEBRA_DEBUG_EVENT || IS_ZEBRA_DEBUG_MPLS)
 		zlog_debug(
 			"Link-params: enable TE link parameters on interface %s",
 			ifp->name);
 
 	if (!if_link_params_get(ifp)) {
-		if (IS_ZEBRA_DEBUG_EVENT)
+		if (IS_ZEBRA_DEBUG_EVENT || IS_ZEBRA_DEBUG_MPLS)
 			zlog_debug(
 				"Link-params: failed to init TE link parameters  %s",
 				ifp->name);
@@ -2182,8 +2258,9 @@ DEFUN (no_link_params_enable,
 {
 	VTY_DECLVAR_CONTEXT(interface, ifp);
 
-	zlog_debug("MPLS-TE: disable TE link parameters on interface %s",
-		   ifp->name);
+	if (IS_ZEBRA_DEBUG_EVENT || IS_ZEBRA_DEBUG_MPLS)
+		zlog_debug("MPLS-TE: disable TE link parameters on interface %s",
+			   ifp->name);
 
 	if_link_params_free(ifp);
 
@@ -2889,7 +2966,7 @@ static int ip_address_uninstall(struct vty *vty, struct interface *ifp,
 	if (!CHECK_FLAG(ifc->conf, ZEBRA_IFC_QUEUED)
 	    || !CHECK_FLAG(ifp->status, ZEBRA_INTERFACE_ACTIVE)) {
 		listnode_delete(ifp->connected, ifc);
-		connected_free(ifc);
+		connected_free(&ifc);
 		return CMD_WARNING_CONFIG_FAILED;
 	}
 
@@ -3114,7 +3191,7 @@ static int ipv6_address_uninstall(struct vty *vty, struct interface *ifp,
 	if (!CHECK_FLAG(ifc->conf, ZEBRA_IFC_QUEUED)
 	    || !CHECK_FLAG(ifp->status, ZEBRA_INTERFACE_ACTIVE)) {
 		listnode_delete(ifp->connected, ifc);
-		connected_free(ifc);
+		connected_free(&ifc);
 		return CMD_WARNING_CONFIG_FAILED;
 	}
 
@@ -3295,7 +3372,7 @@ static int if_config_write(struct vty *vty)
 			}
 
 			hook_call(zebra_if_config_wr, vty, ifp);
-
+			zebra_evpn_mh_if_write(vty, ifp);
 			link_params_config_write(vty, ifp);
 
 			vty_endframe(vty, "!\n");
@@ -3371,4 +3448,7 @@ void zebra_if_init(void)
 	install_element(LINK_PARAMS_NODE, &link_params_use_bw_cmd);
 	install_element(LINK_PARAMS_NODE, &no_link_params_use_bw_cmd);
 	install_element(LINK_PARAMS_NODE, &exit_link_params_cmd);
+
+	/* setup EVPN MH elements */
+	zebra_evpn_interface_init();
 }

@@ -370,6 +370,7 @@ uint32_t zebra_pbr_iptable_hash_key(const void *arg)
 	key = jhash_1word(iptable->tcp_flags, key);
 	key = jhash_1word(iptable->tcp_mask_flags, key);
 	key = jhash_1word(iptable->dscp_value, key);
+	key = jhash_1word(iptable->protocol, key);
 	key = jhash_1word(iptable->fragment, key);
 	key = jhash_1word(iptable->vrf_id, key);
 
@@ -411,6 +412,8 @@ bool zebra_pbr_iptable_hash_equal(const void *arg1, const void *arg2)
 		return false;
 	if (r1->fragment != r2->fragment)
 		return false;
+	if (r1->protocol != r2->protocol)
+		return false;
 	return true;
 }
 
@@ -428,34 +431,53 @@ static void *pbr_rule_alloc_intern(void *arg)
 	return new;
 }
 
-void zebra_pbr_add_rule(struct zebra_pbr_rule *rule)
-{
-	struct zebra_pbr_rule *unique =
-		pbr_rule_lookup_unique(rule);
-
-	(void)hash_get(zrouter.rules_hash, rule, pbr_rule_alloc_intern);
-	(void)kernel_add_pbr_rule(rule);
-	/*
-	 * Rule Replace semantics, if we have an old, install the
-	 * new rule, look above, and then delete the old
-	 */
-	if (unique)
-		zebra_pbr_del_rule(unique);
-}
-
-void zebra_pbr_del_rule(struct zebra_pbr_rule *rule)
+static int pbr_rule_release(struct zebra_pbr_rule *rule)
 {
 	struct zebra_pbr_rule *lookup;
 
 	lookup = hash_lookup(zrouter.rules_hash, rule);
+
+	if (!lookup)
+		return -ENOENT;
+
+	hash_release(zrouter.rules_hash, lookup);
+	XFREE(MTYPE_TMP, lookup);
+
+	return 0;
+}
+
+void zebra_pbr_add_rule(struct zebra_pbr_rule *rule)
+{
+	struct zebra_pbr_rule *found;
+
+	/**
+	 * Check if we already have it (this checks via a unique ID, walking
+	 * over the hash table, not via a hash operation).
+	 */
+	found = pbr_rule_lookup_unique(rule);
+
+	(void)hash_get(zrouter.rules_hash, rule, pbr_rule_alloc_intern);
+
+	/* If found, this is an update */
+	if (found) {
+		(void)kernel_update_pbr_rule(found, rule);
+
+		if (pbr_rule_release(found))
+			zlog_debug(
+				"%s: Rule being updated we know nothing about",
+				__PRETTY_FUNCTION__);
+
+	} else
+		(void)kernel_add_pbr_rule(rule);
+}
+
+void zebra_pbr_del_rule(struct zebra_pbr_rule *rule)
+{
 	(void)kernel_del_pbr_rule(rule);
 
-	if (lookup) {
-		hash_release(zrouter.rules_hash, lookup);
-		XFREE(MTYPE_TMP, lookup);
-	} else
+	if (pbr_rule_release(rule))
 		zlog_debug("%s: Rule being deleted we know nothing about",
-			   __PRETTY_FUNCTION__);
+			   __func__);
 }
 
 static void zebra_pbr_cleanup_rules(struct hash_bucket *b, void *data)
@@ -563,7 +585,7 @@ void zebra_pbr_destroy_ipset(struct zebra_pbr_ipset *ipset)
 	} else
 		zlog_debug(
 			"%s: IPSet Entry being deleted we know nothing about",
-			__PRETTY_FUNCTION__);
+			__func__);
 }
 
 struct pbr_ipset_name_lookup {
@@ -642,7 +664,7 @@ void zebra_pbr_del_ipset_entry(struct zebra_pbr_ipset_entry *ipset)
 		XFREE(MTYPE_TMP, lookup);
 	} else
 		zlog_debug("%s: IPSet being deleted we know nothing about",
-			   __PRETTY_FUNCTION__);
+			   __func__);
 }
 
 static void *pbr_iptable_alloc_intern(void *arg)
@@ -691,7 +713,7 @@ void zebra_pbr_del_iptable(struct zebra_pbr_iptable *iptable)
 		XFREE(MTYPE_TMP, lookup);
 	} else
 		zlog_debug("%s: IPTable being deleted we know nothing about",
-			   __PRETTY_FUNCTION__);
+			   __func__);
 }
 
 /*
@@ -1096,6 +1118,10 @@ static void zebra_pbr_show_iptable_unit(struct zebra_pbr_iptable *iptable,
 			iptable->filter_bm & MATCH_FRAGMENT_INVERSE_SET ?
 			" not" : "", lookup_msg(fragment_value_str,
 					       iptable->fragment, val_str));
+	}
+	if (iptable->protocol) {
+		vty_out(vty, "\t protocol %d\n",
+			iptable->protocol);
 	}
 	ret = hook_call(zebra_pbr_iptable_get_stat, iptable, &pkts,
 			&bytes);

@@ -48,7 +48,7 @@
 #include "lib_errors.h"
 #include "northbound_cli.h"
 
-DEFINE_MTYPE(LIB, HOST, "Host config")
+DEFINE_MTYPE_STATIC(LIB, HOST, "Host config")
 DEFINE_MTYPE(LIB, COMPLETION, "Completion item")
 
 #define item(x)                                                                \
@@ -74,7 +74,7 @@ const struct message tokennames[] = {
 	{0},
 };
 
-const char *node_names[] = {
+const char *const node_names[] = {
 	"auth",			    // AUTH_NODE,
 	"view",			    // VIEW_NODE,
 	"auth enable",		    // AUTH_ENABLE_NODE,
@@ -89,7 +89,6 @@ const char *node_names[] = {
 	"aaa",			    // AAA_NODE,
 	"keychain",		    // KEYCHAIN_NODE,
 	"keychain key",		    // KEYCHAIN_KEY_NODE,
-	"logical-router",	   // LOGICALROUTER_NODE,
 	"static ip",		    // IP_NODE,
 	"vrf",			    // VRF_NODE,
 	"interface",		    // INTERFACE_NODE,
@@ -152,6 +151,7 @@ const char *node_names[] = {
 	"bfd peer",		 /* BFD_PEER_NODE */
 	"openfabric",		    // OPENFABRIC_NODE
 	"vrrp",			    /* VRRP_NODE */
+	"bmp",			 /* BMP_NODE */
 };
 /* clang-format on */
 
@@ -197,9 +197,6 @@ static struct cmd_node enable_node = {
 };
 
 static struct cmd_node config_node = {CONFIG_NODE, "%s(config)# ", 1};
-
-/* Default motd string. */
-static const char *default_motd = FRR_DEFAULT_MOTD;
 
 static const struct facility_map {
 	int facility;
@@ -290,7 +287,7 @@ vector cmd_make_strvec(const char *string)
 	const char *copy = string;
 
 	/* skip leading whitespace */
-	while (isspace((int)*copy) && *copy != '\0')
+	while (isspace((unsigned char)*copy) && *copy != '\0')
 		copy++;
 
 	/* if the entire string was whitespace or a comment, return */
@@ -373,7 +370,7 @@ const char *cmd_prompt(enum node_type node)
 }
 
 /* Install a command into a node. */
-void install_element(enum node_type ntype, struct cmd_element *cmd)
+void install_element(enum node_type ntype, const struct cmd_element *cmd)
 {
 	struct cmd_node *cnode;
 
@@ -395,7 +392,7 @@ void install_element(enum node_type ntype, struct cmd_element *cmd)
 		exit(EXIT_FAILURE);
 	}
 
-	if (hash_lookup(cnode->cmd_hash, cmd) != NULL) {
+	if (hash_lookup(cnode->cmd_hash, (void *)cmd) != NULL) {
 		fprintf(stderr,
 			"%s[%s]:\n"
 			"\tnode %d (%s) already has this command installed.\n"
@@ -404,7 +401,7 @@ void install_element(enum node_type ntype, struct cmd_element *cmd)
 		return;
 	}
 
-	assert(hash_get(cnode->cmd_hash, cmd, hash_alloc_intern));
+	assert(hash_get(cnode->cmd_hash, (void *)cmd, hash_alloc_intern));
 
 	struct graph *graph = graph_new();
 	struct cmd_token *token =
@@ -416,13 +413,13 @@ void install_element(enum node_type ntype, struct cmd_element *cmd)
 	cmd_graph_merge(cnode->cmdgraph, graph, +1);
 	graph_delete_graph(graph);
 
-	vector_set(cnode->cmd_vector, cmd);
+	vector_set(cnode->cmd_vector, (void *)cmd);
 
 	if (ntype == VIEW_NODE)
 		install_element(ENABLE_NODE, cmd);
 }
 
-void uninstall_element(enum node_type ntype, struct cmd_element *cmd)
+void uninstall_element(enum node_type ntype, const struct cmd_element *cmd)
 {
 	struct cmd_node *cnode;
 
@@ -444,7 +441,7 @@ void uninstall_element(enum node_type ntype, struct cmd_element *cmd)
 		exit(EXIT_FAILURE);
 	}
 
-	if (hash_release(cnode->cmd_hash, cmd) == NULL) {
+	if (hash_release(cnode->cmd_hash, (void *)cmd) == NULL) {
 		fprintf(stderr,
 			"%s[%s]:\n"
 			"\tnode %d (%s) does not have this command installed.\n"
@@ -453,7 +450,7 @@ void uninstall_element(enum node_type ntype, struct cmd_element *cmd)
 		return;
 	}
 
-	vector_unset_value(cnode->cmd_vector, cmd);
+	vector_unset_value(cnode->cmd_vector, (void *)cmd);
 
 	struct graph *graph = graph_new();
 	struct cmd_token *token =
@@ -592,6 +589,10 @@ static int config_write_host(struct vty *vty)
 
 		if (host.motdfile)
 			vty_out(vty, "banner motd file %s\n", host.motdfile);
+		else if (host.motd
+			 && strncmp(host.motd, FRR_DEFAULT_MOTD,
+				    strlen(host.motd)))
+			vty_out(vty, "banner motd line %s\n", host.motd);
 		else if (!host.motd)
 			vty_out(vty, "no banner motd\n");
 	}
@@ -976,6 +977,7 @@ enum node_type node_parent(enum node_type node)
 	case BGP_IPV6M_NODE:
 	case BGP_EVPN_NODE:
 	case BGP_IPV6L_NODE:
+	case BMP_NODE:
 		ret = BGP_NODE;
 		break;
 	case BGP_EVPN_VNI_NODE:
@@ -1012,7 +1014,7 @@ enum node_type node_parent(enum node_type node)
 }
 
 /* Execute command by argument vline vector. */
-static int cmd_execute_command_real(vector vline, enum filter_type filter,
+static int cmd_execute_command_real(vector vline, enum cmd_filter_type filter,
 				    struct vty *vty,
 				    const struct cmd_element **cmd)
 {
@@ -1060,8 +1062,10 @@ static int cmd_execute_command_real(vector vline, enum filter_type filter,
 			vty->num_cfg_changes = 0;
 			memset(&vty->cfg_changes, 0, sizeof(vty->cfg_changes));
 
-			/* Regenerate candidate configuration. */
-			if (frr_get_cli_mode() == FRR_CLI_CLASSIC)
+			/* Regenerate candidate configuration if necessary. */
+			if (frr_get_cli_mode() == FRR_CLI_CLASSIC
+			    && running_config->version
+				       > vty->candidate_config->version)
 				nb_config_replace(vty->candidate_config,
 						  running_config, true);
 		}
@@ -1456,7 +1460,6 @@ void cmd_exit(struct vty *vty)
 		break;
 	case INTERFACE_NODE:
 	case PW_NODE:
-	case LOGICALROUTER_NODE:
 	case VRF_NODE:
 	case NH_GROUP_NODE:
 	case ZEBRA_NODE:
@@ -1493,6 +1496,7 @@ void cmd_exit(struct vty *vty)
 	case BGP_IPV6M_NODE:
 	case BGP_EVPN_NODE:
 	case BGP_IPV6L_NODE:
+	case BMP_NODE:
 		vty->node = BGP_NODE;
 		break;
 	case BGP_EVPN_VNI_NODE:
@@ -1564,18 +1568,6 @@ DEFUN (show_version,
 	vty_out(vty, "%s%s\n", FRR_COPYRIGHT, GIT_INFO);
 	vty_out(vty, "configured with:\n    %s\n", FRR_CONFIG_ARGS);
 
-	return CMD_SUCCESS;
-}
-
-/* "Set" version ... ignore version tags */
-DEFUN (frr_version_defaults,
-       frr_version_defaults_cmd,
-       "frr <version|defaults> LINE...",
-       "FRRouting global parameters\n"
-       "version configuration was written by\n"
-       "set of configuration defaults used\n"
-       "version string\n")
-{
 	return CMD_SUCCESS;
 }
 
@@ -1652,7 +1644,7 @@ int cmd_list_cmds(struct vty *vty, int do_permute)
 		permute(vector_slot(node->cmdgraph->nodes, 0), vty);
 	else {
 		/* loop over all commands at this node */
-		struct cmd_element *element = NULL;
+		const struct cmd_element *element = NULL;
 		for (unsigned int i = 0; i < vector_active(node->cmd_vector);
 		     i++)
 			if ((element = vector_slot(node->cmd_vector, i))
@@ -1706,25 +1698,25 @@ static int vty_write_config(struct vty *vty)
 	if (host.noconfig)
 		return CMD_SUCCESS;
 
+	nb_cli_show_config_prepare(running_config, false);
+
 	if (vty->type == VTY_TERM) {
 		vty_out(vty, "\nCurrent configuration:\n");
 		vty_out(vty, "!\n");
 	}
 
+	if (strcmp(frr_defaults_version(), FRR_VER_SHORT))
+		vty_out(vty, "! loaded from %s\n", frr_defaults_version());
 	vty_out(vty, "frr version %s\n", FRR_VER_SHORT);
-	vty_out(vty, "frr defaults %s\n", DFLT_NAME);
+	vty_out(vty, "frr defaults %s\n", frr_defaults_profile());
 	vty_out(vty, "!\n");
 
-	pthread_rwlock_rdlock(&running_config->lock);
-	{
-		for (i = 0; i < vector_active(cmdvec); i++)
-			if ((node = vector_slot(cmdvec, i)) && node->func
-			    && (node->vtysh || vty->type != VTY_SHELL)) {
-				if ((*node->func)(vty))
-					vty_out(vty, "!\n");
-			}
-	}
-	pthread_rwlock_unlock(&running_config->lock);
+	for (i = 0; i < vector_active(cmdvec); i++)
+		if ((node = vector_slot(cmdvec, i)) && node->func
+		    && (node->vtysh || vty->type != VTY_SHELL)) {
+			if ((*node->func)(vty))
+				vty_out(vty, "!\n");
+		}
 
 	if (vty->type == VTY_TERM) {
 		vty_out(vty, "end\n");
@@ -1936,7 +1928,7 @@ DEFUN(config_domainname,
 {
 	struct cmd_token *word = argv[1];
 
-	if (!isalpha((int)word->arg[0])) {
+	if (!isalpha((unsigned char)word->arg[0])) {
 		vty_out(vty, "Please specify string starting with alphabet\n");
 		return CMD_WARNING_CONFIG_FAILED;
 	}
@@ -1970,7 +1962,7 @@ DEFUN (config_hostname,
 {
 	struct cmd_token *word = argv[1];
 
-	if (!isalnum((int)word->arg[0])) {
+	if (!isalnum((unsigned char)word->arg[0])) {
 		vty_out(vty,
 		    "Please specify string starting with alphabet or number\n");
 		return CMD_WARNING_CONFIG_FAILED;
@@ -2018,7 +2010,7 @@ DEFUN (config_password,
 		return CMD_SUCCESS;
 	}
 
-	if (!isalnum((int)argv[idx_8]->arg[0])) {
+	if (!isalnum((unsigned char)argv[idx_8]->arg[0])) {
 		vty_out(vty,
 			"Please specify string starting with alphanumeric\n");
 		return CMD_WARNING_CONFIG_FAILED;
@@ -2098,7 +2090,7 @@ DEFUN (config_enable_password,
 		}
 	}
 
-	if (!isalnum((int)argv[idx_8]->arg[0])) {
+	if (!isalnum((unsigned char)argv[idx_8]->arg[0])) {
 		vty_out(vty,
 			"Please specify string starting with alphanumeric\n");
 		return CMD_WARNING_CONFIG_FAILED;
@@ -2507,8 +2499,6 @@ static void disable_log_file(void)
 	zlog_reset_file();
 
 	XFREE(MTYPE_HOST, host.logfile);
-
-	host.logfile = NULL;
 }
 
 DEFUN (no_config_log_file,
@@ -2532,8 +2522,6 @@ DEFUN (config_log_syslog,
        LOG_LEVEL_DESC)
 {
 	int idx_log_levels = 2;
-
-	disable_log_file();
 
 	if (argc == 3) {
 		int level;
@@ -2665,6 +2653,12 @@ int cmd_banner_motd_file(const char *file)
 	return success;
 }
 
+void cmd_banner_motd_line(const char *line)
+{
+	XFREE(MTYPE_HOST, host.motd);
+	host.motd = XSTRDUP(MTYPE_HOST, line);
+}
+
 DEFUN (banner_motd_file,
        banner_motd_file_cmd,
        "banner motd file FILE",
@@ -2685,6 +2679,26 @@ DEFUN (banner_motd_file,
 	return cmd;
 }
 
+DEFUN (banner_motd_line,
+       banner_motd_line_cmd,
+       "banner motd line LINE...",
+       "Set banner\n"
+       "Banner for motd\n"
+       "Banner from an input\n"
+       "Text\n")
+{
+	int idx = 0;
+	char *motd;
+
+	argv_find(argv, argc, "LINE", &idx);
+	motd = argv_concat(argv, argc, idx);
+
+	cmd_banner_motd_line(motd);
+	XFREE(MTYPE_TMP, motd);
+
+	return CMD_SUCCESS;
+}
+
 DEFUN (banner_motd_default,
        banner_motd_default_cmd,
        "banner motd default",
@@ -2692,7 +2706,7 @@ DEFUN (banner_motd_default,
        "Strings for motd\n"
        "Default string\n")
 {
-	host.motd = default_motd;
+	cmd_banner_motd_line(FRR_DEFAULT_MOTD);
 	return CMD_SUCCESS;
 }
 
@@ -2712,14 +2726,65 @@ DEFUN (no_banner_motd,
 
 DEFUN(find,
       find_cmd,
-      "find COMMAND...",
-      "Find CLI command containing text\n"
-      "Text to search for\n")
+      "find REGEX",
+      "Find CLI command matching a regular expression\n"
+      "Search pattern (POSIX regex)\n")
 {
-	char *text = argv_concat(argv, argc, 1);
+	char *pattern = argv[1]->arg;
 	const struct cmd_node *node;
 	const struct cmd_element *cli;
 	vector clis;
+
+	regex_t exp = {};
+
+	int cr = regcomp(&exp, pattern, REG_NOSUB | REG_EXTENDED);
+
+	if (cr != 0) {
+		switch (cr) {
+		case REG_BADBR:
+			vty_out(vty, "%% Invalid {...} expression\n");
+			break;
+		case REG_BADRPT:
+			vty_out(vty, "%% Bad repetition operator\n");
+			break;
+		case REG_BADPAT:
+			vty_out(vty, "%% Regex syntax error\n");
+			break;
+		case REG_ECOLLATE:
+			vty_out(vty, "%% Invalid collating element\n");
+			break;
+		case REG_ECTYPE:
+			vty_out(vty, "%% Invalid character class name\n");
+			break;
+		case REG_EESCAPE:
+			vty_out(vty,
+				"%% Regex ended with escape character (\\)\n");
+			break;
+		case REG_ESUBREG:
+			vty_out(vty,
+				"%% Invalid number in \\digit construction\n");
+			break;
+		case REG_EBRACK:
+			vty_out(vty, "%% Unbalanced square brackets\n");
+			break;
+		case REG_EPAREN:
+			vty_out(vty, "%% Unbalanced parentheses\n");
+			break;
+		case REG_EBRACE:
+			vty_out(vty, "%% Unbalanced braces\n");
+			break;
+		case REG_ERANGE:
+			vty_out(vty,
+				"%% Invalid endpoint in range expression\n");
+			break;
+		case REG_ESPACE:
+			vty_out(vty, "%% Failed to compile (out of memory)\n");
+			break;
+		}
+
+		goto done;
+	}
+
 
 	for (unsigned int i = 0; i < vector_active(cmdvec); i++) {
 		node = vector_slot(cmdvec, i);
@@ -2728,14 +2793,15 @@ DEFUN(find,
 		clis = node->cmd_vector;
 		for (unsigned int j = 0; j < vector_active(clis); j++) {
 			cli = vector_slot(clis, j);
-			if (strcasestr(cli->string, text))
+
+			if (regexec(&exp, cli->string, 0, NULL, 0) == 0)
 				vty_out(vty, "  (%s)  %s\n",
 					node_names[node->node], cli->string);
 		}
 	}
 
-	XFREE(MTYPE_TMP, text);
-
+done:
+	regfree(&exp);
 	return CMD_SUCCESS;
 }
 
@@ -2809,7 +2875,7 @@ void cmd_init(int terminal)
 	host.config = NULL;
 	host.noconfig = (terminal < 0);
 	host.lines = -1;
-	host.motd = default_motd;
+	cmd_banner_motd_line(FRR_DEFAULT_MOTD);
 	host.motdfile = NULL;
 
 	/* Install top nodes. */
@@ -2858,7 +2924,6 @@ void cmd_init(int terminal)
 	install_element(CONFIG_NODE, &no_hostname_cmd);
 	install_element(CONFIG_NODE, &domainname_cmd);
 	install_element(CONFIG_NODE, &no_domainname_cmd);
-	install_element(CONFIG_NODE, &frr_version_defaults_cmd);
 
 	if (terminal > 0) {
 		install_element(CONFIG_NODE, &debug_memstats_cmd);
@@ -2889,6 +2954,7 @@ void cmd_init(int terminal)
 		install_element(CONFIG_NODE, &no_service_password_encrypt_cmd);
 		install_element(CONFIG_NODE, &banner_motd_default_cmd);
 		install_element(CONFIG_NODE, &banner_motd_file_cmd);
+		install_element(CONFIG_NODE, &banner_motd_line_cmd);
 		install_element(CONFIG_NODE, &no_banner_motd_cmd);
 		install_element(CONFIG_NODE, &service_terminal_length_cmd);
 		install_element(CONFIG_NODE, &no_service_terminal_length_cmd);
@@ -2933,6 +2999,7 @@ void cmd_terminate(void)
 	XFREE(MTYPE_HOST, host.logfile);
 	XFREE(MTYPE_HOST, host.motdfile);
 	XFREE(MTYPE_HOST, host.config);
+	XFREE(MTYPE_HOST, host.motd);
 
 	list_delete(&varhandlers);
 	qobj_finish();
