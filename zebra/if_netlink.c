@@ -690,14 +690,14 @@ static void netlink_proc_dplane_if_protodown(struct zebra_if *zif,
 
 	if (IS_ZEBRA_DEBUG_EVPN_MH_ES ||
 			IS_ZEBRA_DEBUG_KERNEL)
-		zlog_debug("interface %s dplane change, protdown %s",
+		zlog_debug("interface %s dplane change, protodown %s",
 				zif->ifp->name,
 				protodown ? "on" : "off");
 
 	if (zebra_evpn_is_es_bond_member(zif->ifp)) {
 		if (IS_ZEBRA_DEBUG_EVPN_MH_ES ||
 				IS_ZEBRA_DEBUG_KERNEL)
-			zlog_debug("bond mbr %s re-instate protdown %s in the dplane",
+			zlog_debug("bond mbr %s re-instate protodown %s in the dplane",
 					zif->ifp->name,
 					zif_protodown ? "on" : "off");
 		netlink_protodown(zif->ifp, zif_protodown);
