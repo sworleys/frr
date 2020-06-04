@@ -981,14 +981,6 @@ int zebra_evpn_mac_del(zebra_evpn_t *zevpn, zebra_mac_t *mac)
 			   mac->flags);
 	}
 
-	/* If the MAC is freed before the neigh we will end up
-	 * with a stale pointer against the neigh
-	 */
-	if (!list_isempty(mac->neigh_list))
-		zlog_warn("%s: MAC %s flags 0x%x neigh list not empty %d", __func__,
-			   prefix_mac2str(&mac->macaddr, buf, sizeof(buf)),
-			   mac->flags, listcount(mac->neigh_list));
-
 	/* force de-ref any ES entry linked to the MAC */
 	zebra_evpn_es_mac_deref_entry(mac);
 
@@ -997,6 +989,27 @@ int zebra_evpn_mac_del(zebra_evpn_t *zevpn, zebra_mac_t *mac)
 
 	/* Cancel auto recovery */
 	THREAD_OFF(mac->dad_mac_auto_recovery_timer);
+
+	/* If the MAC is freed before the neigh we will end up
+	 * with a stale pointer against the neigh.
+	 * The situation can arise when a MAC is in remote state
+	 * and its associated neigh is local state.
+	 * zebra_evpn_cfg_cleanup() cleans up remote neighs and MACs.
+	 * Instead of deleting remote MAC, if its neigh list is non-empty
+	 * (associated to local neighs), mark the MAC as AUTO.
+	 */
+	if (!list_isempty(mac->neigh_list)) {
+		if (IS_ZEBRA_DEBUG_VXLAN)
+			zlog_debug(
+				"MAC %s (flags 0x%x vni %u) has non-empty neigh list "
+				"count %u, mark MAC as AUTO",
+				prefix_mac2str(&mac->macaddr, buf, sizeof(buf)),
+				mac->flags, zevpn->vni,
+				listcount(mac->neigh_list));
+
+		SET_FLAG(mac->flags, ZEBRA_MAC_AUTO);
+		return;
+	}
 
 	list_delete(&mac->neigh_list);
 
