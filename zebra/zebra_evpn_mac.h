@@ -207,7 +207,7 @@ int zebra_evpn_rem_mac_install(zebra_evpn_t *zevi, zebra_mac_t *mac,
 void zebra_evpn_deref_ip2mac(zebra_evpn_t *zevi, zebra_mac_t *mac);
 zebra_mac_t *zebra_evpn_mac_lookup(zebra_evpn_t *zevi, struct ethaddr *mac);
 zebra_mac_t *zebra_evpn_mac_add(zebra_evpn_t *zevi, struct ethaddr *macaddr);
-int zebra_evpn_mac_del(zebra_evpn_t *zevi, zebra_mac_t *mac);
+void zebra_evpn_mac_del(zebra_evpn_t *zevi, zebra_mac_t *mac);
 int zebra_evpn_macip_send_msg_to_client(uint32_t id, struct ethaddr *macaddr,
 					struct ipaddr *ip, uint8_t flags,
 					uint32_t seq, int state,

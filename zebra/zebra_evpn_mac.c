@@ -968,7 +968,7 @@ zebra_mac_t *zebra_evpn_mac_add(zebra_evpn_t *zevpn, struct ethaddr *macaddr)
 /*
  * Delete MAC entry.
  */
-int zebra_evpn_mac_del(zebra_evpn_t *zevpn, zebra_mac_t *mac)
+void zebra_evpn_mac_del(zebra_evpn_t *zevpn, zebra_mac_t *mac)
 {
 	zebra_mac_t *tmp_mac;
 	char buf[ETHER_ADDR_STRLEN];
@@ -1016,8 +1016,6 @@ int zebra_evpn_mac_del(zebra_evpn_t *zevpn, zebra_mac_t *mac)
 	/* Free the VNI hash entry and allocated memory. */
 	tmp_mac = hash_release(zevpn->mac_table, mac);
 	XFREE(MTYPE_MAC, tmp_mac);
-
-	return 0;
 }
 
 static bool zebra_evpn_check_mac_del_from_db(struct mac_walk_ctx *wctx,
