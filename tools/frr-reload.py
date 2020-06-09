@@ -1003,6 +1003,9 @@ def ignore_unconfigurable_lines(lines_to_add, lines_to_del):
             ctx_keys[0].startswith('password') or
             ctx_keys[0].startswith('line vty') or
 
+            # cumulus enables proto-only by default for now
+            ctx_keys[0].endswith('zebra nexthop proto only') or
+
             # This is technically "no"able but if we did so frr-reload would
             # stop working so do not let the user shoot themselves in the foot
             # by removing this.
