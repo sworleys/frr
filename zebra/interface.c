@@ -1436,6 +1436,14 @@ char *zebra_protodown_rc_str(enum protodown_reasons protodown_rc,
 	return pd_buf;
 }
 
+static inline bool if_is_protodown_applicable(struct interface *ifp)
+{
+	if (IS_ZEBRA_IF_BOND(ifp))
+		return false;
+
+	return true;
+}
+
 /* Interface's information print out to vty interface. */
 static void if_dump_vty(struct vty *vty, struct interface *ifp)
 {
@@ -1586,15 +1594,14 @@ static void if_dump_vty(struct vty *vty, struct interface *ifp)
 	}
 
 	zebra_evpn_if_es_print(vty, zebra_if);
-	vty_out(vty, "  protodown: %s",
+	vty_out(vty, "  protodown: %s %s\n",
 		(zebra_if->flags & ZIF_FLAG_PROTODOWN) ?
-		"on" : "off");
+		"on" : "off",
+		if_is_protodown_applicable(ifp) ? "" : "(n/a)");
 	if (zebra_if->protodown_rc)
-		vty_out(vty, " rc: %s\n",
+		vty_out(vty, "  protodown reasons: %s\n",
 			zebra_protodown_rc_str(zebra_if->protodown_rc,
 				pd_buf, sizeof(pd_buf)));
-	else
-		vty_out(vty, "\n");
 
 	if (zebra_if->link_ifindex != IFINDEX_INTERNAL) {
 		if (zebra_if->link)
