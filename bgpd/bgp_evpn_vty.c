@@ -4191,9 +4191,9 @@ DEFUN(show_bgp_l2vpn_evpn_route,
 			type = BGP_EVPN_MAC_IP_ROUTE;
 		else if (strncmp(argv[type_idx + 1]->arg, "mu", 2) == 0)
 			type = BGP_EVPN_IMET_ROUTE;
-		else if (strncmp(argv[type_idx + 1]->arg, "ea", 1) == 0)
+		else if (strncmp(argv[type_idx + 1]->arg, "ea", 2) == 0)
 			type = BGP_EVPN_AD_ROUTE;
-		else if (strncmp(argv[type_idx + 1]->arg, "es", 1) == 0)
+		else if (strncmp(argv[type_idx + 1]->arg, "es", 2) == 0)
 			type = BGP_EVPN_ES_ROUTE;
 		else if (strncmp(argv[type_idx + 1]->arg, "p", 1) == 0)
 			type = BGP_EVPN_IP_PREFIX_ROUTE;
