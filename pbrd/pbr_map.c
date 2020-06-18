@@ -177,8 +177,8 @@ static void pbr_map_pbrms_uninstall(struct pbr_map_sequence *pbrms)
 }
 
 static const char *const pbr_map_reason_str[] = {
-	"Invalid NH-group",     "Invalid NH",	 "No Nexthops",
-	"Both NH and NH-Group", "Invalid Src or Dst", "Invalid VRF",
+	"Invalid NH-group",	"Invalid NH",	"No Nexthops",
+	"Both NH and NH-Group", "Invalid Mark", "Invalid VRF",
 	"Deleting Sequence",
 };
 
@@ -546,7 +546,7 @@ pbr_map_sequence_check_nexthops_valid(struct pbr_map_sequence *pbrms)
 
 static void pbr_map_sequence_check_not_empty(struct pbr_map_sequence *pbrms)
 {
-	if (!pbrms->src && !pbrms->dst && !pbrms->mark)
+	if (!pbrms->src && !pbrms->dst && !pbrms->mark && !pbrms->dsfield)
 		pbrms->reason |= PBR_MAP_INVALID_EMPTY;
 }
 

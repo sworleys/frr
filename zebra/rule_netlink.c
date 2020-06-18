@@ -102,6 +102,11 @@ static int netlink_rule_update(int cmd, struct zebra_pbr_rule *rule)
 			  &rule->rule.filter.dst_ip.u.prefix, bytelen);
 	}
 
+	/* dsfield, if specified */
+	if (IS_RULE_FILTERING_ON_DSFIELD(rule)) {
+		req.frh.tos = rule->rule.filter.dsfield;
+	}
+
 	/* fwmark, if specified */
 	if (IS_RULE_FILTERING_ON_FWMARK(rule)) {
 		addattr32(&req.n, sizeof(req), FRA_FWMARK,
@@ -119,7 +124,7 @@ static int netlink_rule_update(int cmd, struct zebra_pbr_rule *rule)
 
 	if (IS_ZEBRA_DEBUG_KERNEL)
 		zlog_debug(
-			"Tx %s family %s IF %s(%u) Pref %u Fwmark %u Src %s Dst %s Table %u",
+			"Tx %s family %s IF %s(%u) Pref %u Fwmark %u Src %s Dst %s dsfield %u Table %u",
 			nl_msg_type_to_str(cmd), nl_family_to_str(family),
 			rule->ifname, rule->rule.ifindex, rule->rule.priority,
 			rule->rule.filter.fwmark,
@@ -127,7 +132,7 @@ static int netlink_rule_update(int cmd, struct zebra_pbr_rule *rule)
 				   sizeof(buf1)),
 			prefix2str(&rule->rule.filter.dst_ip, buf2,
 				   sizeof(buf2)),
-			rule->rule.action.table);
+			rule->rule.filter.dsfield, rule->rule.action.table);
 
 	/* Ship off the message.
 	 * Note: Currently, netlink_talk() is a blocking call which returns
