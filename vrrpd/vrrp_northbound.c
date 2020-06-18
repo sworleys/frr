@@ -51,7 +51,9 @@ static int lib_interface_vrrp_vrrp_group_create(enum nb_event event,
 		vr = vrrp_lookup(ifp, vrid);
 		if (vr && vr->autoconf)
 			return NB_ERR_VALIDATION;
+		return NB_OK;
 	case NB_EV_PREPARE:
+		return NB_OK;
 	case NB_EV_ABORT:
 		return NB_OK;
 	case NB_EV_APPLY:
