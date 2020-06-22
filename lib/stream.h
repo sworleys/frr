@@ -422,7 +422,7 @@ static inline uint8_t *ptr_get_be16(uint8_t *ptr, uint16_t *out)
 			float r;                                               \
 			uint32_t d;                                            \
 		} _pval;                                                       \
-		if (stream_getl2((S), &_pval.d))                               \
+		if (!stream_getl2((S), &_pval.d))                              \
 			goto stream_failure;                                   \
 		(P) = _pval.r;                                                 \
 	} while (0)
