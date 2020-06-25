@@ -187,7 +187,7 @@ DEFPY(pbr_map_match_dscp, pbr_map_match_dscp_cmd,
       NO_STR
       "Match the rest of the command\n"
       "Match based on IP DSCP field\n"
-      "DSCP value (below 63) or standard codepoint name\n")
+      "DSCP value (below 64) or standard codepoint name\n")
 {
 	struct pbr_map_sequence *pbrms = VTY_GET_CONTEXT(pbr_map_sequence);
 	char dscpname[100];
@@ -209,9 +209,9 @@ DEFPY(pbr_map_match_dscp, pbr_map_match_dscp_cmd,
 		// dscp passed is a regular number
 		long dscpAsNum = strtol(dscp, NULL, 0);
 
-		if (dscpAsNum >= PBR_DSFIELD_DSCP >> 2) {
+		if (dscpAsNum > PBR_DSFIELD_DSCP >> 2) {
 			// Refuse to install on overflow
-			vty_out(vty, "dscp (%s) must be less than 63\n", dscp);
+			vty_out(vty, "dscp (%s) must be less than 64\n", dscp);
 			return CMD_WARNING_CONFIG_FAILED;
 		}
 		rawDscp = dscpAsNum;
@@ -636,8 +636,6 @@ static void vty_show_pbrms(struct vty *vty,
 	if (pbrms->dsfield & PBR_DSFIELD_ECN)
 		vty_out(vty, "        ECN Match: %u\n",
 			pbrms->dsfield & PBR_DSFIELD_ECN);
-	if (pbrms->dsfield)
-		vty_out(vty, "        DSField Match: %u\n", (pbrms->dsfield));
 	if (pbrms->mark)
 		vty_out(vty, "        MARK Match: %u\n", pbrms->mark);
 
