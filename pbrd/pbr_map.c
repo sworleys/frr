@@ -633,7 +633,7 @@ bool pbr_map_check_valid(const char *name)
 	return pbrm->valid;
 }
 
-void pbr_map_schedule_policy_from_nhg(const char *nh_group)
+void pbr_map_schedule_policy_from_nhg(const char *nh_group, bool installed)
 {
 	struct pbr_map_sequence *pbrms;
 	struct pbr_map *pbrm;
@@ -648,7 +648,7 @@ void pbr_map_schedule_policy_from_nhg(const char *nh_group)
 
 			if (pbrms->nhgrp_name
 			    && (strcmp(nh_group, pbrms->nhgrp_name) == 0)) {
-				pbrms->nhs_installed = true;
+				pbrms->nhs_installed = installed;
 
 				pbr_map_check(pbrms, false);
 			}
@@ -656,7 +656,7 @@ void pbr_map_schedule_policy_from_nhg(const char *nh_group)
 			if (pbrms->nhg
 			    && (strcmp(nh_group, pbrms->internal_nhg_name)
 				== 0)) {
-				pbrms->nhs_installed = true;
+				pbrms->nhs_installed = installed;
 
 				pbr_map_check(pbrms, false);
 			}
