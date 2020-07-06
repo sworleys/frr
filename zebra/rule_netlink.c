@@ -186,15 +186,15 @@ enum zebra_dplane_result kernel_update_pbr_rule(struct zebra_pbr_rule *old_rule,
 {
 	int ret = 0;
 
-	/* Add the new, updated one */
-	ret = netlink_rule_update(RTM_NEWRULE, new_rule);
-
 	/**
 	 * Delete the old one.
 	 *
 	 * Don't care about this result right?
 	 */
 	netlink_rule_update(RTM_DELRULE, old_rule);
+
+	/* Add the new, updated one */
+	ret = netlink_rule_update(RTM_NEWRULE, new_rule);
 
 	kernel_pbr_rule_add_del_status(new_rule,
 				       (!ret) ? ZEBRA_DPLANE_INSTALL_SUCCESS
