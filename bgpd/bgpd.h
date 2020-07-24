@@ -453,6 +453,8 @@ struct bgp {
 #define BGP_FLAG_DELETE_IN_PROGRESS       (1 << 22)
 #define BGP_FLAG_SELECT_DEFER_DISABLE     (1 << 23)
 #define BGP_FLAG_GR_DISABLE_EOR           (1 << 24)
+#define BGP_FLAG_EBGP_REQUIRES_POLICY (1 << 25)
+#define BGP_FLAG_SHOW_NEXTHOP_HOSTNAME (1 << 26)
 
 	enum global_mode GLOBAL_GR_FSM[BGP_GLOBAL_GR_MODE]
 				      [BGP_GLOBAL_GR_EVENT_CMD];
@@ -600,17 +602,10 @@ struct bgp {
 	/* EVPN enable - advertise local VNIs and their MACs etc. */
 	int advertise_all_vni;
 
-	/* RFC 8212 - prevent route leaks. */
-	int ebgp_requires_policy;
-#define DEFAULT_EBGP_POLICY_DISABLED 0
-#define DEFAULT_EBGP_POLICY_ENABLED 1
-
 	/* draft-ietf-idr-deprecate-as-set-confed-set
 	 * Reject aspaths with AS_SET and/or AS_CONFED_SET.
 	 */
 	bool reject_as_sets;
-#define BGP_REJECT_AS_SETS_DISABLED 0
-#define BGP_REJECT_AS_SETS_ENABLED 1
 
 	struct bgp_evpn_info *evpn_info;
 

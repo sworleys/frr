@@ -44,6 +44,7 @@ static int	 ldp_interface_address_delete(ZAPI_CALLBACK_ARGS);
 static int	 ldp_zebra_read_route(ZAPI_CALLBACK_ARGS);
 static int	 ldp_zebra_read_pw_status_update(ZAPI_CALLBACK_ARGS);
 static void	 ldp_zebra_connected(struct zclient *);
+static void	 ldp_zebra_filter_update(struct access_list *access);
 
 static struct zclient	*zclient;
 
@@ -108,8 +109,7 @@ ldp_zebra_send_mpls_labels(int cmd, struct kroute *kr)
 	struct zapi_labels zl = {};
 	struct zapi_nexthop *znh;
 
-	if (kr->local_label < MPLS_LABEL_RESERVED_MAX ||
-	    kr->remote_label == NO_LABEL)
+	if (kr->local_label < MPLS_LABEL_RESERVED_MAX)
 		return (0);
 
 	debug_zebra_out("prefix %s/%u nexthop %s ifindex %u labels %s/%s (%s)",
@@ -122,21 +122,32 @@ ldp_zebra_send_mpls_labels(int cmd, struct kroute *kr)
 	zl.local_label = kr->local_label;
 
 	/* Set prefix. */
-	SET_FLAG(zl.message, ZAPI_LABELS_FTN);
-	zl.route.prefix.family = kr->af;
-	switch (kr->af) {
-	case AF_INET:
-		zl.route.prefix.u.prefix4 = kr->prefix.v4;
-		break;
-	case AF_INET6:
-		zl.route.prefix.u.prefix6 = kr->prefix.v6;
-		break;
-	default:
-		fatalx("ldp_zebra_send_mpls_labels: unknown af");
+	if (kr->remote_label != NO_LABEL) {
+		SET_FLAG(zl.message, ZAPI_LABELS_FTN);
+		zl.route.prefix.family = kr->af;
+		switch (kr->af) {
+		case AF_INET:
+			zl.route.prefix.u.prefix4 = kr->prefix.v4;
+			break;
+		case AF_INET6:
+			zl.route.prefix.u.prefix6 = kr->prefix.v6;
+			break;
+		default:
+			fatalx("ldp_zebra_send_mpls_labels: unknown af");
+		}
+		zl.route.prefix.prefixlen = kr->prefixlen;
+		zl.route.type = kr->route_type;
+		zl.route.instance = kr->route_instance;
 	}
-	zl.route.prefix.prefixlen = kr->prefixlen;
-	zl.route.type = kr->route_type;
-	zl.route.instance = kr->route_instance;
+
+	/*
+	 * For broken LSPs, instruct the forwarding plane to pop the top-level
+	 * label and forward packets normally. This is a best-effort attempt
+	 * to deliver labeled IP packets to their final destination (instead of
+	 * dropping them).
+	 */
+	if (kr->remote_label == NO_LABEL)
+		kr->remote_label = MPLS_LABEL_IMPLICIT_NULL;
 
 	/* Set nexthop. */
 	zl.nexthop_num = 1;
@@ -497,8 +508,9 @@ ldp_zebra_read_pw_status_update(ZAPI_CALLBACK_ARGS)
 
 	zebra_read_pw_status_update(cmd, zclient, length, vrf_id, &zpw);
 
-	debug_zebra_in("pseudowire %s status %s", zpw.ifname,
-	    (zpw.status == PW_STATUS_UP) ? "up" : "down");
+	debug_zebra_in("pseudowire %s status %s 0x%x", zpw.ifname,
+	    (zpw.status == PW_FORWARDING) ? "up" : "down",
+	    zpw.status);
 
 	main_imsg_compose_lde(IMSG_PW_UPDATE, 0, &zpw, sizeof(zpw));
 
@@ -513,6 +525,22 @@ ldp_zebra_connected(struct zclient *zclient)
 	    ZEBRA_ROUTE_ALL, 0, VRF_DEFAULT);
 	zebra_redistribute_send(ZEBRA_REDISTRIBUTE_ADD, zclient, AFI_IP6,
 	    ZEBRA_ROUTE_ALL, 0, VRF_DEFAULT);
+}
+
+static void
+ldp_zebra_filter_update(struct access_list *access)
+{
+	struct ldp_access laccess;
+
+	if (access && access->name[0] != '\0') {
+		strlcpy(laccess.name, access->name, sizeof(laccess.name));
+		laccess.type = access->type;
+		debug_evt("%s ACL update filter name %s type %d", __func__,
+		    access->name, access->type);
+
+		main_imsg_compose_both(IMSG_FILTER_UPDATE, &laccess,
+			sizeof(laccess));
+	}
 }
 
 extern struct zebra_privs_t ldpd_privs;
@@ -535,6 +563,10 @@ ldp_zebra_init(struct thread_master *master)
 	zclient->redistribute_route_add = ldp_zebra_read_route;
 	zclient->redistribute_route_del = ldp_zebra_read_route;
 	zclient->pw_status_update = ldp_zebra_read_pw_status_update;
+
+	/* Access list initialize. */
+	access_list_add_hook(ldp_zebra_filter_update);
+	access_list_delete_hook(ldp_zebra_filter_update);
 }
 
 void

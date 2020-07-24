@@ -180,6 +180,8 @@ static struct quagga_signal_t ldp_signals[] =
 };
 
 static const struct frr_yang_module_info *const ldpd_yang_modules[] = {
+	&frr_filter_info,
+	&frr_vrf_info,
 };
 
 FRR_DAEMON_INFO(ldpd, LDP,
@@ -237,9 +239,6 @@ main(int argc, char *argv[])
 	frr_opt_add("LEn:", longopts,
 		"      --ctl_socket   Override ctl socket path\n"
 		"  -n, --instance     Instance id\n");
-
-	/* set default instance (to differentiate ldpd socket from lde one */
-	init.instance = 1;
 
 	while (1) {
 		int opt;
@@ -308,9 +307,15 @@ main(int argc, char *argv[])
 		exit(1);
 	}
 
-	if (lflag || eflag)
-		openzlog(ldpd_di.progname, "LDP", 0,
-		         LOG_CONS | LOG_NDELAY | LOG_PID, LOG_DAEMON);
+	if (lflag || eflag) {
+		struct zprivs_ids_t ids;
+
+		zprivs_preinit(&ldpd_privs);
+		zprivs_get_ids(&ids);
+
+		zlog_init(ldpd_di.progname, "LDP", 0,
+			  ids.uid_normal, ids.gid_normal);
+	}
 	if (lflag)
 		lde();
 	else if (eflag)
@@ -486,11 +491,12 @@ ldpd_shutdown(void)
 static pid_t
 start_child(enum ldpd_process p, char *argv0, int fd_async, int fd_sync)
 {
-	char	*argv[3];
+	char	*argv[7];
 	int	 argc = 0, nullfd;
 	pid_t	 pid;
 
-	switch (pid = fork()) {
+	pid = fork();
+	switch (pid) {
 	case -1:
 		fatal("cannot fork");
 	case 0:
@@ -529,6 +535,11 @@ start_child(enum ldpd_process p, char *argv0, int fd_async, int fd_sync)
 		argv[argc++] = (char *)"-E";
 		break;
 	}
+
+	argv[argc++] = (char *)"-u";
+	argv[argc++] = (char *)ldpd_privs.user;
+	argv[argc++] = (char *)"-g";
+	argv[argc++] = (char *)ldpd_privs.group;
 	argv[argc++] = NULL;
 
 	execvp(argv0, argv);
@@ -651,23 +662,19 @@ main_dispatch_lde(struct thread *thread)
 			switch (imsg.hdr.type) {
 			case IMSG_KPW_ADD:
 				if (kmpw_add(imsg.data))
-					log_warnx("%s: error adding "
-					    "pseudowire", __func__);
+					log_warnx("%s: error adding pseudowire", __func__);
 				break;
 			case IMSG_KPW_DELETE:
 				if (kmpw_del(imsg.data))
-					log_warnx("%s: error deleting "
-					    "pseudowire", __func__);
+					log_warnx("%s: error deleting pseudowire", __func__);
 				break;
 			case IMSG_KPW_SET:
 				if (kmpw_set(imsg.data))
-					log_warnx("%s: error setting "
-					    "pseudowire", __func__);
+					log_warnx("%s: error setting pseudowire", __func__);
 				break;
 			case IMSG_KPW_UNSET:
 				if (kmpw_unset(imsg.data))
-					log_warnx("%s: error unsetting "
-					    "pseudowire", __func__);
+					log_warnx("%s: error unsetting pseudowire", __func__);
 				break;
 			}
 			break;
@@ -846,8 +853,7 @@ main_imsg_send_net_socket(int af, enum socket_type type)
 
 	fd = ldp_create_socket(af, type);
 	if (fd == -1) {
-		log_warnx("%s: failed to create %s socket for address-family "
-		    "%s", __func__, socket_name(type), af_name(af));
+		log_warnx("%s: failed to create %s socket for address-family %s", __func__, socket_name(type), af_name(af));
 		return;
 	}
 
@@ -1365,8 +1371,7 @@ merge_af(int af, struct ldpd_af_conf *af_conf, struct ldpd_af_conf *xa)
 	}
 
 	/* update ACLs */
-	if (strcmp(af_conf->acl_label_allocate_for,
-	    xa->acl_label_allocate_for))
+	if (strcmp(af_conf->acl_label_allocate_for, xa->acl_label_allocate_for))
 		change_host_label = 1;
 
 	if (strcmp(af_conf->acl_label_advertise_to,
@@ -1403,7 +1408,7 @@ merge_af(int af, struct ldpd_af_conf *af_conf, struct ldpd_af_conf *xa)
 		if (change_egress_label)
 			lde_change_egress_label(af);
 		if (change_host_label)
-			lde_change_host_label(af);
+			lde_change_allocate_filter(af);
 		break;
 	case PROC_LDP_ENGINE:
 		if (stop_init_backoff)

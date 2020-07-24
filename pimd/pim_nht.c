@@ -103,7 +103,7 @@ static struct pim_nexthop_cache *pim_nexthop_cache_add(struct pim_instance *pim,
 	pnc->rp_list = list_new();
 	pnc->rp_list->cmp = pim_rp_list_cmp;
 
-	snprintf(hash_name, 64, "PNC %s(%s) Upstream Hash",
+	snprintf(hash_name, sizeof(hash_name), "PNC %s(%s) Upstream Hash",
 		 prefix2str(&pnc->rpf.rpf_addr, buf1, 64), pim->vrf->name);
 	pnc->upstream_hash = hash_create_size(8192, pim_upstream_hash_key,
 					      pim_upstream_equal, hash_name);
@@ -788,7 +788,11 @@ int pim_parse_nexthop_update(ZAPI_CALLBACK_ARGS)
 			case NEXTHOP_TYPE_IPV6_IFINDEX:
 				ifp1 = if_lookup_by_index(nexthop->ifindex,
 							  pim->vrf_id);
-				nbr = pim_neighbor_find_if(ifp1);
+
+				if (!ifp1)
+					nbr = NULL;
+				else
+					nbr = pim_neighbor_find_if(ifp1);
 				/* Overwrite with Nbr address as NH addr */
 				if (nbr)
 					nexthop->gate.ipv4 = nbr->source_addr;

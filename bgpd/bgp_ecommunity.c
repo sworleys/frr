@@ -59,6 +59,9 @@ void ecommunity_strfree(char **s)
 /* Allocate ecommunities.  */
 void ecommunity_free(struct ecommunity **ecom)
 {
+	if (!(*ecom))
+		return;
+
 	XFREE(MTYPE_ECOMMUNITY_VAL, (*ecom)->val);
 	XFREE(MTYPE_ECOMMUNITY_STR, (*ecom)->str);
 	XFREE(MTYPE_ECOMMUNITY, *ecom);
@@ -104,7 +107,7 @@ bool ecommunity_add_val(struct ecommunity *ecom, struct ecommunity_val *eval,
 			    p[1] == eval->val[1]) {
 				if (overwrite) {
 					memcpy(p, eval->val, ECOMMUNITY_SIZE);
-					return 1;
+					return true;
 				}
 				return false;
 			}
@@ -652,13 +655,16 @@ static int ecommunity_lb_str(char *buf, size_t bufsz, const uint8_t *pnt)
 	as |= (*pnt++);
 	(void)ptr_get_be32(pnt, &bw);
 	if (bw >= ONE_GBPS_BYTES)
-		sprintf(bps_buf, "%.3f Gbps", (float)(bw/ONE_GBPS_BYTES));
+		snprintf(bps_buf, sizeof(bps_buf), "%.3f Gbps",
+			 (float)(bw / ONE_GBPS_BYTES));
 	else if (bw >= ONE_MBPS_BYTES)
-		sprintf(bps_buf, "%.3f Mbps", (float)(bw/ONE_MBPS_BYTES));
+		snprintf(bps_buf, sizeof(bps_buf), "%.3f Mbps",
+			 (float)(bw / ONE_MBPS_BYTES));
 	else if (bw >= ONE_KBPS_BYTES)
-		sprintf(bps_buf, "%.3f Kbps", (float)(bw/ONE_KBPS_BYTES));
+		snprintf(bps_buf, sizeof(bps_buf), "%.3f Kbps",
+			 (float)(bw / ONE_KBPS_BYTES));
 	else
-		sprintf(bps_buf, "%u bps", bw * 8);
+		snprintf(bps_buf, sizeof(bps_buf), "%u bps", bw * 8);
 
 	len = snprintf(buf, bufsz, "LB:%u:%u (%s)", as, bw, bps_buf);
 	return len;
@@ -670,13 +676,10 @@ static int ecommunity_lb_str(char *buf, size_t bufsz, const uint8_t *pnt)
    are three types of format.
 
    route-map set extcommunity format
-	"rt 100:1 100:2"
-	"soo 100:3"
+	"rt 100:1 100:2soo 100:3"
 
    extcommunity-list
-	"rt 100:1 rt 100:2 soo 100:3"
-
-   "show [ip] bgp" and extcommunity-list regular expression matching
+	"rt 100:1 rt 100:2 soo 100:3show [ip] bgp" and extcommunity-list regular expression matching
 	"RT:100:1 RT:100:2 SoO:100:3"
 
    For each formath please use below definition for format:

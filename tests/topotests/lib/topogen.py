@@ -555,6 +555,8 @@ class TopoRouter(TopoGear):
     RD_STATIC = 12
     RD_BFD = 13
     RD_SHARP = 14
+    RD_BABEL = 15
+    RD_PBRD = 16
     RD = {
         RD_ZEBRA: "zebra",
         RD_RIP: "ripd",
@@ -570,6 +572,8 @@ class TopoRouter(TopoGear):
         RD_STATIC: "staticd",
         RD_BFD: "bfdd",
         RD_SHARP: "sharpd",
+        RD_BABEL: "babeld",
+        RD_PBRD: "pbrd",
     }
 
     def __init__(self, tgen, cls, name, **params):
@@ -654,7 +658,7 @@ class TopoRouter(TopoGear):
         Possible daemon values are: TopoRouter.RD_ZEBRA, TopoRouter.RD_RIP,
         TopoRouter.RD_RIPNG, TopoRouter.RD_OSPF, TopoRouter.RD_OSPF6,
         TopoRouter.RD_ISIS, TopoRouter.RD_BGP, TopoRouter.RD_LDP,
-        TopoRouter.RD_PIM.
+        TopoRouter.RD_PIM, TopoRouter.RD_PBR.
         """
         daemonstr = self.RD.get(daemon)
         self.logger.info('loading "{}" configuration: {}'.format(daemonstr, source))
@@ -706,6 +710,38 @@ class TopoRouter(TopoGear):
         """
         self.logger.debug("stopping")
         return self.tgen.net[self.name].stopRouter(wait, assertOnError)
+
+    def startDaemons(self, daemons):
+        """
+        Start Daemons: to start specific daemon(user defined daemon only)
+        * Start daemons (e.g. FRR/Quagga)
+        * Configure daemon logging files
+        """
+        self.logger.debug('starting')
+        nrouter = self.tgen.net[self.name]
+        result = nrouter.startRouterDaemons(daemons)
+
+        # Enable all daemon command logging, logging files
+        # and set them to the start dir.
+        for daemon, enabled in nrouter.daemons.iteritems():
+            for d in daemons:
+                if enabled == 0:
+                    continue
+                self.vtysh_cmd('configure terminal\nlog commands\nlog file {}.log'.\
+                    format(daemon), daemon=daemon)
+
+        if result != '':
+            self.tgen.set_error(result)
+
+        return result
+
+    def killDaemons(self, daemons, wait=True, assertOnError=True):
+        """
+        Kill specific daemon(user defined daemon only)
+        forcefully using SIGKILL
+        """
+        self.logger.debug('Killing daemons using SIGKILL..')
+        return self.tgen.net[self.name].killRouterDaemons(daemons, wait, assertOnError)
 
     def vtysh_cmd(self, command, isjson=False, daemon=None):
         """
@@ -1028,6 +1064,7 @@ def diagnose_env_linux():
             "isisd",
             "pimd",
             "ldpd",
+            "pbrd"
         ]:
             path = os.path.join(frrdir, fname)
             if not os.path.isfile(path):
@@ -1085,6 +1122,7 @@ def diagnose_env_linux():
             "ripngd",
             "isisd",
             "pimd",
+            "pbrd"
         ]:
             path = os.path.join(quaggadir, fname)
             if not os.path.isfile(path):

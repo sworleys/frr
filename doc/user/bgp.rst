@@ -414,7 +414,28 @@ Require policy on EBGP
 .. index:: [no] bgp ebgp-requires-policy
 .. clicmd:: [no] bgp ebgp-requires-policy
 
-   This command requires incoming and outgoing filters to be applied for eBGP sessions. Without the incoming filter, no routes will be accepted. Without the outgoing filter, no routes will be announced.
+   This command requires incoming and outgoing filters to be applied
+   for eBGP sessions. Without the incoming filter, no routes will be
+   accepted. Without the outgoing filter, no routes will be announced.
+
+   This is enabled by default.
+
+   When the incoming or outgoing filter is missing you will see
+   "(Policy)" sign under ``show bgp summary``:
+
+   .. code-block:: frr
+
+      exit1# show bgp summary
+
+      IPv4 Unicast Summary:
+      BGP router identifier 10.10.10.1, local AS number 65001 vrf-id 0
+      BGP table version 4
+      RIB entries 7, using 1344 bytes of memory
+      Peers 2, using 43 KiB of memory
+
+      Neighbor        V         AS   MsgRcvd   MsgSent   TblVer  InQ OutQ  Up/Down State/PfxRcd   PfxSnt
+      192.168.0.2     4      65002         8        10        0    0    0 00:03:09            5 (Policy)
+      fe80:1::2222    4      65002         9        11        0    0    0 00:03:09     (Policy) (Policy)
 
 Reject routes with AS_SET or AS_CONFED_SET types
 ------------------------------------------------
@@ -904,6 +925,17 @@ Networks
 .. index:: no network A.B.C.D/M
 .. clicmd:: no network A.B.C.D/M
 
+.. index:: [no] bgp network import-check
+.. clicmd:: [no] bgp network import-check
+
+   This configuration modifies the behavior of the network statement.
+   If you have this configured the underlying network must exist in
+   the rib.  If you have the [no] form configured then BGP will not
+   check for the networks existence in the rib.  For versions 7.3 and
+   before frr defaults for datacenter were the network must exist,
+   traditional did not check for existence.  For versions 7.4 and beyond
+   both traditional and datacenter the network must exist.
+
 .. _bgp-route-aggregation:
 
 Route Aggregation
@@ -939,7 +971,7 @@ Route Aggregation-IPv4 Address Family
 .. clicmd:: aggregate-address A.B.C.D/M summary-only
 
    This command specifies an aggregate address. Aggregated routes will
-   not be announce.
+   not be announced.
 
 .. index:: no aggregate-address A.B.C.D/M
 .. clicmd:: no aggregate-address A.B.C.D/M
@@ -991,7 +1023,7 @@ Route Aggregation-IPv6 Address Family
 .. clicmd:: aggregate-address X:X::X:X/M summary-only
 
    This command specifies an aggregate address. Aggregated routes will
-   not be announce.
+   not be announced.
 
 .. index:: no aggregate-address X:X::X:X/M
 .. clicmd:: no aggregate-address X:X::X:X/M
@@ -1334,6 +1366,19 @@ Configuring Peers
    on by default or not.  This command defaults to on and is not displayed.
    The `no bgp default ipv4-unicast` form of the command is displayed.
 
+.. index:: [no] bgp default show-hostname
+.. clicmd:: [no] bgp default show-hostname
+
+   This command shows the hostname of the peer in certain BGP commands
+   outputs. It's easier to troubleshoot if you have a number of BGP peers.
+
+.. index:: [no] bgp default show-nexthop-hostname
+.. clicmd:: [no] bgp default show-nexthop-hostname
+
+   This command shows the hostname of the next-hop in certain BGP commands
+   outputs. It's easier to troubleshoot if you have a number of BGP peers
+   and a number of routes to check.
+
 .. index:: [no] neighbor PEER advertisement-interval (0-600)
 .. clicmd:: [no] neighbor PEER advertisement-interval (0-600)
 
@@ -1473,6 +1518,17 @@ AS path access list is user defined AS path.
 
 .. index:: no bgp as-path access-list WORD permit|deny LINE
 .. clicmd:: no bgp as-path access-list WORD permit|deny LINE
+
+.. _bgp-bogon-filter-example:
+
+Bogon ASN filter policy configuration example
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: frr
+
+   bgp as-path access-list 99 permit _0_
+   bgp as-path access-list 99 permit _23456_
+   bgp as-path access-list 99 permit _1310[0-6][0-9]_|_13107[0-1]_
 
 .. _bgp-using-as-path-in-route-map:
 
@@ -1679,8 +1735,8 @@ expanded
    the same namespace, so it's not necessary to specify ``standard`` or
    ``expanded``; these modifiers are purely aesthetic.
 
-.. index:: show bgp community-list [NAME]
-.. clicmd:: show bgp community-list [NAME]
+.. index:: show bgp community-list [NAME detail]
+.. clicmd:: show bgp community-list [NAME detail]
 
    Displays community list information. When ``NAME`` is specified the
    specified community list's information is shown.
@@ -1694,7 +1750,7 @@ expanded
          Named Community expanded list EXPAND
        permit :
 
-         # show bgp community-list CLIST
+         # show bgp community-list CLIST detail
          Named Community standard list CLIST
        permit 7675:80 7675:100 no-export
        deny internet
@@ -1733,7 +1789,7 @@ In :ref:`route-map` we can match on or set the BGP communities attribute. Using
 this feature network operator can implement their network policy based on BGP
 communities attribute.
 
-The ollowing commands can be used in route maps:
+The following commands can be used in route maps:
 
 .. index:: match community WORD exact-match [exact-match]
 .. clicmd:: match community WORD exact-match [exact-match]
@@ -1970,8 +2026,8 @@ Extended Community Lists
 .. index:: show bgp extcommunity-list
 .. clicmd:: show bgp extcommunity-list
 
-.. index:: show bgp extcommunity-list NAME
-.. clicmd:: show bgp extcommunity-list NAME
+.. index:: show bgp extcommunity-list NAME detail
+.. clicmd:: show bgp extcommunity-list NAME detail
 
    This command displays current extcommunity-list information. When `name` is
    specified the community list's information is shown.::
@@ -2085,8 +2141,8 @@ Two types of large community lists are supported, namely `standard` and
 .. index:: show bgp large-community-list
 .. clicmd:: show bgp large-community-list
 
-.. index:: show bgp large-community-list NAME
-.. clicmd:: show bgp large-community-list NAME
+.. index:: show bgp large-community-list NAME detail
+.. clicmd:: show bgp large-community-list NAME detail
 
    This command display current large-community-list information. When
    `name` is specified the community list information is shown.
@@ -2750,7 +2806,14 @@ structure is extended with :clicmd:`show bgp [afi] [safi]`.
 
    These commands display BGP routes for the specific routing table indicated by
    the selected afi and the selected safi. If no afi and no safi value is given,
-   the command falls back to the default IPv6 routing table
+   the command falls back to the default IPv6 routing table.
+   For EVPN prefixes, you can display the full BGP table for this AFI/SAFI
+   using the standard `show bgp [afi] [safi]` syntax.
+
+.. index:: show bgp l2vpn evpn route [type <macip|2|multicast|3|es|4|prefix|5>]
+.. clicmd:: show bgp l2vpn evpn route [type <macip|2|multicast|3|es|4|prefix|5>]
+
+   Additionally, you can also filter this output by route type.
 
 .. index:: show bgp [afi] [safi] summary
 .. clicmd:: show bgp [afi] [safi] summary
@@ -2762,6 +2825,12 @@ structure is extended with :clicmd:`show bgp [afi] [safi]`.
 .. clicmd:: show bgp [afi] [safi] summary failed [json]
 
    Show a bgp peer summary for peers that are not succesfully exchanging routes
+   for the specified address family, and subsequent address-family.
+
+.. index:: show bgp [afi] [safi] summary established [json]
+.. clicmd:: show bgp [afi] [safi] summary established [json]
+
+   Show a bgp peer summary for peers that are succesfully exchanging routes
    for the specified address family, and subsequent address-family.
 
 .. index:: show bgp [afi] [safi] neighbor [PEER]
@@ -2894,8 +2963,8 @@ Displaying Routes by AS Path
 Displaying Update Group Information
 -----------------------------------
 
-..index:: show bgp update-groups SUBGROUP-ID [advertise-queue|advertised-routes|packet-queue]
-..clicmd:: show bgp update-groups [advertise-queue|advertised-routes|packet-queue]
+.. index:: show bgp update-groups SUBGROUP-ID [advertise-queue|advertised-routes|packet-queue]
+.. clicmd:: show bgp update-groups [advertise-queue|advertised-routes|packet-queue]
 
    Display Information about each individual update-group being used.
    If SUBGROUP-ID is specified only display about that particular group.  If
@@ -2904,8 +2973,8 @@ Displaying Update Group Information
    the list of routes we have sent to the peers in the update-group and
    packet-queue specifies the list of packets in the queue to be sent.
 
-..index:: show bgp update-groups statistics
-..clicmd:: show bgp update-groups statistics
+.. index:: show bgp update-groups statistics
+.. clicmd:: show bgp update-groups statistics
 
    Display Information about update-group events in FRR.
 
@@ -3095,8 +3164,8 @@ certainly contains silly mistakes, if not serious flaws.
    ip prefix-list pl-peer2-network permit 192.168.2.0/24
    ip prefix-list pl-peer2-network permit 172.16.1/24
    !
-   ip as-path access-list asp-own-as permit ^$
-   ip as-path access-list asp-own-as permit _64512_
+   bgp as-path access-list asp-own-as permit ^$
+   bgp as-path access-list asp-own-as permit _64512_
    !
    ! #################################################################
    ! Match communities we provide actions for, on routes receives from

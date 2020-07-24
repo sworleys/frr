@@ -72,7 +72,7 @@ struct client_gr_info {
 	enum zserv_client_capabilities capabilities;
 
 	/* GR commands */
-	bool delete;
+	bool do_delete;
 	bool gr_enable;
 	bool stale_client;
 
@@ -96,6 +96,14 @@ struct zserv {
 	/* Client file descriptor. */
 	int sock;
 
+	/* Attributes used to permit access to zapi clients from
+	 * other pthreads: the client has a busy counter, and a
+	 * 'closed' flag. These attributes are managed using a
+	 * lock, via the acquire_client() and release_client() apis.
+	 */
+	int busy_count;
+	bool is_closed;
+
 	/* Input/output buffer to the client. */
 	pthread_mutex_t ibuf_mtx;
 	struct stream_fifo *ibuf_fifo;
@@ -116,7 +124,7 @@ struct zserv {
 	/* Event for message processing, for the main pthread */
 	struct thread *t_process;
 
-	/* Threads for the main pthread */
+	/* Event for the main pthread */
 	struct thread *t_cleanup;
 
 	/* This client's redistribute flag. */
@@ -134,9 +142,10 @@ struct zserv {
 	/* Indicates if client is synchronous. */
 	bool synchronous;
 
-	/* client's protocol */
+	/* client's protocol and session info */
 	uint8_t proto;
 	uint16_t instance;
+	uint32_t session_id;
 
 	/*
 	 * Interested for MLAG Updates, and also stores the client
@@ -277,6 +286,17 @@ extern void zserv_start(char *path);
 extern int zserv_send_message(struct zserv *client, struct stream *msg);
 
 /*
+ * Send a batch of messages to a connected Zebra API client.
+ *
+ * client
+ *    the client to send to
+ *
+ * fifo
+ *    the list of messages to send
+ */
+extern int zserv_send_batch(struct zserv *client, struct stream_fifo *fifo);
+
+/*
  * Retrieve a client by its protocol and instance number.
  *
  * proto
@@ -289,6 +309,45 @@ extern int zserv_send_message(struct zserv *client, struct stream *msg);
  *    The Zebra API client.
  */
 extern struct zserv *zserv_find_client(uint8_t proto, unsigned short instance);
+
+/*
+ * Retrieve a client by its protocol, instance number, and session id.
+ *
+ * proto
+ *    protocol number
+ *
+ * instance
+ *    instance number
+ *
+ * session_id
+ *    session id
+ *
+ * Returns:
+ *    The Zebra API client.
+ */
+struct zserv *zserv_find_client_session(uint8_t proto, unsigned short instance,
+					uint32_t session_id);
+
+/*
+ * Retrieve a client object by the complete tuple of
+ * {protocol, instance, session}. This version supports use
+ * from a different pthread: the object will be returned marked
+ * in-use. The caller *must* release the client object with the
+ * release_client() api, to ensure that the in-use marker is cleared properly.
+ *
+ * Returns:
+ *    The Zebra API client.
+ */
+extern struct zserv *zserv_acquire_client(uint8_t proto,
+					  unsigned short instance,
+					  uint32_t session_id);
+
+/*
+ * Release a client object that was acquired with the acquire_client() api.
+ * After this has been called, the pointer must not be used - it may be freed
+ * in another pthread if the client has closed.
+ */
+extern void zserv_release_client(struct zserv *client);
 
 /*
  * Close a client.

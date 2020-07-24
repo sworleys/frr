@@ -141,6 +141,9 @@ void pim_rp_free(struct pim_instance *pim)
 {
 	if (pim->rp_list)
 		list_delete(&pim->rp_list);
+	if (pim->rp_table)
+		route_table_finish(pim->rp_table);
+	pim->rp_table = NULL;
 }
 
 /*
@@ -728,7 +731,7 @@ int pim_rp_del(struct pim_instance *pim, struct in_addr rp_addr,
 	char rp_str[INET_ADDRSTRLEN];
 
 	if (!inet_ntop(AF_INET, &rp_addr, rp_str, sizeof(rp_str)))
-		sprintf(rp_str, "<rp?>");
+		snprintf(rp_str, sizeof(rp_str), "<rp?>");
 	prefix2str(&group, grp_str, sizeof(grp_str));
 
 	if (plist)
@@ -763,7 +766,9 @@ int pim_rp_del(struct pim_instance *pim, struct in_addr rp_addr,
 
 					if (!inet_ntop(AF_INET, bsrp, bsrp_str,
 						       sizeof(bsrp_str)))
-						sprintf(bsrp_str, "<bsrp?>");
+						snprintf(bsrp_str,
+							 sizeof(bsrp_str),
+							 "<bsrp?>");
 
 					zlog_debug(
 						"%s: BSM RP %s found for the group %s",
@@ -1261,11 +1266,11 @@ void pim_rp_show_information(struct pim_instance *pim, struct vty *vty, bool uj)
 			char buf[48];
 
 			if (rp_info->rp_src == RP_SRC_STATIC)
-				strcpy(source, "Static");
+				strlcpy(source, "Static", sizeof(source));
 			else if (rp_info->rp_src == RP_SRC_BSR)
-				strcpy(source, "BSR");
+				strlcpy(source, "BSR", sizeof(source));
 			else
-				strcpy(source, "None");
+				strlcpy(source, "None", sizeof(source));
 			if (uj) {
 				/*
 				 * If we have moved on to a new RP then add the
@@ -1289,6 +1294,10 @@ void pim_rp_show_information(struct pim_instance *pim, struct vty *vty, bool uj)
 					json_rp_rows = json_object_new_array();
 
 				json_row = json_object_new_object();
+				json_object_string_add(
+					json_row, "rpAddress",
+					inet_ntoa(rp_info->rp.rpf_addr.u
+							  .prefix4));
 				if (rp_info->rp.source_nexthop.interface)
 					json_object_string_add(
 						json_row, "outboundInterface",

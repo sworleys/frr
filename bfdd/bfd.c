@@ -28,10 +28,12 @@
 #include <zebra.h>
 
 #include "lib/jhash.h"
+#include "lib/network.h"
 
 #include "bfd.h"
 
 DEFINE_MTYPE_STATIC(BFDD, BFDD_CONFIG, "long-lived configuration memory")
+DEFINE_MTYPE_STATIC(BFDD, BFDD_PROFILE, "long-lived profile memory")
 DEFINE_MTYPE_STATIC(BFDD, BFDD_SESSION_OBSERVER, "Session observer")
 DEFINE_MTYPE_STATIC(BFDD, BFDD_VRF, "BFD VRF")
 
@@ -52,12 +54,188 @@ static void bs_up_handler(struct bfd_session *bs, int nstate);
 static void bs_neighbour_admin_down_handler(struct bfd_session *bfd,
 					    uint8_t diag);
 
+/**
+ * Remove BFD profile from all BFD sessions so we don't leave dangling
+ * pointers.
+ */
+static void bfd_profile_detach(struct bfd_profile *bp);
+
 /* Zeroed array with the size of an IPv6 address. */
 struct in6_addr zero_addr;
+
+/** BFD profiles list. */
+struct bfdproflist bplist;
 
 /*
  * Functions
  */
+struct bfd_profile *bfd_profile_lookup(const char *name)
+{
+	struct bfd_profile *bp;
+
+	TAILQ_FOREACH (bp, &bplist, entry) {
+		if (strcmp(name, bp->name))
+			continue;
+
+		return bp;
+	}
+
+	return NULL;
+}
+
+static void bfd_profile_set_default(struct bfd_profile *bp)
+{
+	bp->admin_shutdown = true;
+	bp->detection_multiplier = BFD_DEFDETECTMULT;
+	bp->echo_mode = false;
+	bp->min_echo_rx = BFD_DEF_REQ_MIN_ECHO;
+	bp->min_rx = BFD_DEFREQUIREDMINRX;
+	bp->min_tx = BFD_DEFDESIREDMINTX;
+}
+
+struct bfd_profile *bfd_profile_new(const char *name)
+{
+	struct bfd_profile *bp;
+
+	/* Search for duplicates. */
+	if (bfd_profile_lookup(name) != NULL)
+		return NULL;
+
+	/* Allocate, name it and put into list. */
+	bp = XCALLOC(MTYPE_BFDD_PROFILE, sizeof(*bp));
+	strlcpy(bp->name, name, sizeof(bp->name));
+	TAILQ_INSERT_TAIL(&bplist, bp, entry);
+
+	/* Set default values. */
+	bfd_profile_set_default(bp);
+
+	return bp;
+}
+
+void bfd_profile_free(struct bfd_profile *bp)
+{
+	/* Detach from any session. */
+	if (bglobal.bg_shutdown == false)
+		bfd_profile_detach(bp);
+
+	/* Remove from global list. */
+	TAILQ_REMOVE(&bplist, bp, entry);
+
+	XFREE(MTYPE_BFDD_PROFILE, bp);
+}
+
+/**
+ * Removes a profile and tests whether it needs to apply the changes or not.
+ *
+ * \param bs the BFD session.
+ * \param apply whether or not to apply configurations immediately.
+ */
+static void _bfd_profile_remove(struct bfd_session *bs, bool apply)
+{
+	struct bfd_profile *bp;
+
+	/* No profile applied, nothing to do. */
+	bp = bs->profile;
+	if (bp == NULL)
+		return;
+
+	/* Remove the profile association. */
+	bs->profile = NULL;
+
+	/* Set multiplier to the default. */
+	bs->detect_mult = bs->peer_profile.detection_multiplier;
+
+	/* Set timers back to user configuration. */
+	bs->timers.desired_min_tx = bs->peer_profile.min_tx;
+	bs->timers.required_min_rx = bs->peer_profile.min_rx;
+
+	/* We can only apply echo options on single hop sessions. */
+	if (!CHECK_FLAG(bs->flags, BFD_SESS_FLAG_MH)) {
+		/* Set default echo timer. */
+		bs->timers.required_min_echo = bs->peer_profile.min_echo_rx;
+
+		/* Default is no echo mode. */
+		if (apply)
+			bfd_set_echo(bs, bs->peer_profile.echo_mode);
+	}
+
+	if (apply)
+		bfd_set_shutdown(bs, bs->peer_profile.admin_shutdown);
+}
+
+void bfd_profile_apply(const char *profname, struct bfd_session *bs)
+{
+	struct bfd_profile *bp;
+
+	/* Remove previous profile if any. */
+	if (bs->profile_name) {
+		_bfd_profile_remove(bs, false);
+
+		/* We are changing profiles. */
+		if (strcmp(bs->profile_name, profname)) {
+			XFREE(MTYPE_BFDD_PROFILE, bs->profile_name);
+			bs->profile_name =
+				XSTRDUP(MTYPE_BFDD_PROFILE, profname);
+		}
+	} else /* Save the current profile name (in case it doesn't exist). */
+		bs->profile_name = XSTRDUP(MTYPE_BFDD_PROFILE, profname);
+
+	/* Look up new profile to apply. */
+	bp = bfd_profile_lookup(profname);
+	if (bp == NULL)
+		return;
+
+	/* Point to profile if it exists. */
+	bs->profile = bp;
+
+	/* Set multiplier if not the default. */
+	if (bs->peer_profile.detection_multiplier == BFD_DEFDETECTMULT)
+		bs->detect_mult = bp->detection_multiplier;
+	else
+		bs->detect_mult = bs->peer_profile.detection_multiplier;
+
+	/* Set timers if not the default. */
+	if (bs->peer_profile.min_tx == BFD_DEFDESIREDMINTX)
+		bs->timers.desired_min_tx = bp->min_tx;
+	else
+		bs->timers.desired_min_tx = bs->peer_profile.min_tx;
+
+	if (bs->peer_profile.min_rx == BFD_DEFREQUIREDMINRX)
+		bs->timers.required_min_rx = bp->min_rx;
+	else
+		bs->timers.required_min_rx = bs->peer_profile.min_rx;
+
+	/* We can only apply echo options on single hop sessions. */
+	if (!CHECK_FLAG(bs->flags, BFD_SESS_FLAG_MH)) {
+		/* Configure remote echo if it was default. */
+		if (bs->peer_profile.min_echo_rx == BFD_DEF_REQ_MIN_ECHO)
+			bs->timers.required_min_echo = bp->min_echo_rx;
+		else
+			bs->timers.required_min_echo =
+				bs->peer_profile.min_echo_rx;
+
+		/* Toggle echo if default value. */
+		if (bs->peer_profile.echo_mode == false)
+			bfd_set_echo(bs, bp->echo_mode);
+		else
+			bfd_set_echo(bs, bs->peer_profile.echo_mode);
+	}
+
+	/* Toggle 'no shutdown' if default value. */
+	if (bs->peer_profile.admin_shutdown)
+		bfd_set_shutdown(bs, bp->admin_shutdown);
+	else
+		bfd_set_shutdown(bs, bs->peer_profile.admin_shutdown);
+}
+
+void bfd_profile_remove(struct bfd_session *bs)
+{
+	/* Remove any previous set profile name. */
+	XFREE(MTYPE_BFDD_PROFILE, bs->profile_name);
+
+	_bfd_profile_remove(bs, true);
+}
+
 void gen_bfd_key(struct bfd_key *key, struct sockaddr_any *peer,
 		 struct sockaddr_any *local, bool mhop, const char *ifname,
 		 const char *vrfname)
@@ -236,8 +414,8 @@ static uint32_t ptm_bfd_gen_ID(void)
 	 * random session identification numbers.
 	 */
 	do {
-		session_id = ((random() << 16) & 0xFFFF0000)
-			     | (random() & 0x0000FFFF);
+		session_id = ((frr_weak_random() << 16) & 0xFFFF0000)
+			     | (frr_weak_random() & 0x0000FFFF);
 	} while (session_id == 0 || bfd_id_lookup(session_id) != NULL);
 
 	return session_id;
@@ -258,7 +436,7 @@ void ptm_bfd_start_xmt_timer(struct bfd_session *bfd, bool is_echo)
 	 * between 75% and 90%.
 	 */
 	maxpercent = (bfd->detect_mult == 1) ? 16 : 26;
-	jitter = (xmt_TO * (75 + (random() % maxpercent))) / 100;
+	jitter = (xmt_TO * (75 + (frr_weak_random() % maxpercent))) / 100;
 	/* XXX remove that division above */
 
 	if (is_echo)
@@ -493,6 +671,9 @@ struct bfd_session *bfd_session_new(void)
 
 	bs = XCALLOC(MTYPE_BFDD_CONFIG, sizeof(*bs));
 
+	/* Set peer session defaults. */
+	bfd_profile_set_default(&bs->peer_profile);
+
 	bs->timers.desired_min_tx = BFD_DEFDESIREDMINTX;
 	bs->timers.required_min_rx = BFD_DEFREQUIREDMINRX;
 	bs->timers.required_min_echo = BFD_DEF_REQ_MIN_ECHO;
@@ -549,86 +730,52 @@ int bfd_session_update_label(struct bfd_session *bs, const char *nlabel)
 static void _bfd_session_update(struct bfd_session *bs,
 				struct bfd_peer_cfg *bpc)
 {
-	if (bpc->bpc_echo) {
-		/* Check if echo mode is already active. */
-		if (CHECK_FLAG(bs->flags, BFD_SESS_FLAG_ECHO))
-			goto skip_echo;
-
-		SET_FLAG(bs->flags, BFD_SESS_FLAG_ECHO);
-
-		/* Activate/update echo receive timeout timer. */
-		bs_echo_timer_handler(bs);
-	} else {
-		/* Check if echo mode is already disabled. */
-		if (!CHECK_FLAG(bs->flags, BFD_SESS_FLAG_ECHO))
-			goto skip_echo;
-
-		UNSET_FLAG(bs->flags, BFD_SESS_FLAG_ECHO);
-		ptm_bfd_echo_stop(bs);
+	if (bpc->bpc_has_txinterval) {
+		bs->timers.desired_min_tx = bpc->bpc_txinterval * 1000;
+		bs->peer_profile.min_tx = bs->timers.desired_min_tx;
 	}
 
-skip_echo:
-	if (bpc->bpc_has_txinterval)
-		bs->timers.desired_min_tx = bpc->bpc_txinterval * 1000;
-
-	if (bpc->bpc_has_recvinterval)
+	if (bpc->bpc_has_recvinterval) {
 		bs->timers.required_min_rx = bpc->bpc_recvinterval * 1000;
+		bs->peer_profile.min_rx = bs->timers.required_min_rx;
+	}
 
-	if (bpc->bpc_has_detectmultiplier)
+	if (bpc->bpc_has_detectmultiplier) {
 		bs->detect_mult = bpc->bpc_detectmultiplier;
+		bs->peer_profile.detection_multiplier = bs->detect_mult;
+	}
 
-	if (bpc->bpc_has_echointerval)
+	if (bpc->bpc_has_echointerval) {
 		bs->timers.required_min_echo = bpc->bpc_echointerval * 1000;
+		bs->peer_profile.min_echo_rx = bs->timers.required_min_echo;
+	}
 
 	if (bpc->bpc_has_label)
 		bfd_session_update_label(bs, bpc->bpc_label);
 
-	if (bpc->bpc_shutdown) {
-		/* Check if already shutdown. */
-		if (CHECK_FLAG(bs->flags, BFD_SESS_FLAG_SHUTDOWN))
-			return;
-
-		SET_FLAG(bs->flags, BFD_SESS_FLAG_SHUTDOWN);
-
-		/* Disable all events. */
-		bfd_recvtimer_delete(bs);
-		bfd_echo_recvtimer_delete(bs);
-		bfd_xmttimer_delete(bs);
-		bfd_echo_xmttimer_delete(bs);
-
-		/* Change and notify state change. */
-		bs->ses_state = PTM_BFD_ADM_DOWN;
-		control_notify(bs, bs->ses_state);
-
-		/* Don't try to send packets with a disabled session. */
-		if (bs->sock != -1)
-			ptm_bfd_snd(bs, 0);
-	} else {
-		/* Check if already working. */
-		if (!CHECK_FLAG(bs->flags, BFD_SESS_FLAG_SHUTDOWN))
-			return;
-
-		UNSET_FLAG(bs->flags, BFD_SESS_FLAG_SHUTDOWN);
-
-		/* Change and notify state change. */
-		bs->ses_state = PTM_BFD_DOWN;
-		control_notify(bs, bs->ses_state);
-
-		/* Enable all timers. */
-		bfd_recvtimer_update(bs);
-		bfd_xmttimer_update(bs, bs->xmt_TO);
-	}
-	if (bpc->bpc_cbit) {
-		if (CHECK_FLAG(bs->flags, BFD_SESS_FLAG_CBIT))
-			return;
-
+	if (bpc->bpc_cbit)
 		SET_FLAG(bs->flags, BFD_SESS_FLAG_CBIT);
-	} else {
-		if (!CHECK_FLAG(bs->flags, BFD_SESS_FLAG_CBIT))
-			return;
-
+	else
 		UNSET_FLAG(bs->flags, BFD_SESS_FLAG_CBIT);
-	}
+
+	bs->peer_profile.echo_mode = bpc->bpc_echo;
+	bfd_set_echo(bs, bpc->bpc_echo);
+
+	/*
+	 * Shutdown needs to be the last in order to avoid timers enable when
+	 * the session is disabled.
+	 */
+	bs->peer_profile.admin_shutdown = bpc->bpc_shutdown;
+	bfd_set_shutdown(bs, bpc->bpc_shutdown);
+
+	/*
+	 * Apply profile last: it also calls `bfd_set_shutdown`.
+	 *
+	 * There is no problem calling `shutdown` twice if the value doesn't
+	 * change or if it is overriden by peer specific configuration.
+	 */
+	if (bpc->bpc_has_profile)
+		bfd_profile_apply(bpc->bpc_profile, bs);
 }
 
 static int bfd_session_update(struct bfd_session *bs, struct bfd_peer_cfg *bpc)
@@ -665,6 +812,7 @@ void bfd_session_free(struct bfd_session *bs)
 
 	pl_free(bs->pl);
 
+	XFREE(MTYPE_BFDD_PROFILE, bs->profile_name);
 	XFREE(MTYPE_BFDD_CONFIG, bs);
 }
 
@@ -776,8 +924,7 @@ int ptm_bfd_sess_del(struct bfd_peer_cfg *bpc)
 
 	/* This pointer is being referenced, don't let it be deleted. */
 	if (bs->refcount > 0) {
-		zlog_err("session-delete: refcount failure: %" PRIu64
-			 " references",
+		zlog_err("session-delete: refcount failure: %" PRIu64" references",
 			 bs->refcount);
 		return -1;
 	}
@@ -1097,6 +1244,78 @@ void bs_set_slow_timers(struct bfd_session *bs)
 	/* Set the appropriated timeouts for slow connection. */
 	bs->detect_TO = (BFD_DEFDETECTMULT * BFD_DEF_SLOWTX);
 	bs->xmt_TO = BFD_DEF_SLOWTX;
+}
+
+void bfd_set_echo(struct bfd_session *bs, bool echo)
+{
+	if (echo) {
+		/* Check if echo mode is already active. */
+		if (CHECK_FLAG(bs->flags, BFD_SESS_FLAG_ECHO))
+			return;
+
+		SET_FLAG(bs->flags, BFD_SESS_FLAG_ECHO);
+
+		/* Activate/update echo receive timeout timer. */
+		bs_echo_timer_handler(bs);
+	} else {
+		/* Check if echo mode is already disabled. */
+		if (!CHECK_FLAG(bs->flags, BFD_SESS_FLAG_ECHO))
+			return;
+
+		UNSET_FLAG(bs->flags, BFD_SESS_FLAG_ECHO);
+		ptm_bfd_echo_stop(bs);
+	}
+}
+
+void bfd_set_shutdown(struct bfd_session *bs, bool shutdown)
+{
+	bool is_shutdown;
+
+	/*
+	 * Special case: we are batching changes and the previous state was
+	 * not shutdown. Instead of potentially disconnect a running peer,
+	 * we'll get the current status to validate we were really down.
+	 */
+	if (bs->ses_state == PTM_BFD_UP)
+		is_shutdown = false;
+	else
+		is_shutdown = CHECK_FLAG(bs->flags, BFD_SESS_FLAG_SHUTDOWN);
+
+	if (shutdown) {
+		/* Already shutdown. */
+		if (is_shutdown)
+			return;
+
+		SET_FLAG(bs->flags, BFD_SESS_FLAG_SHUTDOWN);
+
+		/* Disable all events. */
+		bfd_recvtimer_delete(bs);
+		bfd_echo_recvtimer_delete(bs);
+		bfd_xmttimer_delete(bs);
+		bfd_echo_xmttimer_delete(bs);
+
+		/* Change and notify state change. */
+		bs->ses_state = PTM_BFD_ADM_DOWN;
+		control_notify(bs, bs->ses_state);
+
+		/* Don't try to send packets with a disabled session. */
+		if (bs->sock != -1)
+			ptm_bfd_snd(bs, 0);
+	} else {
+		/* Already working. */
+		if (!is_shutdown)
+			return;
+
+		UNSET_FLAG(bs->flags, BFD_SESS_FLAG_SHUTDOWN);
+
+		/* Change and notify state change. */
+		bs->ses_state = PTM_BFD_DOWN;
+		control_notify(bs, bs->ses_state);
+
+		/* Enable all timers. */
+		bfd_recvtimer_update(bs);
+		bfd_xmttimer_update(bs, bs->xmt_TO);
+	}
 }
 
 /*
@@ -1473,8 +1692,7 @@ struct bfd_session *bfd_key_lookup(struct bfd_key key)
 				inet_ntop(bs.key.family, &bs.key.local,
 					  addr_buf, sizeof(addr_buf));
 				zlog_debug(
-					" peer %s found, but ifp %s"
-					" and loc-addr %s ignored",
+					" peer %s found, but ifp %s and loc-addr %s ignored",
 					peer_buf, key.ifname, addr_buf);
 			}
 			return bsp;
@@ -1496,8 +1714,7 @@ struct bfd_session *bfd_key_lookup(struct bfd_key key)
 		bsp = ctx.result;
 		if (bglobal.debug_peer_event)
 			zlog_debug(
-				" peer %s found, but ifp"
-				" and/or loc-addr params ignored",
+				" peer %s found, but ifp and/or loc-addr params ignored",
 				peer_buf);
 	}
 	return bsp;
@@ -1569,6 +1786,7 @@ void bfd_initialize(void)
 				  "BFD session discriminator hash");
 	bfd_key_hash = hash_create(bfd_key_hash_do, bfd_key_hash_cmp,
 				   "BFD session hash");
+	TAILQ_INIT(&bplist);
 }
 
 static void _bfd_free(struct hash_bucket *hb,
@@ -1581,6 +1799,8 @@ static void _bfd_free(struct hash_bucket *hb,
 
 void bfd_shutdown(void)
 {
+	struct bfd_profile *bp;
+
 	/*
 	 * Close and free all BFD sessions.
 	 *
@@ -1594,6 +1814,10 @@ void bfd_shutdown(void)
 	/* Now free the hashes themselves. */
 	hash_free(bfd_id_hash);
 	hash_free(bfd_key_hash);
+
+	/* Free all profile allocations. */
+	while ((bp = TAILQ_FIRST(&bplist)) != NULL)
+		bfd_profile_free(bp);
 }
 
 struct bfd_session_iterator {
@@ -1679,6 +1903,43 @@ static void _bfd_session_remove_manual(struct hash_bucket *hb,
 void bfd_sessions_remove_manual(void)
 {
 	hash_iterate(bfd_key_hash, _bfd_session_remove_manual, NULL);
+}
+
+/*
+ * Profile related hash functions.
+ */
+static void _bfd_profile_update(struct hash_bucket *hb, void *arg)
+{
+	struct bfd_profile *bp = arg;
+	struct bfd_session *bs = hb->data;
+
+	/* This session is not using the profile. */
+	if (bs->profile_name == NULL || strcmp(bs->profile_name, bp->name) != 0)
+		return;
+
+	bfd_profile_apply(bp->name, bs);
+}
+
+void bfd_profile_update(struct bfd_profile *bp)
+{
+	hash_iterate(bfd_key_hash, _bfd_profile_update, bp);
+}
+
+static void _bfd_profile_detach(struct hash_bucket *hb, void *arg)
+{
+	struct bfd_profile *bp = arg;
+	struct bfd_session *bs = hb->data;
+
+	/* This session is not using the profile. */
+	if (bs->profile_name == NULL || strcmp(bs->profile_name, bp->name) != 0)
+		return;
+
+	bfd_profile_remove(bs);
+}
+
+static void bfd_profile_detach(struct bfd_profile *bp)
+{
+	hash_iterate(bfd_key_hash, _bfd_profile_detach, bp);
 }
 
 /*

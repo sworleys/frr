@@ -37,6 +37,7 @@
 #include "privs.h"
 #include "lib_errors.h"
 #include "northbound_cli.h"
+#include "network.h"
 
 #include "ripngd/ripngd.h"
 #include "ripngd/ripng_route.h"
@@ -1046,8 +1047,7 @@ void ripng_redistribute_delete(struct ripng *ripng, int type, int sub_type,
 
 				if (IS_RIPNG_DEBUG_EVENT)
 					zlog_debug(
-						"Poisone %s/%d on the interface %s with an "
-						"infinity metric [delete]",
+						"Poisone %s/%d on the interface %s with an infinity metric [delete]",
 						inet6_ntoa(p->prefix),
 						p->prefixlen,
 						ifindex2ifname(
@@ -1545,7 +1545,7 @@ int ripng_triggered_update(struct thread *t)
 	   random interval between 1 and 5 seconds.  If other changes that
 	   would trigger updates occur before the timer expires, a single
 	   update is triggered when the timer expires. */
-	interval = (random() % 5) + 1;
+	interval = (frr_weak_random() % 5) + 1;
 
 	ripng->t_triggered_interval = NULL;
 	thread_add_timer(master, ripng_triggered_interval, ripng, interval,
@@ -1950,7 +1950,7 @@ int ripng_request(struct interface *ifp)
 
 static int ripng_update_jitter(int time)
 {
-	return ((random() % (time + 1)) - (time / 2));
+	return ((frr_weak_random() % (time + 1)) - (time / 2));
 }
 
 void ripng_event(struct ripng *ripng, enum ripng_event event, int sock)
@@ -2434,9 +2434,14 @@ static int ripng_config_write(struct vty *vty)
 	return write;
 }
 
+static int ripng_config_write(struct vty *vty);
 /* RIPng node structure. */
 static struct cmd_node cmd_ripng_node = {
-	RIPNG_NODE, "%s(config-router)# ", 1,
+	.name = "ripng",
+	.node = RIPNG_NODE,
+	.parent_node = CONFIG_NODE,
+	.prompt = "%s(config-router)# ",
+	.config_write = ripng_config_write,
 };
 
 static void ripng_distribute_update(struct distribute_ctx *ctx,
@@ -2850,7 +2855,7 @@ void ripng_vrf_terminate(void)
 void ripng_init(void)
 {
 	/* Install RIPNG_NODE. */
-	install_node(&cmd_ripng_node, ripng_config_write);
+	install_node(&cmd_ripng_node);
 
 	/* Install ripng commands. */
 	install_element(VIEW_NODE, &show_ipv6_ripng_cmd);

@@ -146,23 +146,23 @@ static void _display_peer(struct vty *vty, struct bfd_session *bs)
 		CHECK_FLAG(bs->flags, BFD_SESS_FLAG_CONFIG) ? "configured" : "dynamic");
 
 	vty_out(vty, "\t\tLocal timers:\n");
-	vty_out(vty, "\t\t\tDetect-multiplier: %" PRIu32 "\n",
+	vty_out(vty, "\t\t\tDetect-multiplier: %u\n",
 		bs->detect_mult);
-	vty_out(vty, "\t\t\tReceive interval: %" PRIu32 "ms\n",
+	vty_out(vty, "\t\t\tReceive interval: %ums\n",
 		bs->timers.required_min_rx / 1000);
-	vty_out(vty, "\t\t\tTransmission interval: %" PRIu32 "ms\n",
+	vty_out(vty, "\t\t\tTransmission interval: %ums\n",
 		bs->timers.desired_min_tx / 1000);
-	vty_out(vty, "\t\t\tEcho transmission interval: %" PRIu32 "ms\n",
+	vty_out(vty, "\t\t\tEcho transmission interval: %ums\n",
 		bs->timers.required_min_echo / 1000);
 
 	vty_out(vty, "\t\tRemote timers:\n");
-	vty_out(vty, "\t\t\tDetect-multiplier: %" PRIu32 "\n",
+	vty_out(vty, "\t\t\tDetect-multiplier: %u\n",
 		bs->remote_detect_mult);
-	vty_out(vty, "\t\t\tReceive interval: %" PRIu32 "ms\n",
+	vty_out(vty, "\t\t\tReceive interval: %ums\n",
 		bs->remote_timers.required_min_rx / 1000);
-	vty_out(vty, "\t\t\tTransmission interval: %" PRIu32 "ms\n",
+	vty_out(vty, "\t\t\tTransmission interval: %ums\n",
 		bs->remote_timers.desired_min_tx / 1000);
-	vty_out(vty, "\t\t\tEcho transmission interval: %" PRIu32 "ms\n",
+	vty_out(vty, "\t\t\tEcho transmission interval: %ums\n",
 		bs->remote_timers.required_min_echo / 1000);
 
 	vty_out(vty, "\n");
@@ -878,23 +878,30 @@ DEFUN_NOSH(show_debugging_bfd,
 	   "BFD daemon\n")
 {
 	vty_out(vty, "BFD debugging status:\n");
-	vty_out(vty, "  Peer events debugging.\n");
-	vty_out(vty, "  Zebra events debugging.\n");
-	vty_out(vty, "  Network layer debugging.\n");
+	if (bglobal.debug_peer_event)
+		vty_out(vty, "  Peer events debugging is on.\n");
+	if (bglobal.debug_zebra)
+		vty_out(vty, "  Zebra events debugging is on.\n");
+	if (bglobal.debug_network)
+		vty_out(vty, "  Network layer debugging is on.\n");
 
 	return CMD_SUCCESS;
 }
 
+static int bfdd_write_config(struct vty *vty);
 struct cmd_node bfd_node = {
-	BFD_NODE,
-	"%s(config-bfd)# ",
-	1,
+	.name = "bfd",
+	.node = BFD_NODE,
+	.parent_node = CONFIG_NODE,
+	.prompt = "%s(config-bfd)# ",
+	.config_write = bfdd_write_config,
 };
 
 struct cmd_node bfd_peer_node = {
-	BFD_PEER_NODE,
-	"%s(config-bfd-peer)# ",
-	1,
+	.name = "bfd peer",
+	.node = BFD_PEER_NODE,
+	.parent_node = BFD_NODE,
+	.prompt = "%s(config-bfd-peer)# ",
 };
 
 static int bfdd_write_config(struct vty *vty)
@@ -945,11 +952,11 @@ void bfdd_vty_init(void)
 	install_element(CONFIG_NODE, &bfd_debug_network_cmd);
 
 	/* Install BFD node and commands. */
-	install_node(&bfd_node, bfdd_write_config);
+	install_node(&bfd_node);
 	install_default(BFD_NODE);
 
 	/* Install BFD peer node. */
-	install_node(&bfd_peer_node, NULL);
+	install_node(&bfd_peer_node);
 	install_default(BFD_PEER_NODE);
 
 	bfdd_cli_init();

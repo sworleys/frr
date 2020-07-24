@@ -23,6 +23,7 @@
 #include "thread.h"
 #include "memory.h"
 #include "if.h"
+#include "network.h"
 
 #include "pimd.h"
 #include "pim_pim.h"
@@ -500,6 +501,7 @@ void pim_sock_reset(struct interface *ifp)
 	pim_ifp->pim_dr_num_nondrpri_neighbors =
 		0; /* neighbors without dr_pri */
 	pim_ifp->pim_dr_addr = pim_ifp->primary_address;
+	pim_ifp->am_i_dr = true;
 
 	pim_ifstat_reset(ifp);
 }
@@ -878,7 +880,7 @@ int pim_sock_add(struct interface *ifp)
 	old_genid = pim_ifp->pim_generation_id;
 
 	while (old_genid == pim_ifp->pim_generation_id)
-		pim_ifp->pim_generation_id = random();
+		pim_ifp->pim_generation_id = frr_weak_random();
 
 	zlog_info("PIM INTERFACE UP: on interface %s ifindex=%d", ifp->name,
 		  ifp->ifindex);

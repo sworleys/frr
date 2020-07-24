@@ -44,6 +44,7 @@
 #include "privs.h"
 #include "lib_errors.h"
 #include "northbound_cli.h"
+#include "network.h"
 
 #include "ripd/ripd.h"
 #include "ripd/rip_nb.h"
@@ -741,8 +742,7 @@ static void rip_packet_dump(struct rip_packet *packet, int size,
 						ntohs(md5->family),
 						ntohs(md5->type));
 					zlog_debug(
-						"    RIP-2 packet len %d Key ID %d"
-						" Auth Data len %d",
+						"    RIP-2 packet len %d Key ID %d Auth Data len %d",
 						ntohs(md5->packet_len),
 						md5->keyid, md5->auth_len);
 					zlog_debug("    Sequence Number %ld",
@@ -756,8 +756,7 @@ static void rip_packet_dump(struct rip_packet *packet, int size,
 						ntohs(rte->family),
 						ntohs(rte->tag));
 					zlog_debug(
-						"    MD5: %02X%02X%02X%02X%02X%02X%02X%02X"
-						"%02X%02X%02X%02X%02X%02X%02X%02X",
+						"    MD5: %02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X%02X",
 						p[0], p[1], p[2], p[3], p[4],
 						p[5], p[6], p[7], p[8], p[9],
 						p[10], p[11], p[12], p[13],
@@ -903,8 +902,7 @@ static int rip_auth_md5(struct rip_packet *packet, struct sockaddr_in *from,
 	      || (md5->auth_len == RIP_AUTH_MD5_COMPAT_SIZE))) {
 		if (IS_RIP_DEBUG_EVENT)
 			zlog_debug(
-				"RIPv2 MD5 authentication, strange authentication "
-				"length field %d",
+				"RIPv2 MD5 authentication, strange authentication length field %d",
 				md5->auth_len);
 		return 0;
 	}
@@ -915,8 +913,7 @@ static int rip_auth_md5(struct rip_packet *packet, struct sockaddr_in *from,
 	if (packet_len > (length - RIP_HEADER_SIZE - RIP_AUTH_MD5_SIZE)) {
 		if (IS_RIP_DEBUG_EVENT)
 			zlog_debug(
-				"RIPv2 MD5 authentication, packet length field %d "
-				"greater than received length %d!",
+				"RIPv2 MD5 authentication, packet length field %d greater than received length %d!",
 				md5->packet_len, length);
 		return 0;
 	}
@@ -1644,8 +1641,7 @@ void rip_redistribute_delete(struct rip *rip, int type, int sub_type,
 
 				if (IS_RIP_DEBUG_EVENT)
 					zlog_debug(
-						"Poison %s/%d on the interface %s with an "
-						"infinity metric [delete]",
+						"Poison %s/%d on the interface %s with an infinity metric [delete]",
 						inet_ntoa(p->prefix),
 						p->prefixlen,
 						ifindex2ifname(
@@ -1813,8 +1809,7 @@ static int rip_read(struct thread *t)
 
 	if (ifc == NULL) {
 		zlog_info(
-			"rip_read: cannot find connected address for packet from %s "
-			"port %d on interface %s (VRF %s)",
+			"rip_read: cannot find connected address for packet from %s port %d on interface %s (VRF %s)",
 			inet_ntoa(from.sin_addr), ntohs(from.sin_port),
 			ifp->name, rip->vrf_name);
 		return -1;
@@ -1936,8 +1931,7 @@ static int rip_read(struct thread *t)
 		if (packet->command != RIP_REQUEST) {
 			if (IS_RIP_DEBUG_PACKET)
 				zlog_debug(
-					"RIPv1"
-					" dropped because authentication enabled");
+					"RIPv1 dropped because authentication enabled");
 			ripd_notif_send_auth_type_failure(ifp->name);
 			rip_peer_bad_packet(rip, &from);
 			return -1;
@@ -1960,8 +1954,7 @@ static int rip_read(struct thread *t)
 		if (packet->rte->family != htons(RIP_FAMILY_AUTH)) {
 			if (IS_RIP_DEBUG_PACKET)
 				zlog_debug(
-					"RIPv2"
-					" dropped because authentication enabled");
+					"RIPv2 dropped because authentication enabled");
 			ripd_notif_send_auth_type_failure(ifp->name);
 			rip_peer_bad_packet(rip, &from);
 			return -1;
@@ -2647,7 +2640,7 @@ static int rip_triggered_update(struct thread *t)
 	 random interval between 1 and 5 seconds.  If other changes that
 	 would trigger updates occur before the timer expires, a single
 	 update is triggered when the timer expires. */
-	interval = (random() % 5) + 1;
+	interval = (frr_weak_random() % 5) + 1;
 
 	rip->t_triggered_interval = NULL;
 	thread_add_timer(master, rip_triggered_interval, rip, interval,
@@ -2844,7 +2837,8 @@ static int rip_update_jitter(unsigned long time)
 	if (jitter_input < JITTER_BOUND)
 		jitter_input = JITTER_BOUND;
 
-	jitter = (((random() % ((jitter_input * 2) + 1)) - jitter_input));
+	jitter = (((frr_weak_random() % ((jitter_input * 2) + 1))
+		   - jitter_input));
 
 	return jitter / JITTER_BOUND;
 }
@@ -2972,8 +2966,8 @@ static void rip_distance_show(struct vty *vty, struct rip *rip)
 					"    Address           Distance  List\n");
 				header = 0;
 			}
-			sprintf(buf, "%s/%d", inet_ntoa(rn->p.u.prefix4),
-				rn->p.prefixlen);
+			snprintf(buf, sizeof(buf), "%s/%d",
+				 inet_ntoa(rn->p.u.prefix4), rn->p.prefixlen);
 			vty_out(vty, "    %-20s  %4d  %s\n", buf,
 				rdistance->distance,
 				rdistance->access_list ? rdistance->access_list
@@ -3327,8 +3321,15 @@ static int config_write_rip(struct vty *vty)
 	return write;
 }
 
+static int config_write_rip(struct vty *vty);
 /* RIP node structure. */
-static struct cmd_node rip_node = {RIP_NODE, "%s(config-router)# ", 1};
+static struct cmd_node rip_node = {
+	.name = "rip",
+	.node = RIP_NODE,
+	.parent_node = CONFIG_NODE,
+	.prompt = "%s(config-router)# ",
+	.config_write = config_write_rip,
+};
 
 /* Distribute-list update functions. */
 static void rip_distribute_update(struct distribute_ctx *ctx,
@@ -3731,7 +3732,7 @@ void rip_vrf_terminate(void)
 void rip_init(void)
 {
 	/* Install top nodes. */
-	install_node(&rip_node, config_write_rip);
+	install_node(&rip_node);
 
 	/* Install rip commands. */
 	install_element(VIEW_NODE, &show_ip_rip_cmd);

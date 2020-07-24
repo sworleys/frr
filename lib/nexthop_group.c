@@ -948,10 +948,13 @@ DEFPY(ecmp_nexthops, ecmp_nexthops_cmd,
 	return CMD_SUCCESS;
 }
 
+static int nexthop_group_write(struct vty *vty);
 static struct cmd_node nexthop_group_node = {
-	NH_GROUP_NODE,
-	"%s(config-nh-group)# ",
-	1
+	.name = "nexthop-group",
+	.node = NH_GROUP_NODE,
+	.parent_node = CONFIG_NODE,
+	.prompt = "%s(config-nh-group)# ",
+	.config_write = nexthop_group_write,
 };
 
 void nexthop_group_write_nexthop(struct vty *vty, struct nexthop *nh)
@@ -1006,6 +1009,60 @@ void nexthop_group_write_nexthop(struct vty *vty, struct nexthop *nh)
 		vty_out(vty, " backup-idx %d", nh->backup_idx);
 
 	vty_out(vty, "\n");
+}
+
+void nexthop_group_json_nexthop(json_object *j, struct nexthop *nh)
+{
+	char buf[100];
+	struct vrf *vrf;
+
+	switch (nh->type) {
+	case NEXTHOP_TYPE_IFINDEX:
+		json_object_string_add(j, "nexthop",
+				       ifindex2ifname(nh->ifindex, nh->vrf_id));
+		break;
+	case NEXTHOP_TYPE_IPV4:
+		json_object_string_add(j, "nexthop", inet_ntoa(nh->gate.ipv4));
+		break;
+	case NEXTHOP_TYPE_IPV4_IFINDEX:
+		json_object_string_add(j, "nexthop", inet_ntoa(nh->gate.ipv4));
+		json_object_string_add(j, "vrfId",
+				       ifindex2ifname(nh->ifindex, nh->vrf_id));
+		break;
+	case NEXTHOP_TYPE_IPV6:
+		json_object_string_add(
+			j, "nexthop",
+			inet_ntop(AF_INET6, &nh->gate.ipv6, buf, sizeof(buf)));
+		break;
+	case NEXTHOP_TYPE_IPV6_IFINDEX:
+		json_object_string_add(
+			j, "nexthop",
+			inet_ntop(AF_INET6, &nh->gate.ipv6, buf, sizeof(buf)));
+		json_object_string_add(j, "vrfId",
+				       ifindex2ifname(nh->ifindex, nh->vrf_id));
+		break;
+	case NEXTHOP_TYPE_BLACKHOLE:
+		break;
+	}
+
+	if (nh->vrf_id != VRF_DEFAULT) {
+		vrf = vrf_lookup_by_id(nh->vrf_id);
+		json_object_string_add(j, "targetVrf", vrf->name);
+	}
+
+	if (nh->nh_label && nh->nh_label->num_labels > 0) {
+		char buf[200];
+
+		mpls_label2str(nh->nh_label->num_labels, nh->nh_label->label,
+			       buf, sizeof(buf), 0);
+		json_object_string_add(j, "label", buf);
+	}
+
+	if (nh->weight)
+		json_object_int_add(j, "weight", nh->weight);
+
+	if (CHECK_FLAG(nh->flags, NEXTHOP_FLAG_HAS_BACKUP))
+		json_object_int_add(j, "backupIdx", nh->backup_idx);
 }
 
 static void nexthop_group_write_nexthop_internal(struct vty *vty,
@@ -1228,7 +1285,7 @@ void nexthop_group_init(void (*new)(const char *name),
 
 	cmd_variable_handler_register(nhg_name_handlers);
 
-	install_node(&nexthop_group_node, nexthop_group_write);
+	install_node(&nexthop_group_node);
 	install_element(CONFIG_NODE, &nexthop_group_cmd);
 	install_element(CONFIG_NODE, &no_nexthop_group_cmd);
 

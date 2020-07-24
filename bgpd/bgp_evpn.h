@@ -111,10 +111,10 @@ static inline int is_route_parent_evpn(struct bgp_path_info *ri)
 		return 0;
 
 	/* See if of family L2VPN/EVPN */
-	rn = parent_ri->net;
-	if (!rn)
+	dest = parent_ri->net;
+	if (!dest)
 		return 0;
-	table = bgp_node_table(rn);
+	table = bgp_dest_table(dest);
 	if (table &&
 	    table->afi == AFI_L2VPN &&
 	    table->safi == SAFI_EVPN)
@@ -135,7 +135,7 @@ static inline bool is_route_injectable_into_evpn(struct bgp_path_info *pi)
 {
 	struct bgp_path_info *parent_pi;
 	struct bgp_table *table;
-	struct bgp_node *rn;
+	struct bgp_dest *dest;
 
 	if (pi->sub_type != BGP_ROUTE_IMPORTED ||
 	    !pi->extra ||
@@ -143,10 +143,10 @@ static inline bool is_route_injectable_into_evpn(struct bgp_path_info *pi)
 		return true;
 
 	parent_pi = (struct bgp_path_info *)pi->extra->parent;
-	rn = parent_pi->net;
-	if (!rn)
+	dest = parent_pi->net;
+	if (!dest)
 		return true;
-	table = bgp_node_table(rn);
+	table = bgp_dest_table(dest);
 	if (table &&
 	    table->afi == AFI_L2VPN &&
 	    table->safi == SAFI_EVPN)

@@ -30,60 +30,64 @@
 #include "vty.h"
 #include "ldp_vty.h"
 
+static int	 ldp_config_write(struct vty *);
 static void	 ldp_af_iface_config_write(struct vty *, int);
 static void	 ldp_af_config_write(struct vty *, int, struct ldpd_conf *,
 		    struct ldpd_af_conf *);
+static int	 ldp_l2vpn_config_write(struct vty *);
 static void	 ldp_l2vpn_pw_config_write(struct vty *, struct l2vpn_pw *);
 static int	 ldp_vty_get_af(struct vty *);
 static int	 ldp_iface_is_configured(struct ldpd_conf *, const char *);
 
-struct cmd_node ldp_node =
-{
-	LDP_NODE,
-	"%s(config-ldp)# ",
-	1,
+struct cmd_node ldp_node = {
+	.name = "ldp",
+	.node = LDP_NODE,
+	.parent_node = CONFIG_NODE,
+	.prompt = "%s(config-ldp)# ",
+	.config_write = ldp_config_write,
 };
 
-struct cmd_node ldp_ipv4_node =
-{
-	LDP_IPV4_NODE,
-	"%s(config-ldp-af)# ",
-	1,
+struct cmd_node ldp_ipv4_node = {
+	.name = "ldp ipv4",
+	.node = LDP_IPV4_NODE,
+	.parent_node = LDP_NODE,
+	.prompt = "%s(config-ldp-af)# ",
 };
 
-struct cmd_node ldp_ipv6_node =
-{
-	LDP_IPV6_NODE,
-	"%s(config-ldp-af)# ",
-	1,
+struct cmd_node ldp_ipv6_node = {
+	.name = "ldp ipv6",
+	.node = LDP_IPV6_NODE,
+	.parent_node = LDP_NODE,
+	.prompt = "%s(config-ldp-af)# ",
 };
 
-struct cmd_node ldp_ipv4_iface_node =
-{
-	LDP_IPV4_IFACE_NODE,
-	"%s(config-ldp-af-if)# ",
-	1,
+struct cmd_node ldp_ipv4_iface_node = {
+	.name = "ldp ipv4 interface",
+	.node = LDP_IPV4_IFACE_NODE,
+	.parent_node = LDP_IPV4_NODE,
+	.prompt = "%s(config-ldp-af-if)# ",
 };
 
-struct cmd_node ldp_ipv6_iface_node =
-{
-	LDP_IPV6_IFACE_NODE,
-	"%s(config-ldp-af-if)# ",
-	1,
+struct cmd_node ldp_ipv6_iface_node = {
+	.name = "ldp ipv6 interface",
+	.node = LDP_IPV6_IFACE_NODE,
+	.parent_node = LDP_IPV6_NODE,
+	.prompt = "%s(config-ldp-af-if)# ",
 };
 
-struct cmd_node ldp_l2vpn_node =
-{
-	LDP_L2VPN_NODE,
-	"%s(config-l2vpn)# ",
-	1,
+struct cmd_node ldp_l2vpn_node = {
+	.name = "ldp l2vpn",
+	.node = LDP_L2VPN_NODE,
+	.parent_node = CONFIG_NODE,
+	.prompt = "%s(config-l2vpn)# ",
+	.config_write = ldp_l2vpn_config_write,
 };
 
-struct cmd_node ldp_pseudowire_node =
-{
-	LDP_PSEUDOWIRE_NODE,
-	"%s(config-l2vpn-pw)# ",
-	1,
+struct cmd_node ldp_pseudowire_node = {
+	.name = "ldp",
+	.node = LDP_PSEUDOWIRE_NODE,
+	.parent_node = LDP_L2VPN_NODE,
+	.prompt = "%s(config-l2vpn-pw)# ",
 };
 
 int
@@ -240,7 +244,7 @@ ldp_af_config_write(struct vty *vty, int af, struct ldpd_conf *conf,
 	vty_out(vty, " exit-address-family\n");
 }
 
-int
+static int
 ldp_config_write(struct vty *vty)
 {
 	struct nbr_params	*nbrp;
@@ -288,12 +292,10 @@ ldp_config_write(struct vty *vty)
 
 		if (nbrp->flags & F_NBRP_GTSM) {
 			if (nbrp->gtsm_enabled)
-				vty_out (vty, " neighbor %s ttl-security hops "
-				    "%u\n",  inet_ntoa(nbrp->lsr_id),
+				vty_out (vty, " neighbor %s ttl-security hops %u\n",  inet_ntoa(nbrp->lsr_id),
 				    nbrp->gtsm_hops);
 			else
-				vty_out (vty, " neighbor %s ttl-security "
-				    "disable\n",inet_ntoa(nbrp->lsr_id));
+				vty_out (vty, " neighbor %s ttl-security disable\n",inet_ntoa(nbrp->lsr_id));
 		}
 
 		if (nbrp->auth.method == AUTH_MD5SIG)
@@ -345,7 +347,7 @@ ldp_l2vpn_pw_config_write(struct vty *vty, struct l2vpn_pw *pw)
 		vty_out (vty,"  ! Incomplete config, specify a pw-id\n");
 }
 
-int
+static int
 ldp_l2vpn_config_write(struct vty *vty)
 {
 	struct l2vpn		*l2vpn;
@@ -1075,8 +1077,7 @@ ldp_vty_neighbor_password(struct vty *vty, const char *negate, struct in_addr ls
 		password_len = strlcpy(nbrp->auth.md5key, password_str,
 		    sizeof(nbrp->auth.md5key));
 		if (password_len >= sizeof(nbrp->auth.md5key))
-			vty_out(vty, "%% password has been truncated to %zu "
-			    "characters.", sizeof(nbrp->auth.md5key) - 1);
+			vty_out(vty, "%% password has been truncated to %zu characters.", sizeof(nbrp->auth.md5key) - 1);
 		nbrp->auth.md5key_len = strlen(nbrp->auth.md5key);
 		nbrp->auth.method = AUTH_MD5SIG;
 	}

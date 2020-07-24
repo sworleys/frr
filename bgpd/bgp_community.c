@@ -40,6 +40,9 @@ static struct community *community_new(void)
 /* Free communities value.  */
 void community_free(struct community **com)
 {
+	if (!(*com))
+		return;
+
 	XFREE(MTYPE_COMMUNITY_VAL, (*com)->val);
 	XFREE(MTYPE_COMMUNITY_STR, (*com)->str);
 
@@ -674,6 +677,14 @@ community_gettoken(const char *buf, enum community_token *token, uint32_t *val)
 			p += strlen("graceful-shutdown");
 			return p;
 		}
+		if (strncmp(p, "accept-own-nexthop",
+			    strlen("accept-own-nexthop"))
+		    == 0) {
+			*val = COMMUNITY_ACCEPT_OWN_NEXTHOP;
+			*token = community_token_accept_own_nexthop;
+			p += strlen("accept-own-nexthop");
+			return p;
+		}
 		if (strncmp(p, "accept-own", strlen("accept-own"))
 		    == 0) {
 			*val = COMMUNITY_ACCEPT_OWN;
@@ -723,14 +734,6 @@ community_gettoken(const char *buf, enum community_token *token, uint32_t *val)
 			*val = COMMUNITY_NO_LLGR;
 			*token = community_token_no_llgr;
 			p += strlen("no-llgr");
-			return p;
-		}
-		if (strncmp(p, "accept-own-nexthop",
-			strlen("accept-own-nexthop"))
-		    == 0) {
-			*val = COMMUNITY_ACCEPT_OWN_NEXTHOP;
-			*token = community_token_accept_own_nexthop;
-			p += strlen("accept-own-nexthop");
 			return p;
 		}
 		if (strncmp(p, "blackhole", strlen("blackhole"))

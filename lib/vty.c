@@ -1244,8 +1244,7 @@ static int vty_telnet_option(struct vty *vty, unsigned char *buf, int nbytes)
 			if (vty->sb_len != TELNET_NAWS_SB_LEN)
 				flog_err(
 					EC_LIB_SYSTEM_CALL,
-					"RFC 1073 violation detected: telnet NAWS option "
-					"should send %d characters, but we received %lu",
+					"RFC 1073 violation detected: telnet NAWS option should send %d characters, but we received %lu",
 					TELNET_NAWS_SB_LEN,
 					(unsigned long)vty->sb_len);
 			else if (sizeof(vty->sb_buf) < TELNET_NAWS_SB_LEN)
@@ -1261,8 +1260,7 @@ static int vty_telnet_option(struct vty *vty, unsigned char *buf, int nbytes)
 					       | vty->sb_buf[4]);
 #ifdef TELNET_OPTION_DEBUG
 				vty_out(vty,
-					"TELNET NAWS window size negotiation completed: "
-					"width %d, height %d\n",
+					"TELNET NAWS window size negotiation completed: width %d, height %d\n",
 					vty->width, vty->height);
 #endif
 			}
@@ -1882,7 +1880,7 @@ static void vty_serv_sock_addrinfo(const char *hostname, unsigned short port)
 	req.ai_flags = AI_PASSIVE;
 	req.ai_family = AF_UNSPEC;
 	req.ai_socktype = SOCK_STREAM;
-	sprintf(port_str, "%d", port);
+	snprintf(port_str, sizeof(port_str), "%d", port);
 	port_str[sizeof(port_str) - 1] = '\0';
 
 	ret = getaddrinfo(hostname, port_str, &req, &ainfo);
@@ -2199,6 +2197,9 @@ void vty_close(struct vty *vty)
 	int i;
 	bool was_stdio = false;
 
+	/* Drop out of configure / transaction if needed. */
+	vty_config_exit(vty);
+
 	/* Cancel threads.*/
 	THREAD_OFF(vty->t_read);
 	THREAD_OFF(vty->t_write);
@@ -2241,9 +2242,6 @@ void vty_close(struct vty *vty)
 		vty->error->del = vty_error_delete;
 		list_delete(&vty->error);
 	}
-
-	/* Check configure. */
-	vty_config_exit(vty);
 
 	/* OK free vty. */
 	XFREE(MTYPE_VTY, vty);
@@ -2349,12 +2347,18 @@ static void vty_read_file(struct nb_config *config, FILE *confp)
 	 * reading the configuration file.
 	 */
 	if (config == NULL) {
-		ret = nb_candidate_commit(vty->candidate_config, NB_CLIENT_CLI,
-					  vty, true, "Read configuration file",
-					  NULL);
+		struct nb_context context = {};
+		char errmsg[BUFSIZ] = {0};
+
+		context.client = NB_CLIENT_CLI;
+		context.user = vty;
+		ret = nb_candidate_commit(&context, vty->candidate_config, true,
+					  "Read configuration file", NULL,
+					  errmsg, sizeof(errmsg));
 		if (ret != NB_OK && ret != NB_ERR_NO_CHANGES)
-			zlog_err("%s: failed to read configuration file.",
-				 __func__);
+			zlog_err(
+				"%s: failed to read configuration file: %s (%s)",
+				__func__, nb_err_name(ret), errmsg);
 	}
 
 	vty_close(vty);
@@ -2380,7 +2384,7 @@ static FILE *vty_use_backup_config(const char *fullpath)
 	}
 
 	fullpath_tmp = malloc(strlen(fullpath) + 8);
-	sprintf(fullpath_tmp, "%s.XXXXXX", fullpath);
+	snprintf(fullpath_tmp, strlen(fullpath) + 8, "%s.XXXXXX", fullpath);
 
 	/* Open file to configuration write. */
 	tmp = mkstemp(fullpath_tmp);
@@ -2605,6 +2609,28 @@ int vty_config_enter(struct vty *vty, bool private_config, bool exclusive)
 
 void vty_config_exit(struct vty *vty)
 {
+	enum node_type node = vty->node;
+	struct cmd_node *cnode;
+
+	/* unlock and jump up to ENABLE_NODE if -and only if- we're
+	 * somewhere below CONFIG_NODE */
+	while (node && node != CONFIG_NODE) {
+		cnode = vector_lookup(cmdvec, node);
+		node = cnode->parent_node;
+	}
+	if (node != CONFIG_NODE)
+		/* called outside config, e.g. vty_close() in ENABLE_NODE */
+		return;
+
+	while (vty->node != ENABLE_NODE)
+		/* will call vty_config_node_exit() below */
+		cmd_exit(vty);
+}
+
+int vty_config_node_exit(struct vty *vty)
+{
+	vty->xpath_index = 0;
+
 	/* Check if there's a pending confirmed commit. */
 	if (vty->t_confirmed_commit_timeout) {
 		vty_out(vty,
@@ -2626,6 +2652,7 @@ void vty_config_exit(struct vty *vty)
 	}
 
 	vty->config = false;
+	return 1;
 }
 
 /* Master of the threads. */
@@ -2989,8 +3016,13 @@ static int vty_config_write(struct vty *vty)
 	return CMD_SUCCESS;
 }
 
+static int vty_config_write(struct vty *vty);
 struct cmd_node vty_node = {
-	VTY_NODE, "%s(config-line)# ", 1,
+	.name = "vty",
+	.node = VTY_NODE,
+	.parent_node = CONFIG_NODE,
+	.prompt = "%s(config-line)# ",
+	.config_write = vty_config_write,
 };
 
 /* Reset all VTY status. */
@@ -3084,7 +3116,7 @@ void vty_init(struct thread_master *master_thread, bool do_command_logging)
 	Vvty_serv_thread = vector_init(VECTOR_MIN_SIZE);
 
 	/* Install bgp top node. */
-	install_node(&vty_node, vty_config_write);
+	install_node(&vty_node);
 
 	install_element(VIEW_NODE, &config_who_cmd);
 	install_element(VIEW_NODE, &show_history_cmd);

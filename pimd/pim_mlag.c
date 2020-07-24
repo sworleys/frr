@@ -599,7 +599,9 @@ static void pim_mlag_process_mlagd_state_change(struct mlag_status msg)
 		router->mlag_role = msg.my_role;
 	}
 
-	strcpy(router->peerlink_rif, msg.peerlink_rif);
+	strlcpy(router->peerlink_rif, msg.peerlink_rif,
+		sizeof(router->peerlink_rif));
+
 	/* XXX - handle the case where we may rx the interface name from the
 	 * MLAG daemon before we get the interface from zebra.
 	 */
@@ -792,7 +794,7 @@ static void pim_mlag_process_mroute_del(struct mlag_mroute_del msg)
 int pim_zebra_mlag_handle_msg(struct stream *s, int len)
 {
 	struct mlag_msg mlag_msg;
-	char buf[ZLOG_FILTER_LENGTH_MAX];
+	char buf[80];
 	int rc = 0;
 	size_t length;
 
@@ -1078,6 +1080,14 @@ void pim_instance_mlag_terminate(struct pim_instance *pim)
 		pim_if_unconfigure_mlag_dualactive(pim_ifp);
 	}
 	pim->inst_mlag_intf_cnt = 0;
+}
+
+void pim_mlag_terminate(void)
+{
+	stream_free(router->mlag_stream);
+	router->mlag_stream = NULL;
+	stream_fifo_free(router->mlag_fifo);
+	router->mlag_fifo = NULL;
 }
 
 void pim_mlag_init(void)
