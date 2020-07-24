@@ -573,8 +573,6 @@ static int nhg_notify_owner(ZAPI_CALLBACK_ARGS)
 	return 0;
 }
 
-extern struct zebra_privs_t sharp_privs;
-
 /* Add a zclient with a specified session id, for testing. */
 int sharp_zclient_create(uint32_t session_id)
 {
