@@ -3505,6 +3505,8 @@ int dplane_show_helper(struct vty *vty, bool detailed)
 				    memory_order_relaxed);
 	vty_out(vty, "Rule updates:             %" PRIu64 "\n", incoming);
 	vty_out(vty, "Rule errors:              %" PRIu64 "\n", errs);
+
+	return CMD_SUCCESS;
 }
 
 /*
@@ -4031,6 +4033,12 @@ static void kernel_dplane_handle_result(struct zebra_dplane_ctx *ctx,
 						  memory_order_relaxed);
 		break;
 
+	case DPLANE_OP_BR_PORT_UPDATE:
+		if (res != ZEBRA_DPLANE_REQUEST_SUCCESS)
+			atomic_fetch_add_explicit(
+				&zdplane_info.dg_br_port_errors, 1,
+				memory_order_relaxed);
+		break;
 	case DPLANE_OP_ADDR_INSTALL:
 	case DPLANE_OP_ADDR_UNINSTALL:
 		if (res != ZEBRA_DPLANE_REQUEST_SUCCESS)

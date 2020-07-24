@@ -1177,8 +1177,8 @@ static struct bgp_path_info *bgp_evpn_route_get_local_path(
 	struct bgp_path_info *tmp_pi;
 	struct bgp_path_info *local_pi = NULL;
 
-	for (tmp_pi = bgp_node_get_bgp_path_info(dest); tmp_pi;
-			tmp_pi = tmp_pi->next) {
+	for (tmp_pi = bgp_dest_get_bgp_path_info(dest); tmp_pi;
+	     tmp_pi = tmp_pi->next) {
 		if (bgp_evpn_is_path_local(bgp, tmp_pi)) {
 			local_pi = tmp_pi;
 			break;
@@ -1201,7 +1201,7 @@ static int update_evpn_type5_route_entry(struct bgp *bgp_evpn,
 
 	*route_changed = 0;
 	/* locate the local route entry if any */
-	for (tmp_pi = bgp_node_get_bgp_path_info(dest); tmp_pi;
+	for (tmp_pi = bgp_dest_get_bgp_path_info(dest); tmp_pi;
 	     tmp_pi = tmp_pi->next) {
 		if (tmp_pi->peer == bgp_evpn->peer_self
 		    && tmp_pi->type == ZEBRA_ROUTE_BGP
@@ -1365,8 +1365,8 @@ static void bgp_evpn_get_sync_info(struct bgp *bgp, esi_t *esi,
 	/* find the best non-local path. a local path can only be present
 	 * as best path
 	 */
-	for (tmp_pi = bgp_node_get_bgp_path_info(rn); tmp_pi;
-			tmp_pi = tmp_pi->next) {
+	for (tmp_pi = bgp_dest_get_bgp_path_info(rn); tmp_pi;
+	     tmp_pi = tmp_pi->next) {
 		if (tmp_pi->sub_type != BGP_ROUTE_IMPORTED ||
 			!CHECK_FLAG(tmp_pi->flags, BGP_PATH_VALID))
 			continue;
@@ -1635,9 +1635,10 @@ static void evpn_zebra_reinstall_best_route(struct bgp *bgp,
 	if (curr_select && curr_select->type == ZEBRA_ROUTE_BGP
 			&& (curr_select->sub_type == BGP_ROUTE_IMPORTED ||
 				bgp_evpn_attr_is_sync(curr_select->attr)))
-		evpn_zebra_install(bgp, vpn,
-				   (const struct prefix_evpn *)bgp_node_get_prefix(dest),
-				   curr_select);
+		evpn_zebra_install(
+			bgp, vpn,
+			(const struct prefix_evpn *)bgp_dest_get_prefix(dest),
+			curr_select);
 }
 
 /*
@@ -1664,7 +1665,7 @@ static void evpn_cleanup_local_non_best_route(struct bgp *bgp,
 		zlog_debug("evicting local evpn prefix %pRN as remote won",
 			   dest);
 
-	evpn_delete_old_local_route(bgp, vpn, rn, local_pi, NULL);
+	evpn_delete_old_local_route(bgp, vpn, dest, local_pi, NULL);
 	bgp_path_info_reap(dest, local_pi);
 
 	/* tell zebra to re-add the best remote path */
@@ -2065,7 +2066,7 @@ static void bgp_evpn_update_type2_route_entry(struct bgp *bgp,
 
 		/* Schedule for processing and unlock node. */
 		bgp_process(bgp, global_rn, afi, safi);
-		bgp_unlock_node(global_rn);
+		bgp_dest_unlock_node(global_rn);
 	}
 
 	/* Unintern temporary. */
@@ -2086,7 +2087,8 @@ static int update_all_type2_routes(struct bgp *bgp, struct bgpevpn *vpn)
 	 */
 	for (dest = bgp_table_top(vpn->route_table); dest;
 	     dest = bgp_route_next(dest)) {
-		const struct prefix_evpn *evp = (const struct prefix_evpn *)bgp_node_get_prefix(dest);
+		const struct prefix_evpn *evp =
+			(const struct prefix_evpn *)bgp_dest_get_prefix(dest);
 
 		if (evp->prefix.route_type != BGP_EVPN_MAC_IP_ROUTE)
 			continue;
@@ -2103,8 +2105,8 @@ static int update_all_type2_routes(struct bgp *bgp, struct bgpevpn *vpn)
 		if (!tmp_pi)
 			continue;
 
-		bgp_evpn_update_type2_route_entry(bgp, vpn, rn, tmp_pi,
-			__func__);
+		bgp_evpn_update_type2_route_entry(bgp, vpn, dest, tmp_pi,
+						  __func__);
 	}
 
 	return 0;
@@ -2479,10 +2481,9 @@ static int install_evpn_route_entry_in_vrf(struct bgp *bgp_vrf,
 			pi, pi->lock, pi->flags);
 
 	if (bgp_debug_zebra(NULL))
-		zlog_debug(
-			"... %s pi rn %p (l %d) pi %p (l %d, f 0x%x)",
-			new_pi ? "new" : "update",
-			rn, rn->lock, pi, pi->lock, pi->flags);
+		zlog_debug("... %s pi rn %p (l %d) pi %p (l %d, f 0x%x)",
+			   new_pi ? "new" : "update", dest, dest->lock, pi,
+			   pi->lock, pi->flags);
 
 	return ret;
 }
@@ -2695,10 +2696,10 @@ static int uninstall_evpn_route_entry(struct bgp *bgp, struct bgpevpn *vpn,
 	 * sync info against the local path may need to be updated
 	 * when a remote path is deleted
 	 */
-	local_pi = bgp_evpn_route_get_local_path(bgp, rn);
+	local_pi = bgp_evpn_route_get_local_path(bgp, dest);
 	if (local_pi && bgp_evpn_attr_is_local_es(local_pi->attr))
-		bgp_evpn_update_type2_route_entry(bgp, vpn, rn, local_pi,
-			__func__);
+		bgp_evpn_update_type2_route_entry(bgp, vpn, dest, local_pi,
+						  __func__);
 
 	/* Unlock route node. */
 	bgp_dest_unlock_node(dest);

@@ -7814,6 +7814,7 @@ void route_vty_out(struct vty *vty, const struct prefix *p,
 			json_object_boolean_true_add(json_nexthop_global,
 						     "used");
 		} else {
+			char buf[BUFSIZ];
 			if (nexthop_hostname)
 				len = vty_out(vty, "%pI4(%s)%s", &attr->nexthop,
 					      nexthop_hostname, vrf_id_str);
@@ -8759,10 +8760,6 @@ static void route_vty_out_detail_es_info(struct vty *vty,
 	}
 }
 
-void route_vty_out_detail(struct vty *vty, struct bgp *bgp,
-			  struct bgp_node *bn, struct bgp_path_info *path,
-			  afi_t afi, safi_t safi, json_object *json_paths)
-
 void route_vty_out_detail(struct vty *vty, struct bgp *bgp, struct bgp_dest *bn,
 			  struct bgp_path_info *path, afi_t afi, safi_t safi,
 			  json_object *json_paths)
@@ -8795,8 +8792,6 @@ void route_vty_out_detail(struct vty *vty, struct bgp *bgp, struct bgp_dest *bn,
 	bool nexthop_self =
 		CHECK_FLAG(path->flags, BGP_PATH_ANNC_NH_SELF) ? true : false;
 	int i;
-	char *nexthop_hostname =
-		bgp_nexthop_hostname(path->peer, path->nexthop);
 
 	if (json_paths) {
 		json_path = json_object_new_object();
@@ -8967,13 +8962,9 @@ void route_vty_out_detail(struct vty *vty, struct bgp *bgp, struct bgp_dest *bn,
 						json_nexthop_global, "hostname",
 						path->peer->hostname);
 			} else {
-				if (nexthop_hostname)
-					vty_out(vty, "    %pI4(%s)",
-						&attr->mp_nexthop_global_in,
-						nexthop_hostname);
-			} else
 				vty_out(vty, "    %s",
 					inet_ntoa(attr->mp_nexthop_global_in));
+			}
 		} else {
 			if (json_paths) {
 				json_object_string_add(
@@ -8985,13 +8976,9 @@ void route_vty_out_detail(struct vty *vty, struct bgp *bgp, struct bgp_dest *bn,
 						json_nexthop_global, "hostname",
 						path->peer->hostname);
 			} else {
-				if (nexthop_hostname)
-					vty_out(vty, "    %pI4(%s)",
-						&attr->nexthop,
-						nexthop_hostname);
-			} else
 				vty_out(vty, "    %s",
 					inet_ntoa(attr->nexthop));
+			}
 		}
 
 		if (json_paths)

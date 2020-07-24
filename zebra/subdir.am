@@ -126,12 +126,6 @@ clippy_scan += \
 	zebra/zebra_vty.c \
 	# end
 
-zebra/rtadv_clippy.c: $(CLIPPY_DEPS)
-zebra/rtadv.$(OBJEXT): zebra/rtadv_clippy.c
-
-zebra/zebra_evpn_mh_clippy.c: $(CLIPPY_DEPS)
-zebra/zebra_evpn_mh.$(OBJEXT): zebra/zebra_evpn_mh_clippy.c
-
 noinst_HEADERS += \
 	zebra/connected.h \
 	zebra/debug.h \

@@ -961,7 +961,7 @@ void bgp_nht_reg_enhe_cap_intfs(struct peer *peer)
 void bgp_nht_dereg_enhe_cap_intfs(struct peer *peer)
 {
 	struct bgp *bgp;
-	struct bgp_node *rn;
+	struct bgp_dest *dest;
 	struct bgp_nexthop_cache *bnc;
 	struct nexthop *nhop;
 	struct interface *ifp;
@@ -984,11 +984,11 @@ void bgp_nht_dereg_enhe_cap_intfs(struct peer *peer)
 	if (p.family != AF_INET6)
 		return;
 
-	rn = bgp_node_lookup(bgp->nexthop_cache_table[AFI_IP6], &p);
-	if (!rn)
+	dest = bgp_node_lookup(bgp->nexthop_cache_table[AFI_IP6], &p);
+	if (!dest)
 		return;
 
-	bnc = bgp_node_get_bgp_nexthop_info(rn);
+	bnc = bgp_dest_get_bgp_nexthop_info(dest);
 	if (!bnc)
 		return;
 

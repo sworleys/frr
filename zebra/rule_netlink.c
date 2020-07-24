@@ -119,9 +119,8 @@ netlink_rule_msg_encode(int cmd, const struct zebra_dplane_ctx *ctx,
 	}
 
 	/* dsfield, if specified */
-	if (IS_RULE_FILTERING_ON_DSFIELD(rule)) {
-		req.frh.tos = rule->rule.filter.dsfield;
-	}
+	if (filter_bm & PBR_FILTER_DSFIELD)
+		req->frh.tos = dsfield;
 
 	/* fwmark, if specified */
 	if (filter_bm & PBR_FILTER_FWMARK) {

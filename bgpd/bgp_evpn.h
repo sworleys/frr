@@ -104,7 +104,7 @@ static inline int is_route_parent_evpn(struct bgp_path_info *ri)
 {
 	struct bgp_path_info *parent_ri;
 	struct bgp_table *table;
-	struct bgp_node *rn;
+	struct bgp_dest *dest;
 
 	parent_ri = get_route_parent_evpn(ri);
 	if (!parent_ri)

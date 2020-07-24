@@ -2350,8 +2350,7 @@ int vrrp_config_write_global(struct vty *vty)
 		vty_out(vty, "vrrp default priority %hhu\n", vd.priority);
 
 	if (vd.advertisement_interval != VRRP_DEFAULT_ADVINT && ++writes)
-		vty_out(vty,
-			"vrrp default advertisement-interval %hu\n",
+		vty_out(vty, "vrrp default advertisement-interval %u\n",
 			vd.advertisement_interval * CS2MS);
 
 	if (vd.preempt_mode != VRRP_DEFAULT_PREEMPT && ++writes)
@@ -2374,7 +2373,7 @@ static unsigned int vrrp_hash_key(const void *arg)
 	const struct vrrp_vrouter *vr = arg;
 	char key[IFNAMSIZ + 64];
 
-	snprintf(key, sizeof(key), "%s@%hhu", vr->ifp->name, vr->vrid);
+	snprintf(key, sizeof(key), "%s@%u", vr->ifp->name, vr->vrid);
 
 	return string_hash_make(key);
 }

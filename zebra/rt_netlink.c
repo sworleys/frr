@@ -2086,7 +2086,6 @@ ssize_t netlink_nexthop_msg_encode(uint16_t cmd,
 	mpls_lse_t out_lse[MPLS_MAX_LABELS];
 	char label_buf[256];
 	int num_labels = 0;
-	size_t req_size = sizeof(req);
 	uint32_t id = dplane_ctx_get_nhe_id(ctx);
 	int type = dplane_ctx_get_nhe_type(ctx);
 
@@ -2135,15 +2134,6 @@ ssize_t netlink_nexthop_msg_encode(uint16_t cmd,
 
 	req->nhm.nh_family = AF_UNSPEC;
 	/* TODO: Scope? */
-
-	uint32_t id = dplane_ctx_get_nhe_id(ctx);
-
-	if (!id) {
-		flog_err(
-			EC_ZEBRA_NHG_FIB_UPDATE,
-			"Failed trying to update a nexthop group in the kernel that does not have an ID");
-		return -1;
-	}
 
 	if (!nl_attr_put32(&req->n, buflen, NHA_ID, id))
 		return 0;
@@ -3338,16 +3328,16 @@ enum zebra_dplane_result kernel_br_port_update_ctx(
 	req.ifm.ifi_family = AF_BRIDGE;
 	req.ifm.ifi_index = dplane_ctx_get_ifindex(ctx);
 
-	nest = addattr_nest(&req.n, sizeof(req),
-			IFLA_PROTINFO | NLA_F_NESTED);
+	nest = nl_attr_nest(&req.n, sizeof(req), IFLA_PROTINFO | NLA_F_NESTED);
+
 	/* backup NHG */
-	addattr32(&req.n, sizeof(req), IFLA_BRPORT_DUMMY_BACKUP_NHID,
-		  nhg_id);
+	nl_attr_put32(&req.n, sizeof(req), IFLA_BRPORT_DUMMY_BACKUP_NHID,
+		      nhg_id);
 
 	/* non-DF BUM block filter */
 	block_bum = (flags & DPLANE_BR_PORT_NON_DF) ? 1 : 0;
-	addattr_l(&req.n, sizeof(req), IFLA_BRPORT_DUMMY_BLOCK_BUM,
-		  &block_bum, sizeof(block_bum));
+	nl_attr_put(&req.n, sizeof(req), IFLA_BRPORT_DUMMY_BLOCK_BUM,
+		    &block_bum, sizeof(block_bum));
 
 	/* SPH filter */
 	memset(kern_sph_filters, 0, sizeof(kern_sph_filters));
@@ -3355,9 +3345,9 @@ enum zebra_dplane_result kernel_br_port_update_ctx(
 		sph_filter_cnt : BR_SPH_LIST_SIZE;
 	for (i = 0; i < max_filters; ++i)
 		kern_sph_filters[i] = sph_filters[i].s_addr;
-	addattr_l(&req.n, sizeof(req), IFLA_BRPORT_DUMMY_SPH_FILTER,
-		  &kern_sph_filters, sizeof(kern_sph_filters));
-	addattr_nest_end(&req.n, nest);
+	nl_attr_put(&req.n, sizeof(req), IFLA_BRPORT_DUMMY_SPH_FILTER,
+		    &kern_sph_filters, sizeof(kern_sph_filters));
+	nl_attr_nest_end(&req.n, nest);
 
 	if (IS_ZEBRA_DEBUG_KERNEL) {
 		char vtep_str[ES_VTEP_LIST_STR_SZ];
@@ -4080,10 +4070,10 @@ static int netlink_fdb_nh_update(uint32_t nh_id, struct in_addr vtep_ip)
 	req.n.nlmsg_type = cmd;
 	req.nhm.nh_family = AF_INET;
 
-	addattr32(&req.n, sizeof(req), NHA_ID, nh_id);
-	addattr_l(&req.n, sizeof(req), NHA_FDB, NULL, 0);
-	addattr_l(&req.n, sizeof(req), NHA_GATEWAY,
-			&vtep_ip, IPV4_MAX_BYTELEN);
+	nl_attr_put32(&req.n, sizeof(req), NHA_ID, nh_id);
+	nl_attr_put(&req.n, sizeof(req), NHA_FDB, NULL, 0);
+	nl_attr_put(&req.n, sizeof(req), NHA_GATEWAY, &vtep_ip,
+		    IPV4_MAX_BYTELEN);
 
 	if (IS_ZEBRA_DEBUG_KERNEL || IS_ZEBRA_DEBUG_EVPN_MH_NH) {
 		zlog_debug("Tx %s fdb-nh 0x%x %s",
@@ -4117,7 +4107,7 @@ static int netlink_fdb_nh_del(uint32_t nh_id)
 	req.n.nlmsg_type = cmd;
 	req.nhm.nh_family = AF_UNSPEC;
 
-	addattr32(&req.n, sizeof(req), NHA_ID, nh_id);
+	nl_attr_put32(&req.n, sizeof(req), NHA_ID, nh_id);
 
 	if (IS_ZEBRA_DEBUG_KERNEL || IS_ZEBRA_DEBUG_EVPN_MH_NH) {
 		zlog_debug("Tx %s fdb-nh 0x%x",
@@ -4155,15 +4145,15 @@ static int netlink_fdb_nhg_update(uint32_t nhg_id, uint32_t nh_cnt,
 	req.n.nlmsg_type = cmd;
 	req.nhm.nh_family = AF_UNSPEC;
 
-	addattr32(&req.n, sizeof(req), NHA_ID, nhg_id);
-	addattr_l(&req.n, sizeof(req), NHA_FDB, NULL, 0);
+	nl_attr_put32(&req.n, sizeof(req), NHA_ID, nhg_id);
+	nl_attr_put(&req.n, sizeof(req), NHA_FDB, NULL, 0);
 	memset(&grp, 0, sizeof(grp));
 	for (i = 0; i < nh_cnt; ++i) {
 		grp[i].id = nh_ids[i].id;
 		grp[i].weight = nh_ids[i].weight;
 	}
-	addattr_l(&req.n, sizeof(req), NHA_GROUP,
-			grp, nh_cnt * sizeof(struct nexthop_grp));
+	nl_attr_put(&req.n, sizeof(req), NHA_GROUP, grp,
+		    nh_cnt * sizeof(struct nexthop_grp));
 
 
 	if (IS_ZEBRA_DEBUG_KERNEL || IS_ZEBRA_DEBUG_EVPN_MH_NH) {

@@ -2581,7 +2581,7 @@ static void evpn_show_route_rd_prefix(struct vty *vty, struct bgp *bgp,
 	/* See if route exists. */
 	rn = bgp_afi_node_lookup(bgp->rib[afi][safi], afi, safi,
 				 (struct prefix *)&p, prd);
-	if (!rn || !bgp_node_has_bgp_path_info_data(rn)) {
+	if (!rn || !bgp_dest_has_bgp_path_info_data(rn)) {
 		if (!json)
 			vty_out(vty, "%% Network not in table\n");
 		return;

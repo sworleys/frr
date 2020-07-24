@@ -46,10 +46,6 @@
 #include "zebra/zebra_errors.h"
 #include "zebra/zebra_router.h"
 
-#ifndef VTYSH_EXTRACT_PL
-#include "zebra/rtadv_clippy.c"
-#endif
-
 extern struct zebra_privs_t zserv_privs;
 
 #if defined(HAVE_RTADV)
