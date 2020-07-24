@@ -1760,7 +1760,7 @@ ssize_t netlink_route_multipath_msg_encode(int cmd,
 	}
 
 	if ((!fpm && kernel_nexthops_supported()
-	     && (!!proto_nexthops_only()
+	     && (!proto_nexthops_only()
 		 || is_proto_nhg(dplane_ctx_get_nhe_id(ctx), 0)))
 	    || (fpm && force_nhg)) {
 		/* Kernel supports nexthop objects */
