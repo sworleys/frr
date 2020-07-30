@@ -1191,6 +1191,13 @@ Defining Peers
    ``net.core.optmem_max`` to allow the kernel to allocate the necessary option
    memory.
 
+.. index:: [no] coalesce-time (0-4294967295)
+.. clicmd:: [no] coalesce-time (0-4294967295)
+
+   The time in milliseconds that BGP will delay before deciding what peers
+   can be put into an update-group together in order to generate a single
+   update for them.  The default time is 1000.
+   
 .. _bgp-configuring-peers:
 
 Configuring Peers
@@ -2404,8 +2411,6 @@ the same behavior of using same next-hop and RMAC values.
 Enables or disables advertise-pip feature, specifiy system-IP and/or system-MAC
 parameters.
 
-.. _bgp-cisco-compatibility:
-
 EVPN Multihoming
 ^^^^^^^^^^^^^^^^
 
@@ -2510,6 +2515,8 @@ following zebra command -
 .. index:: [no] evpn mh startup-delay(0-3600)$duration
 .. clicmd:: [no] evpn mh startup-delay(0-3600)$duration
 
+.. _bgp-cisco-compatibility:
+
 Cisco Compatibility
 -------------------
 
@@ -2573,6 +2580,27 @@ removed in a future version of FRR.
 .. clicmd:: bgp config-type zebra
 
    FRR style BGP configuration. This is the default.
+
+Support with VRF network namespace backend
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+It is possible to separate overlay networks contained in VXLAN interfaces from
+underlay networks by using VRFs. VRF-lite and VRF-netns backends can be used for
+that. In the latter case, this is necessary to set both bridge and vxlan interface
+on the same network namespace, as below example illustrates:
+
+.. code-block:: shell
+
+   # linux shell
+   ip netns add vrf1
+   ip link add name vxlan101 type vxlan id 101 dstport 4789 dev eth0 local 10.1.1.1
+   ip link set dev vxlan101 netns vrf1
+   ip netns exec vrf1 ip link set dev lo up
+   ip netns exec vrf1 brctl addbr bridge101
+   ip netns exec vrf1 brctl addif bridge101 vxlan101
+
+This makes possible to separate not only layer 3 networks like VRF-lite networks.
+Also, VRF netns based make possible to separate layer 2 networks on separate VRF
+instances.
 
 .. _bgp-debugging:
 

@@ -642,7 +642,8 @@ static void show_esi_routes(struct bgp *bgp,
 			if (json)
 				json_path = json_object_new_array();
 
-			route_vty_out(vty, p, pi, 0, SAFI_EVPN, json_path);
+			route_vty_out(vty, p, pi, 0, SAFI_EVPN, json_path,
+				      false);
 
 			if (json)
 				json_object_array_add(json_paths, json_path);
@@ -738,8 +739,8 @@ static void bgp_evpn_show_routes_mac_ip_es(struct vty *vty, esi_t *esi,
 						AFI_L2VPN, SAFI_EVPN,
 						json_path);
 			else
-				route_vty_out(vty, &rn->p, pi, 0,
-						SAFI_EVPN, json_path);
+				route_vty_out(vty, &rn->p, pi, 0, SAFI_EVPN,
+					      json_path, false);
 
 			if (json)
 				json_object_array_add(json_paths,
@@ -830,7 +831,7 @@ static void show_vni_routes(struct bgp *bgp, struct bgpevpn *vpn, int type,
 						     json_path);
 			else
 				route_vty_out(vty, p, pi, 0, SAFI_EVPN,
-					      json_path);
+					      json_path, false);
 
 			if (json)
 				json_object_array_add(json_paths, json_path);
@@ -1314,7 +1315,7 @@ static int bgp_show_ethernet_vpn(struct vty *vty, struct prefix_rd *prd,
 					route_vty_out(vty,
 						      bgp_dest_get_prefix(rm),
 						      pi, no_display, SAFI_EVPN,
-						      json_array);
+						      json_array, false);
 				no_display = 1;
 			}
 
@@ -2873,7 +2874,7 @@ static void evpn_show_all_routes(struct vty *vty, struct bgp *bgp, int type,
 						SAFI_EVPN, json_path);
 				} else
 					route_vty_out(vty, p, pi, 0, SAFI_EVPN,
-						      json_path);
+						      json_path, false);
 
 				if (json)
 					json_object_array_add(json_paths,
@@ -3930,6 +3931,12 @@ DEFPY (bgp_evpn_advertise_pip_ip_mac,
 	if (is_evpn_enabled()) {
 		struct listnode *node = NULL;
 		struct bgpevpn *vpn = NULL;
+
+		/*
+		 * At this point if bgp_evpn is NULL and evpn is enabled
+		 * something stupid has gone wrong
+		 */
+		assert(bgp_evpn);
 
 		update_advertise_vrf_routes(bgp_vrf);
 
