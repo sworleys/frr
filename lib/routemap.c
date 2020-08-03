@@ -2450,6 +2450,7 @@ route_map_result_t route_map_apply(struct route_map *map,
 
 	for (; index; index = index->next) {
 		if (!skip_match_clause) {
+			index->applied++;
 			/* Apply this index. */
 			match_ret = route_map_apply_match(&index->match_list,
 							  prefix, type, object);
