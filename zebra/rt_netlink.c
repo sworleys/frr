@@ -3807,6 +3807,7 @@ static int netlink_neigh_update_ctx(const struct zebra_dplane_ctx *ctx,
 		if (update_flags & DPLANE_NEIGH_SET_STATIC)
 			ext_flags |= NTF_E_MH_PEER_SYNC;
 
+#if 0
 		/* the ndm_state set for local entries can be REACHABLE or
 		 * STALE. if the dataplane has already establish reachability
 		 * (in the meantime) FRR must not over-write it with STALE.
@@ -3814,18 +3815,19 @@ static int netlink_neigh_update_ctx(const struct zebra_dplane_ctx *ctx,
 		 * WEAK_OVERRIDE_STATE
 		 */
 		ext_flags |= NTF_E_WEAK_OVERRIDE_STATE;
+#endif
 	}
 	if (IS_ZEBRA_DEBUG_KERNEL) {
 		char buf[INET6_ADDRSTRLEN];
 		char buf2[ETHER_ADDR_STRLEN];
 
 		zlog_debug(
-			"Tx %s family %s IF %s(%u) Neigh %s MAC %s flags 0x%x state 0x%x",
+			"Tx %s family %s IF %s(%u) Neigh %s MAC %s flags 0x%x state 0x%x %sext_flags 0x%x",
 			nl_msg_type_to_str(cmd), nl_family_to_str(family),
 			dplane_ctx_get_ifname(ctx), dplane_ctx_get_ifindex(ctx),
 			ipaddr2str(ip, buf, sizeof(buf)),
 			mac ? prefix_mac2str(mac, buf2, sizeof(buf2)) : "null",
-			flags, state);
+			flags, state, ext ? "ext ":"", ext_flags);
 	}
 
 	if (netlink_neigh_update_msg_encode(
