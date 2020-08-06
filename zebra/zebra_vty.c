@@ -3484,8 +3484,9 @@ static int config_write_protocol(struct vty *vty)
 	if (!zebra_nhg_kernel_nexthops_enabled())
 		vty_out(vty, "no zebra nexthop kernel enable\n");
 
-	if (zebra_nhg_proto_nexthops_only())
-		vty_out(vty, "zebra nexthop proto only\n");
+	/* CUMULUS: Disable seeing this in `show run` since its default */
+	//if (zebra_nhg_proto_nexthops_only())
+	//	vty_out(vty, "zebra nexthop proto only\n");
 
 	return 1;
 }

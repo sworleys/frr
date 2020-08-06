@@ -77,17 +77,6 @@
 /* Re-defining as I am unable to include <linux/if_bridge.h> which has the
  * UAPI for MAC sync. */
 #ifndef _UAPI_LINUX_IF_BRIDGE_H
-/* FDB notification bits for NDA_NOTIFY:
- * - BR_FDB_NFY_STATIC - notify on activity/expire even for a static entry
- * - BR_FDB_NFY_INACTIVE - mark as inactive to avoid double notification,
- *                         used with BR_FDB_NFY_STATIC (kernel controlled)
- */
-enum {
-	BR_FDB_NFY_STATIC,
-	BR_FDB_NFY_INACTIVE,
-	BR_FDB_NFY_MAX
-};
-
 #define BR_SPH_LIST_SIZE 10
 #endif
 
@@ -2794,9 +2783,18 @@ static ssize_t netlink_neigh_update_msg_encode(
 	}
 
 	if (nfy) {
-		if (!nl_attr_put(&req->n, datalen, NDA_NOTIFY, &nfy_flags,
-				 sizeof(nfy_flags)))
+		struct rtattr *nest;
+
+		nest = nl_attr_nest(&req->n, datalen,
+				    NDA_FDB_EXT_ATTRS | NLA_F_NESTED);
+		if (!nl_attr_put(&req->n, datalen, NFEA_ACTIVITY_NOTIFY,
+				 &nfy_flags, sizeof(nfy_flags)))
 			return 0;
+
+		if (!nl_attr_put(&req->n, datalen, NFEA_DONT_REFRESH, NULL, 0))
+			return 0;
+
+		nl_attr_nest_end(&req->n, nest);
 	}
 
 	if (ext) {
@@ -2892,7 +2890,8 @@ static int netlink_macfdb_change(struct nlmsghdr *h, int len, ns_id_t ns_id)
 	 * validation of the fields.
 	 */
 	memset(tb, 0, sizeof tb);
-	netlink_parse_rtattr(tb, NDA_MAX, NDA_RTA(ndm), len);
+	netlink_parse_rtattr_flags(tb, NDA_MAX, NDA_RTA(ndm), len,
+			NLA_F_NESTED);
 
 	if (!tb[NDA_LLADDR]) {
 		if (IS_ZEBRA_DEBUG_KERNEL)
@@ -2934,14 +2933,20 @@ static int netlink_macfdb_change(struct nlmsghdr *h, int len, ns_id_t ns_id)
 	if (ndm->ndm_state & NUD_STALE)
 		local_inactive = true;
 
-	if (tb[NDA_NOTIFY]) {
-		uint8_t nfy_flags;
+	if (tb[NDA_FDB_EXT_ATTRS]) {
+		struct rtattr *attr = tb[NDA_FDB_EXT_ATTRS];
+		struct rtattr *nfea_tb[NFEA_MAX + 1] = {0};
 
-		dp_static = true;
-		nfy_flags = *(uint8_t *)RTA_DATA(tb[NDA_NOTIFY]);
-		/* local activity has not been detected on the entry */
-		if (nfy_flags & (1 << BR_FDB_NFY_INACTIVE))
-			local_inactive = true;
+		netlink_parse_rtattr_nested(nfea_tb, NFEA_MAX, attr);
+		if (nfea_tb[NFEA_ACTIVITY_NOTIFY]) {
+			uint8_t nfy_flags;
+
+			nfy_flags = *(uint8_t *)RTA_DATA(nfea_tb[NFEA_ACTIVITY_NOTIFY]);
+			if (nfy_flags & FDB_NOTIFY_BIT)
+				dp_static = true;
+			if (nfy_flags & FDB_NOTIFY_INACTIVE_BIT)
+				local_inactive = true;
+		}
 	}
 
 	if (IS_ZEBRA_DEBUG_KERNEL)
@@ -3245,12 +3250,12 @@ netlink_macfdb_update_ctx(struct zebra_dplane_ctx *ctx, uint8_t *data,
 	} else {
 		/* local mac */
 		if (update_flags & DPLANE_MAC_SET_STATIC) {
-			nfy_flags |= (1 << BR_FDB_NFY_STATIC);
+			nfy_flags |= FDB_NOTIFY_BIT;
 			state |= NUD_NOARP;
 		}
 
 		if (update_flags & DPLANE_MAC_SET_INACTIVE)
-			nfy_flags |= (1 << BR_FDB_NFY_INACTIVE);
+			nfy_flags |= FDB_NOTIFY_INACTIVE_BIT;
 
 		nfy = true;
 	}
