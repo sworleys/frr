@@ -1,8 +1,10 @@
-frr (7.4+cl4u1) RELEASED; urgency=medium
+frr (7.4+cl4u2.1) RELEASED; urgency=medium
 
-  * New Enabled: New Work
+  * CM-30866 vtysh: Improve lookup performance
+  * CM-30948 lib: Add notation about whether or not a route-map is about to be reprocessed
+  * CM-30952 lib: Make sure route_map_dep-data is non NULL
 
- -- dev-support <dev-support@cumulusnetworks.com>  Tue, 03 Mar 2020 09:14:23 -0400
+ -- dev-support <dev-support@cumulusnetworks.com>  Thur, 04 Aug 2020 19:24:24 -0400
 
 frr (7.0+cl4u2) RELEASED; urgency=medium
 
