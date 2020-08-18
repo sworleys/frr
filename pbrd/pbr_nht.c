@@ -524,6 +524,7 @@ void pbr_nht_add_individual_nexthop(struct pbr_map_sequence *pbrms,
 	struct pbr_nexthop_cache *pnhc;
 	struct pbr_nexthop_cache lookup;
 	struct nexthop *nh;
+	struct vrf *vrf;
 	char buf[PBR_NHC_NAMELEN];
 
 	pbrms->nhg = nexthop_group_new();
@@ -531,6 +532,13 @@ void pbr_nht_add_individual_nexthop(struct pbr_map_sequence *pbrms,
 		MTYPE_TMP,
 		pbr_nht_nexthop_make_name(pbrms->parent->name, PBR_NHC_NAMELEN,
 					  pbrms->seqno, buf));
+
+	if (nhop->vrf_id != VRF_DEFAULT) {
+		vrf = vrf_lookup_by_id(nhop->vrf_id);
+		if (vrf)
+			strlcpy(pbrms->internal_nh_vrf_name, vrf->name,
+				sizeof(pbrms->internal_nh_vrf_name));
+	}
 
 	nh = nexthop_new();
 	memcpy(nh, nhop, sizeof(*nh));
@@ -586,6 +594,7 @@ static void pbr_nht_release_individual_nexthop(struct pbr_map_sequence *pbrms)
 
 	nexthop_group_delete(&pbrms->nhg);
 	XFREE(MTYPE_TMP, pbrms->internal_nhg_name);
+	pbrms->internal_nh_vrf_name[0] = '\0';
 }
 
 void pbr_nht_delete_individual_nexthop(struct pbr_map_sequence *pbrms)

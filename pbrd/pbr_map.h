@@ -119,6 +119,10 @@ struct pbr_map_sequence {
 	 */
 	struct nexthop_group *nhg;
 	char *internal_nhg_name;
+	/*
+	 * Special case of the above to track VRF used with `nexthop-vrf`
+	 */
+	char internal_nh_vrf_name[VRF_NAMSIZ + 1];
 
 	/*
 	 * The name of the nexthop group
