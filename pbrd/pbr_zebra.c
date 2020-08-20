@@ -594,4 +594,10 @@ void pbr_send_pbr_map(struct pbr_map_sequence *pbrms,
 	stream_putw_at(s, 0, stream_get_endp(s));
 
 	zclient_send_message(zclient);
+
+	/* Assume installed/removed until callback */
+	if (install)
+		pbrms->installed |= ((uint64_t)1 << pmi->install_bit);
+	else
+		pbrms->installed &= ~((uint64_t)1 << pmi->install_bit);
 }
