@@ -2159,10 +2159,10 @@ static int rule_notify_owner(ZAPI_CALLBACK_ARGS)
 	enum zapi_rule_notify_owner note;
 	struct bgp_pbr_action *bgp_pbra;
 	struct bgp_pbr_rule *bgp_pbr = NULL;
-	ifindex_t ifi;
+	char ifname[INTERFACE_NAMSIZ + 1] = {};
 
 	if (!zapi_rule_notify_decode(zclient->ibuf, &seqno, &priority, &unique,
-				     &ifi, &note))
+				     ifname, &note))
 		return -1;
 
 	bgp_pbra = bgp_pbr_action_rule_lookup(vrf_id, unique);
@@ -2418,7 +2418,7 @@ static void bgp_encode_pbr_rule_action(struct stream *s,
 
 	stream_putl(s, pbra->table_id);
 
-	stream_putl(s, 0); /* ifindex unused */
+	stream_put(s, 0, 0); /* ifname unused */
 }
 
 static void bgp_encode_pbr_ipset_match(struct stream *s,

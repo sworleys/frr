@@ -1396,7 +1396,7 @@ int zapi_pbr_rule_encode(uint8_t cmd, struct stream *s, struct pbr_rule *zrule)
 	stream_putw(s, zrule->filter.fwmark);   /* fwmark */
 
 	stream_putl(s, zrule->action.table);
-	stream_putl(s, zrule->ifindex);
+	stream_put(s, 0, 0); /* ifname */
 
 	/* Put length at the first point of the stream. */
 	stream_putw_at(s, 0, stream_get_endp(s));
@@ -1442,26 +1442,23 @@ stream_failure:
 }
 
 bool zapi_rule_notify_decode(struct stream *s, uint32_t *seqno,
-			     uint32_t *priority, uint32_t *unique,
-			     ifindex_t *ifindex,
+			     uint32_t *priority, uint32_t *unique, char *ifname,
 			     enum zapi_rule_notify_owner *note)
 {
 	uint32_t prio, seq, uni;
-	ifindex_t ifi;
 
 	STREAM_GET(note, s, sizeof(*note));
 
 	STREAM_GETL(s, seq);
 	STREAM_GETL(s, prio);
 	STREAM_GETL(s, uni);
-	STREAM_GETL(s, ifi);
+	STREAM_GET(ifname, s, INTERFACE_NAMSIZ);
 
 	if (zclient_debug)
-		zlog_debug("%s: %u %u %u %u", __func__, seq, prio, uni, ifi);
+		zlog_debug("%s: %u %u %u %s", __func__, seq, prio, uni, ifname);
 	*seqno = seq;
 	*priority = prio;
 	*unique = uni;
-	*ifindex = ifi;
 
 	return true;
 
@@ -1834,7 +1831,7 @@ static void zclient_vrf_delete(struct zclient *zclient, vrf_id_t vrf_id)
 static int zclient_interface_add(struct zclient *zclient, vrf_id_t vrf_id)
 {
 	struct interface *ifp;
-	char ifname_tmp[INTERFACE_NAMSIZ + 1] = {};
+	char ifname_tmp[INTERFACE_NAMSIZ] = {};
 	struct stream *s = zclient->ibuf;
 
 	/* Read interface name. */

@@ -41,7 +41,7 @@ struct zebra_pbr_rule {
 
 	struct pbr_rule rule;
 
-	char ifname[INTERFACE_NAMSIZ];
+	char ifname[INTERFACE_NAMSIZ + 1];
 
 	vrf_id_t vrf_id;
 };
