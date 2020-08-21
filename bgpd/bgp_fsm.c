@@ -1682,9 +1682,6 @@ static int bgp_fsm_open(struct peer *peer)
 	/* Send keepalive and make keepalive timer */
 	bgp_keepalive_send(peer);
 
-	/* Reset holdtimer value. */
-	BGP_TIMER_OFF(peer->t_holdtime);
-
 	return 0;
 }
 
