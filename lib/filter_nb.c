@@ -110,6 +110,19 @@ static void prefix_list_entry_set_empty(struct prefix_list_entry *ple)
 	ple->le = 0;
 }
 
+/**
+ * Unsets the cisco style rule for addresses so it becomes disabled (the
+ * equivalent of setting: `0.0.0.0/32`).
+ *
+ * \param addr address part.
+ * \param mask mask part.
+ */
+static void cisco_unset_addr_mask(struct in_addr *addr, struct in_addr *mask)
+{
+	addr->s_addr = INADDR_ANY;
+	mask->s_addr = CISCO_BIN_HOST_WILDCARD_MASK;
+}
+
 /*
  * XPath: /frr-filter:lib/access-list
  */
@@ -343,7 +356,7 @@ lib_access_list_entry_host_modify(struct nb_cb_modify_args *args)
 	f->cisco = 1;
 	fc = &f->u.cfilter;
 	yang_dnode_get_ipv4(&fc->addr, args->dnode, NULL);
-	fc->addr_mask.s_addr = INADDR_ANY;
+	fc->addr_mask.s_addr = CISCO_BIN_HOST_WILDCARD_MASK;
 
 	return NB_OK;
 }
@@ -359,8 +372,7 @@ lib_access_list_entry_host_destroy(struct nb_cb_destroy_args *args)
 
 	f = nb_running_get_entry(args->dnode, NULL, true);
 	fc = &f->u.cfilter;
-	fc->addr.s_addr = INADDR_ANY;
-	fc->addr_mask.s_addr = INADDR_NONE;
+	cisco_unset_addr_mask(&fc->addr, &fc->addr_mask);
 
 	return NB_OK;
 }
@@ -384,6 +396,7 @@ lib_access_list_entry_network_modify(struct nb_cb_modify_args *args)
 	yang_dnode_get_prefix(&p, args->dnode, NULL);
 	fc->addr.s_addr = ipv4_network_addr(p.u.prefix4.s_addr, p.prefixlen);
 	masklen2ip(p.prefixlen, &fc->addr_mask);
+	fc->addr_mask.s_addr = ~fc->addr_mask.s_addr;
 
 	return NB_OK;
 }
@@ -399,8 +412,7 @@ lib_access_list_entry_network_destroy(struct nb_cb_destroy_args *args)
 
 	f = nb_running_get_entry(args->dnode, NULL, true);
 	fc = &f->u.cfilter;
-	fc->addr.s_addr = INADDR_ANY;
-	fc->addr_mask.s_addr = INADDR_NONE;
+	cisco_unset_addr_mask(&fc->addr, &fc->addr_mask);
 
 	return NB_OK;
 }
@@ -421,7 +433,7 @@ lib_access_list_entry_source_any_create(struct nb_cb_create_args *args)
 	f->cisco = 1;
 	fc = &f->u.cfilter;
 	fc->addr.s_addr = INADDR_ANY;
-	fc->addr_mask.s_addr = INADDR_NONE;
+	fc->addr_mask.s_addr = CISCO_BIN_ANY_WILDCARD_MASK;
 
 	return NB_OK;
 }
@@ -437,8 +449,7 @@ lib_access_list_entry_source_any_destroy(struct nb_cb_destroy_args *args)
 
 	f = nb_running_get_entry(args->dnode, NULL, true);
 	fc = &f->u.cfilter;
-	fc->addr.s_addr = INADDR_ANY;
-	fc->addr_mask.s_addr = INADDR_NONE;
+	cisco_unset_addr_mask(&fc->addr, &fc->addr_mask);
 
 	return NB_OK;
 }
@@ -459,7 +470,7 @@ static int lib_access_list_entry_destination_host_modify(
 	fc = &f->u.cfilter;
 	fc->extended = 1;
 	yang_dnode_get_ipv4(&fc->mask, args->dnode, NULL);
-	fc->mask_mask.s_addr = INADDR_ANY;
+	fc->mask_mask.s_addr = CISCO_BIN_HOST_WILDCARD_MASK;
 
 	return NB_OK;
 }
@@ -476,8 +487,7 @@ static int lib_access_list_entry_destination_host_destroy(
 	f = nb_running_get_entry(args->dnode, NULL, true);
 	fc = &f->u.cfilter;
 	fc->extended = 0;
-	fc->mask.s_addr = INADDR_ANY;
-	fc->mask_mask.s_addr = INADDR_NONE;
+	cisco_unset_addr_mask(&fc->mask, &fc->mask_mask);
 
 	return NB_OK;
 }
@@ -501,6 +511,7 @@ static int lib_access_list_entry_destination_network_modify(
 	yang_dnode_get_prefix(&p, args->dnode, NULL);
 	fc->mask.s_addr = ipv4_network_addr(p.u.prefix4.s_addr, p.prefixlen);
 	masklen2ip(p.prefixlen, &fc->mask_mask);
+	fc->mask_mask.s_addr = ~fc->mask_mask.s_addr;
 
 	return NB_OK;
 }
@@ -517,8 +528,7 @@ static int lib_access_list_entry_destination_network_destroy(
 	f = nb_running_get_entry(args->dnode, NULL, true);
 	fc = &f->u.cfilter;
 	fc->extended = 0;
-	fc->mask.s_addr = INADDR_ANY;
-	fc->mask_mask.s_addr = INADDR_NONE;
+	cisco_unset_addr_mask(&fc->mask, &fc->mask_mask);
 
 	return NB_OK;
 }
@@ -539,7 +549,7 @@ static int lib_access_list_entry_destination_any_create(
 	fc = &f->u.cfilter;
 	fc->extended = 1;
 	fc->mask.s_addr = INADDR_ANY;
-	fc->mask_mask.s_addr = INADDR_NONE;
+	fc->mask_mask.s_addr = CISCO_BIN_ANY_WILDCARD_MASK;
 
 	return NB_OK;
 }
@@ -556,8 +566,7 @@ static int lib_access_list_entry_destination_any_destroy(
 	f = nb_running_get_entry(args->dnode, NULL, true);
 	fc = &f->u.cfilter;
 	fc->extended = 0;
-	fc->mask.s_addr = INADDR_ANY;
-	fc->mask_mask.s_addr = INADDR_NONE;
+	cisco_unset_addr_mask(&fc->mask, &fc->mask_mask);
 
 	return NB_OK;
 }
