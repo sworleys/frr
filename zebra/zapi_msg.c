@@ -840,6 +840,7 @@ void zsend_rule_notify_owner(const struct zebra_dplane_ctx *ctx,
 	stream_putl(s, dplane_ctx_rule_get_seq(ctx));
 	stream_putl(s, dplane_ctx_rule_get_priority(ctx));
 	stream_putl(s, dplane_ctx_rule_get_unique(ctx));
+	stream_put(s, dplane_ctx_rule_get_ifname(ctx), INTERFACE_NAMSIZ);
 
 	stream_putw_at(s, 0, stream_get_endp(s));
 
@@ -2746,7 +2747,7 @@ static inline void zread_rule(ZAPI_HANDLER_ARGS)
 		STREAM_GET(ifname, s, INTERFACE_NAMSIZ);
 
 		strlcpy(zpr.ifname, ifname, sizeof(zpr.ifname));
-		strlcpy(zpr.rule.ifname, ifname, sizeof(zpr.ifname));
+		strlcpy(zpr.rule.ifname, ifname, sizeof(zpr.rule.ifname));
 
 		if (!is_default_prefix(&zpr.rule.filter.src_ip))
 			zpr.rule.filter.filter_bm |= PBR_FILTER_SRC_IP;

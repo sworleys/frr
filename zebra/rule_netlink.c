@@ -74,7 +74,7 @@ netlink_rule_msg_encode(int cmd, const struct zebra_dplane_ctx *ctx,
 		char buf[];
 	} *req = buf;
 
-	const char *ifname = dplane_ctx_get_ifname(ctx);
+	const char *ifname = dplane_ctx_rule_get_ifname(ctx);
 	char buf1[PREFIX_STRLEN];
 	char buf2[PREFIX_STRLEN];
 
