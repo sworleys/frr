@@ -3527,6 +3527,9 @@ DEFUN (show_zebra,
 		vty_out(vty, "Zebra RIB sweep happened at %s", timebuf);
 	}
 
+	if (zrouter.asic_offloaded)
+		vty_out(vty, "Asic Offload is being used\n");
+
 	vty_out(vty,
 		"                            Route      Route      Neighbor   LSP        LSP\n");
 	vty_out(vty,
