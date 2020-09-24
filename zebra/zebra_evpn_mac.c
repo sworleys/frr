@@ -2142,9 +2142,6 @@ int zebra_evpn_add_update_local_mac(struct zebra_vrf *zvrf, zebra_evpn_t *zevpn,
 		upd_neigh = true;
 	}
 
-	zlog_debug("%s is_dup_detect %u es_change %u inform_client %u upd_neigh %u",
-		   __func__, is_dup_detect, es_change, inform_client , upd_neigh);
-
 	/* Inform dataplane if required. */
 	if (inform_dataplane)
 		zebra_evpn_sync_mac_dp_install(mac, false /* set_inactive */,
