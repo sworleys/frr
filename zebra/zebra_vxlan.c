@@ -4622,6 +4622,11 @@ int zebra_vxlan_if_down(struct interface *ifp)
 
 		assert(zevpn->vxlan_if == ifp);
 
+		/* remove from l3-vni list */
+		zl3vni = zl3vni_from_vrf(zevpn->vrf_id);
+		if (zl3vni)
+			listnode_delete(zl3vni->l2vnis, zevpn);
+
 		/* Delete this VNI from BGP. */
 		zebra_evpn_send_del_to_client(zevpn);
 
@@ -4696,7 +4701,7 @@ int zebra_vxlan_if_up(struct interface *ifp)
 			zevpn->vrf_id = vlan_if->vrf_id;
 			zl3vni = zl3vni_from_vrf(vlan_if->vrf_id);
 			if (zl3vni)
-				listnode_add_sort(zl3vni->l2vnis, zevpn);
+				listnode_add_sort_nodup(zl3vni->l2vnis, zevpn);
 		}
 
 		/* If part of a bridge, inform BGP about this VNI. */
@@ -5035,7 +5040,7 @@ int zebra_vxlan_if_add(struct interface *ifp)
 			zevpn->vrf_id = vlan_if->vrf_id;
 			zl3vni = zl3vni_from_vrf(vlan_if->vrf_id);
 			if (zl3vni)
-				listnode_add_sort(zl3vni->l2vnis, zevpn);
+				listnode_add_sort_nodup(zl3vni->l2vnis, zevpn);
 		}
 
 		if (IS_ZEBRA_DEBUG_VXLAN) {
