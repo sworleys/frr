@@ -84,6 +84,8 @@ uint32_t nl_rcvbufsize = 4194304;
 #endif /* HAVE_NETLINK */
 
 #define OPTION_V6_RR_SEMANTICS 2000
+#define OPTION_ASIC_OFFLOAD    2001
+
 /* Command line options. */
 const struct option longopts[] = {
 	{"batch", no_argument, NULL, 'b'},
@@ -93,6 +95,7 @@ const struct option longopts[] = {
 	{"ecmp", required_argument, NULL, 'e'},
 	{"retain", no_argument, NULL, 'r'},
 	{"vrfdefaultname", required_argument, NULL, 'o'},
+	{"asic-offload", optional_argument, NULL, OPTION_ASIC_OFFLOAD},
 #ifdef HAVE_NETLINK
 	{"vrfwnetns", no_argument, NULL, 'n'},
 	{"nl-bufsize", required_argument, NULL, 's'},
@@ -285,12 +288,8 @@ int main(int argc, char **argv)
 	char *vrf_default_name_configured = NULL;
 	struct sockaddr_storage dummy;
 	socklen_t dummylen;
-#if defined(HANDLE_ZAPI_FUZZING)
-	char *zapi_fuzzing = NULL;
-#endif /* HANDLE_ZAPI_FUZZING */
-#if defined(HANDLE_NETLINK_FUZZING)
-	char *netlink_fuzzing = NULL;
-#endif /* HANDLE_NETLINK_FUZZING */
+	bool asic_offload = false;
+	bool notify_on_ack = true;
 
 	vrf_configure_backend(VRF_BACKEND_VRF_LITE);
 
@@ -315,6 +314,7 @@ int main(int argc, char **argv)
 		"  -e, --ecmp               Specify ECMP to use.\n"
 		"  -r, --retain             When program terminates, retain added route by zebra.\n"
 		"  -o, --vrfdefaultname     Set default VRF name.\n"
+		"  -A, --asic-offload       FRR is interacting with an asic underneath the linux kernel\n"
 #ifdef HAVE_NETLINK
 		"  -n, --vrfwnetns          Use NetNS as VRF backend\n"
 		"  -s, --nl-bufsize         Set netlink receive buffer size\n"
@@ -385,6 +385,13 @@ int main(int argc, char **argv)
 		case OPTION_V6_RR_SEMANTICS:
 			v6_rr_semantics = true;
 			break;
+		case OPTION_ASIC_OFFLOAD:
+			if (!strcmp(optarg, "notify_on_offload"))
+				notify_on_ack = false;
+			if (!strcmp(optarg, "notify_on_ack"))
+				notify_on_ack = true;
+			asic_offload = true;
+			break;
 #endif /* HAVE_NETLINK */
 #if defined(HANDLE_ZAPI_FUZZING)
 		case 'c':
@@ -414,7 +421,7 @@ int main(int argc, char **argv)
 	zrouter.master = frr_init();
 
 	/* Zebra related initialize. */
-	zebra_router_init();
+	zebra_router_init(asic_offload, notify_on_ack);
 	zserv_init();
 	rib_init();
 	zebra_if_init();
