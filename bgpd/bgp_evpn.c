@@ -2576,7 +2576,7 @@ static int install_evpn_route_entry(struct bgp *bgp, struct bgpevpn *vpn,
 					prefix2str(&pi->net->p, prefix_buf,
 						   sizeof(prefix_buf)),
 					new_local_es ? "local" : "non-local");
-			bgp_path_info_set_flag(rn, pi, BGP_PATH_ATTR_CHANGED);
+			bgp_path_info_set_flag(dest, pi, BGP_PATH_ATTR_CHANGED);
 		}
 
 		/* Unintern existing, set to new. */
@@ -2950,7 +2950,7 @@ int bgp_evpn_route_entry_install_if_vrf_match(struct bgp *bgp_vrf,
 	int ret = 0;
 	char buf[PREFIX_STRLEN];
 	const struct prefix_evpn *evp =
-		(const struct prefix_evpn *)bgp_node_get_prefix(pi->net);
+		(const struct prefix_evpn *)bgp_dest_get_prefix(pi->net);
 
 	/* Consider "valid" remote routes applicable for
 	 * this VRF.

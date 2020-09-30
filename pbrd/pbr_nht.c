@@ -1243,7 +1243,7 @@ static void pbr_nht_json_nhg_nexthops(struct hash_bucket *b, void *data)
 	json_object *this_hop;
 
 	this_hop = json_object_new_object();
-	nexthop_group_json_nexthop(this_hop, pnhc->nexthop);
+	nexthop_group_json_nexthop(this_hop, &pnhc->nexthop);
 	json_object_boolean_add(this_hop, "valid", pnhc->valid);
 
 	json_object_array_add(all_hops, this_hop);
