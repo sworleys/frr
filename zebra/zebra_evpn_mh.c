@@ -2109,6 +2109,13 @@ static void zebra_evpn_es_local_info_clear(struct zebra_evpn_es **esp)
 	if (!(es->flags & ZEBRA_EVPNES_LOCAL))
 		return;
 
+	zif = es->zif;
+
+	/* if there any local macs referring to the ES as dest we
+	 * need to clear the contents and start over
+	 */
+	zebra_evpn_es_flush_local_macs(es, zif->ifp, false);
+
 	es->flags &= ~(ZEBRA_EVPNES_LOCAL |
 					ZEBRA_EVPNES_READY_FOR_BGP);
 
@@ -2125,14 +2132,8 @@ static void zebra_evpn_es_local_info_clear(struct zebra_evpn_es **esp)
 		zebra_evpn_es_br_port_dplane_clear(es);
 
 	/* clear the es from the parent interface */
-	zif = es->zif;
 	zif->es_info.es = NULL;
 	es->zif = NULL;
-
-	/* if there any local macs referring to the ES as dest we
-	 * need to clear the contents and start over
-	 */
-	zebra_evpn_es_flush_local_macs(es, zif->ifp, false);
 
 	/* clear all local flags associated with the ES */
 	es->flags &= ~(ZEBRA_EVPNES_OPER_UP | ZEBRA_EVPNES_BR_PORT
