@@ -2215,7 +2215,7 @@ static int zebra_evpn_local_es_update(struct zebra_if *zif, uint32_t lid,
 	if (!lid || is_zero_mac(sysmac)) {
 		/* if in ES is attached to zif delete it */
 		if (old_es)
-			zebra_evpn_local_es_del(&zif->es_info.es);
+			zebra_evpn_local_es_del(&old_es);
 		return 0;
 	}
 
@@ -2240,7 +2240,7 @@ static int zebra_evpn_local_es_update(struct zebra_if *zif, uint32_t lid,
 
 	/* release the old_es against the zif */
 	if (old_es)
-		zebra_evpn_local_es_del(&zif->es_info.es);
+		zebra_evpn_local_es_del(&old_es);
 
 	es = zebra_evpn_es_find(&esi);
 	if (es) {
