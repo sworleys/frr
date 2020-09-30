@@ -63,7 +63,7 @@ DEFINE_MTYPE_STATIC(ZEBRA, L2_NH, "L2 nexthop");
 static void zebra_evpn_es_get_one_base_evpn(void);
 static int zebra_evpn_es_evi_send_to_client(struct zebra_evpn_es *es,
 		zebra_evpn_t *zevpn, bool add);
-static struct zebra_evpn_es *zebra_evpn_local_es_del(struct zebra_evpn_es *es);
+static void zebra_evpn_local_es_del(struct zebra_evpn_es **esp);
 static int zebra_evpn_local_es_update(struct zebra_if *zif, uint32_t lid,
 		struct ethaddr *sysmac);
 static bool zebra_evpn_es_br_port_dplane_update(struct zebra_evpn_es *es,
@@ -949,7 +949,7 @@ void zebra_evpn_if_cleanup(struct zebra_if *zif)
 
 	/* Delete associated Ethernet Segment */
 	if (zif->es_info.es)
-		zebra_evpn_local_es_del(zif->es_info.es);
+		zebra_evpn_local_es_del(&zif->es_info.es);
 }
 
 /*****************************************************************************
@@ -1694,15 +1694,17 @@ static struct zebra_evpn_es *zebra_evpn_es_new(esi_t *esi)
  * This just frees appropriate memory, caller should have taken other
  * needed actions.
  */
-static struct zebra_evpn_es *zebra_evpn_es_free(struct zebra_evpn_es *es)
+static void zebra_evpn_es_free(struct zebra_evpn_es **esp)
 {
+	struct zebra_evpn_es *es = *esp;
+
 	/* If the ES has a local or remote reference it cannot be freed.
 	 * Free is also prevented if there are MAC entries referencing
 	 * it.
 	 */
 	if ((es->flags & (ZEBRA_EVPNES_LOCAL | ZEBRA_EVPNES_REMOTE)) ||
 			listcount(es->mac_list))
-		return es;
+		return;
 
 	if (IS_ZEBRA_DEBUG_EVPN_MH_ES)
 		zlog_debug("es %s free", es->esi_str);
@@ -1724,7 +1726,7 @@ static struct zebra_evpn_es *zebra_evpn_es_free(struct zebra_evpn_es *es)
 
 	XFREE(MTYPE_ZES, es);
 
-	return NULL;
+	*esp = NULL;
 }
 
 /* Inform BGP about local ES addition */
@@ -2098,14 +2100,14 @@ static void zebra_evpn_es_local_info_set(struct zebra_evpn_es *es,
 	zebra_evpn_mh_update_protodown_es(es, true /*resync_dplane*/);
 }
 
-static struct zebra_evpn_es *zebra_evpn_es_local_info_clear(
-		struct zebra_evpn_es *es)
+static void zebra_evpn_es_local_info_clear(struct zebra_evpn_es **esp)
 {
 	struct zebra_if *zif;
 	bool dplane_updated = false;
+	struct zebra_evpn_es *es = *esp;
 
 	if (!(es->flags & ZEBRA_EVPNES_LOCAL))
-		return es;
+		return;
 
 	es->flags &= ~(ZEBRA_EVPNES_LOCAL |
 					ZEBRA_EVPNES_READY_FOR_BGP);
@@ -2140,19 +2142,20 @@ static struct zebra_evpn_es *zebra_evpn_es_local_info_clear(
 	list_delete_node(zmh_info->local_es_list, &es->local_es_listnode);
 
 	/* free up the ES if there is no remote reference */
-	return zebra_evpn_es_free(es);
+	zebra_evpn_es_free(esp);
 }
 
 /* Delete an ethernet segment and inform BGP */
-static struct zebra_evpn_es *zebra_evpn_local_es_del(struct zebra_evpn_es *es)
+static void zebra_evpn_local_es_del(struct zebra_evpn_es **esp)
 {
 	struct zebra_evpn_es_evi *es_evi;
 	struct listnode *node = NULL;
 	struct listnode *nnode = NULL;
 	struct zebra_if *zif;
+	struct zebra_evpn_es *es = *esp;
 
 	if (!CHECK_FLAG(es->flags, ZEBRA_EVPNES_LOCAL))
-		return es;
+		return;
 
 	if (IS_ZEBRA_DEBUG_EVPN_MH_ES) {
 		zif = es->zif;
@@ -2169,12 +2172,14 @@ static struct zebra_evpn_es *zebra_evpn_local_es_del(struct zebra_evpn_es *es)
 	if (es->flags & ZEBRA_EVPNES_READY_FOR_BGP)
 		zebra_evpn_es_send_del_to_client(es);
 
-	return zebra_evpn_es_local_info_clear(es);
+	zebra_evpn_es_local_info_clear(esp);
 }
 
 /* eval remote info associated with the ES */
-static void zebra_evpn_es_remote_info_re_eval(struct zebra_evpn_es *es)
+static void zebra_evpn_es_remote_info_re_eval(struct zebra_evpn_es **esp)
 {
+	struct zebra_evpn_es *es = *esp;
+
 	/* if there are remote VTEPs the ES-EVI is classified as "remote" */
 	if (listcount(es->es_vtep_list)) {
 		if (!(es->flags & ZEBRA_EVPNES_REMOTE)) {
@@ -2189,7 +2194,7 @@ static void zebra_evpn_es_remote_info_re_eval(struct zebra_evpn_es *es)
 			if (IS_ZEBRA_DEBUG_EVPN_MH_ES)
 				zlog_debug("remote es %s del; nhg %u",
 						es->esi_str, es->nhg_id);
-			zebra_evpn_es_free(es);
+			zebra_evpn_es_free(esp);
 		}
 	}
 }
@@ -2210,7 +2215,7 @@ static int zebra_evpn_local_es_update(struct zebra_if *zif, uint32_t lid,
 	if (!lid || is_zero_mac(sysmac)) {
 		/* if in ES is attached to zif delete it */
 		if (old_es)
-			zebra_evpn_local_es_del(old_es);
+			zebra_evpn_local_es_del(&zif->es_info.es);
 		return 0;
 	}
 
@@ -2235,7 +2240,7 @@ static int zebra_evpn_local_es_update(struct zebra_if *zif, uint32_t lid,
 
 	/* release the old_es against the zif */
 	if (old_es)
-		zebra_evpn_local_es_del(old_es);
+		zebra_evpn_local_es_del(&zif->es_info.es);
 
 	es = zebra_evpn_es_find(&esi);
 	if (es) {
@@ -2271,17 +2276,18 @@ static int zebra_evpn_remote_es_del(esi_t *esi, struct in_addr vtep_ip)
 	}
 
 	zebra_evpn_es_vtep_del(es, vtep_ip);
-	zebra_evpn_es_remote_info_re_eval(es);
+	zebra_evpn_es_remote_info_re_eval(&es);
 
 	return 0;
 }
 
 /* force delete a remote ES on the way down */
-static void zebra_evpn_remote_es_flush(struct zebra_evpn_es *es)
+static void zebra_evpn_remote_es_flush(struct zebra_evpn_es **esp)
 {
 	struct zebra_evpn_es_vtep *es_vtep;
 	struct listnode	*node;
 	struct listnode	*nnode;
+	struct zebra_evpn_es *es = *esp;
 
 	for (ALL_LIST_ELEMENTS(es->es_vtep_list, node, nnode, es_vtep)) {
 		if (IS_ZEBRA_DEBUG_EVPN_MH_ES)
@@ -2289,8 +2295,8 @@ static void zebra_evpn_remote_es_flush(struct zebra_evpn_es *es)
 					es->esi_str,
 					inet_ntoa(es_vtep->vtep_ip));
 		zebra_evpn_es_vtep_free(es_vtep);
-		zebra_evpn_es_remote_info_re_eval(es);
 	}
+	zebra_evpn_es_remote_info_re_eval(esp);
 }
 
 static int zebra_evpn_remote_es_add(esi_t *esi, struct in_addr vtep_ip,
@@ -2318,7 +2324,7 @@ static int zebra_evpn_remote_es_add(esi_t *esi, struct in_addr vtep_ip,
 	}
 
 	zebra_evpn_es_vtep_add(es, vtep_ip, esr_rxed, df_alg, df_pref);
-	zebra_evpn_es_remote_info_re_eval(es);
+	zebra_evpn_es_remote_info_re_eval(&es);
 
 	return 0;
 }
@@ -2370,7 +2376,7 @@ void zebra_evpn_es_mac_deref_entry(zebra_mac_t *mac)
 
 	list_delete_node(es->mac_list, &mac->es_listnode);
 	if (!listcount(es->mac_list))
-		zebra_evpn_es_free(es);
+		zebra_evpn_es_free(&es);
 }
 
 /* Associate a MAC entry with a local or remote ES. Returns false if there
@@ -2477,9 +2483,9 @@ void zebra_evpn_es_cleanup(void)
 
 	RB_FOREACH_SAFE(es, zebra_es_rb_head,
 			&zmh_info->es_rb_tree, es_next) {
-		es = zebra_evpn_local_es_del(es);
+		zebra_evpn_local_es_del(&es);
 		if (es)
-			zebra_evpn_remote_es_flush(es);
+			zebra_evpn_remote_es_flush(&es);
 	}
 }
 
