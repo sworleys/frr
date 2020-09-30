@@ -229,8 +229,8 @@ void bgp_path_info_extra_free(struct bgp_path_info_extra **extra)
 	if (e->bgp_orig)
 		bgp_unlock(e->bgp_orig);
 
-	if (e->es_info)
-		bgp_evpn_path_es_info_free(e->es_info);
+	if (e->mh_info)
+		bgp_evpn_path_mh_info_free(e->mh_info);
 
 	if ((*extra)->bgp_fs_iprule)
 		list_delete(&((*extra)->bgp_fs_iprule));
@@ -8034,15 +8034,17 @@ void route_vty_out(struct vty *vty, const struct prefix *p,
 		if (safi == SAFI_EVPN) {
 			struct bgp_path_es_info *path_es_info = NULL;
 
-			if (path->extra)
-				path_es_info = path->extra->es_info;
-
 			if (bgp_evpn_is_esi_valid(&attr->esi)) {
 				/* XXX - add these params to the json out */
 				vty_out(vty, "%*s", 20, " ");
 				vty_out(vty, "ESI:%s",
 						esi_to_str(&attr->esi,
 						esi_buf, sizeof(esi_buf)));
+
+				if (path->extra && path->extra->mh_info)
+					path_es_info =
+						path->extra->mh_info->es_info;
+
 				if (path_es_info && path_es_info->es)
 					vty_out(vty, " VNI: %u",
 							path_es_info->vni);
@@ -8852,7 +8854,17 @@ void route_vty_out_detail(struct vty *vty, struct bgp *bgp, struct bgp_dest *bn,
 							bgp_dest_get_prefix(
 								dest),
 						buf2, sizeof(buf2));
-					vty_out(vty, "  Imported from %s:%s, VNI %s\n", buf1, buf2, tag_buf);
+					vty_out(vty,
+						"  Imported from %s:%s, VNI %s",
+						buf1, buf2, tag_buf);
+					if (attr->es_flags & ATTR_ES_L3_NHG)
+						vty_out(vty, ", L3NHG %s",
+							(attr->es_flags
+							 & ATTR_ES_L3_NHG_ACTIVE)
+								? "active"
+								: "inactive");
+					vty_out(vty, "\n");
+
 				} else
 					vty_out(vty, "  Imported from %s:%s\n", buf1, buf2);
 			}

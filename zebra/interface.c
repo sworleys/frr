@@ -52,6 +52,7 @@
 #include "zebra/zebra_vxlan.h"
 #include "zebra/zebra_errors.h"
 #include "zebra/zebra_evpn_mh.h"
+#include "zebra/zebra_evpn_arp_nd.h"
 
 DEFINE_MTYPE_STATIC(ZEBRA, ZINFO, "Zebra Interface Information")
 
@@ -241,6 +242,7 @@ static int if_zebra_delete_hook(struct interface *ifp)
 #endif /* HAVE_RTADV */
 
 		zebra_evpn_if_cleanup(zebra_if);
+		zebra_evpn_mac_ifp_del(ifp);
 
 		if_nhg_dependents_release(ifp);
 		zebra_if_nhg_dependents_free(zebra_if);
@@ -836,6 +838,7 @@ void if_delete_update(struct interface *ifp)
 		memset(&zif->brslave_info, 0,
 		       sizeof(struct zebra_l2info_brslave));
 		zebra_evpn_if_cleanup(zif);
+		zebra_evpn_mac_ifp_del(ifp);
 	}
 
 	if (!ifp->configured) {
@@ -1578,12 +1581,20 @@ static void if_dump_vty(struct vty *vty, struct interface *ifp)
 
 		br_slave = &zebra_if->brslave_info;
 		if (br_slave->bridge_ifindex != IFINDEX_INTERNAL) {
-			if (br_slave->br_if)
-				vty_out(vty, "  Master interface: %s\n",
-					br_slave->br_if->name);
+			char vid_buf[16];
+
+			if (zebra_if->pvid)
+				snprintf(vid_buf, sizeof(vid_buf),
+						" PVID: %u", zebra_if->pvid);
 			else
-				vty_out(vty, "  Master ifindex: %u\n",
-					br_slave->bridge_ifindex);
+				vid_buf[0] = '\0';
+
+			if (br_slave->br_if)
+				vty_out(vty, "  Master interface: %s%s\n",
+					br_slave->br_if->name, vid_buf);
+			else
+				vty_out(vty, "  Master ifindex: %u%s\n",
+					br_slave->bridge_ifindex, vid_buf);
 		}
 	}
 
@@ -1601,6 +1612,9 @@ static void if_dump_vty(struct vty *vty, struct interface *ifp)
 		}
 	}
 
+	if (zebra_if->flags & ZIF_FLAG_LACP_BYPASS)
+		vty_out(vty, "  LACP bypass: on\n");
+
 	zebra_evpn_if_es_print(vty, zebra_if);
 	vty_out(vty, "  protodown: %s %s\n",
 		(zebra_if->flags & ZIF_FLAG_PROTODOWN) ?
@@ -1610,6 +1624,8 @@ static void if_dump_vty(struct vty *vty, struct interface *ifp)
 		vty_out(vty, "  protodown reasons: %s\n",
 			zebra_protodown_rc_str(zebra_if->protodown_rc,
 				pd_buf, sizeof(pd_buf)));
+
+	zebra_evpn_arp_nd_if_print(vty, zebra_if);
 
 	if (zebra_if->link_ifindex != IFINDEX_INTERNAL) {
 		if (zebra_if->link)

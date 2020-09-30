@@ -897,7 +897,11 @@ int str2prefix(const char *str, struct prefix *p)
 static const char *prefixevpn_ead2str(const struct prefix_evpn *p, char *str,
 				      int size)
 {
-	snprintf(str, size, "Unsupported EVPN prefix");
+	char buf[ESI_STR_LEN];
+
+	snprintf(str, size, "[%d]:[%s]:[%s]/%d", p->prefix.route_type,
+		 esi_to_str(&p->prefix.ead_addr.esi, buf, sizeof(buf)),
+		 inet_ntoa(p->prefix.ead_addr.ip.ipaddr_v4), p->prefixlen);
 	return str;
 }
 

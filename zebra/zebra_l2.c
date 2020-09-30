@@ -45,6 +45,7 @@
 #include "zebra/zebra_l2.h"
 #include "zebra/zebra_vxlan.h"
 #include "zebra/zebra_evpn_mh.h"
+#include "zebra/zebra_evpn_arp_nd.h"
 
 /* definitions */
 
@@ -101,6 +102,44 @@ void zebra_l2_unmap_slave_from_bridge(struct zebra_l2info_brslave *br_slave)
 	br_slave->br_if = NULL;
 }
 
+/* If any of the bond members are in bypass state the bond is placed
+ * in bypass state
+ */
+static void zebra_l2_bond_lacp_bypass_eval(struct zebra_if *bond_zif)
+{
+	struct listnode *node;
+	struct zebra_if *bond_mbr;
+	bool old_bypass = !!(bond_zif->flags & ZIF_FLAG_LACP_BYPASS);
+	bool new_bypass = false;
+
+	if (bond_zif->bond_info.mbr_zifs) {
+		for (ALL_LIST_ELEMENTS_RO(bond_zif->bond_info.mbr_zifs, node,
+					  bond_mbr)) {
+			if (bond_mbr->flags & ZIF_FLAG_LACP_BYPASS) {
+				new_bypass = true;
+				break;
+			}
+		}
+	}
+
+	if (old_bypass == new_bypass)
+		return;
+
+	if (IS_ZEBRA_DEBUG_EVPN_MH_ES || IS_ZEBRA_DEBUG_EVENT)
+		zlog_debug("bond %s lacp bypass changed to %s",
+			   bond_zif->ifp->name, new_bypass ? "on" : "off");
+
+	if (new_bypass)
+		bond_zif->flags |= ZIF_FLAG_LACP_BYPASS;
+	else
+		bond_zif->flags &= ~ZIF_FLAG_LACP_BYPASS;
+
+	if (bond_zif->es_info.es)
+		zebra_evpn_es_bypass_update(bond_zif->es_info.es, bond_zif->ifp,
+					    new_bypass);
+}
+
+/* Returns true if member was newly linked to bond */
 void zebra_l2_map_slave_to_bond(struct zebra_if *zif, vrf_id_t vrf_id)
 {
 	struct interface *bond_if;
@@ -130,6 +169,7 @@ void zebra_l2_map_slave_to_bond(struct zebra_if *zif, vrf_id_t vrf_id)
 			if (zebra_evpn_is_es_bond(bond_if))
 				zebra_evpn_mh_update_protodown_bond_mbr(zif,
 					false /*clear*/, __func__);
+			zebra_l2_bond_lacp_bypass_eval(bond_zif);
 		}
 	} else {
 		if (IS_ZEBRA_DEBUG_EVPN_MH_ES || IS_ZEBRA_DEBUG_EVENT)
@@ -162,6 +202,7 @@ void zebra_l2_unmap_slave_from_bond(struct zebra_if *zif)
 			true /*clear*/, __func__);
 	listnode_delete(bond_zif->bond_info.mbr_zifs, zif);
 	bond_slave->bond_if = NULL;
+	zebra_l2_bond_lacp_bypass_eval(bond_zif);
 }
 
 void zebra_l2if_update_bond(struct interface *ifp, bool add)
@@ -346,6 +387,8 @@ void zebra_l2if_update_bridge_slave(struct interface *ifp,
 		/* In the case of VxLAN, invoke the handler for EVPN. */
 		if (zif->zif_type == ZEBRA_IF_VXLAN)
 			zebra_vxlan_if_update(ifp, ZEBRA_VXLIF_MASTER_CHANGE);
+		else
+			zebra_evpn_arp_nd_if_update(zif, true);
 		if (zif->es_info.es)
 			zebra_evpn_es_local_br_port_update(zif);
 	} else if (old_bridge_ifindex != IFINDEX_INTERNAL) {
@@ -356,19 +399,43 @@ void zebra_l2if_update_bridge_slave(struct interface *ifp,
 		 */
 		if (zif->zif_type == ZEBRA_IF_VXLAN)
 			zebra_vxlan_if_update(ifp, ZEBRA_VXLIF_MASTER_CHANGE);
+		else
+			zebra_evpn_arp_nd_if_update(zif, false);
 		if (zif->es_info.es)
 			zebra_evpn_es_local_br_port_update(zif);
 		zebra_l2_unmap_slave_from_bridge(&zif->brslave_info);
 	}
 }
 
-void zebra_l2if_update_bond_slave(struct interface *ifp, ifindex_t bond_ifindex)
+void zebra_l2if_update_bond_slave(struct interface *ifp, ifindex_t bond_ifindex,
+				  bool new_bypass)
 {
 	struct zebra_if *zif;
 	ifindex_t old_bond_ifindex;
+	bool old_bypass;
+	struct zebra_l2info_bondslave *bond_mbr;
 
 	zif = ifp->info;
 	assert(zif);
+
+	old_bypass = !!(zif->flags & ZIF_FLAG_LACP_BYPASS);
+	if (old_bypass != new_bypass) {
+		if (IS_ZEBRA_DEBUG_EVPN_MH_ES || IS_ZEBRA_DEBUG_EVENT)
+			zlog_debug("bond-mbr %s lacp bypass changed to %s",
+				   zif->ifp->name, new_bypass ? "on" : "off");
+
+		if (new_bypass)
+			zif->flags |= ZIF_FLAG_LACP_BYPASS;
+		else
+			zif->flags &= ~ZIF_FLAG_LACP_BYPASS;
+
+		bond_mbr = &zif->bondslave_info;
+		if (bond_mbr->bond_if) {
+			struct zebra_if *bond_zif = bond_mbr->bond_if->info;
+
+			zebra_l2_bond_lacp_bypass_eval(bond_zif);
+		}
+	}
 
 	old_bond_ifindex = zif->bondslave_info.bond_ifindex;
 	if (old_bond_ifindex == bond_ifindex)

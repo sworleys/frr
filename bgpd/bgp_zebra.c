@@ -2159,10 +2159,10 @@ static int rule_notify_owner(ZAPI_CALLBACK_ARGS)
 	enum zapi_rule_notify_owner note;
 	struct bgp_pbr_action *bgp_pbra;
 	struct bgp_pbr_rule *bgp_pbr = NULL;
-	ifindex_t ifi;
+	char ifname[INTERFACE_NAMSIZ + 1];
 
 	if (!zapi_rule_notify_decode(zclient->ibuf, &seqno, &priority, &unique,
-				     &ifi, &note))
+				     ifname, &note))
 		return -1;
 
 	bgp_pbra = bgp_pbr_action_rule_lookup(vrf_id, unique);
@@ -2521,6 +2521,7 @@ static int bgp_zebra_process_local_es_add(ZAPI_CALLBACK_ARGS)
 	char buf[ESI_STR_LEN];
 	struct in_addr originator_ip;
 	uint8_t active;
+	uint8_t bypass;
 	uint16_t df_pref;
 
 	bgp = bgp_lookup_by_vrf_id(vrf_id);
@@ -2532,14 +2533,16 @@ static int bgp_zebra_process_local_es_add(ZAPI_CALLBACK_ARGS)
 	originator_ip.s_addr = stream_get_ipv4(s);
 	active = stream_getc(s);
 	df_pref = stream_getw(s);
+	bypass = stream_getc(s);
 
 	if (BGP_DEBUG(zebra, ZEBRA))
-		zlog_debug("Rx add ESI %s originator-ip %s active %u df_pref %u",
-				esi_to_str(&esi, buf, sizeof(buf)),
-				inet_ntoa(originator_ip),
-				active, df_pref);
+		zlog_debug("Rx add ESI %s originator-ip %s df_pref %u %s%s",
+			   esi_to_str(&esi, buf, sizeof(buf)),
+			   inet_ntoa(originator_ip), df_pref,
+			   active ? "active" : "", bypass ? " bypass" : "");
 
-	bgp_evpn_local_es_add(bgp, &esi, originator_ip, active, df_pref);
+	bgp_evpn_local_es_add(bgp, &esi, originator_ip, active, df_pref,
+			      !!bypass);
 
 	return 0;
 }

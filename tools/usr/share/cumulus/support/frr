@@ -91,6 +91,7 @@ func_frr()
     # json version was removed because these cmds were leading to memory pileup on scale
     exec_cmd $jexec evpn.vni.detail vtysh -c "show evpn vni detail $json"
     exec_cmd $jexec evpn vtysh -c "show evpn $json"
+    exec_cmd $jexec evpn.arp_nd_redirect vtysh -c "show evpn arp-nd-redirect $json"
     exec_cmd $jexec evpn.es.detail vtysh -c "show evpn es detail $json"
     exec_cmd $jexec evpn.es_evi.detail vtysh -c "show evpn es-evi detail $json"
     exec_cmd $jexec evpn.l2_nh vtysh -c "show evpn l2-nh $json"

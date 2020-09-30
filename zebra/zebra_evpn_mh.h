@@ -60,6 +60,10 @@ struct zebra_evpn_es {
  * filter, SPH filter and backup NHG for fast-failover
  */
 #define ZEBRA_EVPNES_BR_PORT       (1 << 6)
+/* ES is in bypass mode i.e. must not be advertised. ES-bypass is set
+ * when the associated host bond goes into LACP bypass
+ */
+#define ZEBRA_EVPNES_BYPASS (1 << 7)
 
 	/* memory used for adding the es to zmh_info->es_rb_tree */
 	RB_ENTRY(zebra_evpn_es) rb_node;
@@ -285,7 +289,6 @@ static inline bool zebra_evpn_mh_do_adv_reachable_neigh_only(void)
 	return !!(zmh_info->flags & ZEBRA_EVPN_MH_ADV_REACHABLE_NEIGH_ONLY);
 }
 
-
 /*****************************************************************************/
 extern esi_t *zero_esi;
 extern void zebra_evpn_mh_init(void);
@@ -344,5 +347,9 @@ extern bool zebra_evpn_is_es_bond_member(struct interface *ifp);
 extern void zebra_evpn_mh_print(struct vty *vty);
 extern void zebra_evpn_mh_json(json_object *json);
 extern void zebra_evpn_l2_nh_show(struct vty *vty, bool uj);
+extern struct zebra_evpn_access_bd *zebra_evpn_acc_vl_find(vlanid_t vid);
+extern void zebra_evpn_es_bypass_update(struct zebra_evpn_es *es,
+					struct interface *ifp, bool bypass);
+extern void zebra_evpn_proc_remote_nh(ZAPI_HANDLER_ARGS);
 
 #endif /* _ZEBRA_EVPN_MH_H */

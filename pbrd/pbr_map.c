@@ -293,7 +293,7 @@ void pbr_map_policy_interface_update(const struct interface *ifp, bool state_up)
 	for (ALL_LIST_ELEMENTS_RO(pbrm->seqnumbers, node, pbrms))
 		for (ALL_LIST_ELEMENTS_RO(pbrm->incoming, inode, pmi))
 			if (pmi->ifp == ifp && pbr_map_interface_is_valid(pmi))
-				pbr_send_pbr_map(pbrms, pmi, state_up, false);
+				pbr_send_pbr_map(pbrms, pmi, state_up, true);
 }
 
 static void pbrms_vrf_update(struct pbr_map_sequence *pbrms,
@@ -398,7 +398,7 @@ void pbr_map_delete_vrf(struct pbr_map_sequence *pbrms)
 	pbr_map_delete_common(pbrms);
 }
 
-struct pbr_map_sequence *pbrms_lookup_unique(uint32_t unique, ifindex_t ifindex,
+struct pbr_map_sequence *pbrms_lookup_unique(uint32_t unique, char *ifname,
 					     struct pbr_map_interface **ppmi)
 {
 	struct pbr_map_sequence *pbrms;
@@ -408,7 +408,8 @@ struct pbr_map_sequence *pbrms_lookup_unique(uint32_t unique, ifindex_t ifindex,
 
 	RB_FOREACH (pbrm, pbr_map_entry_head, &pbr_maps) {
 		for (ALL_LIST_ELEMENTS_RO(pbrm->incoming, inode, pmi)) {
-			if (pmi->ifp->ifindex != ifindex)
+			if (strncmp(pmi->ifp->name, ifname, INTERFACE_NAMSIZ)
+			    != 0)
 				continue;
 
 			if (ppmi)
@@ -720,12 +721,23 @@ void pbr_map_policy_delete(struct pbr_map *pbrm, struct pbr_map_interface *pmi)
 {
 	struct listnode *node;
 	struct pbr_map_sequence *pbrms;
+	bool sent = false;
 
 
 	for (ALL_LIST_ELEMENTS_RO(pbrm->seqnumbers, node, pbrms))
-		pbr_send_pbr_map(pbrms, pmi, false, false);
+		if (!pbr_send_pbr_map(pbrms, pmi, false, true))
+			sent = true; /* rule removal sent to zebra */
 
 	pmi->delete = true;
+
+	/*
+	 * If we actually sent something for deletion, wait on zapi callback
+	 * before clearing data.
+	 */
+	if (sent)
+		return;
+
+	pbr_map_final_interface_deletion(pbrm, pmi);
 }
 
 /*
@@ -767,6 +779,57 @@ void pbr_map_check_nh_group_change(const char *nh_group)
 						pbr_send_pbr_map(pbrms, pmi,
 								 false, false);
 			}
+		}
+	}
+}
+
+void pbr_map_check_vrf_nh_group_change(const char *nh_group,
+				       struct pbr_vrf *pbr_vrf,
+				       uint32_t old_vrf_id)
+{
+	struct pbr_map *pbrm;
+	struct pbr_map_sequence *pbrms;
+	struct listnode *node;
+
+
+	RB_FOREACH (pbrm, pbr_map_entry_head, &pbr_maps) {
+		for (ALL_LIST_ELEMENTS_RO(pbrm->seqnumbers, node, pbrms)) {
+			if (pbrms->nhgrp_name)
+				continue;
+
+			if (pbrms->nhg
+			    && strcmp(nh_group, pbrms->internal_nhg_name))
+				continue;
+
+			if (pbrms->nhg->nexthop->vrf_id != old_vrf_id)
+				continue;
+
+			pbrms->nhg->nexthop->vrf_id = pbr_vrf_id(pbr_vrf);
+		}
+	}
+}
+
+void pbr_map_check_interface_nh_group_change(const char *nh_group,
+					     struct interface *ifp,
+					     ifindex_t oldifindex)
+{
+	struct pbr_map *pbrm;
+	struct pbr_map_sequence *pbrms;
+	struct listnode *node;
+
+	RB_FOREACH (pbrm, pbr_map_entry_head, &pbr_maps) {
+		for (ALL_LIST_ELEMENTS_RO(pbrm->seqnumbers, node, pbrms)) {
+			if (pbrms->nhgrp_name)
+				continue;
+
+			if (pbrms->nhg
+			    && strcmp(nh_group, pbrms->internal_nhg_name))
+				continue;
+
+			if (pbrms->nhg->nexthop->ifindex != oldifindex)
+				continue;
+
+			pbrms->nhg->nexthop->ifindex = ifp->ifindex;
 		}
 	}
 }

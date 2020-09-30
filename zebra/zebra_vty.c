@@ -55,6 +55,7 @@
 #include "zebra/zebra_pbr.h"
 #include "zebra/zebra_nhg.h"
 #include "zebra/zebra_evpn_mh.h"
+#include "zebra/zebra_evpn_arp_nd.h"
 #include "zebra/interface.h"
 #include "northbound_cli.h"
 #include "zebra/zebra_nb.h"
@@ -1540,14 +1541,12 @@ DEFPY_HIDDEN(nexthop_group_use_enable,
 	return CMD_SUCCESS;
 }
 
-DEFPY_HIDDEN (proto_nexthop_group_only,
-              proto_nexthop_group_only_cmd,
-              "[no] zebra nexthop proto only",
-              NO_STR
-              ZEBRA_STR
-              "Nexthop configuration\n"
-              "Configure exclusive use of proto nexthops\n"
-              "Only use proto nexthops\n")
+DEFPY_HIDDEN(proto_nexthop_group_only, proto_nexthop_group_only_cmd,
+	     "[no] zebra nexthop proto only",
+	     NO_STR ZEBRA_STR
+	     "Nexthop configuration\n"
+	     "Configure exclusive use of proto nexthops\n"
+	     "Only use proto nexthops\n")
 {
 	zebra_nhg_set_proto_nexthops_only(!no);
 	return CMD_SUCCESS;
@@ -2591,6 +2590,20 @@ DEFUN (show_evpn_global,
 	bool uj = use_json(argc, argv);
 
 	zebra_vxlan_print_evpn(vty, uj);
+	return CMD_SUCCESS;
+}
+
+DEFUN (show_evpn_arp_redirect,
+       show_evpn_arp_nd_redirect_cmd,
+       "show evpn arp-nd-redirect[json]",
+       SHOW_STR
+       "EVPN\n"
+       "ARP/NA packet redirect\n"
+       JSON_STR)
+{
+	bool uj = use_json(argc, argv);
+
+	zebra_evpn_arp_nd_print_summary(vty, uj);
 	return CMD_SUCCESS;
 }
 
@@ -3906,6 +3919,7 @@ void zebra_vty_init(void)
 
 	install_element(VIEW_NODE, &show_frr_cmd);
 	install_element(VIEW_NODE, &show_evpn_global_cmd);
+	install_element(VIEW_NODE, &show_evpn_arp_nd_redirect_cmd);
 	install_element(VIEW_NODE, &show_evpn_vni_cmd);
 	install_element(VIEW_NODE, &show_evpn_vni_detail_cmd);
 	install_element(VIEW_NODE, &show_evpn_vni_vni_cmd);

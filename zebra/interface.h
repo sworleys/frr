@@ -282,6 +282,9 @@ struct zebra_es_if_info {
 	struct ethaddr sysmac;
 	uint32_t lid; /* local-id; has to be unique per-ES-sysmac */
 	uint16_t df_pref;
+	uint8_t flags;
+#define ZIF_CFG_ES_FLAG_BYPASS (1 << 0)
+
 	struct zebra_evpn_es *es; /* local ES */
 };
 
@@ -293,7 +296,30 @@ enum zebra_if_flags {
 	ZIF_FLAG_EVPN_MH_UPLINK_OPER_UP = (1 << 1),
 
 	/* Dataplane protodown-on */
-	ZIF_FLAG_PROTODOWN = (1 << 2)
+	ZIF_FLAG_PROTODOWN = (1 << 2),
+
+	/* LACP bypass state is set by the dataplane on a bond member
+	 * and inherited by the bond (if one or more bond members are in
+	 * a bypass state the bond is placed in a bypass state)
+	 */
+	ZIF_FLAG_LACP_BYPASS = (1 << 3),
+
+	/* On local ESs ARP ND snooping is enabling if fast-failover is
+	 * needed with arp-suppression on
+	 */
+	ZIF_FLAG_ARP_ND_SNOOP = (1 << 4)
+};
+
+/* We snoop on ARP replies and NAs rxed on bridge ports if MH is
+ * enabled. This is needed to allow fastfailover of ESs in the
+ * bridge
+ */
+struct zebra_arp_nd_if_info {
+	int pkt_fd;
+	struct thread *t_pkt_read; /* thread for reading
+				    *ARP/NA packets */
+	uint32_t arp_pkts;
+	uint32_t na_pkts;
 };
 
 /* `zebra' daemon local interface structure. */
@@ -380,8 +406,13 @@ struct zebra_if {
 	/* ethernet segment */
 	struct zebra_es_if_info es_info;
 
+	/* ARP snooping is enabled on bridge ports to
+	 * handle fast failover of ESs */
+	struct zebra_arp_nd_if_info arp_nd_info;
+
 	/* bitmap of vlans associated with this interface */
 	bitfield_t vlan_bitmap;
+	vlanid_t pvid;
 
 	/* An interface can be error-disabled if a protocol (such as EVPN or
 	 * VRRP) detects a problem with keeping it operationally-up.
@@ -390,6 +421,9 @@ struct zebra_if {
 	 * physical device.
 	 */
 	enum protodown_reasons protodown_rc;
+
+	/* list of zebra_mac entries using this interface as destination */
+	struct list *mac_list;
 
 	/* Link fields - for sub-interfaces. */
 	ifindex_t link_ifindex;

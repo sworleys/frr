@@ -3122,6 +3122,24 @@ enum zebra_dplane_result dplane_local_mac_add(const struct interface *ifp,
 }
 
 /*
+ * Enqueue local mac del
+ */
+enum zebra_dplane_result
+dplane_local_mac_del(const struct interface *ifp,
+		     const struct interface *bridge_ifp, vlanid_t vid,
+		     const struct ethaddr *mac)
+{
+	enum zebra_dplane_result result;
+	struct in_addr vtep_ip;
+
+	vtep_ip.s_addr = 0;
+
+	/* Use common helper api */
+	result = mac_update_common(DPLANE_OP_MAC_DELETE, ifp, bridge_ifp, vid,
+				   mac, vtep_ip, false, 0, 0);
+	return result;
+}
+/*
  * Public api to init an empty context - either newly-allocated or
  * reset/cleared - for a MAC update.
  */
@@ -3265,25 +3283,6 @@ enum zebra_dplane_result dplane_local_neigh_add(const struct interface *ifp,
 	result = neigh_update_internal(DPLANE_OP_NEIGH_INSTALL,
 				       ifp, mac, ip, ntf,
 				       state, update_flags);
-
-	return result;
-}
-
-/*
- * Enqueue evpn neighbor update for the dataplane.
- */
-enum zebra_dplane_result dplane_rem_neigh_update(const struct interface *ifp,
-					     const struct ipaddr *ip,
-					     const struct ethaddr *mac)
-{
-	enum zebra_dplane_result result;
-	uint32_t update_flags = 0;
-
-	update_flags |= DPLANE_NEIGH_REMOTE;
-
-	result = neigh_update_internal(DPLANE_OP_NEIGH_UPDATE,
-				       ifp, mac, ip, 0, DPLANE_NUD_PROBE,
-				       update_flags);
 
 	return result;
 }
@@ -3907,7 +3906,8 @@ kernel_dplane_route_update(struct zebra_dplane_ctx *ctx)
 	 * same route again.
 	 */
 	if ((dplane_ctx_get_type(ctx) == dplane_ctx_get_old_type(ctx))
-	    && (dplane_ctx_get_nhe_id(ctx) == dplane_ctx_get_old_nhe_id(ctx))) {
+	    && (dplane_ctx_get_nhe_id(ctx) == dplane_ctx_get_old_nhe_id(ctx))
+	    && (dplane_ctx_get_nhe_id(ctx) >= ZEBRA_NHG_PROTO_LOWER)) {
 		struct nexthop *nexthop;
 
 		if (IS_ZEBRA_DEBUG_DPLANE_DETAIL)

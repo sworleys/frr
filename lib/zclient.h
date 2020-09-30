@@ -206,6 +206,8 @@ typedef enum {
 	ZEBRA_NHG_ADD,
 	ZEBRA_NHG_DEL,
 	ZEBRA_NHG_NOTIFY_OWNER,
+	ZEBRA_EVPN_REMOTE_NH_ADD,
+	ZEBRA_EVPN_REMOTE_NH_DEL,
 	ZEBRA_ERROR,
 	ZEBRA_CLIENT_CAPABILITIES,
 	ZEBRA_OPAQUE_MESSAGE,
@@ -366,7 +368,7 @@ struct zclient {
 #define ZAPI_MESSAGE_SRCPFX   0x20
 /* Backup nexthops are present */
 #define ZAPI_MESSAGE_BACKUP_NEXTHOPS 0x40
-#define ZAPI_MESSAGE_NHG      0x80
+#define ZAPI_MESSAGE_NHG 0x80
 
 /*
  * This should only be used by a DAEMON that needs to communicate
@@ -838,15 +840,13 @@ bool zapi_route_notify_decode(struct stream *s, struct prefix *p,
 			      uint32_t *tableid,
 			      enum zapi_route_notify_owner *note);
 bool zapi_rule_notify_decode(struct stream *s, uint32_t *seqno,
-			     uint32_t *priority, uint32_t *unique,
-			     ifindex_t *ifindex,
+			     uint32_t *priority, uint32_t *unique, char *ifname,
 			     enum zapi_rule_notify_owner *note);
 bool zapi_ipset_notify_decode(struct stream *s,
 			      uint32_t *unique,
 			     enum zapi_ipset_notify_owner *note);
 
-extern void zclient_nhg_add(struct zclient *zclient,
-			    uint32_t id, size_t nhops,
+extern void zclient_nhg_add(struct zclient *zclient, uint32_t id, size_t nhops,
 			    struct zapi_nexthop *znh);
 extern void zclient_nhg_del(struct zclient *zclient, uint32_t id);
 

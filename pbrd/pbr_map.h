@@ -158,7 +158,7 @@ extern struct pbr_map_entry_head pbr_maps;
 
 extern struct pbr_map_sequence *pbrms_get(const char *name, uint32_t seqno);
 extern struct pbr_map_sequence *
-pbrms_lookup_unique(uint32_t unique, ifindex_t ifindex,
+pbrms_lookup_unique(uint32_t unique, char *ifname,
 		    struct pbr_map_interface **ppmi);
 
 extern struct pbr_map *pbrm_find(const char *name);
@@ -205,4 +205,11 @@ extern void pbr_map_install(struct pbr_map *pbrm);
 extern void pbr_map_policy_install(const char *name);
 extern void pbr_map_policy_delete(struct pbr_map *pbrm,
 				  struct pbr_map_interface *pmi);
+
+extern void pbr_map_check_vrf_nh_group_change(const char *nh_group,
+					      struct pbr_vrf *pbr_vrf,
+					      uint32_t old_vrf_id);
+extern void pbr_map_check_interface_nh_group_change(const char *nh_group,
+						    struct interface *ifp,
+						    ifindex_t oldifindex);
 #endif

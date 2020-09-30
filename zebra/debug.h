@@ -66,6 +66,8 @@ extern "C" {
 #define ZEBRA_DEBUG_EVPN_MH_NH 0x02
 #define ZEBRA_DEBUG_EVPN_MH_MAC 0x04
 #define ZEBRA_DEBUG_EVPN_MH_NEIGH 0x08
+#define ZEBRA_DEBUG_EVPN_MH_ARP_ND_EVT 0x10
+#define ZEBRA_DEBUG_EVPN_MH_ARP_ND_PKT 0x20
 
 /* Debug related macro. */
 #define IS_ZEBRA_DEBUG_EVENT  (zebra_debug_event & ZEBRA_DEBUG_EVENT)
@@ -113,6 +115,10 @@ extern "C" {
 	(zebra_debug_evpn_mh & ZEBRA_DEBUG_EVPN_MH_MAC)
 #define IS_ZEBRA_DEBUG_EVPN_MH_NEIGH \
 	(zebra_debug_evpn_mh & ZEBRA_DEBUG_EVPN_MH_NEIGH)
+#define IS_ZEBRA_DEBUG_EVPN_MH_ARP_ND_EVT                                      \
+	(zebra_debug_evpn_mh & ZEBRA_DEBUG_EVPN_MH_ARP_ND_EVT)
+#define IS_ZEBRA_DEBUG_EVPN_MH_ARP_ND_PKT                                      \
+	(zebra_debug_evpn_mh & ZEBRA_DEBUG_EVPN_MH_ARP_ND_PKT)
 
 extern unsigned long zebra_debug_event;
 extern unsigned long zebra_debug_packet;

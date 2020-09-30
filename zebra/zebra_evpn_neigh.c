@@ -327,9 +327,9 @@ int zebra_evpn_neigh_send_add_to_client(vni_t vni, struct ipaddr *ip,
 	if (CHECK_FLAG(neigh_flags, ZEBRA_NEIGH_SVI_IP))
 		SET_FLAG(flags, ZEBRA_MACIP_TYPE_SVI_IP);
 
-	return zebra_evpn_macip_send_msg_to_client(
-		vni, macaddr, ip, flags, seq, ZEBRA_NEIGH_ACTIVE,
-		zmac ? zmac->es : NULL, ZEBRA_MACIP_ADD);
+	return zebra_evpn_macip_send_msg_to_client(vni, macaddr, ip, flags, seq,
+						   ZEBRA_NEIGH_ACTIVE, zmac->es,
+						   ZEBRA_MACIP_ADD);
 }
 
 /*
@@ -1071,35 +1071,6 @@ void zebra_evpn_process_neigh_on_remote_mac_del(zebra_evpn_t *zevpn,
 	/* NOTE: Currently a NO-OP. */
 }
 
-/*
- * Probe neighbor from the kernel.
- */
-static int zebra_evpn_neigh_probe(zebra_evpn_t *zevpn, zebra_neigh_t *n)
-{
-	struct interface *vlan_if;
-
-	vlan_if = zevpn_map_to_svi(zevpn);
-	if (!vlan_if)
-		return -1;
-
-	dplane_rem_neigh_update(vlan_if, &n->ip, &n->emac);
-
-	return 0;
-}
-
-static void zebra_evpn_probe_neigh_on_mac_add(zebra_evpn_t *zevpn,
-					      zebra_mac_t *zmac)
-{
-	zebra_neigh_t *nbr = NULL;
-	struct listnode *node = NULL;
-
-	for (ALL_LIST_ELEMENTS_RO(zmac->neigh_list, node, nbr)) {
-		if (CHECK_FLAG(nbr->flags, ZEBRA_NEIGH_LOCAL)
-		    && IS_ZEBRA_NEIGH_INACTIVE(nbr))
-			zebra_evpn_neigh_probe(zevpn, nbr);
-	}
-}
-
 static inline void zebra_evpn_local_neigh_update_log(
 	const char *pfx, zebra_neigh_t *n, bool is_router, bool local_inactive,
 	bool old_bgp_ready, bool new_bgp_ready, bool inform_dataplane,
@@ -1390,7 +1361,7 @@ int zebra_evpn_local_neigh_update(zebra_evpn_t *zevpn, struct interface *ifp,
 			return -1;
 		}
 
-		memset(&zmac->fwd_info, 0, sizeof(zmac->fwd_info));
+		zebra_evpn_mac_clear_fwd_info(zmac);
 		memset(&zmac->flags, 0, sizeof(uint32_t));
 		SET_FLAG(zmac->flags, ZEBRA_MAC_AUTO);
 	} else {
@@ -1480,6 +1451,9 @@ int zebra_evpn_local_neigh_update(zebra_evpn_t *zevpn, struct interface *ifp,
 				new_bgp_ready =
 					zebra_evpn_neigh_is_ready_for_bgp(n);
 
+				if (dp_static != new_static)
+					inform_dataplane = true;
+
 				/* Neigh is in freeze state and freeze action
 				 * is enabled, do not send update to client.
 				 */
@@ -1493,6 +1467,12 @@ int zebra_evpn_local_neigh_update(zebra_evpn_t *zevpn, struct interface *ifp,
 					"local", n, is_router, local_inactive,
 					old_bgp_ready, new_bgp_ready, false,
 					false, "flag-update");
+
+				if (inform_dataplane)
+					zebra_evpn_sync_neigh_dp_install(
+						n, false /* set_inactive */,
+						false /* force_clear_static */,
+						__func__);
 
 				/* if the neigh can no longer be advertised
 				 * remove it from bgp
@@ -1605,15 +1585,11 @@ int zebra_evpn_local_neigh_update(zebra_evpn_t *zevpn, struct interface *ifp,
 	else
 		UNSET_FLAG(n->flags, ZEBRA_NEIGH_ROUTER_FLAG);
 
-	/* if the dataplane thinks that this is a sync entry but
-	 * zebra doesn't we need to re-concile the diff
-	 * by re-installing the dataplane entry
-	 */
-	if (dp_static) {
-		new_static = zebra_evpn_neigh_is_static(n);
-		if (!new_static)
-			inform_dataplane = true;
-	}
+	/* if zebra and dataplane don't agree this is a sync entry
+	 * re-install in the dataplane */
+	new_static = zebra_evpn_neigh_is_static(n);
+	if (dp_static != new_static)
+		inform_dataplane = true;
 
 	/* Check old and/or new MAC detected as duplicate mark
 	 * the neigh as duplicate
@@ -2281,8 +2257,6 @@ void process_neigh_remote_macip_add(zebra_evpn_t *zevpn, struct zebra_vrf *zvrf,
 		if (!is_dup_detect)
 			zebra_evpn_rem_neigh_install(zevpn, n, old_static);
 	}
-
-	zebra_evpn_probe_neigh_on_mac_add(zevpn, mac);
 
 	/* Update seq number. */
 	n->rem_seq = seq;
