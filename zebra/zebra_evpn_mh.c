@@ -937,6 +937,7 @@ void zebra_evpn_if_init(struct zebra_if *zif)
 void zebra_evpn_if_cleanup(struct zebra_if *zif)
 {
 	vlanid_t vid;
+	struct zebra_evpn_es *es;
 
 	if (!bf_is_inited(zif->vlan_bitmap))
 		return;
@@ -948,8 +949,9 @@ void zebra_evpn_if_cleanup(struct zebra_if *zif)
 	bf_free(zif->vlan_bitmap);
 
 	/* Delete associated Ethernet Segment */
-	if (zif->es_info.es)
-		zebra_evpn_local_es_del(&zif->es_info.es);
+	es = zif->es_info.es;
+	if (es)
+		zebra_evpn_local_es_del(&es);
 }
 
 /*****************************************************************************
