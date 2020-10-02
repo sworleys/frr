@@ -500,7 +500,7 @@ void if_flags_update(struct interface *ifp, uint64_t newflags)
 		/* inoperative -> operative? */
 		ifp->flags = newflags;
 		if (if_is_operative(ifp))
-			if_up(ifp);
+			if_up(ifp, true);
 	}
 }
 
@@ -1032,7 +1032,7 @@ bool if_nhg_dependents_is_empty(const struct interface *ifp)
 }
 
 /* Interface is up. */
-void if_up(struct interface *ifp)
+void if_up(struct interface *ifp, bool install_connected)
 {
 	struct zebra_if *zif;
 	struct interface *link_if;
@@ -1064,7 +1064,8 @@ void if_up(struct interface *ifp)
 #endif
 
 	/* Install connected routes to the kernel. */
-	if_install_connected(ifp);
+	if (install_connected)
+		if_install_connected(ifp);
 
 	/* Handle interface up for specific types for EVPN. Non-VxLAN interfaces
 	 * are checked to see if (remote) neighbor entries need to be installed
@@ -2064,7 +2065,7 @@ DEFUN (no_linkdetect,
 
 	/* Interface may come up after disabling link detection */
 	if (if_is_operative(ifp) && !if_was_operative)
-		if_up(ifp);
+		if_up(ifp, true);
 
 	/* FIXME: see linkdetect_cmd */
 
