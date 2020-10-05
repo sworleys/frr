@@ -1751,6 +1751,9 @@ static int bgp_update_receive(struct peer *peer, bgp_size_t size)
 	BGP_TIMER_OFF(peer->t_holdtime);
 	bgp_timer_set(peer);
 
+	/* Notify BGP Conditional advertisement scanner process */
+	peer->advmap_table_change = true;
+
 	return Receive_UPDATE_message;
 }
 

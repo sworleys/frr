@@ -714,7 +714,7 @@ struct bgp {
 	enum bgp_link_bw_handling lb_handling;
 
 	/* BGP Conditional advertisement */
-	int condition_filter_count;
+	uint32_t condition_filter_count;
 	struct thread *t_condition_check;
 
 	QOBJ_FIELDS
@@ -798,8 +798,10 @@ struct bgp_nexthop {
 #define BGP_GTSM_HOPS_CONNECTED 1
 
 /* Advertise map */
-#define CONDITION_NON_EXIST	0
-#define CONDITION_EXIST 1
+#define CONDITION_NON_EXIST 	false
+#define CONDITION_EXIST     	true
+
+enum advertise { WITHDRAW, ADVERTISE };
 
 #include "filter.h"
 
@@ -845,7 +847,7 @@ struct bgp_filter {
 		char *cname;
 		struct route_map *cmap;
 
-		bool status;
+		enum advertise advertise;
 	} advmap;
 };
 
@@ -1504,11 +1506,8 @@ struct peer {
 	bool as_path_loop_detection;
 
 	/* Conditional advertisement */
-	struct {
-		bool config_change;
-		enum route_map_cmd_result_t amap_prev_status;
-		enum route_map_cmd_result_t cmap_prev_status;
-	} advmap_info[AFI_MAX][SAFI_MAX];
+	bool advmap_config_change[AFI_MAX][SAFI_MAX];
+	bool advmap_table_change;
 
 	QOBJ_FIELDS
 };
