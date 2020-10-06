@@ -4243,19 +4243,19 @@ DEFUN(show_bgp_l2vpn_evpn_route,
       BGP_STR
       L2VPN_HELP_STR
       EVPN_HELP_STR
-      "EVPN route information\n"
+      EVPN_RT_HELP_STR
       "Display Detailed Information\n"
-      "Specify Route type\n"
-      "EAD (Type-1) route\n"
-      "EAD (Type-1) route\n"
-      "MAC-IP (Type-2) route\n"
-      "MAC-IP (Type-2) route\n"
-      "Multicast (Type-3) route\n"
-      "Multicast (Type-3) route\n"
-      "Ethernet Segment (Type-4) route\n"
-      "Ethernet Segment (Type-4) route\n"
-      "Prefix (Type-5) route\n"
-      "Prefix (Type-5) route\n"
+      EVPN_TYPE_HELP_STR
+      EVPN_TYPE_1_HELP_STR
+      EVPN_TYPE_1_HELP_STR
+      EVPN_TYPE_2_HELP_STR
+      EVPN_TYPE_2_HELP_STR
+      EVPN_TYPE_3_HELP_STR
+      EVPN_TYPE_3_HELP_STR
+      EVPN_TYPE_4_HELP_STR
+      EVPN_TYPE_4_HELP_STR
+      EVPN_TYPE_5_HELP_STR
+      EVPN_TYPE_5_HELP_STR
       JSON_STR)
 {
 	struct bgp *bgp;
@@ -4319,15 +4319,15 @@ DEFUN(show_bgp_l2vpn_evpn_route_rd,
       BGP_STR
       L2VPN_HELP_STR
       EVPN_HELP_STR
-      "EVPN route information\n"
-      "Route Distinguisher\n"
-      "ASN:XX or A.B.C.D:XX\n"
-      "Specify Route type\n"
-      "EAD (Type-1) route\n"
-      "MAC-IP (Type-2) route\n"
-      "Multicast (Type-3) route\n"
-      "Ethernet Segment route\n"
-      "Prefix route\n"
+      EVPN_RT_HELP_STR
+      EVPN_RT_DIST_HELP_STR
+      EVPN_ASN_IP_HELP_STR
+      EVPN_TYPE_HELP_STR
+      EVPN_TYPE_1_HELP_STR
+      EVPN_TYPE_2_HELP_STR
+      EVPN_TYPE_3_HELP_STR
+      EVPN_TYPE_4_HELP_STR
+      EVPN_TYPE_5_HELP_STR
       JSON_STR)
 {
 	struct bgp *bgp;
@@ -4396,9 +4396,9 @@ DEFUN(show_bgp_l2vpn_evpn_route_rd_macip,
       BGP_STR
       L2VPN_HELP_STR
       EVPN_HELP_STR
-      "EVPN route information\n"
-      "Route Distinguisher\n"
-      "ASN:XX or A.B.C.D:XX\n"
+      EVPN_RT_HELP_STR
+      EVPN_RT_DIST_HELP_STR
+      EVPN_ASN_IP_HELP_STR
       "MAC\n"
       "MAC address (e.g., 00:e0:ec:20:12:62)\n"
       "IP\n"
@@ -4537,7 +4537,7 @@ DEFUN(show_bgp_l2vpn_evpn_route_esi,
       BGP_STR
       L2VPN_HELP_STR
       EVPN_HELP_STR
-      "EVPN route information\n"
+      EVPN_RT_HELP_STR
       "Ethernet Segment Identifier\n"
       "ESI ID\n"
       JSON_STR)
@@ -4583,13 +4583,13 @@ DEFUN(show_bgp_l2vpn_evpn_route_vni, show_bgp_l2vpn_evpn_route_vni_cmd,
       BGP_STR
       L2VPN_HELP_STR
       EVPN_HELP_STR
-      "EVPN route information\n"
+      EVPN_RT_HELP_STR
       "VXLAN Network Identifier\n"
       "VNI number\n"
-      "Specify Route type\n"
-      "EAD (Type-1) route\n"
-      "MAC-IP (Type-2) route\n"
-      "Multicast (Type-3) route\n"
+      EVPN_TYPE_HELP_STR
+      EVPN_TYPE_1_HELP_STR
+      EVPN_TYPE_2_HELP_STR
+      EVPN_TYPE_3_HELP_STR
       "Remote VTEP\n"
       "Remote VTEP IP address\n"
       JSON_STR)
@@ -4659,7 +4659,7 @@ DEFUN(show_bgp_l2vpn_evpn_route_vni_macip,
       BGP_STR
       L2VPN_HELP_STR
       EVPN_HELP_STR
-      "EVPN route information\n"
+      EVPN_RT_HELP_STR
       "VXLAN Network Identifier\n"
       "VNI number\n"
       "MAC\n"
@@ -4729,10 +4729,10 @@ DEFUN(show_bgp_l2vpn_evpn_route_vni_multicast,
       BGP_STR
       L2VPN_HELP_STR
       EVPN_HELP_STR
-      "EVPN route information\n"
+      EVPN_RT_HELP_STR
       "VXLAN Network Identifier\n"
       "VNI number\n"
-      "Multicast (Type-3) route\n"
+      EVPN_TYPE_3_HELP_STR
       "Originating Router IP address\n"
       JSON_STR)
 {
@@ -4787,7 +4787,7 @@ DEFUN(show_bgp_l2vpn_evpn_route_vni_all,
       BGP_STR
       L2VPN_HELP_STR
       EVPN_HELP_STR
-      "EVPN route information\n"
+      EVPN_RT_HELP_STR
       "VXLAN Network Identifier\n"
       "All VNIs\n"
       "Print Detailed Output\n"
@@ -5090,30 +5090,30 @@ ALIAS_HIDDEN(show_bgp_l2vpn_evpn_summary, show_bgp_evpn_summary_cmd,
 ALIAS_HIDDEN(show_bgp_l2vpn_evpn_route, show_bgp_evpn_route_cmd,
 	     "show bgp evpn route [detail] [type <macip|multicast>]",
 	     SHOW_STR BGP_STR EVPN_HELP_STR
-	     "EVPN route information\n"
+	     EVPN_RT_HELP_STR
 	     "Display Detailed Information\n"
-	     "Specify Route type\n"
-	     "MAC-IP (Type-2) route\n"
-	     "Multicast (Type-3) route\n")
+	     EVPN_TYPE_HELP_STR
+	     EVPN_TYPE_2_HELP_STR
+	     EVPN_TYPE_3_HELP_STR)
 
 ALIAS_HIDDEN(
 	show_bgp_l2vpn_evpn_route_rd, show_bgp_evpn_route_rd_cmd,
 	"show bgp evpn route rd ASN:NN_OR_IP-ADDRESS:NN [type <macip|multicast>]",
 	SHOW_STR BGP_STR EVPN_HELP_STR
-	"EVPN route information\n"
-	"Route Distinguisher\n"
-	"ASN:XX or A.B.C.D:XX\n"
-	"Specify Route type\n"
-	"MAC-IP (Type-2) route\n"
-	"Multicast (Type-3) route\n")
+	EVPN_RT_HELP_STR
+	EVPN_RT_DIST_HELP_STR
+	EVPN_ASN_IP_HELP_STR
+	EVPN_TYPE_HELP_STR
+	EVPN_TYPE_2_HELP_STR
+	EVPN_TYPE_3_HELP_STR)
 
 ALIAS_HIDDEN(
 	show_bgp_l2vpn_evpn_route_rd_macip, show_bgp_evpn_route_rd_macip_cmd,
 	"show bgp evpn route rd ASN:NN_OR_IP-ADDRESS:NN mac WORD [ip WORD]",
 	SHOW_STR BGP_STR EVPN_HELP_STR
-	"EVPN route information\n"
-	"Route Distinguisher\n"
-	"ASN:XX or A.B.C.D:XX\n"
+	EVPN_RT_HELP_STR
+	EVPN_RT_DIST_HELP_STR
+	EVPN_ASN_IP_HELP_STR
 	"MAC\n"
 	"MAC address (e.g., 00:e0:ec:20:12:62)\n"
 	"IP\n"
@@ -5137,12 +5137,12 @@ ALIAS_HIDDEN(
 	show_bgp_l2vpn_evpn_route_vni, show_bgp_evpn_route_vni_cmd,
 	"show bgp evpn route vni " CMD_VNI_RANGE " [<type <macip|multicast> | vtep A.B.C.D>]",
 	SHOW_STR BGP_STR EVPN_HELP_STR
-	"EVPN route information\n"
+	EVPN_RT_HELP_STR
 	"VXLAN Network Identifier\n"
 	"VNI number\n"
-	"Specify Route type\n"
-	"MAC-IP (Type-2) route\n"
-	"Multicast (Type-3) route\n"
+	EVPN_TYPE_HELP_STR
+	EVPN_TYPE_2_HELP_STR
+	EVPN_TYPE_3_HELP_STR
 	"Remote VTEP\n"
 	"Remote VTEP IP address\n")
 
@@ -5150,7 +5150,7 @@ ALIAS_HIDDEN(show_bgp_l2vpn_evpn_route_vni_macip,
 	     show_bgp_evpn_route_vni_macip_cmd,
 	     "show bgp evpn route vni " CMD_VNI_RANGE " mac WORD [ip WORD]",
 	     SHOW_STR BGP_STR EVPN_HELP_STR
-	     "EVPN route information\n"
+	     EVPN_RT_HELP_STR
 	     "VXLAN Network Identifier\n"
 	     "VNI number\n"
 	     "MAC\n"
@@ -5162,16 +5162,16 @@ ALIAS_HIDDEN(show_bgp_l2vpn_evpn_route_vni_multicast,
 	     show_bgp_evpn_route_vni_multicast_cmd,
 	     "show bgp evpn route vni " CMD_VNI_RANGE " multicast A.B.C.D",
 	     SHOW_STR BGP_STR EVPN_HELP_STR
-	     "EVPN route information\n"
+	     EVPN_RT_HELP_STR
 	     "VXLAN Network Identifier\n"
 	     "VNI number\n"
-	     "Multicast (Type-3) route\n"
+	     EVPN_TYPE_3_HELP_STR
 	     "Originating Router IP address\n")
 
 ALIAS_HIDDEN(show_bgp_l2vpn_evpn_route_vni_all, show_bgp_evpn_route_vni_all_cmd,
 	     "show bgp evpn route vni all [detail] [vtep A.B.C.D]",
 	     SHOW_STR BGP_STR EVPN_HELP_STR
-	     "EVPN route information\n"
+	     EVPN_RT_HELP_STR
 	     "VXLAN Network Identifier\n"
 	     "All VNIs\n"
 	     "Print Detailed Output\n"
@@ -5252,8 +5252,8 @@ DEFUN_NOSH (exit_vni,
 DEFUN (bgp_evpn_vrf_rd,
        bgp_evpn_vrf_rd_cmd,
        "rd ASN:NN_OR_IP-ADDRESS:NN",
-       "Route Distinguisher\n"
-       "ASN:XX or A.B.C.D:XX\n")
+       EVPN_RT_DIST_HELP_STR
+       EVPN_ASN_IP_HELP_STR)
 {
 	int ret;
 	struct prefix_rd prd;
@@ -5281,8 +5281,8 @@ DEFUN (no_bgp_evpn_vrf_rd,
        no_bgp_evpn_vrf_rd_cmd,
        "no rd ASN:NN_OR_IP-ADDRESS:NN",
        NO_STR
-       "Route Distinguisher\n"
-       "ASN:XX or A.B.C.D:XX\n")
+       EVPN_RT_DIST_HELP_STR
+       EVPN_ASN_IP_HELP_STR)
 {
 	int ret;
 	struct prefix_rd prd;
@@ -5317,7 +5317,7 @@ DEFUN (no_bgp_evpn_vrf_rd_without_val,
        no_bgp_evpn_vrf_rd_without_val_cmd,
        "no rd",
        NO_STR
-       "Route Distinguisher\n")
+       EVPN_RT_DIST_HELP_STR)
 {
 	struct bgp *bgp_vrf = VTY_GET_CONTEXT(bgp);
 
@@ -5337,8 +5337,8 @@ DEFUN (no_bgp_evpn_vrf_rd_without_val,
 DEFUN (bgp_evpn_vni_rd,
        bgp_evpn_vni_rd_cmd,
        "rd ASN:NN_OR_IP-ADDRESS:NN",
-       "Route Distinguisher\n"
-       "ASN:XX or A.B.C.D:XX\n")
+       EVPN_RT_DIST_HELP_STR
+       EVPN_ASN_IP_HELP_STR)
 {
 	struct prefix_rd prd;
 	struct bgp *bgp = VTY_GET_CONTEXT(bgp);
@@ -5373,8 +5373,8 @@ DEFUN (no_bgp_evpn_vni_rd,
        no_bgp_evpn_vni_rd_cmd,
        "no rd ASN:NN_OR_IP-ADDRESS:NN",
        NO_STR
-       "Route Distinguisher\n"
-       "ASN:XX or A.B.C.D:XX\n")
+       EVPN_RT_DIST_HELP_STR
+       EVPN_ASN_IP_HELP_STR)
 {
 	struct prefix_rd prd;
 	struct bgp *bgp = VTY_GET_CONTEXT(bgp);
@@ -5416,7 +5416,7 @@ DEFUN (no_bgp_evpn_vni_rd_without_val,
        no_bgp_evpn_vni_rd_without_val_cmd,
        "no rd",
        NO_STR
-       "Route Distinguisher\n")
+       EVPN_RT_DIST_HELP_STR)
 {
 	struct bgp *bgp = VTY_GET_CONTEXT(bgp);
 	VTY_DECLVAR_CONTEXT_SUB(bgpevpn, vpn);
@@ -5647,7 +5647,7 @@ DEFUN (no_bgp_evpn_vrf_rt,
        "import and export\n"
        "import\n"
        "export\n"
-       "ASN:XX or A.B.C.D:XX\n")
+       EVPN_ASN_IP_HELP_STR)
 {
 	struct bgp *bgp = VTY_GET_CONTEXT(bgp);
 	int rt_type, found_ecomdel;
@@ -5811,7 +5811,7 @@ DEFUN (no_bgp_evpn_vni_rt,
        "import and export\n"
        "import\n"
        "export\n"
-       "ASN:XX or A.B.C.D:XX\n")
+       EVPN_ASN_IP_HELP_STR)
 {
 	struct bgp *bgp = VTY_GET_CONTEXT(bgp);
 	VTY_DECLVAR_CONTEXT_SUB(bgpevpn, vpn);
