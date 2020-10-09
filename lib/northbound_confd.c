@@ -1065,6 +1065,7 @@ static int frr_confd_action_execute(struct confd_user_info *uinfo,
 	struct yang_data *data;
 	confd_tag_value_t *reply;
 	int ret = CONFD_OK;
+	char errmsg[BUFSIZ] = {0};
 
 	/* Getting the XPath is tricky. */
 	if (kp) {
@@ -1112,7 +1113,9 @@ static int frr_confd_action_execute(struct confd_user_info *uinfo,
 	}
 
 	/* Execute callback registered for this XPath. */
-	if (nb_callback_rpc(nb_node, xpath, input, output) != NB_OK) {
+	if (nb_callback_rpc(nb_node, xpath, input, output, errmsg,
+			    sizeof(errmsg))
+	    != NB_OK) {
 		flog_warn(EC_LIB_NB_CB_RPC, "%s: rpc callback failed: %s",
 			  __func__, xpath);
 		ret = CONFD_ERR;

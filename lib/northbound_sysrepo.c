@@ -450,6 +450,7 @@ static int frr_sr_config_rpc_cb(const char *xpath, const sr_val_t *sr_input,
 	struct yang_data *data;
 	size_t cb_output_cnt;
 	int ret = SR_ERR_OK;
+	char errmsg[BUFSIZ] = {0};
 
 	nb_node = nb_node_find(xpath);
 	if (!nb_node) {
@@ -472,7 +473,9 @@ static int frr_sr_config_rpc_cb(const char *xpath, const sr_val_t *sr_input,
 	}
 
 	/* Execute callback registered for this XPath. */
-	if (nb_callback_rpc(nb_node, xpath, input, output) != NB_OK) {
+	if (nb_callback_rpc(nb_node, xpath, input, output, errmsg,
+			    sizeof(errmsg))
+	    != NB_OK) {
 		flog_warn(EC_LIB_NB_CB_RPC, "%s: rpc callback failed: %s",
 			  __func__, xpath);
 		ret = SR_ERR_OPERATION_FAILED;
