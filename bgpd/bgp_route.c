@@ -7626,15 +7626,6 @@ static void route_vty_short_status_out(struct vty *vty,
 		vty_out(vty, " ");
 }
 
-static char *bgp_nexthop_hostname(struct peer *peer,
-				  struct bgp_nexthop_cache *bnc)
-{
-	if (peer->hostname
-	    && CHECK_FLAG(peer->bgp->flags, BGP_FLAG_SHOW_NEXTHOP_HOSTNAME))
-		return peer->hostname;
-	return NULL;
-}
-
 /* called from terminal list command */
 void route_vty_out(struct vty *vty, const struct prefix *p,
 		   struct bgp_path_info *path, int display, safi_t safi,
@@ -7653,8 +7644,6 @@ void route_vty_out(struct vty *vty, const struct prefix *p,
 	bool nexthop_othervrf = false;
 	vrf_id_t nexthop_vrfid = VRF_DEFAULT;
 	const char *nexthop_vrfname = VRF_DEFAULT_NAME;
-	char *nexthop_hostname =
-		bgp_nexthop_hostname(path->peer, path->nexthop);
 	char esi_buf[ESI_STR_LEN];
 
 	if (json_paths)
@@ -7814,12 +7803,6 @@ void route_vty_out(struct vty *vty, const struct prefix *p,
 						     "used");
 		} else {
 			char buf[BUFSIZ];
-			if (nexthop_hostname)
-				len = vty_out(vty, "%pI4(%s)%s", &attr->nexthop,
-					      nexthop_hostname, vrf_id_str);
-			else
-				len = vty_out(vty, "%pI4%s", &attr->nexthop,
-					      vrf_id_str);
 
 			snprintf(buf, sizeof(buf), "%s%s",
 				 inet_ntoa(attr->nexthop), vrf_id_str);
