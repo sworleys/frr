@@ -393,8 +393,8 @@ void bgp_parse_nexthop_update(int command, vrf_id_t vrf_id)
 		char buf[PREFIX2STR_BUFFER];
 		prefix2str(&nhr.prefix, buf, sizeof(buf));
 		zlog_debug(
-			"%s(%u): Rcvd NH update %s - metric %d/%d #nhops %d/%d flags 0x%x",
-			bnc->bgp->name_pretty, vrf_id, buf, nhr.metric,
+			"%s(%u): Rcvd NH update %pFX - metric %d/%d #nhops %d/%d flags 0x%x",
+			bnc->bgp->name_pretty, vrf_id, &nhr.prefix, nhr.metric,
 			bnc->metric, nhr.nexthop_num, bnc->nexthop_num,
 			bnc->flags);
 	}

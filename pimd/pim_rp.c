@@ -370,14 +370,10 @@ void pim_upstream_update(struct pim_instance *pim, struct pim_upstream *up)
 		nht_p.family = AF_INET;
 		nht_p.prefixlen = IPV4_MAX_BITLEN;
 		nht_p.u.prefix4 = old_upstream_addr;
-		if (PIM_DEBUG_PIM_TRACE) {
-			char buf[PREFIX2STR_BUFFER];
-
-			prefix2str(&nht_p, buf, sizeof(buf));
+		if (PIM_DEBUG_PIM_TRACE)
 			zlog_debug(
-				"%s: Deregister upstream %s addr %s with Zebra NHT",
-				__func__, up->sg_str, buf);
-		}
+				"%s: Deregister upstream %s addr %pFX with Zebra NHT",
+				__func__, up->sg_str, &nht_p);
 		pim_delete_tracked_nexthop(pim, &nht_p, up, NULL, false);
 	}
 
@@ -547,15 +543,10 @@ int pim_rp_new(struct pim_instance *pim, struct in_addr rp_addr,
 			nht_p.prefixlen = IPV4_MAX_BITLEN;
 			nht_p.u.prefix4 =
 				rp_all->rp.rpf_addr.u.prefix4; // RP address
-			if (PIM_DEBUG_PIM_NHT_RP) {
-				char buf[PREFIX2STR_BUFFER];
-				char buf1[PREFIX2STR_BUFFER];
-				prefix2str(&nht_p, buf, sizeof(buf));
-				prefix2str(&rp_all->group, buf1, sizeof(buf1));
+			if (PIM_DEBUG_PIM_NHT_RP)
 				zlog_debug(
-					"%s: NHT Register rp_all addr %s grp %s ",
-					__func__, buf, buf1);
-			}
+					"%s: NHT Register rp_all addr %pFX grp %pFX ",
+					__func__, &nht_p, &rp_all->group);
 
 			frr_each (rb_pim_upstream, &pim->upstream_head, up) {
 				/* Find (*, G) upstream whose RP is not
@@ -674,14 +665,9 @@ int pim_rp_new(struct pim_instance *pim, struct in_addr rp_addr,
 	nht_p.family = AF_INET;
 	nht_p.prefixlen = IPV4_MAX_BITLEN;
 	nht_p.u.prefix4 = rp_info->rp.rpf_addr.u.prefix4;
-	if (PIM_DEBUG_PIM_NHT_RP) {
-		char buf[PREFIX2STR_BUFFER];
-		char buf1[PREFIX2STR_BUFFER];
-		prefix2str(&nht_p, buf, sizeof(buf));
-		prefix2str(&rp_info->group, buf1, sizeof(buf1));
-		zlog_debug("%s: NHT Register RP addr %s grp %s with Zebra ",
-			   __func__, buf, buf1);
-	}
+	if (PIM_DEBUG_PIM_NHT_RP)
+		zlog_debug("%s: NHT Register RP addr %pFX grp %pFX with Zebra ",
+			   __func__, &nht_p, &rp_info->group);
 	pim_find_or_track_nexthop(pim, &nht_p, NULL, rp_info, false, NULL);
 	if (!pim_ecmp_nexthop_lookup(pim, &rp_info->rp.source_nexthop, &nht_p,
 				     &rp_info->group, 1))
@@ -727,12 +713,10 @@ int pim_rp_del(struct pim_instance *pim, struct in_addr rp_addr,
 	struct pim_upstream *up;
 	struct bsgrp_node *bsgrp = NULL;
 	struct bsm_rpinfo *bsrp = NULL;
-	char grp_str[PREFIX2STR_BUFFER];
 	char rp_str[INET_ADDRSTRLEN];
 
 	if (!inet_ntop(AF_INET, &rp_addr, rp_str, sizeof(rp_str)))
 		snprintf(rp_str, sizeof(rp_str), "<rp?>");
-	prefix2str(&group, grp_str, sizeof(grp_str));
 
 	if (plist)
 		rp_info = pim_rp_find_prefix_list(pim, rp_addr, plist);
@@ -748,8 +732,8 @@ int pim_rp_del(struct pim_instance *pim, struct in_addr rp_addr,
 	}
 
 	if (PIM_DEBUG_PIM_TRACE)
-		zlog_debug("%s: Delete RP %s for the group %s", __func__,
-			   rp_str, grp_str);
+		zlog_debug("%s: Delete RP %s for the group %pFX", __func__,
+			   rp_str, &group);
 
 	/* While static RP is getting deleted, we need to check if dynamic RP
 	 * present for the same group in BSM RP table, then install the dynamic
@@ -771,8 +755,8 @@ int pim_rp_del(struct pim_instance *pim, struct in_addr rp_addr,
 							 "<bsrp?>");
 
 					zlog_debug(
-						"%s: BSM RP %s found for the group %s",
-						__func__, bsrp_str, grp_str);
+						"%s: BSM RP %s found for the group %pFX",
+						__func__, bsrp_str, &group);
 				}
 				return pim_rp_change(pim, bsrp->rp_address,
 						     group, RP_SRC_BSR);
@@ -780,8 +764,8 @@ int pim_rp_del(struct pim_instance *pim, struct in_addr rp_addr,
 		} else {
 			if (PIM_DEBUG_PIM_TRACE)
 				zlog_debug(
-					"%s: BSM RP not found for the group %s",
-					__func__, grp_str);
+					"%s: BSM RP not found for the group %pFX",
+					__func__, &group);
 		}
 	}
 
@@ -789,12 +773,9 @@ int pim_rp_del(struct pim_instance *pim, struct in_addr rp_addr,
 	nht_p.family = AF_INET;
 	nht_p.prefixlen = IPV4_MAX_BITLEN;
 	nht_p.u.prefix4 = rp_info->rp.rpf_addr.u.prefix4;
-	if (PIM_DEBUG_PIM_NHT_RP) {
-		char buf[PREFIX2STR_BUFFER];
-		prefix2str(&nht_p, buf, sizeof(buf));
-		zlog_debug("%s: Deregister RP addr %s with Zebra ", __func__,
-			   buf);
-	}
+	if (PIM_DEBUG_PIM_NHT_RP)
+		zlog_debug("%s: Deregister RP addr %pFX with Zebra ", __func__,
+			   &nht_p);
 	pim_delete_tracked_nexthop(pim, &nht_p, NULL, rp_info, false);
 
 	if (!str2prefix("224.0.0.0/4", &g_all))
@@ -837,16 +818,11 @@ int pim_rp_del(struct pim_instance *pim, struct in_addr rp_addr,
 					EC_LIB_DEVELOPMENT,
 					"Expected rn->info to be equal to rp_info");
 
-			if (PIM_DEBUG_PIM_TRACE) {
-				char buf[PREFIX_STRLEN];
-
+			if (PIM_DEBUG_PIM_TRACE)
 				zlog_debug(
-					"%s:Found for Freeing: %p for rp_info: %p(%s) Lock: %d",
+					"%s:Found for Freeing: %p for rp_info: %p(%pFX) Lock: %d",
 					__func__, rn, rp_info,
-					prefix2str(&rp_info->group, buf,
-						   sizeof(buf)),
-					rn->lock);
-			}
+					&rp_info->group, rn->lock);
 			rn->info = NULL;
 			route_unlock_node(rn);
 			route_unlock_node(rn);
@@ -925,13 +901,9 @@ int pim_rp_change(struct pim_instance *pim, struct in_addr new_rp_addr,
 	/* Deregister old RP addr with Zebra NHT */
 	if (rp_info->rp.rpf_addr.u.prefix4.s_addr != INADDR_ANY) {
 		nht_p.u.prefix4 = rp_info->rp.rpf_addr.u.prefix4;
-		if (PIM_DEBUG_PIM_NHT_RP) {
-			char buf[PREFIX2STR_BUFFER];
-
-			prefix2str(&nht_p, buf, sizeof(buf));
-			zlog_debug("%s: Deregister RP addr %s with Zebra ",
-				   __func__, buf);
-		}
+		if (PIM_DEBUG_PIM_NHT_RP)
+			zlog_debug("%s: Deregister RP addr %pFX with Zebra ",
+				   __func__, &nht_p);
 		pim_delete_tracked_nexthop(pim, &nht_p, NULL, rp_info, false);
 	}
 
@@ -961,15 +933,9 @@ int pim_rp_change(struct pim_instance *pim, struct in_addr new_rp_addr,
 
 	/* Register new RP addr with Zebra NHT */
 	nht_p.u.prefix4 = rp_info->rp.rpf_addr.u.prefix4;
-	if (PIM_DEBUG_PIM_NHT_RP) {
-		char buf[PREFIX2STR_BUFFER];
-		char buf1[PREFIX2STR_BUFFER];
-
-		prefix2str(&nht_p, buf, sizeof(buf));
-		prefix2str(&rp_info->group, buf1, sizeof(buf1));
-		zlog_debug("%s: NHT Register RP addr %s grp %s with Zebra ",
-			   __func__, buf, buf1);
-	}
+	if (PIM_DEBUG_PIM_NHT_RP)
+		zlog_debug("%s: NHT Register RP addr %pFX grp %pFX with Zebra ",
+			   __func__, &nht_p, &rp_info->group);
 
 	pim_find_or_track_nexthop(pim, &nht_p, NULL, rp_info, false, NULL);
 	if (!pim_ecmp_nexthop_lookup(pim, &rp_info->rp.source_nexthop, &nht_p,
@@ -1145,15 +1111,10 @@ struct pim_rpf *pim_rp_g(struct pim_instance *pim, struct in_addr group)
 		nht_p.family = AF_INET;
 		nht_p.prefixlen = IPV4_MAX_BITLEN;
 		nht_p.u.prefix4 = rp_info->rp.rpf_addr.u.prefix4;
-		if (PIM_DEBUG_PIM_NHT_RP) {
-			char buf[PREFIX2STR_BUFFER];
-			char buf1[PREFIX2STR_BUFFER];
-			prefix2str(&nht_p, buf, sizeof(buf));
-			prefix2str(&rp_info->group, buf1, sizeof(buf1));
+		if (PIM_DEBUG_PIM_NHT_RP)
 			zlog_debug(
-				"%s: NHT Register RP addr %s grp %s with Zebra",
-				__func__, buf, buf1);
-		}
+				"%s: NHT Register RP addr %pFX grp %pFX with Zebra",
+				__func__, &nht_p, &rp_info->group);
 		pim_find_or_track_nexthop(pim, &nht_p, NULL, rp_info, false,
 					  NULL);
 		pim_rpf_set_refresh_time(pim);
@@ -1208,7 +1169,6 @@ int pim_rp_config_write(struct pim_instance *pim, struct vty *vty,
 	struct listnode *node;
 	struct rp_info *rp_info;
 	char rp_buffer[32];
-	char group_buffer[32];
 	int count = 0;
 
 	for (ALL_LIST_ELEMENTS_RO(pim->rp_list, node, rp_info)) {
@@ -1225,11 +1185,11 @@ int pim_rp_config_write(struct pim_instance *pim, struct vty *vty,
 					  rp_buffer, 32),
 				rp_info->plist);
 		else
-			vty_out(vty, "%sip pim rp %s %s\n", spaces,
+			vty_out(vty, "%sip pim rp %s %pFX\n", spaces,
 				inet_ntop(AF_INET,
 					  &rp_info->rp.rpf_addr.u.prefix4,
 					  rp_buffer, 32),
-				prefix2str(&rp_info->group, group_buffer, 32));
+				&rp_info->group);
 		count++;
 	}
 
@@ -1335,9 +1295,8 @@ void pim_rp_show_information(struct pim_instance *pim, struct vty *vty, bool uj)
 				if (rp_info->plist)
 					vty_out(vty, "%-18s  ", rp_info->plist);
 				else
-					vty_out(vty, "%-18s  ",
-						prefix2str(&rp_info->group, buf,
-							   48));
+					vty_out(vty, "%-18pFX  ",
+						&rp_info->group);
 
 				if (rp_info->rp.source_nexthop.interface)
 					vty_out(vty, "%-16s  ",

@@ -92,9 +92,9 @@ static int isis_zebra_if_address_add(ZAPI_CALLBACK_ARGS)
 	prefix2str(p, buf, sizeof(buf));
 #ifdef EXTREME_DEBUG
 	if (p->family == AF_INET)
-		zlog_debug("connected IP address %s", buf);
+		zlog_debug("connected IP address %pFX", c->address);
 	if (p->family == AF_INET6)
-		zlog_debug("connected IPv6 address %s", buf);
+		zlog_debug("connected IPv6 address %pFX", c->address);
 #endif /* EXTREME_DEBUG */
 	if (if_is_operative(c->ifp))
 		isis_circuit_add_addr(circuit_scan_by_ifp(c->ifp), c);
@@ -120,13 +120,10 @@ static int isis_zebra_if_address_del(ZAPI_CALLBACK_ARGS)
 	ifp = c->ifp;
 
 #ifdef EXTREME_DEBUG
-	p = c->address;
-	prefix2str(p, buf, sizeof(buf));
-
 	if (p->family == AF_INET)
-		zlog_debug("disconnected IP address %s", buf);
+		zlog_debug("disconnected IP address %pFX", c->address);
 	if (p->family == AF_INET6)
-		zlog_debug("disconnected IPv6 address %s", buf);
+		zlog_debug("disconnected IPv6 address %pFX", c->address);
 #endif /* EXTREME_DEBUG */
 
 	if (if_is_operative(ifp))

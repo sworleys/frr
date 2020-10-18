@@ -20,6 +20,8 @@
 
 #include "zebra.h"
 
+#include "lib/printfrr.h"
+
 #include "prefix.h"
 #include "lib_errors.h"
 

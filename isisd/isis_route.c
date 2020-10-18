@@ -281,8 +281,8 @@ struct isis_route_info *isis_route_create(struct prefix *prefix,
 	rinfo_old = route_node->info;
 	if (!rinfo_old) {
 		if (IS_DEBUG_RTE_EVENTS)
-			zlog_debug("ISIS-Rte (%s) route created: %s",
-				   area->area_tag, buff);
+			zlog_debug("ISIS-Rte (%s) route created: %pFX",
+				   area->area_tag, prefix);
 		route_info = rinfo_new;
 		UNSET_FLAG(route_info->flag, ISIS_ROUTE_FLAG_ZEBRA_SYNCED);
 	} else {

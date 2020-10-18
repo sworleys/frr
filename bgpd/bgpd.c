@@ -2771,7 +2771,6 @@ int peer_group_listen_range_del(struct peer_group *group, struct prefix *range)
 	struct listnode *node, *nnode;
 	struct peer *peer;
 	afi_t afi;
-	char buf[PREFIX2STR_BUFFER];
 
 	afi = family2afi(range->family);
 
@@ -2784,8 +2783,6 @@ int peer_group_listen_range_del(struct peer_group *group, struct prefix *range)
 	if (!prefix)
 		return BGP_ERR_DYNAMIC_NEIGHBORS_RANGE_NOT_FOUND;
 
-	prefix2str(prefix, buf, sizeof(buf));
-
 	/* Dispose off any dynamic neighbors that exist due to this listen range
 	 */
 	for (ALL_LIST_ELEMENTS(group->peer, node, nnode, peer)) {
@@ -2796,8 +2793,8 @@ int peer_group_listen_range_del(struct peer_group *group, struct prefix *range)
 		if (prefix_match(prefix, &prefix2)) {
 			if (bgp_debug_neighbor_events(peer))
 				zlog_debug(
-					"Deleting dynamic neighbor %s group %s upon delete of listen range %s",
-					peer->host, group->name, buf);
+					"Deleting dynamic neighbor %s group %s upon delete of listen range %pFX",
+					peer->host, group->name, prefix);
 			peer_delete(peer);
 		}
 	}
@@ -3853,7 +3850,6 @@ struct peer *peer_lookup_dynamic_neighbor(struct bgp *bgp, union sockunion *su)
 	struct prefix *listen_range;
 	int dncount;
 	char buf[PREFIX2STR_BUFFER];
-	char buf1[PREFIX2STR_BUFFER];
 
 	sockunion2hostprefix(su, &prefix);
 
@@ -3870,12 +3866,11 @@ struct peer *peer_lookup_dynamic_neighbor(struct bgp *bgp, union sockunion *su)
 		return NULL;
 
 	prefix2str(&prefix, buf, sizeof(buf));
-	prefix2str(listen_range, buf1, sizeof(buf1));
 
 	if (bgp_debug_neighbor_events(NULL))
 		zlog_debug(
-			"Dynamic Neighbor %s matches group %s listen range %s",
-			buf, group->name, buf1);
+			"Dynamic Neighbor %s matches group %s listen range %pFX",
+			buf, group->name, listen_range);
 
 	/* Are we within the listen limit? */
 	dncount = gbgp->dynamic_neighbors_count;

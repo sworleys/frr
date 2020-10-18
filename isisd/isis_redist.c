@@ -230,11 +230,8 @@ void isis_redist_add(int type, struct prefix *p, struct prefix_ipv6 *src_p,
 	int level;
 	struct isis_redist *redist;
 
-	char debug_buf[BUFSIZ];
-	prefix2str(p, debug_buf, sizeof(debug_buf));
-
-	zlog_debug("%s: New route %s from %s: distance %d.", __func__,
-		   debug_buf, zebra_route_string(type), distance);
+	zlog_debug("%s: New route %pFX from %s: distance %d.", __func__, p,
+		   zebra_route_string(type), distance);
 
 	if (!ei_table) {
 		zlog_warn("%s: External information table not initialized.",
@@ -280,10 +277,7 @@ void isis_redist_delete(int type, struct prefix *p, struct prefix_ipv6 *src_p)
 	int level;
 	struct isis_redist *redist;
 
-	char debug_buf[BUFSIZ];
-	prefix2str(p, debug_buf, sizeof(debug_buf));
-
-	zlog_debug("%s: Removing route %s from %s.", __func__, debug_buf,
+	zlog_debug("%s: Removing route %pFX from %s.", __func__, p,
 		   zebra_route_string(type));
 
 	if (is_default_prefix(p)
@@ -305,11 +299,9 @@ void isis_redist_delete(int type, struct prefix *p, struct prefix_ipv6 *src_p)
 
 	ei_node = srcdest_rnode_lookup(ei_table, p, src_p);
 	if (!ei_node || !ei_node->info) {
-		char buf[BUFSIZ];
-		prefix2str(p, buf, sizeof(buf));
 		zlog_warn(
-			"%s: Got a delete for %s route %s, but that route was never added.",
-			__func__, zebra_route_string(type), buf);
+			"%s: Got a delete for %s route %pFX, but that route was never added.",
+			__func__, zebra_route_string(type), p);
 		if (ei_node)
 			route_unlock_node(ei_node);
 		return;

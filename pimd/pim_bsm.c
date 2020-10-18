@@ -171,7 +171,6 @@ static int pim_on_bs_timer(struct thread *t)
 	struct bsgrp_node *bsgrp_node;
 	struct bsm_rpinfo *bsrp;
 	struct prefix nht_p;
-	char buf[PREFIX2STR_BUFFER];
 	bool is_bsr_tracking = true;
 
 	scope = THREAD_ARG(t);
@@ -185,11 +184,9 @@ static int pim_on_bs_timer(struct thread *t)
 	nht_p.family = AF_INET;
 	nht_p.prefixlen = IPV4_MAX_BITLEN;
 	nht_p.u.prefix4 = scope->current_bsr;
-	if (PIM_DEBUG_BSM) {
-		prefix2str(&nht_p, buf, sizeof(buf));
-		zlog_debug("%s: Deregister BSR addr %s with Zebra NHT",
-			   __func__, buf);
-	}
+	if (PIM_DEBUG_BSM)
+		zlog_debug("%s: Deregister BSR addr %pFX with Zebra NHT",
+			   __func__, &nht_p);
 	pim_delete_tracked_nexthop(scope->pim, &nht_p, NULL, NULL,
 				   is_bsr_tracking);
 
@@ -378,15 +375,12 @@ static void pim_g2rp_timer_start(struct bsm_rpinfo *bsrp, int hold_time)
 		return;
 	}
 	THREAD_OFF(bsrp->g2rp_timer);
-	if (PIM_DEBUG_BSM) {
-		char buf[48];
-
+	if (PIM_DEBUG_BSM)
 		zlog_debug(
-			"%s : starting g2rp timer for grp: %s - rp: %s with timeout  %d secs(Actual Hold time : %d secs)",
-			__func__, prefix2str(&bsrp->bsgrp_node->group, buf, 48),
+			"%s : starting g2rp timer for grp: %pFX - rp: %s with timeout  %d secs(Actual Hold time : %d secs)",
+			__func__, &bsrp->bsgrp_node->group,
 			inet_ntoa(bsrp->rp_address), hold_time,
 			bsrp->rp_holdtime);
-	}
 
 	thread_add_timer(router->master, pim_on_g2rp_timer, bsrp, hold_time,
 			 &bsrp->g2rp_timer);
@@ -403,14 +397,10 @@ static void pim_g2rp_timer_stop(struct bsm_rpinfo *bsrp)
 	if (!bsrp)
 		return;
 
-	if (PIM_DEBUG_BSM) {
-		char buf[48];
-
-		zlog_debug("%s : stopping g2rp timer for grp: %s - rp: %s",
-			   __func__,
-			   prefix2str(&bsrp->bsgrp_node->group, buf, 48),
+	if (PIM_DEBUG_BSM)
+		zlog_debug("%s : stopping g2rp timer for grp: %pFX - rp: %s",
+			   __func__, &bsrp->bsgrp_node->group,
 			   inet_ntoa(bsrp->rp_address));
-	}
 
 	THREAD_OFF(bsrp->g2rp_timer);
 }
@@ -617,7 +607,6 @@ static void pim_bsm_update(struct pim_instance *pim, struct in_addr bsr,
 
 	if (bsr.s_addr != pim->global_scope.current_bsr.s_addr) {
 		struct prefix nht_p;
-		char buf[PREFIX2STR_BUFFER];
 		bool is_bsr_tracking = true;
 
 		/* De-register old BSR and register new BSR with Zebra NHT */
@@ -626,23 +615,19 @@ static void pim_bsm_update(struct pim_instance *pim, struct in_addr bsr,
 
 		if (pim->global_scope.current_bsr.s_addr != INADDR_ANY) {
 			nht_p.u.prefix4 = pim->global_scope.current_bsr;
-			if (PIM_DEBUG_BSM) {
-				prefix2str(&nht_p, buf, sizeof(buf));
+			if (PIM_DEBUG_BSM)
 				zlog_debug(
-					"%s: Deregister BSR addr %s with Zebra NHT",
-					__func__, buf);
-			}
+					"%s: Deregister BSR addr %pFX with Zebra NHT",
+					__func__, &nht_p);
 			pim_delete_tracked_nexthop(pim, &nht_p, NULL, NULL,
 						   is_bsr_tracking);
 		}
 
 		nht_p.u.prefix4 = bsr;
-		if (PIM_DEBUG_BSM) {
-			prefix2str(&nht_p, buf, sizeof(buf));
+		if (PIM_DEBUG_BSM)
 			zlog_debug(
-				"%s: NHT Register BSR addr %s with Zebra NHT",
-				__func__, buf);
-		}
+				"%s: NHT Register BSR addr %pFX with Zebra NHT",
+				__func__, &nht_p);
 
 		memset(&pnc, 0, sizeof(struct pim_nexthop_cache));
 		pim_find_or_track_nexthop(pim, &nht_p, NULL, NULL,

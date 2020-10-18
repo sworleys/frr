@@ -496,7 +496,6 @@ static void zebra_rnh_eval_import_check_entry(struct zebra_vrf *zvrf, afi_t afi,
 {
 	int state_changed = 0;
 	struct zserv *client;
-	char bufn[INET6_ADDRSTRLEN];
 	struct listnode *node;
 
 	zebra_rnh_remove_from_routing_table(rnh);
@@ -522,13 +521,11 @@ static void zebra_rnh_eval_import_check_entry(struct zebra_vrf *zvrf, afi_t afi,
 	}
 
 	if (state_changed || force) {
-		if (IS_ZEBRA_DEBUG_NHT) {
-			prefix2str(&nrn->p, bufn, INET6_ADDRSTRLEN);
-			zlog_debug("%u:%s: Route import check %s %s",
+		if (IS_ZEBRA_DEBUG_NHT)
+			zlog_debug("%u:%pRN: Route import check %s %s",
 				   zvrf->vrf->vrf_id,
-				   bufn, rnh->state ? "passed" : "failed",
+				   &nrn->p, rnh->state ? "passed" : "failed",
 				   state_changed ? "(state changed)" : "");
-		}
 		/* state changed, notify clients */
 		for (ALL_LIST_ELEMENTS_RO(rnh->client_list, node, client)) {
 			send_client(rnh, client,

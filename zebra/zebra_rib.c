@@ -700,15 +700,13 @@ void zebra_rib_evaluate_rn_nexthops(struct route_node *rn, uint32_t seq)
 
 			if (IS_ZEBRA_DEBUG_NHT_DETAILED) {
 				char buf1[PREFIX_STRLEN];
-				char buf2[PREFIX_STRLEN];
 
 				zlog_debug(
-					"%s(%u):%s has Nexthop(%s) Type: %s depending on it, evaluating %u:%u",
+					"%s(%u):%s has Nexthop(%pFX) Type: %s depending on it, evaluating %u:%u",
 					zvrf_name(zvrf), zvrf_id(zvrf),
 					srcdest_rnode2str(rn, buf1,
 							  sizeof(buf1)),
-					prefix2str(p, buf2, sizeof(buf2)),
-					rnh_type2str(rnh->type), seq,
+					p, rnh_type2str(rnh->type), seq,
 					rnh->seqno);
 			}
 
@@ -1936,11 +1934,9 @@ static void rib_process_result(struct zebra_dplane_ctx *ctx)
 							 ZAPI_ROUTE_FAIL_INSTALL,
 							 info->afi, info->safi);
 
-			zlog_warn("%s(%u:%u):%s: Route install failed",
+			zlog_warn("%s(%u:%u):%pFX: Route install failed",
 				  VRF_LOGNAME(vrf), dplane_ctx_get_vrf(ctx),
-				  dplane_ctx_get_table(ctx),
-				  prefix2str(dest_pfx, dest_str,
-					     sizeof(dest_str)));
+				  dplane_ctx_get_table(ctx), dest_pfx);
 		}
 		break;
 	case DPLANE_OP_ROUTE_DELETE:
@@ -1966,11 +1962,9 @@ static void rib_process_result(struct zebra_dplane_ctx *ctx)
 			zsend_route_notify_owner_ctx(ctx,
 						     ZAPI_ROUTE_REMOVE_FAIL);
 
-			zlog_warn("%s(%u:%u):%s: Route Deletion failure",
+			zlog_warn("%s(%u:%u):%pFX: Route Deletion failure",
 				  VRF_LOGNAME(vrf), dplane_ctx_get_vrf(ctx),
-				  dplane_ctx_get_table(ctx),
-				  prefix2str(dest_pfx, dest_str,
-					     sizeof(dest_str)));
+				  dplane_ctx_get_table(ctx), dest_pfx);
 		}
 
 		/*
@@ -2844,7 +2838,6 @@ void rib_lookup_and_dump(struct prefix_ipv4 *p, vrf_id_t vrf_id)
 	struct route_node *rn;
 	struct route_entry *re;
 	struct vrf *vrf;
-	char prefix_buf[INET_ADDRSTRLEN];
 
 	vrf = vrf_lookup_by_id(vrf_id);
 
@@ -2862,10 +2855,8 @@ void rib_lookup_and_dump(struct prefix_ipv4 *p, vrf_id_t vrf_id)
 
 	/* No route for this prefix. */
 	if (!rn) {
-		zlog_debug("%s:%s(%u) lookup failed for %s", __func__,
-			   VRF_LOGNAME(vrf), vrf_id,
-			   prefix2str((struct prefix *)p, prefix_buf,
-				      sizeof(prefix_buf)));
+		zlog_debug("%s:%s(%u) lookup failed for %pFX", __func__,
+			   VRF_LOGNAME(vrf), vrf_id, (struct prefix *)p);
 		return;
 	}
 
@@ -2924,14 +2915,13 @@ void rib_lookup_and_pushup(struct prefix_ipv4 *p, vrf_id_t vrf_id)
 	 */
 	if (dest->selected_fib) {
 		if (IS_ZEBRA_DEBUG_RIB) {
-			char buf[PREFIX_STRLEN];
 			struct vrf *vrf =
 				vrf_lookup_by_id(dest->selected_fib->vrf_id);
 
 			zlog_debug(
-				"%s(%u):%s: freeing way for connected prefix",
+				"%s(%u):%pFX: freeing way for connected prefix",
 				VRF_LOGNAME(vrf), dest->selected_fib->vrf_id,
-				prefix2str(&rn->p, buf, sizeof(buf)));
+				&rn->p);
 			route_entry_dump(&rn->p, NULL, dest->selected_fib);
 		}
 		rib_uninstall(rn, dest->selected_fib);
@@ -2982,14 +2972,12 @@ int rib_add_multipath_nhe(afi_t afi, safi_t safi, struct prefix *p,
 		/* Lookup nhe from route information */
 		nhe = zebra_nhg_rib_find_nhe(re_nhe, afi);
 		if (!nhe) {
-			char buf[PREFIX_STRLEN] = "";
 			char buf2[PREFIX_STRLEN] = "";
 
 			flog_err(
 				EC_ZEBRA_TABLE_LOOKUP_FAILED,
-				"Zebra failed to find or create a nexthop hash entry for %s%s%s",
-				prefix2str(p, buf, sizeof(buf)),
-				src_p ? " from " : "",
+				"Zebra failed to find or create a nexthop hash entry for %pFX%s%s",
+				p, src_p ? " from " : "",
 				src_p ? prefix2str(src_p, buf2, sizeof(buf2))
 				      : "");
 

@@ -844,7 +844,6 @@ static struct isis_lsp *lsp_next_frag(uint8_t frag_num, struct isis_lsp *lsp0,
 static void lsp_build(struct isis_lsp *lsp, struct isis_area *area)
 {
 	int level = lsp->level;
-	char buf[PREFIX2STR_BUFFER];
 	struct listnode *node;
 	struct isis_lsp *frag;
 
@@ -956,9 +955,8 @@ static void lsp_build(struct isis_lsp *lsp, struct isis_area *area)
 	 */
 	if (isis->router_id != 0) {
 		struct in_addr id = {.s_addr = isis->router_id};
-		inet_ntop(AF_INET, &id, buf, sizeof(buf));
-		lsp_debug("ISIS (%s): Adding router ID %s as IPv4 tlv.",
-			  area->area_tag, buf);
+		lsp_debug("ISIS (%s): Adding router ID %pI4 as IPv4 tlv.",
+			  area->area_tag, &id);
 		isis_tlvs_add_ipv4_address(lsp->tlvs, &id);
 
 		/* If new style TLV's are in use, add TE router ID TLV
@@ -1025,10 +1023,8 @@ static void lsp_build(struct isis_lsp *lsp, struct isis_area *area)
 						  ipv4)) {
 				if (area->oldmetric) {
 					lsp_debug(
-						"ISIS (%s): Adding old-style IP reachability for %s",
-						area->area_tag,
-						prefix2str(ipv4, buf,
-							   sizeof(buf)));
+						"ISIS (%s): Adding old-style IP reachability for %pFX",
+						area->area_tag, ipv4);
 					isis_tlvs_add_oldstyle_ip_reach(
 						lsp->tlvs, ipv4, metric);
 				}
@@ -1037,10 +1033,8 @@ static void lsp_build(struct isis_lsp *lsp, struct isis_area *area)
 					struct sr_prefix_cfg *pcfg = NULL;
 
 					lsp_debug(
-						"ISIS (%s): Adding te-style IP reachability for %s",
-						area->area_tag,
-						prefix2str(ipv4, buf,
-							   sizeof(buf)));
+						"ISIS (%s): Adding te-style IP reachability for %pFX",
+						area->area_tag, ipv4);
 
 					if (area->srdb.enabled)
 						pcfg = isis_sr_cfg_prefix_find(
@@ -1063,9 +1057,8 @@ static void lsp_build(struct isis_lsp *lsp, struct isis_area *area)
 				struct sr_prefix_cfg *pcfg = NULL;
 
 				lsp_debug(
-					"ISIS (%s): Adding IPv6 reachability for %s",
-					area->area_tag,
-					prefix2str(ipv6, buf, sizeof(buf)));
+					"ISIS (%s): Adding IPv6 reachability for %pFX",
+					area->area_tag, ipv6);
 
 				if (area->srdb.enabled)
 					pcfg = isis_sr_cfg_prefix_find(area,

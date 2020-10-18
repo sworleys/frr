@@ -2269,20 +2269,14 @@ static int dplane_ctx_rule_init(struct zebra_dplane_ctx *ctx,
 				struct zebra_pbr_rule *new_rule,
 				struct zebra_pbr_rule *old_rule)
 {
-	if (IS_ZEBRA_DEBUG_DPLANE_DETAIL) {
-		char buf1[PREFIX_STRLEN];
-		char buf2[PREFIX_STRLEN];
-
+	if (IS_ZEBRA_DEBUG_DPLANE_DETAIL)
 		zlog_debug(
-			"init dplane ctx %s: IF %s Prio %u Fwmark %u Src %s Dst %s Table %u",
+			"init dplane ctx %s: IF %s Prio %u Fwmark %u Src %pFX Dst %pFX Table %u",
 			dplane_op2str(op), new_rule->ifname,
 			new_rule->rule.priority, new_rule->rule.filter.fwmark,
-			prefix2str(&new_rule->rule.filter.src_ip, buf1,
-				   sizeof(buf1)),
-			prefix2str(&new_rule->rule.filter.dst_ip, buf2,
-				   sizeof(buf2)),
+			&new_rule->rule.filter.src_ip,
+			&new_rule->rule.filter.dst_ip,
 			new_rule->rule.action.table);
-	}
 
 	ctx->zd_op = op;
 	ctx->zd_status = ZEBRA_DPLANE_REQUEST_SUCCESS;
@@ -2980,15 +2974,10 @@ static enum zebra_dplane_result intf_addr_update_internal(
 	struct zebra_dplane_ctx *ctx = NULL;
 	struct zebra_ns *zns;
 
-	if (IS_ZEBRA_DEBUG_DPLANE_DETAIL) {
-		char addr_str[PREFIX_STRLEN];
-
-		prefix2str(ifc->address, addr_str, sizeof(addr_str));
-
-		zlog_debug("init intf ctx %s: idx %d, addr %u:%s",
+	if (IS_ZEBRA_DEBUG_DPLANE_DETAIL)
+		zlog_debug("init intf ctx %s: idx %d, addr %u:%pFX",
 			   dplane_op2str(op), ifp->ifindex, ifp->vrf_id,
-			   addr_str);
-	}
+			   ifc->address);
 
 	ctx = dplane_ctx_alloc();
 
