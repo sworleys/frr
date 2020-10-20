@@ -470,8 +470,8 @@ static void vrrp_show(struct vty *vty, struct vrrp_vrouter *vr)
 
 	struct ttable *tt = ttable_new(&ttable_styles[TTSTYLE_BLANK]);
 
-	ttable_add_row(tt, "%s|%" PRIu32, "Virtual Router ID", vr->vrid);
-	ttable_add_row(tt, "%s|%" PRIu8, "Protocol Version", vr->version);
+	ttable_add_row(tt, "%s|%u", "Virtual Router ID", vr->vrid);
+	ttable_add_row(tt, "%s|%hhu", "Protocol Version", vr->version);
 	ttable_add_row(tt, "%s|%s", "Autoconfigured",
 		       vr->autoconf ? "Yes" : "No");
 	ttable_add_row(tt, "%s|%s", "Shutdown", vr->shutdown ? "Yes" : "No");
@@ -492,10 +492,10 @@ static void vrrp_show(struct vty *vty, struct vrrp_vrouter *vr)
 	ttable_add_row(tt, "%s|%s", "Virtual MAC (v6)", ethstr6);
 	ttable_add_row(tt, "%s|%s", "Status (v4)", stastr4);
 	ttable_add_row(tt, "%s|%s", "Status (v6)", stastr6);
-	ttable_add_row(tt, "%s|%" PRIu8, "Priority", vr->priority);
-	ttable_add_row(tt, "%s|%" PRIu8, "Effective Priority (v4)",
+	ttable_add_row(tt, "%s|%hhu", "Priority", vr->priority);
+	ttable_add_row(tt, "%s|%hhu", "Effective Priority (v4)",
 		       vr->v4->priority);
-	ttable_add_row(tt, "%s|%" PRIu8, "Effective Priority (v6)",
+	ttable_add_row(tt, "%s|%hhu", "Effective Priority (v6)",
 		       vr->v6->priority);
 	ttable_add_row(tt, "%s|%s", "Preempt Mode",
 		       vr->preempt_mode ? "Yes" : "No");
@@ -509,21 +509,21 @@ static void vrrp_show(struct vty *vty, struct vrrp_vrouter *vr)
 	ttable_add_row(tt, "%s|%d ms",
 		       "Master Advertisement Interval (v6)",
 		       vr->v6->master_adver_interval * CS2MS);
-	ttable_add_row(tt, "%s|%" PRIu32, "Advertisements Tx (v4)",
+	ttable_add_row(tt, "%s|%u", "Advertisements Tx (v4)",
 		       vr->v4->stats.adver_tx_cnt);
-	ttable_add_row(tt, "%s|%" PRIu32, "Advertisements Tx (v6)",
+	ttable_add_row(tt, "%s|%u", "Advertisements Tx (v6)",
 		       vr->v6->stats.adver_tx_cnt);
-	ttable_add_row(tt, "%s|%" PRIu32, "Advertisements Rx (v4)",
+	ttable_add_row(tt, "%s|%u", "Advertisements Rx (v4)",
 		       vr->v4->stats.adver_rx_cnt);
-	ttable_add_row(tt, "%s|%" PRIu32, "Advertisements Rx (v6)",
+	ttable_add_row(tt, "%s|%u", "Advertisements Rx (v6)",
 		       vr->v6->stats.adver_rx_cnt);
-	ttable_add_row(tt, "%s|%" PRIu32, "Gratuitous ARP Tx (v4)",
+	ttable_add_row(tt, "%s|%u", "Gratuitous ARP Tx (v4)",
 		       vr->v4->stats.garp_tx_cnt);
-	ttable_add_row(tt, "%s|%" PRIu32, "Neigh. Adverts Tx (v6)",
+	ttable_add_row(tt, "%s|%u", "Neigh. Adverts Tx (v6)",
 		       vr->v6->stats.una_tx_cnt);
-	ttable_add_row(tt, "%s|%" PRIu32, "State transitions (v4)",
+	ttable_add_row(tt, "%s|%u", "State transitions (v4)",
 		       vr->v4->stats.trans_cnt);
-	ttable_add_row(tt, "%s|%" PRIu32, "State transitions (v6)",
+	ttable_add_row(tt, "%s|%u", "State transitions (v6)",
 		       vr->v6->stats.trans_cnt);
 	ttable_add_row(tt, "%s|%d ms", "Skew Time (v4)",
 		       vr->v4->skew_time * CS2MS);
@@ -653,7 +653,7 @@ DEFPY(vrrp_vrid_show_summary,
 			continue;
 
 		ttable_add_row(
-			tt, "%s|%" PRIu8 "|%" PRIu8 "|%d|%d|%s|%s",
+			tt, "%s|%u|%hhu|%d|%d|%s|%s",
 			vr->ifp->name, vr->vrid, vr->priority,
 			vr->v4->addrs->count, vr->v6->addrs->count,
 			vr->v4->fsm.state == VRRP_STATE_MASTER ? "Master"
@@ -744,15 +744,33 @@ static int vrrp_config_write_interface(struct vty *vty)
 	return write;
 }
 
-static struct cmd_node interface_node = {INTERFACE_NODE, "%s(config-if)# ", 1};
-static struct cmd_node debug_node = {DEBUG_NODE, "", 1};
-static struct cmd_node vrrp_node = {VRRP_NODE, "", 1};
+static struct cmd_node interface_node = {
+	.name = "interface",
+	.node = INTERFACE_NODE,
+	.parent_node = CONFIG_NODE,
+	.prompt = "%s(config-if)# ",
+	.config_write = vrrp_config_write_interface,
+};
+
+static struct cmd_node debug_node = {
+	.name = "debug",
+	.node = DEBUG_NODE,
+	.prompt = "",
+	.config_write = vrrp_config_write_debug,
+};
+
+static struct cmd_node vrrp_node = {
+	.name = "vrrp",
+	.node = VRRP_NODE,
+	.prompt = "",
+	.config_write = vrrp_config_write_global,
+};
 
 void vrrp_vty_init(void)
 {
-	install_node(&debug_node, vrrp_config_write_debug);
-	install_node(&interface_node, vrrp_config_write_interface);
-	install_node(&vrrp_node, vrrp_config_write_global);
+	install_node(&debug_node);
+	install_node(&interface_node);
+	install_node(&vrrp_node);
 	if_cmd_init();
 
 	install_element(VIEW_NODE, &vrrp_vrid_show_cmd);

@@ -30,6 +30,7 @@
 #include "isisd/isis_redist.h"
 #include "isisd/isis_pdu_counter.h"
 #include "isisd/isis_circuit.h"
+#include "isisd/isis_sr.h"
 #include "isis_flags.h"
 #include "isis_lsp.h"
 #include "isis_memory.h"
@@ -69,10 +70,8 @@ struct isis {
 	uint32_t router_id;		/* Router ID from zebra */
 	struct list *area_list;	/* list of IS-IS areas */
 	struct list *init_circ_list;
-	struct list *nexthops;		  /* IP next hops from this IS */
 	uint8_t max_area_addrs;		  /* maximumAreaAdresses */
 	struct area_addr *man_area_addrs; /* manualAreaAddresses */
-	uint32_t debugs;		  /* bitmap for debug */
 	time_t uptime;			  /* when did we start */
 	struct thread *t_dync_clean;      /* dynamic hostname cache cleanup thread */
 	uint32_t circuit_ids_used[8];     /* 256 bits to track circuit ids 1 through 255 */
@@ -128,6 +127,9 @@ struct isis_area {
 	 */
 	int lsp_regenerate_pending[ISIS_LEVELS];
 
+	bool bfd_signalled_down;
+	bool bfd_force_spf_refresh;
+
 	struct fabricd *fabricd;
 
 	/*
@@ -166,6 +168,8 @@ struct isis_area {
 	struct list *mt_settings;
 	/* MPLS-TE settings */
 	struct mpls_te_area *mta;
+	/* Segment Routing information */
+	struct isis_sr_db srdb;
 	int ipv6_circuits;
 	bool purge_originator;
 	/* Counters */
@@ -219,8 +223,26 @@ int isis_area_passwd_cleartext_set(struct isis_area *area, int level,
 int isis_area_passwd_hmac_md5_set(struct isis_area *area, int level,
 				  const char *passwd, uint8_t snp_auth);
 
+/* YANG paths */
+#define ISIS_INSTANCE	"/frr-isisd:isis/instance"
+#define ISIS_SR		"/frr-isisd:isis/instance/segment-routing"
+
 /* Master of threads. */
 extern struct thread_master *master;
+
+extern unsigned long debug_adj_pkt;
+extern unsigned long debug_snp_pkt;
+extern unsigned long debug_update_pkt;
+extern unsigned long debug_spf_events;
+extern unsigned long debug_rte_events;
+extern unsigned long debug_events;
+extern unsigned long debug_pkt_dump;
+extern unsigned long debug_lsp_gen;
+extern unsigned long debug_lsp_sched;
+extern unsigned long debug_flooding;
+extern unsigned long debug_bfd;
+extern unsigned long debug_tx_queue;
+extern unsigned long debug_sr;
 
 #define DEBUG_ADJ_PACKETS                (1<<0)
 #define DEBUG_SNP_PACKETS                (1<<1)
@@ -234,21 +256,41 @@ extern struct thread_master *master;
 #define DEBUG_FLOODING                   (1<<9)
 #define DEBUG_BFD                        (1<<10)
 #define DEBUG_TX_QUEUE                   (1<<11)
+#define DEBUG_SR                         (1<<12)
+
+/* Debug related macro. */
+#define IS_DEBUG_ADJ_PACKETS (debug_adj_pkt & DEBUG_ADJ_PACKETS)
+#define IS_DEBUG_SNP_PACKETS (debug_snp_pkt & DEBUG_SNP_PACKETS)
+#define IS_DEBUG_UPDATE_PACKETS (debug_update_pkt & DEBUG_UPDATE_PACKETS)
+#define IS_DEBUG_SPF_EVENTS (debug_spf_events & DEBUG_SPF_EVENTS)
+#define IS_DEBUG_RTE_EVENTS (debug_rte_events & DEBUG_RTE_EVENTS)
+#define IS_DEBUG_EVENTS (debug_events & DEBUG_EVENTS)
+#define IS_DEBUG_PACKET_DUMP (debug_pkt_dump & DEBUG_PACKET_DUMP)
+#define IS_DEBUG_LSP_GEN (debug_lsp_gen & DEBUG_LSP_GEN)
+#define IS_DEBUG_LSP_SCHED (debug_lsp_sched & DEBUG_LSP_SCHED)
+#define IS_DEBUG_FLOODING (debug_flooding & DEBUG_FLOODING)
+#define IS_DEBUG_BFD (debug_bfd & DEBUG_BFD)
+#define IS_DEBUG_TX_QUEUE (debug_tx_queue & DEBUG_TX_QUEUE)
+#define IS_DEBUG_SR (debug_sr & DEBUG_SR)
 
 #define lsp_debug(...)                                                         \
 	do {                                                                   \
-		if (isis->debugs & DEBUG_LSP_GEN)                              \
+		if (IS_DEBUG_LSP_GEN)                                          \
 			zlog_debug(__VA_ARGS__);                               \
 	} while (0)
 
 #define sched_debug(...)                                                       \
 	do {                                                                   \
-		if (isis->debugs & DEBUG_LSP_SCHED)                            \
+		if (IS_DEBUG_LSP_SCHED)                                        \
+			zlog_debug(__VA_ARGS__);                               \
+	} while (0)
+
+#define sr_debug(...)                                                          \
+	do {                                                                   \
+		if (IS_DEBUG_SR)                                               \
 			zlog_debug(__VA_ARGS__);                               \
 	} while (0)
 
 #define DEBUG_TE                         DEBUG_LSP_GEN
-
-#define IS_DEBUG_ISIS(x)                 (isis->debugs & x)
 
 #endif /* ISISD_H */

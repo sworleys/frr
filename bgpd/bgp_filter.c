@@ -592,15 +592,6 @@ DEFUN (no_as_path_all,
 	return CMD_SUCCESS;
 }
 
-ALIAS (no_as_path_all,
-       no_ip_as_path_all_cmd,
-       "no ip as-path access-list WORD",
-       NO_STR
-       IP_STR
-       "BGP autonomous system path filter\n"
-       "Specify an access list name\n"
-       "Regular expression access list name\n")
-
 static void as_list_show(struct vty *vty, struct as_list *aslist)
 {
 	struct as_filter *asfilter;
@@ -727,19 +718,24 @@ static int config_write_as_list(struct vty *vty)
 	return write;
 }
 
-static struct cmd_node as_list_node = {AS_LIST_NODE, "", 1};
+static int config_write_as_list(struct vty *vty);
+static struct cmd_node as_list_node = {
+	.name = "as list",
+	.node = AS_LIST_NODE,
+	.prompt = "",
+	.config_write = config_write_as_list,
+};
 
 /* Register functions. */
 void bgp_filter_init(void)
 {
-	install_node(&as_list_node, config_write_as_list);
+	install_node(&as_list_node);
 
 	install_element(CONFIG_NODE, &bgp_as_path_cmd);
 	install_element(CONFIG_NODE, &ip_as_path_cmd);
 	install_element(CONFIG_NODE, &no_bgp_as_path_cmd);
 	install_element(CONFIG_NODE, &no_ip_as_path_cmd);
 	install_element(CONFIG_NODE, &no_bgp_as_path_all_cmd);
-	install_element(CONFIG_NODE, &no_ip_as_path_all_cmd);
 
 	install_element(VIEW_NODE, &show_bgp_as_path_access_list_cmd);
 	install_element(VIEW_NODE, &show_ip_as_path_access_list_cmd);

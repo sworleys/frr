@@ -29,6 +29,7 @@
 #include "hash.h"
 #include "jhash.h"
 #include "wheel.h"
+#include "network.h"
 
 #include "pimd.h"
 #include "pim_pim.h"
@@ -413,7 +414,8 @@ void pim_upstream_join_suppress(struct pim_upstream *up,
 				struct in_addr rpf_addr, int holdtime)
 {
 	long t_joinsuppress_msec;
-	long join_timer_remain_msec;
+	long join_timer_remain_msec = 0;
+	struct pim_neighbor *nbr = NULL;
 
 	if (!up->rpf.source_nexthop.interface) {
 		if (PIM_DEBUG_PIM_TRACE)
@@ -426,7 +428,18 @@ void pim_upstream_join_suppress(struct pim_upstream *up,
 		MIN(pim_if_t_suppressed_msec(up->rpf.source_nexthop.interface),
 		    1000 * holdtime);
 
-	join_timer_remain_msec = pim_time_timer_remain_msec(up->t_join_timer);
+	if (up->t_join_timer)
+		join_timer_remain_msec =
+			pim_time_timer_remain_msec(up->t_join_timer);
+	else {
+		/* Remove it from jp agg from the nbr for suppression */
+		nbr = pim_neighbor_find(up->rpf.source_nexthop.interface,
+					up->rpf.rpf_addr.u.prefix4);
+		if (nbr) {
+			join_timer_remain_msec =
+				pim_time_timer_remain_msec(nbr->jp_timer);
+		}
+	}
 
 	if (PIM_DEBUG_PIM_TRACE) {
 		char rpf_str[INET_ADDRSTRLEN];
@@ -444,6 +457,9 @@ void pim_upstream_join_suppress(struct pim_upstream *up,
 				__FILE__, __func__, up->sg_str,
 				t_joinsuppress_msec);
 		}
+
+		if (nbr)
+			pim_jp_agg_remove_group(nbr->upstream_jp_agg, up, nbr);
 
 		pim_upstream_join_timer_restart_msec(up, t_joinsuppress_msec);
 	}
@@ -531,7 +547,7 @@ static void forward_off(struct pim_upstream *up)
 	} /* scan iface channel list */
 }
 
-static int pim_upstream_could_register(struct pim_upstream *up)
+int pim_upstream_could_register(struct pim_upstream *up)
 {
 	struct pim_interface *pim_ifp = NULL;
 
@@ -1762,7 +1778,7 @@ void pim_upstream_start_register_stop_timer(struct pim_upstream *up,
 	if (!null_register) {
 		uint32_t lower = (0.5 * PIM_REGISTER_SUPPRESSION_PERIOD);
 		uint32_t upper = (1.5 * PIM_REGISTER_SUPPRESSION_PERIOD);
-		time = lower + (random() % (upper - lower + 1))
+		time = lower + (frr_weak_random() % (upper - lower + 1))
 		       - PIM_REGISTER_PROBE_PERIOD;
 	} else
 		time = PIM_REGISTER_PROBE_PERIOD;
@@ -2164,8 +2180,7 @@ void pim_upstream_init(struct pim_instance *pim)
 {
 	char name[64];
 
-	snprintf(name, 64, "PIM %s Timer Wheel",
-		 pim->vrf->name);
+	snprintf(name, sizeof(name), "PIM %s Timer Wheel", pim->vrf->name);
 	pim->upstream_sg_wheel =
 		wheel_init(router->master, 31000, 100, pim_upstream_hash_key,
 			   pim_upstream_sg_running, name);

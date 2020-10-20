@@ -529,9 +529,9 @@ void ospf_terminate(void)
 
 	SET_FLAG(om->options, OSPF_MASTER_SHUTDOWN);
 
-	/* exit immediately if OSPF not actually running */
+	/* Skip some steps if OSPF not actually running */
 	if (listcount(om->ospf) == 0)
-		exit(0);
+		goto done;
 
 	bfd_gbl_exit();
 	for (ALL_LIST_ELEMENTS(om->ospf, node, nnode, ospf))
@@ -555,6 +555,7 @@ void ospf_terminate(void)
 	zclient_stop(zclient);
 	zclient_free(zclient);
 
+done:
 	frr_fini();
 }
 
@@ -685,6 +686,7 @@ static void ospf_finish_final(struct ospf *ospf)
 	OSPF_TIMER_OFF(ospf->t_lsa_refresher);
 	OSPF_TIMER_OFF(ospf->t_opaque_lsa_self);
 	OSPF_TIMER_OFF(ospf->t_sr_update);
+	OSPF_TIMER_OFF(ospf->t_default_routemap_timer);
 
 	LSDB_LOOP (OPAQUE_AS_LSDB(ospf), rn, lsa)
 		ospf_discard_from_db(ospf, ospf->lsdb, lsa);

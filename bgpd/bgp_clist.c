@@ -337,17 +337,41 @@ static void community_list_entry_delete(struct community_list_master *cm,
 		community_list_delete(cm, list);
 }
 
+/*
+ * Replace community-list entry in the list. Note that entry is the new one
+ * and replace is one one being replaced.
+ */
+static void community_list_entry_replace(struct community_list *list,
+					 struct community_entry *replace,
+					 struct community_entry *entry)
+{
+	if (replace->next) {
+		entry->next = replace->next;
+		replace->next->prev = entry;
+	} else {
+		entry->next = NULL;
+		list->tail = entry;
+	}
+
+	if (replace->prev) {
+		entry->prev = replace->prev;
+		replace->prev->next = entry;
+	} else {
+		entry->prev = NULL;
+		list->head = entry;
+	}
+
+	community_entry_free(replace);
+}
+
 /* Add community-list entry to the list.  */
 static void community_list_entry_add(struct community_list *list,
 				     struct community_entry *entry,
 				     struct community_list_handler *ch,
 				     int master)
 {
-	struct community_list_master *cm = NULL;
 	struct community_entry *replace;
 	struct community_entry *point;
-
-	cm = community_list_master_lookup(ch, master);
 
 	/* Automatic assignment of seq no. */
 	if (entry->seq == COMMUNITY_SEQ_NUMBER_AUTO)
@@ -357,8 +381,10 @@ static void community_list_entry_add(struct community_list *list,
 		point = NULL;
 	else {
 		replace = bgp_clist_seq_check(list, entry->seq);
-		if (replace)
-			community_list_entry_delete(cm, list, entry);
+		if (replace) {
+			community_list_entry_replace(list, replace, entry);
+			return;
+		}
 
 		/* Check insert point. */
 		for (point = list->head; point; point = point->next)
@@ -546,24 +572,20 @@ static char *lcommunity_str_get(struct lcommunity *lcom, int i)
 	uint32_t localdata2;
 	char *str;
 	const uint8_t *ptr;
-	char *pnt;
 
 	ptr = lcom->val + (i * LCOMMUNITY_SIZE);
 
 	memcpy(&lcomval, ptr, LCOMMUNITY_SIZE);
 
 	/* Allocate memory.  48 bytes taken off bgp_lcommunity.c */
-	str = pnt = XMALLOC(MTYPE_LCOMMUNITY_STR, 48);
-
 	ptr = (uint8_t *)lcomval.val;
 	ptr = ptr_get_be32(ptr, &globaladmin);
 	ptr = ptr_get_be32(ptr, &localdata1);
 	ptr = ptr_get_be32(ptr, &localdata2);
 	(void)ptr; /* consume value */
 
-	sprintf(pnt, "%u:%u:%u", globaladmin, localdata1, localdata2);
-	pnt += strlen(pnt);
-	*pnt = '\0';
+	str = XMALLOC(MTYPE_LCOMMUNITY_STR, 48);
+	snprintf(str, 48, "%u:%u:%u", globaladmin, localdata1, localdata2);
 
 	return str;
 }
@@ -972,7 +994,7 @@ int community_list_set(struct community_list_handler *ch, const char *name,
 	entry = community_entry_new();
 	entry->direct = direct;
 	entry->style = style;
-	entry->any = (str ? 0 : 1);
+	entry->any = (str ? false : true);
 	entry->u.com = com;
 	entry->reg = regex;
 	entry->seq = seqnum;
@@ -1169,7 +1191,7 @@ int lcommunity_list_set(struct community_list_handler *ch, const char *name,
 	entry = community_entry_new();
 	entry->direct = direct;
 	entry->style = style;
-	entry->any = (str ? 0 : 1);
+	entry->any = (str ? false : true);
 	entry->u.lcom = lcom;
 	entry->reg = regex;
 	entry->seq = seqnum;
@@ -1290,7 +1312,7 @@ int extcommunity_list_set(struct community_list_handler *ch, const char *name,
 	entry = community_entry_new();
 	entry->direct = direct;
 	entry->style = style;
-	entry->any = 0;
+	entry->any = false;
 	if (ecom)
 		entry->config = ecommunity_ecom2str(
 			ecom, ECOMMUNITY_FORMAT_COMMUNITY_LIST, 0);

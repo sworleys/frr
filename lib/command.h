@@ -66,9 +66,6 @@ struct host {
 	/* System wide terminal lines. */
 	int lines;
 
-	/* Log filename. */
-	char *logfile;
-
 	/* config file name of this host */
 	char *config;
 	int noconfig;
@@ -149,6 +146,7 @@ enum node_type {
 	MPLS_NODE,		 /* MPLS config node */
 	PW_NODE,		 /* Pseudowire config node */
 	VTY_NODE,		 /* Vty node. */
+	FPM_NODE,		 /* Dataplane FPM node. */
 	LINK_PARAMS_NODE,	/* Link-parameters node */
 	BGP_EVPN_VNI_NODE,       /* BGP EVPN VNI */
 	RPKI_NODE,     /* RPKI node for configuration of RPKI cache server
@@ -157,6 +155,7 @@ enum node_type {
 	BGP_FLOWSPECV6_NODE,	/* BGP IPv6 FLOWSPEC Address-Family */
 	BFD_NODE,		 /* BFD protocol mode. */
 	BFD_PEER_NODE,		 /* BFD peer configuration mode. */
+	BFD_PROFILE_NODE,	 /* BFD profile configuration mode. */
 	OPENFABRIC_NODE,	/* OpenFabric router configuration node */
 	VRRP_NODE,		 /* VRRP node */
 	BMP_NODE,		/* BMP config under router bgp */
@@ -165,22 +164,29 @@ enum node_type {
 
 extern vector cmdvec;
 extern const struct message tokennames[];
-extern const char *const node_names[];
+
+/* for external users depending on struct layout */
+#define FRR_CMD_NODE_20200416
 
 /* Node which has some commands and prompt string and configuration
    function pointer . */
 struct cmd_node {
+	const char *name;
+
 	/* Node index. */
 	enum node_type node;
+	enum node_type parent_node;
 
 	/* Prompt character at vty interface. */
 	const char *prompt;
 
-	/* Is this node's configuration goes to vtysh ? */
-	int vtysh;
-
 	/* Node's configuration write function */
-	int (*func)(struct vty *);
+	int (*config_write)(struct vty *);
+
+	/* called when leaving the node on a VTY session.
+	 * return 1 if normal exit processing should happen, 0 to suppress
+	 */
+	int (*node_exit)(struct vty *);
 
 	/* Node's command graph */
 	struct graph *cmdgraph;
@@ -322,18 +328,6 @@ struct cmd_node {
 	DEFUN_CMD_ELEMENT(funcname, cmdname, cmdstr, helpstr,                  \
 			  CMD_ATTR_DEPRECATED, daemon)
 
-#else /* VTYSH_EXTRACT_PL */
-#define DEFPY(funcname, cmdname, cmdstr, helpstr)                              \
-	DEFUN(funcname, cmdname, cmdstr, helpstr)
-
-#define DEFPY_NOSH(funcname, cmdname, cmdstr, helpstr)                         \
-	DEFUN_NOSH(funcname, cmdname, cmdstr, helpstr)
-
-#define DEFPY_ATTR(funcname, cmdname, cmdstr, helpstr, attr)                   \
-	DEFUN_ATTR(funcname, cmdname, cmdstr, helpstr, attr)
-
-#define DEFPY_HIDDEN(funcname, cmdname, cmdstr, helpstr)                       \
-	DEFUN_HIDDEN(funcname, cmdname, cmdstr, helpstr)
 #endif /* VTYSH_EXTRACT_PL */
 
 /* Some macroes */
@@ -398,6 +392,9 @@ struct cmd_node {
 #define WATCHFRR_STR "watchfrr information\n"
 #define ZEBRA_STR "Zebra information\n"
 #define FILTER_LOG_STR "Filter Logs\n"
+#define BFD_PROFILE_STR "BFD profile.\n"
+#define BFD_PROFILE_NAME_STR "BFD profile name.\n"
+#define SHARP_STR "Sharp Routing Protocol\n"
 
 #define CMD_VNI_RANGE "(1-16777215)"
 #define CONF_BACKUP_EXT ".sav"
@@ -434,7 +431,7 @@ struct cmd_node {
 #define NO_GR_NEIGHBOR_HELPER_CMD "Undo Graceful Restart Helper command for a neighbor\n"
 
 /* Prototypes. */
-extern void install_node(struct cmd_node *node, int (*)(struct vty *));
+extern void install_node(struct cmd_node *node);
 extern void install_default(enum node_type);
 extern void install_element(enum node_type, const struct cmd_element *);
 

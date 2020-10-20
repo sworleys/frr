@@ -22,6 +22,7 @@
 #include <zebra.h>
 
 #include "prefix.h"
+#include "ipaddr.h"
 #include "vty.h"
 #include "sockunion.h"
 #include "memory.h"
@@ -76,10 +77,10 @@ bool is_mcast_mac(const struct ethaddr *mac)
 	return false;
 }
 
-unsigned int prefix_bit(const uint8_t *prefix, const uint16_t prefixlen)
+unsigned int prefix_bit(const uint8_t *prefix, const uint16_t bit_index)
 {
-	unsigned int offset = prefixlen / 8;
-	unsigned int shift = 7 - (prefixlen % 8);
+	unsigned int offset = bit_index / 8;
+	unsigned int shift = 7 - (bit_index % 8);
 
 	return (prefix[offset] >> shift) & 1;
 }
@@ -1342,6 +1343,26 @@ char *evpn_es_df_alg2str(uint8_t df_alg, char *buf, int buf_len)
 	}
 
 	return buf;
+}
+
+printfrr_ext_autoreg_p("EA", printfrr_ea)
+static ssize_t printfrr_ea(char *buf, size_t bsz, const char *fmt,
+			   int prec, const void *ptr)
+{
+	const struct ethaddr *mac = ptr;
+
+	prefix_mac2str(mac, buf, bsz);
+	return 2;
+}
+
+printfrr_ext_autoreg_p("IA", printfrr_ia)
+static ssize_t printfrr_ia(char *buf, size_t bsz, const char *fmt,
+			   int prec, const void *ptr)
+{
+	const struct ipaddr *ipa = ptr;
+
+	ipaddr2str(ipa, buf, bsz);
+	return 2;
 }
 
 printfrr_ext_autoreg_p("I4", printfrr_i4)

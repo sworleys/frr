@@ -42,10 +42,11 @@ extern "C" {
  * client
  *    the client datastructure
  *
- * msg
- *    the message
+ * fifo
+ *    a batch of messages
  */
-extern void zserv_handle_commands(struct zserv *client, struct stream *msg);
+extern void zserv_handle_commands(struct zserv *client,
+				  struct stream_fifo *fifo);
 
 extern int zsend_vrf_add(struct zserv *zclient, struct zebra_vrf *zvrf);
 extern int zsend_vrf_delete(struct zserv *zclient, struct zebra_vrf *zvrf);
@@ -80,7 +81,7 @@ extern int zsend_route_notify_owner(struct route_entry *re,
 extern int zsend_route_notify_owner_ctx(const struct zebra_dplane_ctx *ctx,
 					enum zapi_route_notify_owner note);
 
-extern void zsend_rule_notify_owner(struct zebra_pbr_rule *rule,
+extern void zsend_rule_notify_owner(const struct zebra_dplane_ctx *ctx,
 				    enum zapi_rule_notify_owner note);
 extern void zsend_ipset_notify_owner(struct zebra_pbr_ipset *ipset,
 				     enum zapi_ipset_notify_owner note);
@@ -94,8 +95,7 @@ extern bool zserv_nexthop_num_warn(const char *caller, const struct prefix *p,
 
 extern void zsend_capabilities_all_clients(void);
 extern int zsend_assign_label_chunk_response(struct zserv *client,
-					     vrf_id_t vrf_id, uint8_t proto,
-					     uint16_t instance,
+					     vrf_id_t vrf_id,
 					     struct label_manager_chunk *lmc);
 extern int zsend_label_manager_connect_response(struct zserv *client,
 						vrf_id_t vrf_id,

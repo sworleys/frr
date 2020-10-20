@@ -26,6 +26,10 @@
 #include "lib/nexthop.h"
 #include "lib/nexthop_group.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* This struct is used exclusively for dataplane
  * interaction via a dataplane context.
  *
@@ -115,6 +119,12 @@ struct nhg_hash_entry {
  *
  */
 #define NEXTHOP_GROUP_PROTO_RELEASED (1 << 5)
+
+/*
+ * Track FPM installation status..
+ */
+#define NEXTHOP_GROUP_FPM (1 << 6)
+
 };
 
 /* Upper 4 bits of the NHG are reserved for indicating the NHG type */
@@ -211,6 +221,12 @@ void zebra_nhg_hash_free(void *p);
  */
 void zebra_nhe_init(struct nhg_hash_entry *nhe, afi_t afi,
 		    const struct nexthop *nh);
+
+/*
+ * Shallow copy of 'orig', into new/allocated nhe.
+ */
+struct nhg_hash_entry *zebra_nhe_copy(const struct nhg_hash_entry *orig,
+				      uint32_t id);
 
 /* Allocate, free backup nexthop info objects */
 struct nhg_backup_info *zebra_nhg_backup_alloc(void);
@@ -323,5 +339,9 @@ extern void zebra_nhg_sweep_table(struct hash *hash);
 /* Nexthop resolution processing */
 struct route_entry; /* Forward ref to avoid circular includes */
 extern int nexthop_active_update(struct route_node *rn, struct route_entry *re);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif	/* __ZEBRA_NHG_H__ */

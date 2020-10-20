@@ -25,7 +25,6 @@
 #include "lib/memory.h"
 #include "lib/routemap.h"
 #include "lib/log.h"
-#include "lib/log_int.h"
 #include "lib/linklist.h"
 #include "lib/command.h"
 
@@ -371,7 +370,7 @@ int rfapiStream2Vty(void *stream,			   /* input */
 		*fp = (int (*)(void *, const char *, ...))rfapiDebugPrintf;
 		*outstream = NULL;
 		*vty_newline = str_vty_newline(*vty);
-		return (vzlog_test(LOG_DEBUG));
+		return 1;
 	}
 
 	if (((uintptr_t)stream == (uintptr_t)1)
@@ -1039,7 +1038,7 @@ static int rfapiPrintRemoteRegBi(struct bgp *bgp, void *stream,
 	 * Prefix
 	 */
 	buf_pfx[0] = 0;
-	snprintf(buf_pfx, BUFSIZ, "%s/%d",
+	snprintf(buf_pfx, sizeof(buf_pfx), "%s/%d",
 		 rfapi_ntop(p->family, &p->u.prefix, buf_ntop, BUFSIZ),
 		 p->prefixlen);
 	buf_pfx[BUFSIZ - 1] = 0;
@@ -1050,7 +1049,7 @@ static int rfapiPrintRemoteRegBi(struct bgp *bgp, void *stream,
 	 */
 	buf_un[0] = 0;
 	if (!rfapiGetUnAddrOfVpnBi(bpi, &pfx_un)) {
-		snprintf(buf_un, BUFSIZ, "%s",
+		snprintf(buf_un, sizeof(buf_un), "%s",
 			 inet_ntop(pfx_un.family, &pfx_un.u.prefix, buf_ntop,
 				   BUFSIZ));
 	}
@@ -1064,18 +1063,18 @@ static int rfapiPrintRemoteRegBi(struct bgp *bgp, void *stream,
 	if (tun_type == BGP_ENCAP_TYPE_MPLS) {
 		/* MPLS carries un in nrli next hop (same as vn for IP tunnels)
 		 */
-		snprintf(buf_un, BUFSIZ, "%s",
+		snprintf(buf_un, sizeof(buf_un), "%s",
 			 inet_ntop(pfx_vn.family, &pfx_vn.u.prefix, buf_ntop,
 				   BUFSIZ));
 		if (bpi->extra) {
 			uint32_t l = decode_label(&bpi->extra->label[0]);
-			snprintf(buf_vn, BUFSIZ, "Label: %d", l);
+			snprintf(buf_vn, sizeof(buf_vn), "Label: %d", l);
 		} else /* should never happen */
 		{
-			snprintf(buf_vn, BUFSIZ, "Label: N/A");
+			snprintf(buf_vn, sizeof(buf_vn), "Label: N/A");
 		}
 	} else {
-		snprintf(buf_vn, BUFSIZ, "%s",
+		snprintf(buf_vn, sizeof(buf_vn), "%s",
 			 inet_ntop(pfx_vn.family, &pfx_vn.u.prefix, buf_ntop,
 				   BUFSIZ));
 	}
@@ -1536,7 +1535,7 @@ void rfapiPrintAdvertisedInfo(struct vty *vty, struct rfapi_descriptor *rfd,
 			      safi_t safi, struct prefix *p)
 {
 	afi_t afi; /* of the VN address */
-	struct bgp_node *bn;
+	struct bgp_dest *bd;
 	struct bgp_path_info *bpi;
 	uint8_t type = ZEBRA_ROUTE_BGP;
 	struct bgp *bgp;
@@ -1563,11 +1562,11 @@ void rfapiPrintAdvertisedInfo(struct vty *vty, struct rfapi_descriptor *rfd,
 	} else {
 		prd = &rfd->rd;
 	}
-	bn = bgp_afi_node_get(bgp->rib[afi][safi], afi, safi, p, prd);
+	bd = bgp_afi_node_get(bgp->rib[afi][safi], afi, safi, p, prd);
 
-	vty_out(vty, "  bn=%p%s", bn, HVTYNL);
+	vty_out(vty, "  bd=%p%s", bd, HVTYNL);
 
-	for (bpi = bgp_node_get_bgp_path_info(bn); bpi; bpi = bpi->next) {
+	for (bpi = bgp_dest_get_bgp_path_info(bd); bpi; bpi = bpi->next) {
 		if (bpi->peer == rfd->peer && bpi->type == type
 		    && bpi->sub_type == BGP_ROUTE_RFP && bpi->extra
 		    && bpi->extra->vnc.export.rfapi_handle == (void *)rfd) {

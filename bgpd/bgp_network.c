@@ -409,8 +409,8 @@ static int bgp_accept(struct thread *thread)
 			 *
 			 * To avoid this, if we see accept() fail with EINVAL,
 			 * we cancel ourselves and trust that when the VRF
-			 * deleteion notification comes in the event handler
-			 * for that will take care of cleaning us up.
+			 * deletion notification comes in the event handler for
+			 * that will take care of cleaning us up.
 			 */
 			flog_err_sys(
 				EC_LIB_SOCKET,
@@ -467,9 +467,9 @@ static int bgp_accept(struct thread *thread)
 	if (!peer1) {
 		if (bgp_debug_neighbor_events(NULL)) {
 			zlog_debug(
-				"[Event] %s connection rejected - not configured"
-				" and not valid for dynamic",
-				inet_sutop(&su, buf));
+				"[Event] %s connection rejected(%s:%u:%s) - not configured and not valid for dynamic",
+				inet_sutop(&su, buf), bgp->name_pretty, bgp->as,
+				VRF_LOGNAME(vrf_lookup_by_id(bgp->vrf_id)));
 		}
 		close(bgp_sock);
 		return -1;
@@ -478,8 +478,9 @@ static int bgp_accept(struct thread *thread)
 	if (CHECK_FLAG(peer1->flags, PEER_FLAG_SHUTDOWN)) {
 		if (bgp_debug_neighbor_events(peer1))
 			zlog_debug(
-				"[Event] connection from %s rejected due to admin shutdown",
-				inet_sutop(&su, buf));
+				"[Event] connection from %s rejected(%s:%u:%s) due to admin shutdown",
+				inet_sutop(&su, buf), bgp->name_pretty, bgp->as,
+				VRF_LOGNAME(vrf_lookup_by_id(bgp->vrf_id)));
 		close(bgp_sock);
 		return -1;
 	}
@@ -516,8 +517,7 @@ static int bgp_accept(struct thread *thread)
 	if (BGP_PEER_START_SUPPRESSED(peer1)) {
 		if (bgp_debug_neighbor_events(peer1))
 			zlog_debug(
-				"[Event] Incoming BGP connection rejected from %s "
-				"due to maximum-prefix or shutdown",
+				"[Event] Incoming BGP connection rejected from %s due to maximum-prefix or shutdown",
 				peer1->host);
 		close(bgp_sock);
 		return -1;
@@ -533,8 +533,7 @@ static int bgp_accept(struct thread *thread)
 		*/
 		if (bgp_debug_neighbor_events(peer1))
 			zlog_debug(
-				"[Event] New active connection from peer %s, Killing"
-				" previous active connection",
+				"[Event] New active connection from peer %s, Killing previous active connection",
 				peer1->host);
 		peer_delete(peer1->doppelganger);
 	}

@@ -7,7 +7,7 @@
 ##
 AC_PREREQ([2.60])
 
-AC_INIT([frr], [7.4+cl4u3], [https://github.com/frrouting/frr/issues])
+AC_INIT([frr], [7.5+cl4u1], [https://github.com/frrouting/frr/issues])
 PACKAGE_URL="https://frrouting.org/"
 AC_SUBST([PACKAGE_URL])
 PACKAGE_FULLNAME="FRRouting"
@@ -428,6 +428,9 @@ LT_INIT
 _LT_CONFIG_LIBTOOL([
   patch -N -i "${srcdir}/m4/libtool-whole-archive.patch" libtool >&AS_MESSAGE_LOG_FD || \
     AC_MSG_WARN([Could not patch libtool for static linking support.  Loading modules into a statically linked daemon will fail.])
+  sed -e 's%func_warning "relinking%true #\0%' -i libtool || true
+  sed -e 's%func_warning "remember to run%true #\0%' -i libtool || true
+  sed -e 's%func_warning ".*has not been installed in%true #\0%' -i libtool || true
 ])
 if test "$enable_static_bin" = "yes"; then
   AC_LDFLAGS="-static"
@@ -641,6 +644,9 @@ AC_ARG_WITH([crypto],
   AS_HELP_STRING([--with-crypto=<internal|openssl>], [choose between different implementations of cryptographic functions(default value is --with-crypto=internal)]))
 AC_ARG_WITH([frr-format],
   AS_HELP_STRING([--with-frr-format[=<.../frr-format.so>]], [use frr-format GCC plugin]))
+
+AC_ARG_ENABLE([version-build-config],
+  AS_HELP_STRING([--disable-version-build-config], [do not include build configs in show version command]))
 
 #if openssl, else use the internal
 AS_IF([test "$with_crypto" = "openssl"], [
@@ -960,7 +966,7 @@ int main(int argc, char **argv) {
 AC_CHECK_HEADERS([pthread_np.h],,, [
 #include <pthread.h>
 ])
-AC_CHECK_FUNCS([pthread_setname_np pthread_set_name_np])
+AC_CHECK_FUNCS([pthread_setname_np pthread_set_name_np pthread_getthreadid_np])
 
 needsync=true
 
@@ -1203,7 +1209,11 @@ dnl other functions
 dnl ---------------
 AC_CHECK_FUNCS([ \
 	strlcat strlcpy \
-	getgrouplist])
+	getgrouplist \
+	openat \
+	unlinkat \
+	posix_fallocate \
+	])
 
 dnl ##########################################################################
 dnl LARGE if block spans a lot of "configure"!
@@ -1674,6 +1684,10 @@ case "${enable_bmp}" in
     fi
     ;;
 esac
+
+if test "$enable_version_build_config" != "no";then
+  AC_DEFINE([ENABLE_VERSION_BUILD_CONFIG], [1], [Report build configs in show version])
+fi
 
 dnl ##########################################################################
 dnl LARGE if block
@@ -2198,22 +2212,12 @@ if test "$enable_backtrace" != "no" ; then
   fi
 
   if test "$backtrace_ok" = "no"; then
-    case "$host_os" in
-    sunos* | solaris2*)
-      AC_CHECK_FUNCS([printstack], [
-        AC_DEFINE([HAVE_PRINTSTACK], [1], [Solaris printstack])
+    AC_CHECK_HEADER([execinfo.h], [
+      AC_SEARCH_LIBS([backtrace], [execinfo], [
+        AC_DEFINE([HAVE_GLIBC_BACKTRACE], [1], [Glibc backtrace])
         backtrace_ok=yes
-      ])
-      ;;
-    esac
-    if test "$backtrace_ok" = "no"; then
-      AC_CHECK_HEADER([execinfo.h], [
-        AC_SEARCH_LIBS([backtrace], [execinfo], [
-          AC_DEFINE([HAVE_GLIBC_BACKTRACE], [1], [Glibc backtrace])
-          backtrace_ok=yes
-        ],, [-lm])
-      ])
-    fi
+      ],, [-lm])
+    ])
   fi
 
   if test "$enable_backtrace" = "yes" -a "$backtrace_ok" = "no"; then
@@ -2409,7 +2413,13 @@ AM_CONDITIONAL([STATICD], [test "$enable_staticd" != "no"])
 AM_CONDITIONAL([FABRICD], [test "$enable_fabricd" != "no"])
 AM_CONDITIONAL([VRRPD], [test "$enable_vrrpd" != "no"])
 
-AC_CONFIG_FILES([Makefile],[sed -e 's/^#AUTODERP# //' -i Makefile])
+AC_CONFIG_FILES([Makefile],[
+	test "$enable_dev_build" = "yes" && makefile_devbuild="--dev-build"
+	${PYTHON} "${ac_abs_top_srcdir}/python/makefile.py" ${makefile_devbuild} || exit 1
+], [
+	PYTHON="$PYTHON"
+	enable_dev_build="$enable_dev_build"
+])
 
 AC_CONFIG_FILES([
 	  config.version

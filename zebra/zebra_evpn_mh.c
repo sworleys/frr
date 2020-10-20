@@ -1987,7 +1987,7 @@ static void zebra_evpn_mh_dup_addr_detect_off(void)
 			zlog_debug("evpn-mh config caused DAD addr detect chg from %s to %s",
 				old_detect ? "on" : "off",
 				new_detect ? "on" : "off");
-		zebra_vxlan_clear_dup_detect_vni_all(NULL, zvrf);
+		zebra_vxlan_clear_dup_detect_vni_all(zvrf);
 	}
 }
 

@@ -50,10 +50,12 @@
 #include "ospfd/ospf_nsm.h"
 #include "ospfd/ospf_zebra.h"
 #include "ospfd/ospf_te.h"
+#include "ospfd/ospf_sr.h"
 
 DEFINE_MTYPE_STATIC(OSPFD, OSPF_EXTERNAL, "OSPF External route table")
 DEFINE_MTYPE_STATIC(OSPFD, OSPF_REDISTRIBUTE, "OSPF Redistriute")
 DEFINE_MTYPE_STATIC(OSPFD, OSPF_DIST_ARGS, "OSPF Distribute arguments")
+
 
 /* Zebra structure to hold current status. */
 struct zclient *zclient = NULL;
@@ -274,7 +276,7 @@ void ospf_zebra_add(struct ospf *ospf, struct prefix_ipv4 *p,
 		count++;
 
 		if (IS_DEBUG_OSPF(zebra, ZEBRA_REDISTRIBUTE)) {
-			char buf[2][INET_ADDRSTRLEN];
+			char buf[2][PREFIX2STR_BUFFER];
 			struct interface *ifp;
 
 			ifp = if_lookup_by_index(path->ifindex, ospf->vrf_id);
@@ -396,6 +398,101 @@ struct ospf_external *ospf_external_add(struct ospf *ospf, uint8_t type,
 	return ext;
 }
 
+/*
+ * Walk all the ei received from zebra for a route type and apply
+ * default route-map.
+ */
+bool ospf_external_default_routemap_apply_walk(struct ospf *ospf,
+					       struct list *ext_list,
+					       struct external_info *default_ei)
+{
+	struct listnode *node;
+	struct ospf_external *ext;
+	struct route_node *rn;
+	struct external_info *ei = NULL;
+	int ret = 0;
+
+	for (ALL_LIST_ELEMENTS_RO(ext_list, node, ext)) {
+		if (!ext->external_info)
+			continue;
+
+		for (rn = route_top(ext->external_info); rn;
+		     rn = route_next(rn)) {
+			ei = rn->info;
+			if (!ei)
+				continue;
+			ret = ospf_external_info_apply_default_routemap(
+				ospf, ei, default_ei);
+			if (ret)
+				break;
+		}
+	}
+
+	if (ret && ei) {
+		if (IS_DEBUG_OSPF_DEFAULT_INFO)
+			zlog_debug("Default originate routemap permit ei: %s",
+				   inet_ntoa(ei->p.prefix));
+		return true;
+	}
+
+	return false;
+}
+
+/*
+ * Function to originate or flush default after applying
+ * route-map on all ei.
+ */
+static int ospf_external_lsa_default_routemap_timer(struct thread *thread)
+{
+	struct list *ext_list;
+	struct ospf *ospf = THREAD_ARG(thread);
+	struct prefix_ipv4 p;
+	int type;
+	int ret = 0;
+	struct ospf_lsa *lsa;
+	struct external_info *default_ei;
+
+	p.family = AF_INET;
+	p.prefixlen = 0;
+	p.prefix.s_addr = INADDR_ANY;
+
+	/* Get the default extenal info. */
+	default_ei = ospf_external_info_lookup(ospf, DEFAULT_ROUTE,
+					       ospf->instance, &p);
+	if (!default_ei) {
+		/* Nothing to be done here. */
+		if (IS_DEBUG_OSPF_DEFAULT_INFO)
+			zlog_debug("Default originate info not present");
+		return 0;
+	}
+
+	/* For all the ei apply route-map */
+	for (type = 0; type <= ZEBRA_ROUTE_MAX; type++) {
+		ext_list = ospf->external[type];
+		if (!ext_list || type == ZEBRA_ROUTE_OSPF)
+			continue;
+
+		ret = ospf_external_default_routemap_apply_walk(ospf, ext_list,
+								default_ei);
+		if (ret)
+			break;
+	}
+
+	/* Get the default LSA. */
+	lsa = ospf_external_info_find_lsa(ospf, &p);
+
+	/* If permit then originate default. */
+	if (ret && !lsa)
+		ospf_external_lsa_originate(ospf, default_ei);
+	else if (ret && lsa && IS_LSA_MAXAGE(lsa))
+		ospf_external_lsa_refresh(ospf, lsa, default_ei, true);
+	else if (!ret && lsa)
+		ospf_external_lsa_flush(ospf, DEFAULT_ROUTE, &default_ei->p, 0);
+
+	return 1;
+}
+
+
 void ospf_external_del(struct ospf *ospf, uint8_t type, unsigned short instance)
 {
 	struct ospf_external *ext;
@@ -413,6 +510,125 @@ void ospf_external_del(struct ospf *ospf, uint8_t type, unsigned short instance)
 
 		XFREE(MTYPE_OSPF_EXTERNAL, ext);
 	}
+
+	/*
+	 * Check if default needs to be flushed too.
+	 */
+	thread_add_event(master, ospf_external_lsa_default_routemap_timer, ospf,
+			 0, &ospf->t_default_routemap_timer);
+}
+
+/* Update NHLFE for Prefix SID */
+void ospf_zebra_update_prefix_sid(const struct sr_prefix *srp)
+{
+	struct zapi_labels zl;
+	struct zapi_nexthop *znh;
+	struct listnode *node;
+	struct ospf_path *path;
+
+	osr_debug("SR (%s): Update Labels %u for Prefix %pFX", __func__,
+		  srp->label_in, (struct prefix *)&srp->prefv4);
+
+	/* Prepare message. */
+	memset(&zl, 0, sizeof(zl));
+	zl.type = ZEBRA_LSP_OSPF_SR;
+	zl.local_label = srp->label_in;
+
+	switch (srp->type) {
+	case LOCAL_SID:
+		/* Set Label for local Prefix */
+		znh = &zl.nexthops[zl.nexthop_num++];
+		znh->type = NEXTHOP_TYPE_IFINDEX;
+		znh->ifindex = srp->nhlfe.ifindex;
+		znh->label_num = 1;
+		znh->labels[0] = srp->nhlfe.label_out;
+		break;
+
+	case PREF_SID:
+		/* Update route in the RIB too. */
+		SET_FLAG(zl.message, ZAPI_LABELS_FTN);
+		zl.route.prefix.u.prefix4 = srp->prefv4.prefix;
+		zl.route.prefix.prefixlen = srp->prefv4.prefixlen;
+		zl.route.prefix.family = srp->prefv4.family;
+		zl.route.type = ZEBRA_ROUTE_OSPF;
+		zl.route.instance = 0;
+
+		/* Check that SRP contains at least one valid path */
+		if (srp->route == NULL) {
+			return;
+		}
+		for (ALL_LIST_ELEMENTS_RO(srp->route->paths, node, path)) {
+			if (path->srni.label_out == MPLS_INVALID_LABEL)
+				continue;
+
+			if (zl.nexthop_num >= MULTIPATH_NUM)
+				break;
+
+			znh = &zl.nexthops[zl.nexthop_num++];
+			znh->type = NEXTHOP_TYPE_IPV4_IFINDEX;
+			znh->gate.ipv4 = path->nexthop;
+			znh->ifindex = path->ifindex;
+			znh->label_num = 1;
+			znh->labels[0] = path->srni.label_out;
+		}
+		break;
+	default:
+		return;
+	}
+
+	/* Finally, send message to zebra. */
+	(void)zebra_send_mpls_labels(zclient, ZEBRA_MPLS_LABELS_REPLACE, &zl);
+}
+
+/* Remove NHLFE for Prefix-SID */
+void ospf_zebra_delete_prefix_sid(const struct sr_prefix *srp)
+{
+	struct zapi_labels zl;
+
+	osr_debug("SR (%s): Delete Labels %u for Prefix %pFX", __func__,
+		  srp->label_in, (struct prefix *)&srp->prefv4);
+
+	/* Prepare message. */
+	memset(&zl, 0, sizeof(zl));
+	zl.type = ZEBRA_LSP_OSPF_SR;
+	zl.local_label = srp->label_in;
+
+	if (srp->type == PREF_SID) {
+		/* Update route in the RIB too */
+		SET_FLAG(zl.message, ZAPI_LABELS_FTN);
+		zl.route.prefix.u.prefix4 = srp->prefv4.prefix;
+		zl.route.prefix.prefixlen = srp->prefv4.prefixlen;
+		zl.route.prefix.family = srp->prefv4.family;
+		zl.route.type = ZEBRA_ROUTE_OSPF;
+		zl.route.instance = 0;
+	}
+
+	/* Send message to zebra. */
+	(void)zebra_send_mpls_labels(zclient, ZEBRA_MPLS_LABELS_DELETE, &zl);
+}
+
+/* Send MPLS Label entry to Zebra for installation or deletion */
+void ospf_zebra_send_adjacency_sid(int cmd, struct sr_nhlfe nhlfe)
+{
+	struct zapi_labels zl;
+	struct zapi_nexthop *znh;
+
+	osr_debug("SR (%s): %s Labels %u/%u for Adjacency via %u", __func__,
+		  cmd == ZEBRA_MPLS_LABELS_ADD ? "Add" : "Delete",
+		  nhlfe.label_in, nhlfe.label_out, nhlfe.ifindex);
+
+	memset(&zl, 0, sizeof(zl));
+	zl.type = ZEBRA_LSP_OSPF_SR;
+	zl.local_label = nhlfe.label_in;
+	zl.nexthop_num = 1;
+	znh = &zl.nexthops[0];
+	znh->type = NEXTHOP_TYPE_IPV4_IFINDEX;
+	znh->gate.ipv4 = nhlfe.nexthop;
+	znh->ifindex = nhlfe.ifindex;
+	znh->label_num = 1;
+	znh->labels[0] = nhlfe.label_out;
+
+	(void)zebra_send_mpls_labels(zclient, cmd, &zl);
 }
 
 struct ospf_redist *ospf_redist_lookup(struct ospf *ospf, uint8_t type,
@@ -656,8 +872,7 @@ static int ospf_external_lsa_originate_check(struct ospf *ospf,
 	/* If prefix is multicast, then do not originate LSA. */
 	if (IN_MULTICAST(htonl(ei->p.prefix.s_addr))) {
 		zlog_info(
-			"LSA[Type5:%s]: Not originate AS-external-LSA, "
-			"Prefix belongs multicast",
+			"LSA[Type5:%s]: Not originate AS-external-LSA, Prefix belongs multicast",
 			inet_ntoa(ei->p.prefix));
 		return 0;
 	}
@@ -666,8 +881,7 @@ static int ospf_external_lsa_originate_check(struct ospf *ospf,
 	if (is_prefix_default(&ei->p))
 		if (ospf->default_originate == DEFAULT_ORIGINATE_NONE) {
 			zlog_info(
-				"LSA[Type5:0.0.0.0]: Not originate AS-external-LSA "
-				"for default");
+				"LSA[Type5:0.0.0.0]: Not originate AS-external-LSA for default");
 			return 0;
 		}
 
@@ -687,6 +901,132 @@ int ospf_distribute_check_connected(struct ospf *ospf, struct external_info *ei)
 	return 1;
 }
 
+
+/* Apply default route-map on ei received. */
+int ospf_external_info_apply_default_routemap(struct ospf *ospf,
+					      struct external_info *ei,
+					      struct external_info *default_ei)
+{
+	struct ospf_redist *red;
+	int type = default_ei->type;
+	struct prefix_ipv4 *p = &ei->p;
+	struct route_map_set_values save_values;
+
+
+	if (!ospf_external_lsa_originate_check(ospf, default_ei))
+		return 0;
+
+	save_values = default_ei->route_map_set;
+	ospf_reset_route_map_set_values(&default_ei->route_map_set);
+
+	/* apply route-map if needed */
+	red = ospf_redist_lookup(ospf, type, ospf->instance);
+	if (red && ROUTEMAP_NAME(red)) {
+		route_map_result_t ret;
+
+		ret = route_map_apply(ROUTEMAP(red), (struct prefix *)p,
+				      RMAP_OSPF, ei);
+
+		if (ret == RMAP_DENYMATCH) {
+			ei->route_map_set = save_values;
+			return 0;
+		}
+	}
+
+	return 1;
+}
+
+
+/*
+ * Default originated is based on route-map condition then
+ * apply route-map on received external info. Originate or
+ * flush based on route-map condition.
+ */
+static bool ospf_external_lsa_default_routemap_apply(struct ospf *ospf,
+						     struct external_info *ei,
+						     int cmd)
+{
+	struct external_info *default_ei;
+	struct prefix_ipv4 p;
+	struct ospf_lsa *lsa;
+	int ret;
+
+	p.family = AF_INET;
+	p.prefixlen = 0;
+	p.prefix.s_addr = INADDR_ANY;
+
+
+	/* Get the default extenal info. */
+	default_ei = ospf_external_info_lookup(ospf, DEFAULT_ROUTE,
+					       ospf->instance, &p);
+	if (!default_ei) {
+		/* Nothing to be done here. */
+		return false;
+	}
+
+	if (IS_DEBUG_OSPF_DEFAULT_INFO)
+		zlog_debug("Apply default originate routemap on ei: %s cmd: %d",
+			   inet_ntoa(ei->p.prefix), cmd);
+
+	ret = ospf_external_info_apply_default_routemap(ospf, ei, default_ei);
+
+	/* If deny then nothing to be done both in add and del case. */
+	if (!ret) {
+		if (IS_DEBUG_OSPF_DEFAULT_INFO)
+			zlog_debug("Default originte routemap deny for ei: %s",
+				   inet_ntoa(ei->p.prefix));
+		return false;
+	}
+
+	/* Get the default LSA. */
+	lsa = ospf_external_info_find_lsa(ospf, &p);
+
+	/* If this is add route and permit then ooriginate default. */
+	if (cmd == ZEBRA_REDISTRIBUTE_ROUTE_ADD) {
+		/* If permit and default already advertise then return. */
+		if (lsa && !IS_LSA_MAXAGE(lsa)) {
+			if (IS_DEBUG_OSPF_DEFAULT_INFO)
+				zlog_debug("Defult lsa already originated");
+			return true;
+		}
+
+		if (IS_DEBUG_OSPF_DEFAULT_INFO)
+			zlog_debug("Originating/Refreshing default lsa");
+
+		if (lsa && IS_LSA_MAXAGE(lsa))
+			/* Refresh lsa.*/
+			ospf_external_lsa_refresh(ospf, lsa, default_ei, true);
+		else
+			/* If permit and default not advertised then advertise.
+			 */
+			ospf_external_lsa_originate(ospf, default_ei);
+
+	} else if (cmd == ZEBRA_REDISTRIBUTE_ROUTE_DEL) {
+		/* If deny and lsa is not originated then nothing to be done.*/
+		if (!lsa) {
+			if (IS_DEBUG_OSPF_DEFAULT_INFO)
+				zlog_debug(
+					"Default lsa not originated, not flushing");
+			return true;
+		}
+
+		if (IS_DEBUG_OSPF_DEFAULT_INFO)
+			zlog_debug(
+				"Running default route-map again as ei: %s deleted",
+				inet_ntoa(ei->p.prefix));
+		/*
+		 * if this route delete was permitted then we need to check
+		 * there are any other external info which can still trigger
+		 * default route origination else flush it.
+		 */
+		thread_add_event(master,
+				 ospf_external_lsa_default_routemap_timer, ospf,
+				 0, &ospf->t_default_routemap_timer);
+	}
+
+	return true;
+}
+
 /* return 1 if external LSA must be originated, 0 otherwise */
 int ospf_redistribute_check(struct ospf *ospf, struct external_info *ei,
 			    int *changed)
@@ -696,6 +1036,11 @@ int ospf_redistribute_check(struct ospf *ospf, struct external_info *ei,
 	struct ospf_redist *red;
 	uint8_t type = is_prefix_default(&ei->p) ? DEFAULT_ROUTE : ei->type;
 	unsigned short instance = is_prefix_default(&ei->p) ? 0 : ei->instance;
+	route_tag_t saved_tag = 0;
+
+	/* Default is handled differently. */
+	if (type == DEFAULT_ROUTE)
+		return 1;
 
 	if (changed)
 		*changed = 0;
@@ -726,6 +1071,10 @@ int ospf_redistribute_check(struct ospf *ospf, struct external_info *ei,
 	save_values = ei->route_map_set;
 	ospf_reset_route_map_set_values(&ei->route_map_set);
 
+	saved_tag = ei->tag;
+	/* Resetting with original route tag */
+	ei->tag = ei->orig_tag;
+
 	/* apply route-map if needed */
 	red = ospf_redist_lookup(ospf, type, instance);
 	if (red && ROUTEMAP_NAME(red)) {
@@ -747,9 +1096,13 @@ int ospf_redistribute_check(struct ospf *ospf, struct external_info *ei,
 		}
 
 		/* check if 'route-map set' changed something */
-		if (changed)
+		if (changed) {
 			*changed = !ospf_route_map_set_compare(
 				&ei->route_map_set, &save_values);
+
+			/* check if tag is modified */
+			*changed |= (saved_tag != ei->tag);
+		}
 	}
 
 	return 1;
@@ -881,8 +1234,24 @@ static int ospf_zebra_read_route(ZAPI_CALLBACK_ARGS)
 				}
 			}
 		}
+
+		/*
+		 * Check if default-information originate is
+		 * with some routemap prefix/access list match.
+		 */
+		ospf_external_lsa_default_routemap_apply(ospf, ei, cmd);
+
 	} else /* if (cmd == ZEBRA_REDISTRIBUTE_ROUTE_DEL) */
 	{
+		/*
+		 * Check if default-information originate is
+		 * with some routemap prefix/access list match.
+		 * Apply before ei is deleted.
+		 */
+		ei = ospf_external_info_lookup(ospf, rt_type, api.instance, &p);
+		if (ei)
+			ospf_external_lsa_default_routemap_apply(ospf, ei, cmd);
+
 		ospf_external_info_delete(ospf, rt_type, api.instance, p);
 		if (is_prefix_default(&p))
 			ospf_external_lsa_refresh_default(ospf);
@@ -890,6 +1259,7 @@ static int ospf_zebra_read_route(ZAPI_CALLBACK_ARGS)
 			ospf_external_lsa_flush(ospf, rt_type, &p,
 						ifindex /*, nexthop */);
 	}
+
 
 	return 0;
 }
@@ -981,11 +1351,28 @@ static int ospf_distribute_list_update_timer(struct thread *thread)
 						default_refresh = 1;
 					else if (
 						(lsa = ospf_external_info_find_lsa(
-							 ospf, &ei->p)))
+							 ospf, &ei->p))) {
+						int force =
+							LSA_REFRESH_IF_CHANGED;
+						/* If this is a MaxAge LSA, we
+						 * need to force refresh it
+						 * because distribute settings
+						 * might have changed and now,
+						 * this LSA needs to be
+						 * originated, not be removed.
+						 * If we don't force refresh it,
+						 * it will remain a MaxAge LSA
+						 * because it will look like it
+						 * hasn't changed. Neighbors
+						 * will not receive updates for
+						 * this LSA.
+						 */
+						if (IS_LSA_MAXAGE(lsa))
+							force = LSA_REFRESH_FORCE;
+
 						ospf_external_lsa_refresh(
-							ospf, lsa, ei,
-							LSA_REFRESH_IF_CHANGED);
-					else
+							ospf, lsa, ei, force);
+					} else
 						ospf_external_lsa_originate(
 							ospf, ei);
 				}
@@ -1342,6 +1729,7 @@ void ospf_zebra_vrf_deregister(struct ospf *ospf)
 		zclient_send_dereg_requests(zclient, ospf->vrf_id);
 	}
 }
+
 static void ospf_zebra_connected(struct zclient *zclient)
 {
 	/* Send the client registration */

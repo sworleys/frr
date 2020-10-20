@@ -131,7 +131,7 @@ void zebra_pbr_rules_free(void *arg)
 
 	rule = (struct zebra_pbr_rule *)arg;
 
-	(void)kernel_del_pbr_rule(rule);
+	(void)dplane_pbr_rule_delete(rule);
 	XFREE(MTYPE_TMP, rule);
 }
 
@@ -337,14 +337,20 @@ bool zebra_pbr_ipset_entry_hash_equal(const void *arg1, const void *arg2)
 	return true;
 }
 
-void zebra_pbr_iptable_free(void *arg)
+/* this function gives option to flush plugin memory contexts
+ * with all parameter. set it to true to flush all
+ * set it to false to flush only passed arg argument
+ */
+static void _zebra_pbr_iptable_free_all(void *arg, bool all)
 {
 	struct zebra_pbr_iptable *iptable;
 	struct listnode *node, *nnode;
 	char *name;
 
 	iptable = (struct zebra_pbr_iptable *)arg;
-	hook_call(zebra_pbr_iptable_update, 0, iptable);
+
+	if (all)
+		hook_call(zebra_pbr_iptable_update, 0, iptable);
 
 	if (iptable->interface_name_list) {
 		for (ALL_LIST_ELEMENTS(iptable->interface_name_list, node,
@@ -355,6 +361,11 @@ void zebra_pbr_iptable_free(void *arg)
 		list_delete(&iptable->interface_name_list);
 	}
 	XFREE(MTYPE_TMP, iptable);
+}
+
+void zebra_pbr_iptable_free(void *arg)
+{
+	_zebra_pbr_iptable_free_all(arg, false);
 }
 
 uint32_t zebra_pbr_iptable_hash_key(const void *arg)
@@ -461,7 +472,7 @@ void zebra_pbr_add_rule(struct zebra_pbr_rule *rule)
 
 	/* If found, this is an update */
 	if (found) {
-		(void)kernel_update_pbr_rule(found, rule);
+		(void)dplane_pbr_rule_update(found, rule);
 
 		if (pbr_rule_release(found))
 			zlog_debug(
@@ -469,12 +480,12 @@ void zebra_pbr_add_rule(struct zebra_pbr_rule *rule)
 				__PRETTY_FUNCTION__);
 
 	} else
-		(void)kernel_add_pbr_rule(rule);
+		(void)dplane_pbr_rule_add(rule);
 }
 
 void zebra_pbr_del_rule(struct zebra_pbr_rule *rule)
 {
-	(void)kernel_del_pbr_rule(rule);
+	(void)dplane_pbr_rule_delete(rule);
 
 	if (pbr_rule_release(rule))
 		zlog_debug("%s: Rule being deleted we know nothing about",
@@ -487,7 +498,7 @@ static void zebra_pbr_cleanup_rules(struct hash_bucket *b, void *data)
 	int *sock = data;
 
 	if (rule->sock == *sock) {
-		(void)kernel_del_pbr_rule(rule);
+		(void)dplane_pbr_rule_delete(rule);
 		if (hash_release(zrouter.rules_hash, rule))
 			XFREE(MTYPE_TMP, rule);
 		else
@@ -530,7 +541,7 @@ static void zebra_pbr_cleanup_iptable(struct hash_bucket *b, void *data)
 
 	if (iptable->sock == *sock) {
 		if (hash_release(zrouter.iptable_hash, iptable))
-			zebra_pbr_iptable_free(iptable);
+			_zebra_pbr_iptable_free_all(iptable, true);
 		else
 			hook_call(zebra_pbr_iptable_update, 0, iptable);
 	}
@@ -736,25 +747,29 @@ void zebra_pbr_del_iptable(struct zebra_pbr_iptable *iptable)
 /*
  * Handle success or failure of rule (un)install in the kernel.
  */
-void kernel_pbr_rule_add_del_status(struct zebra_pbr_rule *rule,
-				    enum zebra_dplane_status res)
+void zebra_pbr_dplane_result(struct zebra_dplane_ctx *ctx)
 {
-	switch (res) {
-	case ZEBRA_DPLANE_INSTALL_SUCCESS:
-		zsend_rule_notify_owner(rule, ZAPI_RULE_INSTALLED);
-		break;
-	case ZEBRA_DPLANE_INSTALL_FAILURE:
-		zsend_rule_notify_owner(rule, ZAPI_RULE_FAIL_INSTALL);
-		break;
-	case ZEBRA_DPLANE_DELETE_SUCCESS:
-		zsend_rule_notify_owner(rule, ZAPI_RULE_REMOVED);
-		break;
-	case ZEBRA_DPLANE_DELETE_FAILURE:
-		zsend_rule_notify_owner(rule, ZAPI_RULE_FAIL_REMOVE);
-		break;
-	case ZEBRA_DPLANE_STATUS_NONE:
-		break;
-	}
+	enum zebra_dplane_result res;
+	enum dplane_op_e op;
+
+	res = dplane_ctx_get_status(ctx);
+	op = dplane_ctx_get_op(ctx);
+	if (op == DPLANE_OP_RULE_ADD || op == DPLANE_OP_RULE_UPDATE)
+		zsend_rule_notify_owner(ctx, res == ZEBRA_DPLANE_REQUEST_SUCCESS
+						     ? ZAPI_RULE_INSTALLED
+						     : ZAPI_RULE_FAIL_INSTALL);
+	else if (op == DPLANE_OP_RULE_DELETE)
+		zsend_rule_notify_owner(ctx, res == ZEBRA_DPLANE_REQUEST_SUCCESS
+						     ? ZAPI_RULE_REMOVED
+						     : ZAPI_RULE_FAIL_REMOVE);
+	else
+		flog_err(
+			EC_ZEBRA_PBR_RULE_UPDATE,
+			"Context received in pbr rule dplane result handler with incorrect OP code (%u)",
+			op);
+
+
+	dplane_ctx_fini(&ctx);
 }
 
 /*
@@ -878,16 +893,15 @@ static void zebra_pbr_display_icmp(struct vty *vty,
 
 	/* range icmp type */
 	if (zpie->src_port_max || zpie->dst_port_max) {
-		vty_out(vty, ":icmp:[type <%d:%d>;code <%d:%d>",
+		vty_out(vty, ":icmp:[type <%u:%u>;code <%u:%u>",
 			zpie->src_port_min, zpie->src_port_max,
 			zpie->dst_port_min, zpie->dst_port_max);
 	} else {
 		port = ((zpie->src_port_min << 8) & 0xff00) +
 			(zpie->dst_port_min & 0xff);
 		memset(decoded_str, 0, sizeof(decoded_str));
-		sprintf(decoded_str, "%d/%d",
-			zpie->src_port_min,
-			zpie->dst_port_min);
+		snprintf(decoded_str, sizeof(decoded_str), "%u/%u",
+			 zpie->src_port_min, zpie->dst_port_min);
 		vty_out(vty, ":icmp:%s",
 			lookup_msg(icmp_typecode_str,
 				   port, decoded_str));
@@ -1130,7 +1144,7 @@ static void zebra_pbr_show_iptable_unit(struct zebra_pbr_iptable *iptable,
 	if (iptable->fragment) {
 		char val_str[10];
 
-		sprintf(val_str, "%d", iptable->fragment);
+		snprintf(val_str, sizeof(val_str), "%d", iptable->fragment);
 		vty_out(vty, "\t fragment%s %s\n",
 			iptable->filter_bm & MATCH_FRAGMENT_INVERSE_SET ?
 			" not" : "", lookup_msg(fragment_value_str,

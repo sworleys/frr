@@ -33,6 +33,7 @@
 #include "table.h"
 #include "log.h"
 #include "command.h"
+#include "network.h"
 
 #include "ospfd/ospfd.h"
 #include "ospfd/ospf_interface.h"
@@ -682,8 +683,7 @@ static void nsm_change_state(struct ospf_neighbor *nbr, int state)
 
 		if (CHECK_FLAG(oi->ospf->config, OSPF_LOG_ADJACENCY_DETAIL))
 			zlog_info(
-				"%s:[%s:%s], %s -> %s): "
-				"scheduling new router-LSA origination",
+				"%s:[%s:%s], %s -> %s): scheduling new router-LSA origination",
 				__func__, inet_ntoa(nbr->router_id),
 				ospf_get_name(oi->ospf),
 				lookup_msg(ospf_nsm_state_msg, old_state, NULL),
@@ -723,7 +723,7 @@ static void nsm_change_state(struct ospf_neighbor *nbr, int state)
 	/* Start DD exchange protocol */
 	if (state == NSM_ExStart) {
 		if (nbr->dd_seqnum == 0)
-			nbr->dd_seqnum = (uint32_t)random();
+			nbr->dd_seqnum = (uint32_t)frr_weak_random();
 		else
 			nbr->dd_seqnum++;
 
@@ -784,8 +784,7 @@ int ospf_nsm_event(struct thread *thread)
 			 */
 			flog_err(
 				EC_OSPF_FSM_INVALID_STATE,
-				"NSM[%s:%s:%s]: %s (%s): "
-				"Warning: action tried to change next_state to %s",
+				"NSM[%s:%s:%s]: %s (%s): Warning: action tried to change next_state to %s",
 				IF_NAME(nbr->oi), inet_ntoa(nbr->router_id),
 				ospf_get_name(nbr->oi->ospf),
 				lookup_msg(ospf_nsm_state_msg, nbr->state,

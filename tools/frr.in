@@ -75,10 +75,10 @@ started()
 # Loads the config via vtysh -b if configured to do so.
 vtysh_b ()
 {
-        # Rember, that all variables have been incremented by 1 in convert_daemon_prios()
-        if [ "$vtysh_enable" = 2 -a -f $C_PATH/frr.conf ]; then
-                $VTYSH -b -n
-        fi
+	# Rember, that all variables have been incremented by 1 in convert_daemon_prios()
+	if [ "$vtysh_enable" = 2 -a -f $C_PATH/frr.conf ]; then
+		$VTYSH -b
+	fi
 }
 
 # Check if the daemon is activated and if its executable and config files

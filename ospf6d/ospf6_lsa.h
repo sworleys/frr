@@ -80,8 +80,8 @@
 struct ospf6_lsa_header {
 	uint16_t age;	/* LS age */
 	uint16_t type;       /* LS type */
-	uint32_t id;	 /* Link State ID */
-	uint32_t adv_router; /* Advertising Router */
+	in_addr_t id;	 /* Link State ID */
+	in_addr_t adv_router; /* Advertising Router */
 	uint32_t seqnum;     /* LS sequence number */
 	uint16_t checksum;   /* LS checksum */
 	uint16_t length;     /* LSA length */
@@ -227,7 +227,7 @@ extern void ospf6_lsa_delete(struct ospf6_lsa *lsa);
 extern struct ospf6_lsa *ospf6_lsa_copy(struct ospf6_lsa *);
 
 extern void ospf6_lsa_lock(struct ospf6_lsa *);
-extern void ospf6_lsa_unlock(struct ospf6_lsa *);
+extern struct ospf6_lsa *ospf6_lsa_unlock(struct ospf6_lsa *);
 
 extern int ospf6_lsa_expire(struct thread *);
 extern int ospf6_lsa_refresh(struct thread *);

@@ -168,6 +168,14 @@ struct bgp_master {
 	/* EVPN multihoming */
 	struct bgp_evpn_mh_info *mh_info;
 
+	/* global update-delay timer values */
+	uint16_t v_update_delay;
+	uint16_t v_establish_wait;
+
+	uint32_t flags;
+#define BM_FLAG_GRACEFUL_SHUTDOWN        (1 << 0)
+#define BM_FLAG_MAINTENANCE_MODE         (1 << 1)
+
 	bool terminating;	/* global flag that sigint terminate seen */
 	QOBJ_FIELDS
 };
@@ -453,6 +461,8 @@ struct bgp {
 #define BGP_FLAG_DELETE_IN_PROGRESS       (1 << 22)
 #define BGP_FLAG_SELECT_DEFER_DISABLE     (1 << 23)
 #define BGP_FLAG_GR_DISABLE_EOR           (1 << 24)
+#define BGP_FLAG_EBGP_REQUIRES_POLICY (1 << 25)
+#define BGP_FLAG_SHOW_NEXTHOP_HOSTNAME (1 << 26)
 
 	enum global_mode GLOBAL_GR_FSM[BGP_GLOBAL_GR_MODE]
 				      [BGP_GLOBAL_GR_EVENT_CMD];
@@ -600,17 +610,10 @@ struct bgp {
 	/* EVPN enable - advertise local VNIs and their MACs etc. */
 	int advertise_all_vni;
 
-	/* RFC 8212 - prevent route leaks. */
-	int ebgp_requires_policy;
-#define DEFAULT_EBGP_POLICY_DISABLED 0
-#define DEFAULT_EBGP_POLICY_ENABLED 1
-
 	/* draft-ietf-idr-deprecate-as-set-confed-set
 	 * Reject aspaths with AS_SET and/or AS_CONFED_SET.
 	 */
 	bool reject_as_sets;
-#define BGP_REJECT_AS_SETS_DISABLED 0
-#define BGP_REJECT_AS_SETS_ENABLED 1
 
 	struct bgp_evpn_info *evpn_info;
 
@@ -1853,7 +1856,6 @@ extern void peer_group_notify_unconfig(struct peer_group *group);
 
 extern int peer_activate(struct peer *, afi_t, safi_t);
 extern int peer_deactivate(struct peer *, afi_t, safi_t);
-extern int peer_afc_set(struct peer *, afi_t, safi_t, int);
 
 extern int peer_group_bind(struct bgp *, union sockunion *, struct peer *,
 			   struct peer_group *, as_t *);
@@ -2152,6 +2154,16 @@ static inline void bgp_vrf_unlink(struct bgp *bgp, struct vrf *vrf)
 		bgp_unlock(bgp);
 	}
 	bgp->vrf_id = VRF_UNKNOWN;
+}
+
+static inline bool bgp_in_graceful_shutdown(struct bgp *bgp)
+{
+	/* True if either set for this instance or globally or
+	 * we are in maintenance mode
+	 */
+	return (!!CHECK_FLAG(bgp->flags, BGP_FLAG_GRACEFUL_SHUTDOWN) ||
+	        !!CHECK_FLAG(bm->flags, BM_FLAG_GRACEFUL_SHUTDOWN) ||
+	        !!CHECK_FLAG(bm->flags, BM_FLAG_MAINTENANCE_MODE));
 }
 
 extern void bgp_unset_redist_vrf_bitmaps(struct bgp *, vrf_id_t);

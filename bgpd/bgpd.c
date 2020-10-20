@@ -290,7 +290,15 @@ void bgp_router_id_zebra_bump(vrf_id_t vrf_id, const struct prefix *router_id)
 							bgp->name_pretty,
 							bgp->vrf_id,
 							inet_ntoa(*addr));
-					bgp_router_id_set(bgp, addr, false);
+					/*
+					 * if old router-id was 0x0, set flag
+					 * to use this new value
+					 */
+					bgp_router_id_set(bgp, addr,
+							  (bgp->router_id.s_addr
+							   == INADDR_ANY)
+								  ? true
+								  : false);
 				}
 			}
 		}
@@ -313,7 +321,15 @@ void bgp_router_id_zebra_bump(vrf_id_t vrf_id, const struct prefix *router_id)
 							bgp->name_pretty,
 							bgp->vrf_id,
 							inet_ntoa(*addr));
-					bgp_router_id_set(bgp, addr, false);
+					/*
+					 * if old router-id was 0x0, set flag
+					 * to use this new value
+					 */
+					bgp_router_id_set(bgp, addr,
+							  (bgp->router_id.s_addr
+							   == INADDR_ANY)
+								  ? true
+								  : false);
 				}
 			}
 
@@ -1501,22 +1517,22 @@ void bgp_peer_conf_if_to_su_update(struct peer *peer)
 static void bgp_recalculate_afi_safi_bestpaths(struct bgp *bgp, afi_t afi,
 					       safi_t safi)
 {
-	struct bgp_node *rn, *nrn;
+	struct bgp_dest *dest, *ndest;
 	struct bgp_table *table;
 
-	for (rn = bgp_table_top(bgp->rib[afi][safi]); rn;
-	     rn = bgp_route_next(rn)) {
-		table = bgp_node_get_bgp_table_info(rn);
+	for (dest = bgp_table_top(bgp->rib[afi][safi]); dest;
+	     dest = bgp_route_next(dest)) {
+		table = bgp_dest_get_bgp_table_info(dest);
 		if (table != NULL) {
 			/* Special handling for 2-level routing
 			 * tables. */
 			if (safi == SAFI_MPLS_VPN || safi == SAFI_ENCAP
 			    || safi == SAFI_EVPN) {
-				for (nrn = bgp_table_top(table);
-				     nrn; nrn = bgp_route_next(nrn))
-					bgp_process(bgp, nrn, afi, safi);
+				for (ndest = bgp_table_top(table); ndest;
+				     ndest = bgp_route_next(ndest))
+					bgp_process(bgp, ndest, afi, safi);
 			} else
-				bgp_process(bgp, rn, afi, safi);
+				bgp_process(bgp, dest, afi, safi);
 		}
 	}
 }
@@ -2179,14 +2195,6 @@ int peer_deactivate(struct peer *peer, afi_t afi, safi_t safi)
 	return ret;
 }
 
-int peer_afc_set(struct peer *peer, afi_t afi, safi_t safi, int enable)
-{
-	if (enable)
-		return peer_activate(peer, afi, safi);
-	else
-		return peer_deactivate(peer, afi, safi);
-}
-
 void peer_nsf_stop(struct peer *peer)
 {
 	afi_t afi;
@@ -2712,8 +2720,7 @@ int peer_group_listen_range_del(struct peer_group *group, struct prefix *range)
 		if (prefix_match(prefix, &prefix2)) {
 			if (bgp_debug_neighbor_events(peer))
 				zlog_debug(
-					"Deleting dynamic neighbor %s group %s upon "
-					"delete of listen range %s",
+					"Deleting dynamic neighbor %s group %s upon delete of listen range %s",
 					peer->host, group->name, buf);
 			peer_delete(peer);
 		}
@@ -2975,7 +2982,8 @@ static struct bgp *bgp_create(as_t *as, const char *name,
 		bgp->gr_info[afi][safi].route_list = list_new();
 	}
 
-	bgp->v_update_delay = BGP_UPDATE_DELAY_DEF;
+	bgp->v_update_delay = bm->v_update_delay;
+	bgp->v_establish_wait = bm->v_establish_wait;
 	bgp->default_local_pref = BGP_DEFAULT_LOCAL_PREF;
 	bgp->default_subgroup_pkt_queue_max =
 		BGP_DEFAULT_SUBGROUP_PKT_QUEUE_MAX;
@@ -2988,8 +2996,7 @@ static struct bgp *bgp_create(as_t *as, const char *name,
 	bgp->dynamic_neighbors_count = 0;
 	bgp->lb_ref_bw = BGP_LINK_BW_REF_BW;
 	bgp->lb_handling = BGP_LINK_BW_ECMP;
-	bgp->ebgp_requires_policy = DEFAULT_EBGP_POLICY_DISABLED;
-	bgp->reject_as_sets = BGP_REJECT_AS_SETS_DISABLED;
+	bgp->reject_as_sets = false;
 	bgp_addpath_init_bgp_data(&bgp->tx_addpath);
 
 	bgp->as = *as;
@@ -3448,7 +3455,7 @@ void bgp_free(struct bgp *bgp)
 	afi_t afi;
 	safi_t safi;
 	struct bgp_table *table;
-	struct bgp_node *rn;
+	struct bgp_dest *dest;
 	struct bgp_rmap *rmap;
 
 	QOBJ_UNREG(bgp);
@@ -3465,9 +3472,9 @@ void bgp_free(struct bgp *bgp)
 		/* Special handling for 2-level routing tables. */
 		if (safi == SAFI_MPLS_VPN || safi == SAFI_ENCAP
 		    || safi == SAFI_EVPN) {
-			for (rn = bgp_table_top(bgp->rib[afi][safi]); rn;
-			     rn = bgp_route_next(rn)) {
-				table = bgp_node_get_bgp_table_info(rn);
+			for (dest = bgp_table_top(bgp->rib[afi][safi]); dest;
+			     dest = bgp_route_next(dest)) {
+				table = bgp_dest_get_bgp_table_info(dest);
 				bgp_table_finish(&table);
 			}
 		}
@@ -6933,6 +6940,8 @@ void bgp_master_init(struct thread_master *master, const int buffer_size)
 	bm->start_time = bgp_clock();
 	bm->t_rmap_update = NULL;
 	bm->rmap_update_timer = RMAP_DEFAULT_UPDATE_TIMER;
+	bm->v_update_delay = BGP_UPDATE_DELAY_DEF;
+	bm->v_establish_wait = BGP_UPDATE_DELAY_DEF;
 	bm->terminating = false;
 	bm->socket_buffer = buffer_size;
 

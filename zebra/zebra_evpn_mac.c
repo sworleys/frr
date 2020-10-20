@@ -2230,7 +2230,7 @@ int zebra_evpn_add_update_local_mac(struct zebra_vrf *zvrf, zebra_evpn_t *zevpn,
 	 */
 	if ((old_local_inactive != local_inactive)
 	    || (new_bgp_ready != old_bgp_ready)) {
-		if (IS_ZEBRA_DEBUG_EVPN_MH_MAC)
+		//if (IS_ZEBRA_DEBUG_EVPN_MH_MAC)
 			zlog_debug(
 				"local mac vni %u mac %s es %s seq %d f 0x%x%s",
 				zevpn->vni,

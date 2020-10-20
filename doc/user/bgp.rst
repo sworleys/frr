@@ -414,7 +414,28 @@ Require policy on EBGP
 .. index:: [no] bgp ebgp-requires-policy
 .. clicmd:: [no] bgp ebgp-requires-policy
 
-   This command requires incoming and outgoing filters to be applied for eBGP sessions. Without the incoming filter, no routes will be accepted. Without the outgoing filter, no routes will be announced.
+   This command requires incoming and outgoing filters to be applied
+   for eBGP sessions. Without the incoming filter, no routes will be
+   accepted. Without the outgoing filter, no routes will be announced.
+
+   This is enabled by default.
+
+   When the incoming or outgoing filter is missing you will see
+   "(Policy)" sign under ``show bgp summary``:
+
+   .. code-block:: frr
+
+      exit1# show bgp summary
+
+      IPv4 Unicast Summary:
+      BGP router identifier 10.10.10.1, local AS number 65001 vrf-id 0
+      BGP table version 4
+      RIB entries 7, using 1344 bytes of memory
+      Peers 2, using 43 KiB of memory
+
+      Neighbor        V         AS   MsgRcvd   MsgSent   TblVer  InQ OutQ  Up/Down State/PfxRcd   PfxSnt
+      192.168.0.2     4      65002         8        10        0    0    0 00:03:09            5 (Policy)
+      fe80:1::2222    4      65002         9        11        0    0    0 00:03:09     (Policy) (Policy)
 
 Reject routes with AS_SET or AS_CONFED_SET types
 ------------------------------------------------
@@ -904,6 +925,17 @@ Networks
 .. index:: no network A.B.C.D/M
 .. clicmd:: no network A.B.C.D/M
 
+.. index:: [no] bgp network import-check
+.. clicmd:: [no] bgp network import-check
+
+   This configuration modifies the behavior of the network statement.
+   If you have this configured the underlying network must exist in
+   the rib.  If you have the [no] form configured then BGP will not
+   check for the networks existence in the rib.  For versions 7.3 and
+   before frr defaults for datacenter were the network must exist,
+   traditional did not check for existence.  For versions 7.4 and beyond
+   both traditional and datacenter the network must exist.
+
 .. _bgp-route-aggregation:
 
 Route Aggregation
@@ -939,7 +971,7 @@ Route Aggregation-IPv4 Address Family
 .. clicmd:: aggregate-address A.B.C.D/M summary-only
 
    This command specifies an aggregate address. Aggregated routes will
-   not be announce.
+   not be announced.
 
 .. index:: no aggregate-address A.B.C.D/M
 .. clicmd:: no aggregate-address A.B.C.D/M
@@ -991,7 +1023,7 @@ Route Aggregation-IPv6 Address Family
 .. clicmd:: aggregate-address X:X::X:X/M summary-only
 
    This command specifies an aggregate address. Aggregated routes will
-   not be announce.
+   not be announced.
 
 .. index:: no aggregate-address X:X::X:X/M
 .. clicmd:: no aggregate-address X:X::X:X/M
@@ -1052,6 +1084,41 @@ Redistribution
 
    Redistribute VNC direct (not via zebra) routes to BGP process.
 
+.. index:: bgp update-delay MAX-DELAY
+.. clicmd:: bgp update-delay MAX-DELAY
+
+.. index:: bgp update-delay MAX-DELAY ESTABLISH-WAIT
+.. clicmd:: bgp update-delay MAX-DELAY ESTABLISH-WAIT
+
+   This feature is used to enable read-only mode on BGP process restart or when
+   a BGP process is cleared using 'clear ip bgp \*'. Note that this command is
+   configured at the global level and applies to all bgp instances/vrfs.  It
+   cannot be used at the same time as the "update-delay" command described below,
+   which is entered in each bgp instance/vrf desired to delay update installation
+   and advertisements. The global and per-vrf approaches to defining update-delay
+   are mutually exclusive.
+
+   When applicable, read-only mode would begin as soon as the first peer reaches
+   Established status and a timer for max-delay seconds is started.  During this
+   mode BGP doesn't run any best-path or generate any updates to its peers. This
+   mode continues until:
+
+   1. All the configured peers, except the shutdown peers, have sent explicit EOR
+      (End-Of-RIB) or an implicit-EOR. The first keep-alive after BGP has reached
+      Established is considered an implicit-EOR.
+      If the establish-wait optional value is given, then BGP will wait for
+      peers to reach established from the beginning of the update-delay till the
+      establish-wait period is over, i.e. the minimum set of established peers for
+      which EOR is expected would be peers established during the establish-wait
+      window, not necessarily all the configured neighbors.
+   2. max-delay period is over.
+
+   On hitting any of the above two conditions, BGP resumes the decision process
+   and generates updates to its peers.
+
+   Default max-delay is 0, i.e. the feature is off by default.
+
+
 .. index:: update-delay MAX-DELAY
 .. clicmd:: update-delay MAX-DELAY
 
@@ -1059,12 +1126,17 @@ Redistribution
 .. clicmd:: update-delay MAX-DELAY ESTABLISH-WAIT
 
    This feature is used to enable read-only mode on BGP process restart or when
-   BGP process is cleared using 'clear ip bgp \*'. When applicable, read-only
-   mode would begin as soon as the first peer reaches Established status and a
-   timer for max-delay seconds is started.
+   a BGP process is cleared using 'clear ip bgp \*'.  Note that this command is
+   configured under the specific bgp instance/vrf that the feaure is enabled for.
+   It cannot be used at the same time as the global "bgp update-delay" described
+   above, which is entered at the global level and applies to all bgp instances.
+   The global and per-vrf approaches to defining update-delay are mutually
+   exclusive.
 
-   During this mode BGP doesn't run any best-path or generate any updates to its
-   peers. This mode continues until:
+   When applicable, read-only mode would begin as soon as the first peer reaches
+   Established status and a timer for max-delay seconds is started.  During this
+   mode BGP doesn't run any best-path or generate any updates to its peers. This
+   mode continues until:
 
    1. All the configured peers, except the shutdown peers, have sent explicit EOR
       (End-Of-RIB) or an implicit-EOR. The first keep-alive after BGP has reached
@@ -1159,6 +1231,13 @@ Defining Peers
    ``net.core.optmem_max`` to allow the kernel to allocate the necessary option
    memory.
 
+.. index:: [no] coalesce-time (0-4294967295)
+.. clicmd:: [no] coalesce-time (0-4294967295)
+
+   The time in milliseconds that BGP will delay before deciding what peers
+   can be put into an update-group together in order to generate a single
+   update for them.  The default time is 1000.
+   
 .. _bgp-configuring-peers:
 
 Configuring Peers
@@ -1334,12 +1413,34 @@ Configuring Peers
    on by default or not.  This command defaults to on and is not displayed.
    The `no bgp default ipv4-unicast` form of the command is displayed.
 
+.. index:: [no] bgp default show-hostname
+.. clicmd:: [no] bgp default show-hostname
+
+   This command shows the hostname of the peer in certain BGP commands
+   outputs. It's easier to troubleshoot if you have a number of BGP peers.
+
+.. index:: [no] bgp default show-nexthop-hostname
+.. clicmd:: [no] bgp default show-nexthop-hostname
+
+   This command shows the hostname of the next-hop in certain BGP commands
+   outputs. It's easier to troubleshoot if you have a number of BGP peers
+   and a number of routes to check.
+
 .. index:: [no] neighbor PEER advertisement-interval (0-600)
 .. clicmd:: [no] neighbor PEER advertisement-interval (0-600)
 
    Setup the minimum route advertisement interval(mrai) for the
    peer in question.  This number is between 0 and 600 seconds,
    with the default advertisement interval being 0.
+
+Displaying Information about Peers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. index:: show bgp <afi> <safi> neighbors WORD bestpath-routes [json] [wide]
+.. clicmd:: show bgp <afi> <safi> neighbors WORD bestpath-routes [json] [wide]
+
+   For the given neighbor, WORD, that is specified list the routes selected
+   by BGP as having the best path.
 
 .. _bgp-peer-filtering:
 
@@ -1473,6 +1574,17 @@ AS path access list is user defined AS path.
 
 .. index:: no bgp as-path access-list WORD permit|deny LINE
 .. clicmd:: no bgp as-path access-list WORD permit|deny LINE
+
+.. _bgp-bogon-filter-example:
+
+Bogon ASN filter policy configuration example
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. code-block:: frr
+
+   bgp as-path access-list 99 permit _0_
+   bgp as-path access-list 99 permit _23456_
+   bgp as-path access-list 99 permit _1310[0-6][0-9]_|_13107[0-1]_
 
 .. _bgp-using-as-path-in-route-map:
 
@@ -1679,8 +1791,8 @@ expanded
    the same namespace, so it's not necessary to specify ``standard`` or
    ``expanded``; these modifiers are purely aesthetic.
 
-.. index:: show bgp community-list [NAME]
-.. clicmd:: show bgp community-list [NAME]
+.. index:: show bgp community-list [NAME detail]
+.. clicmd:: show bgp community-list [NAME detail]
 
    Displays community list information. When ``NAME`` is specified the
    specified community list's information is shown.
@@ -1694,7 +1806,7 @@ expanded
          Named Community expanded list EXPAND
        permit :
 
-         # show bgp community-list CLIST
+         # show bgp community-list CLIST detail
          Named Community standard list CLIST
        permit 7675:80 7675:100 no-export
        deny internet
@@ -1733,7 +1845,7 @@ In :ref:`route-map` we can match on or set the BGP communities attribute. Using
 this feature network operator can implement their network policy based on BGP
 communities attribute.
 
-The ollowing commands can be used in route maps:
+The following commands can be used in route maps:
 
 .. index:: match community WORD exact-match [exact-match]
 .. clicmd:: match community WORD exact-match [exact-match]
@@ -1970,8 +2082,8 @@ Extended Community Lists
 .. index:: show bgp extcommunity-list
 .. clicmd:: show bgp extcommunity-list
 
-.. index:: show bgp extcommunity-list NAME
-.. clicmd:: show bgp extcommunity-list NAME
+.. index:: show bgp extcommunity-list NAME detail
+.. clicmd:: show bgp extcommunity-list NAME detail
 
    This command displays current extcommunity-list information. When `name` is
    specified the community list's information is shown.::
@@ -2085,8 +2197,8 @@ Two types of large community lists are supported, namely `standard` and
 .. index:: show bgp large-community-list
 .. clicmd:: show bgp large-community-list
 
-.. index:: show bgp large-community-list NAME
-.. clicmd:: show bgp large-community-list NAME
+.. index:: show bgp large-community-list NAME detail
+.. clicmd:: show bgp large-community-list NAME detail
 
    This command display current large-community-list information. When
    `name` is specified the community list information is shown.
@@ -2348,8 +2460,6 @@ the same behavior of using same next-hop and RMAC values.
 Enables or disables advertise-pip feature, specifiy system-IP and/or system-MAC
 parameters.
 
-.. _bgp-cisco-compatibility:
-
 EVPN Multihoming
 ^^^^^^^^^^^^^^^^
 
@@ -2468,6 +2578,8 @@ following zebra command -
 .. index:: [no] evpn mh startup-delay(0-3600)$duration
 .. clicmd:: [no] evpn mh startup-delay(0-3600)$duration
 
+.. _bgp-cisco-compatibility:
+
 Cisco Compatibility
 -------------------
 
@@ -2531,6 +2643,27 @@ removed in a future version of FRR.
 .. clicmd:: bgp config-type zebra
 
    FRR style BGP configuration. This is the default.
+
+Support with VRF network namespace backend
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+It is possible to separate overlay networks contained in VXLAN interfaces from
+underlay networks by using VRFs. VRF-lite and VRF-netns backends can be used for
+that. In the latter case, this is necessary to set both bridge and vxlan interface
+on the same network namespace, as below example illustrates:
+
+.. code-block:: shell
+
+   # linux shell
+   ip netns add vrf1
+   ip link add name vxlan101 type vxlan id 101 dstport 4789 dev eth0 local 10.1.1.1
+   ip link set dev vxlan101 netns vrf1
+   ip netns exec vrf1 ip link set dev lo up
+   ip netns exec vrf1 brctl addbr bridge101
+   ip netns exec vrf1 brctl addif bridge101 vxlan101
+
+This makes possible to separate not only layer 3 networks like VRF-lite networks.
+Also, VRF netns based make possible to separate layer 2 networks on separate VRF
+instances.
 
 .. _bgp-debugging:
 
@@ -2700,6 +2833,32 @@ The following are available in the ``router bgp`` mode:
    at a time in a loop. This setting controls how many iterations the loop runs
    for. As with write-quanta, it is best to leave this setting on the default.
 
+The following command is available in ``config`` mode as well as in the
+``router bgp`` mode:
+
+.. index:: bgp graceful-shutdown
+.. clicmd:: bgp graceful-shutdown
+
+   The purpose of this command is to initiate BGP Graceful Shutdown which
+   is described in :rfc:`8326`. The use case for this is to minimize or
+   eliminate the amount of traffic loss in a network when a planned
+   maintenance activity such as software upgrade or hardware replacement
+   is to be performed on a router. The feature works by re-announcing
+   routes to eBGP peers with the GRACEFUL_SHUTDOWN community included.
+   Peers are then expected to treat such paths with the lowest preference.
+   This happens automatically on a receiver running FRR; with other
+   routing protocol stacks, an inbound policy may have to be configured.
+   In FRR, triggering graceful shutdown also results in announcing a
+   LOCAL_PREF of 0 to iBGP peers.
+
+   Graceful shutdown can be configured per BGP instance or globally for
+   all of BGP. These two options are mutually exclusive. The no form of
+   the command causes graceful shutdown to be stopped, and routes will
+   be re-announced without the GRACEFUL_SHUTDOWN community and/or with
+   the usual LOCAL_PREF value. Note that if this option is saved to
+   the startup configuration, graceful shutdown will remain in effect
+   across restarts of *bgpd* and will need to be explicitly disabled.
+
 .. _bgp-displaying-bgp-information:
 
 Displaying BGP Information
@@ -2712,17 +2871,17 @@ daemon project, while :clicmd:`show bgp` command is the new format. The choice
 has been done to keep old format with IPv4 routing table, while new format
 displays IPv6 routing table.
 
-.. index:: show ip bgp
-.. clicmd:: show ip bgp
+.. index:: show ip bgp [wide]
+.. clicmd:: show ip bgp [wide]
 
-.. index:: show ip bgp A.B.C.D
-.. clicmd:: show ip bgp A.B.C.D
+.. index:: show ip bgp A.B.C.D [wide]
+.. clicmd:: show ip bgp A.B.C.D [wide]
 
-.. index:: show bgp
-.. clicmd:: show bgp
+.. index:: show bgp [wide]
+.. clicmd:: show bgp [wide]
 
-.. index:: show bgp X:X::X:X
-.. clicmd:: show bgp X:X::X:X
+.. index:: show bgp X:X::X:X [wide]
+.. clicmd:: show bgp X:X::X:X [wide]
 
    These commands display BGP routes. When no route is specified, the default
    is to display all BGP routes.
@@ -2737,6 +2896,12 @@ displays IPv6 routing table.
          \*> 1.1.1.1/32       0.0.0.0      0   32768 i
 
          Total number of prefixes 1
+
+   If _wide_ option is specified, then the prefix table's width is increased
+   to fully display the prefix and the nexthop.
+
+   This is especially handy dealing with IPv6 prefixes and
+   if :clicmd:`[no] bgp default show-nexthop-hostname` is enabled.
 
 Some other commands provide additional options for filtering the output.
 
@@ -2764,7 +2929,14 @@ structure is extended with :clicmd:`show bgp [afi] [safi]`.
 
    These commands display BGP routes for the specific routing table indicated by
    the selected afi and the selected safi. If no afi and no safi value is given,
-   the command falls back to the default IPv6 routing table
+   the command falls back to the default IPv6 routing table.
+   For EVPN prefixes, you can display the full BGP table for this AFI/SAFI
+   using the standard `show bgp [afi] [safi]` syntax.
+
+.. index:: show bgp l2vpn evpn route [type <macip|2|multicast|3|es|4|prefix|5>]
+.. clicmd:: show bgp l2vpn evpn route [type <macip|2|multicast|3|es|4|prefix|5>]
+
+   Additionally, you can also filter this output by route type.
 
 .. index:: show bgp [afi] [safi] summary
 .. clicmd:: show bgp [afi] [safi] summary
@@ -2776,6 +2948,12 @@ structure is extended with :clicmd:`show bgp [afi] [safi]`.
 .. clicmd:: show bgp [afi] [safi] summary failed [json]
 
    Show a bgp peer summary for peers that are not succesfully exchanging routes
+   for the specified address family, and subsequent address-family.
+
+.. index:: show bgp [afi] [safi] summary established [json]
+.. clicmd:: show bgp [afi] [safi] summary established [json]
+
+   Show a bgp peer summary for peers that are succesfully exchanging routes
    for the specified address family, and subsequent address-family.
 
 .. index:: show bgp [afi] [safi] neighbor [PEER]
@@ -2908,8 +3086,8 @@ Displaying Routes by AS Path
 Displaying Update Group Information
 -----------------------------------
 
-..index:: show bgp update-groups SUBGROUP-ID [advertise-queue|advertised-routes|packet-queue]
-..clicmd:: show bgp update-groups [advertise-queue|advertised-routes|packet-queue]
+.. index:: show bgp update-groups SUBGROUP-ID [advertise-queue|advertised-routes|packet-queue]
+.. clicmd:: show bgp update-groups [advertise-queue|advertised-routes|packet-queue]
 
    Display Information about each individual update-group being used.
    If SUBGROUP-ID is specified only display about that particular group.  If
@@ -2918,8 +3096,8 @@ Displaying Update Group Information
    the list of routes we have sent to the peers in the update-group and
    packet-queue specifies the list of packets in the queue to be sent.
 
-..index:: show bgp update-groups statistics
-..clicmd:: show bgp update-groups statistics
+.. index:: show bgp update-groups statistics
+.. clicmd:: show bgp update-groups statistics
 
    Display Information about update-group events in FRR.
 
@@ -3109,8 +3287,8 @@ certainly contains silly mistakes, if not serious flaws.
    ip prefix-list pl-peer2-network permit 192.168.2.0/24
    ip prefix-list pl-peer2-network permit 172.16.1/24
    !
-   ip as-path access-list asp-own-as permit ^$
-   ip as-path access-list asp-own-as permit _64512_
+   bgp as-path access-list asp-own-as permit ^$
+   bgp as-path access-list asp-own-as permit _64512_
    !
    ! #################################################################
    ! Match communities we provide actions for, on routes receives from

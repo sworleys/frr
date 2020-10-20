@@ -26,8 +26,8 @@
 #include "zclient.h"
 #include "zebra/zserv.h"
 
-#ifdef HAVE_PROTOBUF_VERSION_3
-#include "mlag/mlag.pb-c.h"
+#ifdef __cplusplus
+extern "C" {
 #endif
 
 #define ZEBRA_MLAG_BUF_LIMIT 32768
@@ -73,4 +73,8 @@ int zebra_mlag_protobuf_encode_client_data(struct stream *s,
 					   uint32_t *msg_type);
 int zebra_mlag_protobuf_decode_message(struct stream *s, uint8_t *data,
 				       uint32_t len);
+#ifdef __cplusplus
+}
+#endif
+
 #endif

@@ -572,34 +572,39 @@ static void bgp_debug_print_evpn_prefix(struct vty *vty, const char *desc,
 
 	if (p->u.prefix_evpn.route_type == BGP_EVPN_MAC_IP_ROUTE) {
 		if (is_evpn_prefix_ipaddr_none((struct prefix_evpn *)p)) {
-			sprintf(evpn_desc, "l2vpn evpn type macip mac %s",
-				 prefix_mac2str(
-					&p->u.prefix_evpn.macip_addr.mac,
-					buf2, sizeof(buf2)));
+			snprintf(
+				evpn_desc, sizeof(evpn_desc),
+				"l2vpn evpn type macip mac %s",
+				prefix_mac2str(&p->u.prefix_evpn.macip_addr.mac,
+					       buf2, sizeof(buf2)));
 		} else {
 			uint8_t family = is_evpn_prefix_ipaddr_v4(
 						(struct prefix_evpn *)p) ?
 							AF_INET : AF_INET6;
-			sprintf(evpn_desc, "l2vpn evpn type macip mac %s ip %s",
-				 prefix_mac2str(
-					&p->u.prefix_evpn.macip_addr.mac,
-					buf2, sizeof(buf2)),
-				 inet_ntop(family,
+			snprintf(
+				evpn_desc, sizeof(evpn_desc),
+				"l2vpn evpn type macip mac %s ip %s",
+				prefix_mac2str(&p->u.prefix_evpn.macip_addr.mac,
+					       buf2, sizeof(buf2)),
+				inet_ntop(
+					family,
 					&p->u.prefix_evpn.macip_addr.ip.ip.addr,
 					buf, PREFIX2STR_BUFFER));
 		}
 	} else if (p->u.prefix_evpn.route_type == BGP_EVPN_IMET_ROUTE) {
-		sprintf(evpn_desc, "l2vpn evpn type multicast ip %s",
-			inet_ntoa(p->u.prefix_evpn.imet_addr.ip.ipaddr_v4));
+		snprintf(evpn_desc, sizeof(evpn_desc),
+			 "l2vpn evpn type multicast ip %s",
+			 inet_ntoa(p->u.prefix_evpn.imet_addr.ip.ipaddr_v4));
 	} else if (p->u.prefix_evpn.route_type == BGP_EVPN_IP_PREFIX_ROUTE) {
 		uint8_t family = is_evpn_prefix_ipaddr_v4(
 					(struct prefix_evpn *)p) ? AF_INET
 								: AF_INET6;
-		sprintf(evpn_desc, "l2vpn evpn type prefix ip %s/%d",
-			inet_ntop(family,
-				  &p->u.prefix_evpn.prefix_addr.ip.ip.addr, buf,
-				  PREFIX2STR_BUFFER),
-			p->u.prefix_evpn.prefix_addr.ip_prefix_length);
+		snprintf(evpn_desc, sizeof(evpn_desc),
+			 "l2vpn evpn type prefix ip %s/%d",
+			 inet_ntop(family,
+				   &p->u.prefix_evpn.prefix_addr.ip.ip.addr,
+				   buf, PREFIX2STR_BUFFER),
+			 p->u.prefix_evpn.prefix_addr.ip_prefix_length);
 	}
 
 	vty_out(vty, "%s %s\n", desc, evpn_desc);
@@ -2194,7 +2199,7 @@ DEFUN_NOSH (show_debugging_bgp,
 				     bgp_debug_zebra_prefixes);
 
 	if (BGP_DEBUG(graceful_restart, GRACEFUL_RESTART))
-		vty_out(vty, "  BGP graceful-restart debugging is on");
+		vty_out(vty, "  BGP graceful-restart debugging is on\n");
 
 	if (BGP_DEBUG(allow_martians, ALLOW_MARTIANS))
 		vty_out(vty, "  BGP allow martian next hop debugging is on\n");
@@ -2351,11 +2356,17 @@ static int bgp_config_write_debug(struct vty *vty)
 	return write;
 }
 
-static struct cmd_node debug_node = {DEBUG_NODE, "", 1};
+static int bgp_config_write_debug(struct vty *vty);
+static struct cmd_node debug_node = {
+	.name = "debug",
+	.node = DEBUG_NODE,
+	.prompt = "",
+	.config_write = bgp_config_write_debug,
+};
 
 void bgp_debug_init(void)
 {
-	install_node(&debug_node, bgp_config_write_debug);
+	install_node(&debug_node);
 
 	install_element(ENABLE_NODE, &show_debugging_bgp_cmd);
 
@@ -2599,11 +2610,11 @@ bool bgp_debug_update(struct peer *peer, const struct prefix *p,
 	return false;
 }
 
-bool bgp_debug_bestpath(struct bgp_node *rn)
+bool bgp_debug_bestpath(struct bgp_dest *dest)
 {
 	if (BGP_DEBUG(bestpath, BESTPATH)) {
 		if (bgp_debug_per_prefix(
-			    bgp_node_get_prefix(rn), term_bgp_debug_bestpath,
+			    bgp_dest_get_prefix(dest), term_bgp_debug_bestpath,
 			    BGP_DEBUG_BESTPATH, bgp_debug_bestpath_prefixes))
 			return true;
 	}
@@ -2657,12 +2668,14 @@ const char *bgp_debug_rdpfxpath2str(afi_t afi, safi_t safi,
 			char tag_buf2[20];
 
 			bgp_evpn_label2str(label, num_labels, tag_buf2, 20);
-			sprintf(tag_buf, " label %s", tag_buf2);
+			snprintf(tag_buf, sizeof(tag_buf), " label %s",
+				 tag_buf2);
 		} else {
 			uint32_t label_value;
 
 			label_value = decode_label(label);
-			sprintf(tag_buf, " label %u", label_value);
+			snprintf(tag_buf, sizeof(tag_buf), " label %u",
+				 label_value);
 		}
 	}
 

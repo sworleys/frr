@@ -41,7 +41,7 @@
 extern "C" {
 #endif
 
-typedef enum { RNH_NEXTHOP_TYPE, RNH_IMPORT_CHECK_TYPE } rnh_type_t;
+enum rnh_type { RNH_NEXTHOP_TYPE, RNH_IMPORT_CHECK_TYPE };
 
 PREDECL_LIST(rnh_list)
 
@@ -58,7 +58,7 @@ struct rnh {
 
 	afi_t afi;
 
-	rnh_type_t type;
+	enum rnh_type type;
 
 	uint32_t seqno;
 
@@ -94,9 +94,11 @@ struct route_entry {
 	struct nhg_hash_entry *nhe;
 
 	/* Nexthop group from FIB (optional), reflecting what is actually
-	 * installed in the FIB if that differs.
+	 * installed in the FIB if that differs. The 'backup' group is used
+	 * when backup nexthops are present in the route's nhg.
 	 */
 	struct nexthop_group fib_ng;
+	struct nexthop_group fib_backup_ng;
 
 	/* Nexthop group hash entry ID */
 	uint32_t nhe_id;
@@ -142,6 +144,10 @@ struct route_entry {
 #define ROUTE_ENTRY_INSTALLED        0x10
 /* Route has Failed installation into the Data Plane in some manner */
 #define ROUTE_ENTRY_FAILED           0x20
+/* Route has a 'fib' set of nexthops, probably because the installed set
+ * differs from the rib/normal set of nexthops.
+ */
+#define ROUTE_ENTRY_USE_FIB_NHG      0x40
 
 	/* Sequence value incremented for each dataplane operation */
 	uint32_t dplane_sequence;
@@ -251,11 +257,21 @@ DECLARE_LIST(re_list, struct route_entry, next);
 	     (re) && ((next) = re_list_next(&((dest)->routes), (re)), 1);      \
 	     (re) = (next))
 
+#define RE_DEST_FIRST_ROUTE(dest, re)                                          \
+	((re) = (dest) ? re_list_first(&((dest)->routes)) : NULL)
+
+#define RE_DEST_NEXT_ROUTE(dest, re)                                           \
+	((re) = (dest) ? re_list_next(&((dest)->routes), (re)) : NULL)
+
 #define RNODE_FOREACH_RE(rn, re)                                               \
 	RE_DEST_FOREACH_ROUTE (rib_dest_from_rnode(rn), re)
 
 #define RNODE_FOREACH_RE_SAFE(rn, re, next)                                    \
 	RE_DEST_FOREACH_ROUTE_SAFE (rib_dest_from_rnode(rn), re, next)
+
+#define RNODE_FIRST_RE(rn, re) RE_DEST_FIRST_ROUTE(rib_dest_from_rnode(rn), re)
+
+#define RNODE_NEXT_RE(rn, re) RE_DEST_NEXT_ROUTE(rib_dest_from_rnode(rn), re)
 
 #if defined(HAVE_RTADV)
 /* Structure which hold status of router advertisement. */
@@ -276,7 +292,7 @@ struct rtadv {
  * Structure that is hung off of a route_table that holds information about
  * the table.
  */
-typedef struct rib_table_info_t_ {
+struct rib_table_info {
 
 	/*
 	 * Back pointer to zebra_vrf.
@@ -284,14 +300,13 @@ typedef struct rib_table_info_t_ {
 	struct zebra_vrf *zvrf;
 	afi_t afi;
 	safi_t safi;
+};
 
-} rib_table_info_t;
-
-typedef enum {
+enum rib_tables_iter_state {
 	RIB_TABLES_ITER_S_INIT,
 	RIB_TABLES_ITER_S_ITERATING,
 	RIB_TABLES_ITER_S_DONE
-} rib_tables_iter_state_t;
+};
 
 /*
  * Structure that holds state for iterating over all tables in the
@@ -301,20 +316,21 @@ typedef struct rib_tables_iter_t_ {
 	vrf_id_t vrf_id;
 	int afi_safi_ix;
 
-	rib_tables_iter_state_t state;
+	enum rib_tables_iter_state state;
 } rib_tables_iter_t;
 
 /* Events/reasons triggering a RIB update. */
-typedef enum {
+enum rib_update_event {
 	RIB_UPDATE_KERNEL,
 	RIB_UPDATE_RMAP_CHANGE,
 	RIB_UPDATE_OTHER,
 	RIB_UPDATE_MAX
-} rib_update_event_t;
+};
 
 extern void route_entry_copy_nexthops(struct route_entry *re,
 				      struct nexthop *nh);
-int route_entry_update_nhe(struct route_entry *re, struct nhg_hash_entry *new);
+int route_entry_update_nhe(struct route_entry *re,
+			   struct nhg_hash_entry *new_nhghe);
 
 /* NHG replace has happend, we have to update route_entry pointers to new one */
 void rib_handle_nhg_replace(struct nhg_hash_entry *old,
@@ -378,10 +394,10 @@ extern struct route_entry *rib_match_ipv4_multicast(vrf_id_t vrf_id,
 extern struct route_entry *rib_lookup_ipv4(struct prefix_ipv4 *p,
 					   vrf_id_t vrf_id);
 
-extern void rib_update(rib_update_event_t event);
-extern void rib_update_vrf(vrf_id_t vrf_id, rib_update_event_t event);
+extern void rib_update(enum rib_update_event event);
+extern void rib_update_vrf(vrf_id_t vrf_id, enum rib_update_event event);
 extern void rib_update_table(struct route_table *table,
-			     rib_update_event_t event);
+			     enum rib_update_event event);
 extern int rib_sweep_route(struct thread *t);
 extern void rib_sweep_table(struct route_table *table);
 extern void rib_close_table(struct route_table *table);
@@ -416,9 +432,9 @@ extern void zebra_rib_evaluate_rn_nexthops(struct route_node *rn, uint32_t seq);
 /*
  * rib_table_info
  */
-static inline rib_table_info_t *rib_table_info(struct route_table *table)
+static inline struct rib_table_info *rib_table_info(struct route_table *table)
 {
-	return (rib_table_info_t *)route_table_get_info(table);
+	return (struct rib_table_info *)route_table_get_info(table);
 }
 
 /*
@@ -518,14 +534,28 @@ DECLARE_HOOK(rib_update, (struct route_node * rn, const char *reason),
 	     (rn, reason))
 
 /*
- * Access active nexthop-group, either RIB or FIB version
+ * Access installed/fib nexthops, which may be a subset of the
+ * rib nexthops.
  */
-static inline struct nexthop_group *rib_active_nhg(struct route_entry *re)
+static inline struct nexthop_group *rib_get_fib_nhg(struct route_entry *re)
 {
-	if (re->fib_ng.nexthop)
+	/* If the fib set is a subset of the active rib set,
+	 * use the dedicated fib list.
+	 */
+	if (CHECK_FLAG(re->status, ROUTE_ENTRY_USE_FIB_NHG))
 		return &(re->fib_ng);
 	else
 		return &(re->nhe->nhg);
+}
+
+/*
+ * Access backup nexthop-group that represents the installed backup nexthops;
+ * any installed backup will be on the fib list.
+ */
+static inline struct nexthop_group *rib_get_fib_backup_nhg(
+	struct route_entry *re)
+{
+	return &(re->fib_backup_ng);
 }
 
 extern void zebra_vty_init(void);

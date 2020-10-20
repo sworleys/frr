@@ -23,6 +23,8 @@
 #include "lib_errors.h"
 #include "northbound.h"
 #include "printfrr.h"
+#include "nexthop.h"
+#include "printfrr.h"
 
 static const char *yang_get_default_value(const char *xpath)
 {
@@ -783,6 +785,14 @@ void yang_get_default_string_buf(char *buf, size_t size, const char *xpath_fmt,
 }
 
 /*
+ * Primitive type: empty.
+ */
+struct yang_data *yang_data_new_empty(const char *xpath)
+{
+	return yang_data_new(xpath, NULL);
+}
+
+/*
  * Derived type: IP prefix.
  */
 void yang_str2prefix(const char *value, union prefixptr prefix)
@@ -1113,4 +1123,106 @@ void yang_get_default_ip(struct ipaddr *var, const char *xpath_fmt, ...)
 
 	value = yang_get_default_value(xpath);
 	yang_str2ip(value, var);
+}
+
+struct yang_data *yang_data_new_mac(const char *xpath,
+				    const struct ethaddr *mac)
+{
+	char value_str[ETHER_ADDR_STRLEN];
+
+	prefix_mac2str(mac, value_str, sizeof(value_str));
+	return yang_data_new(xpath, value_str);
+}
+
+void yang_str2mac(const char *value, struct ethaddr *mac)
+{
+	(void)prefix_str2mac(value, mac);
+}
+
+struct yang_data *yang_data_new_date_and_time(const char *xpath, time_t time)
+{
+	struct tm tm;
+	char timebuf[MONOTIME_STRLEN];
+	struct timeval _time, time_real;
+	char *ts_dot;
+	uint16_t buflen;
+
+	_time.tv_sec = time;
+	_time.tv_usec = 0;
+	monotime_to_realtime(&_time, &time_real);
+
+	gmtime_r(&time_real.tv_sec, &tm);
+
+	/* rfc-3339 format */
+	strftime(timebuf, sizeof(timebuf), "%Y-%m-%dT%H:%M:%S", &tm);
+	buflen = strlen(timebuf);
+	ts_dot = timebuf + buflen;
+
+	/* microseconds and appends Z */
+	snprintfrr(ts_dot, sizeof(timebuf) - buflen, ".%06luZ",
+		   (unsigned long)time_real.tv_usec);
+
+	return yang_data_new(xpath, timebuf);
+}
+
+const char *yang_nexthop_type2str(uint32_t ntype)
+{
+	switch (ntype) {
+	case NEXTHOP_TYPE_IFINDEX:
+		return "ifindex";
+		break;
+	case NEXTHOP_TYPE_IPV4:
+		return "ip4";
+		break;
+	case NEXTHOP_TYPE_IPV4_IFINDEX:
+		return "ip4-ifindex";
+		break;
+	case NEXTHOP_TYPE_IPV6:
+		return "ip6";
+		break;
+	case NEXTHOP_TYPE_IPV6_IFINDEX:
+		return "ip6-ifindex";
+		break;
+	case NEXTHOP_TYPE_BLACKHOLE:
+		return "blackhole";
+		break;
+	default:
+		return "unknown";
+		break;
+	}
+}
+
+
+const char *yang_afi_safi_value2identity(afi_t afi, safi_t safi)
+{
+	if (afi == AFI_IP && safi == SAFI_UNICAST)
+		return "frr-routing:ipv4-unicast";
+	if (afi == AFI_IP6 && safi == SAFI_UNICAST)
+		return "frr-routing:ipv6-unicast";
+	if (afi == AFI_IP && safi == SAFI_MULTICAST)
+		return "frr-routing:ipv4-multicast";
+	if (afi == AFI_IP6 && safi == SAFI_MULTICAST)
+		return "frr-routing:ipv6-multicast";
+
+	return NULL;
+}
+
+void yang_afi_safi_identity2value(const char *key, afi_t *afi, safi_t *safi)
+{
+	if (strmatch(key, "frr-routing:ipv4-unicast")) {
+		*afi = AFI_IP;
+		*safi = SAFI_UNICAST;
+	} else if (strmatch(key, "frr-routing:ipv6-unicast")) {
+		*afi = AFI_IP6;
+		*safi = SAFI_UNICAST;
+	} else if (strmatch(key, "frr-routing:ipv4-multicast")) {
+		*afi = AFI_IP;
+		*safi = SAFI_MULTICAST;
+	} else if (strmatch(key, "frr-routing:ipv6-multicast")) {
+		*afi = AFI_IP6;
+		*safi = SAFI_MULTICAST;
+	} else {
+		*afi = AFI_UNSPEC;
+		*safi = SAFI_UNSPEC;
+	}
 }

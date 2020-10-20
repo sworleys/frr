@@ -143,7 +143,7 @@ struct if_stats {
 #define TE_EXT_MASK             0x0FFFFFFF
 #define TE_EXT_ANORMAL          0x80000000
 #define LOSS_PRECISION          0.000003
-#define TE_KILO_BIT             1000
+#define TE_MEGA_BIT             1000000
 #define TE_BYTE                 8
 #define DEFAULT_BANDWIDTH       10000
 #define MAX_CLASS_TYPE          8
@@ -514,16 +514,18 @@ extern struct interface *if_create_name(const char *name, vrf_id_t vrf_id);
 extern struct interface *if_create_ifindex(ifindex_t ifindex, vrf_id_t vrf_id);
 extern struct interface *if_lookup_by_index(ifindex_t, vrf_id_t vrf_id);
 extern struct interface *if_lookup_by_index_all_vrf(ifindex_t);
-extern struct interface *if_lookup_exact_address(void *matchaddr, int family,
-						 vrf_id_t vrf_id);
-extern struct connected *if_lookup_address(void *matchaddr, int family,
+extern struct interface *if_lookup_exact_address(const void *matchaddr,
+						 int family, vrf_id_t vrf_id);
+extern struct connected *if_lookup_address(const void *matchaddr, int family,
 					   vrf_id_t vrf_id);
-extern struct interface *if_lookup_prefix(struct prefix *prefix,
+extern struct interface *if_lookup_prefix(const struct prefix *prefix,
 					  vrf_id_t vrf_id);
 size_t if_lookup_by_hwaddr(const uint8_t *hw_addr, size_t addrsz,
 			   struct interface ***result, vrf_id_t vrf_id);
 
+struct vrf;
 extern struct interface *if_lookup_by_name_all_vrf(const char *ifname);
+extern struct interface *if_lookup_by_name_vrf(const char *name, struct vrf *vrf);
 extern struct interface *if_lookup_by_name(const char *ifname, vrf_id_t vrf_id);
 extern struct interface *if_get_by_name(const char *ifname, vrf_id_t vrf_id);
 extern struct interface *if_get_by_ifindex(ifindex_t ifindex, vrf_id_t vrf_id);
@@ -552,7 +554,6 @@ extern bool if_is_loopback_or_vrf(const struct interface *ifp);
 extern int if_is_broadcast(const struct interface *ifp);
 extern int if_is_pointopoint(const struct interface *ifp);
 extern int if_is_multicast(const struct interface *ifp);
-struct vrf;
 extern void if_terminate(struct vrf *vrf);
 extern void if_dump_all(void);
 extern const char *if_flag_dump(unsigned long);
@@ -577,9 +578,9 @@ connected_add_by_prefix(struct interface *, struct prefix *, struct prefix *);
 extern struct connected *connected_delete_by_prefix(struct interface *,
 						    struct prefix *);
 extern struct connected *connected_lookup_prefix(struct interface *,
-						 struct prefix *);
+						 const struct prefix *);
 extern struct connected *connected_lookup_prefix_exact(struct interface *,
-						       struct prefix *);
+						       const struct prefix *);
 extern unsigned int connected_count_by_family(struct interface *, int family);
 extern struct nbr_connected *nbr_connected_new(void);
 extern void nbr_connected_free(struct nbr_connected *);

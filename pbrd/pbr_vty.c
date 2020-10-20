@@ -27,6 +27,7 @@
 #include "nexthop_group.h"
 #include "nexthop_group_private.h"
 #include "log.h"
+#include "json.h"
 #include "debug.h"
 #include "pbr.h"
 
@@ -193,30 +194,33 @@ DEFPY(pbr_map_match_dscp, pbr_map_match_dscp_cmd,
 	char dscpname[100];
 	uint8_t rawDscp;
 
-	// Discriminate dscp enums (cs0, cs1 etc.) and numbers
+	/* Discriminate dscp enums (cs0, cs1 etc.) and numbers */
 	bool isANumber = true;
 	for (int i = 0; i < (int)strlen(dscp); i++) {
-		// Letters are not numbers
-		if (!isdigit(dscp[i])) isANumber = false;
+		/* Letters are not numbers */
+		if (!isdigit(dscp[i]))
+			isANumber = false;
 
-		// Lowercase the dscp enum (if needed)
-		if (isupper(dscp[i])) dscpname[i] = tolower(dscp[i]);
-		else dscpname[i] = dscp[i];
+		/* Lowercase the dscp enum (if needed) */
+		if (isupper(dscp[i]))
+			dscpname[i] = tolower(dscp[i]);
+		else
+			dscpname[i] = dscp[i];
 	}
 	dscpname[strlen(dscp)] = '\0';
 
 	if (isANumber) {
-		// dscp passed is a regular number
+		/* dscp passed is a regular number */
 		long dscpAsNum = strtol(dscp, NULL, 0);
 
 		if (dscpAsNum > PBR_DSFIELD_DSCP >> 2) {
-			// Refuse to install on overflow
+			/* Refuse to install on overflow */
 			vty_out(vty, "dscp (%s) must be less than 64\n", dscp);
 			return CMD_WARNING_CONFIG_FAILED;
 		}
 		rawDscp = dscpAsNum;
 	} else {
-		// check dscp if it is an enum like cs0
+		/* check dscp if it is an enum like cs0 */
 		rawDscp = pbr_map_decode_dscp_enum(dscpname);
 		if (rawDscp > PBR_DSFIELD_DSCP) {
 			vty_out(vty, "Invalid dscp value: %s\n", dscpname);
@@ -228,7 +232,7 @@ DEFPY(pbr_map_match_dscp, pbr_map_match_dscp_cmd,
 		if (((pbrms->dsfield & PBR_DSFIELD_DSCP) >> 2) == rawDscp)
 			return CMD_SUCCESS;
 
-		// Set the DSCP bits of the DSField
+		/* Set the DSCP bits of the DSField */
 		pbrms->dsfield =
 			(pbrms->dsfield & ~PBR_DSFIELD_DSCP) | (rawDscp << 2);
 	} else {
@@ -253,7 +257,7 @@ DEFPY(pbr_map_match_ecn, pbr_map_match_ecn_cmd,
 		if ((pbrms->dsfield & PBR_DSFIELD_ECN) == ecn)
 			return CMD_SUCCESS;
 
-		// Set the ECN bits of the DSField
+		/* Set the ECN bits of the DSField */
 		pbrms->dsfield = (pbrms->dsfield & ~PBR_DSFIELD_ECN) | ecn;
 	} else {
 		pbrms->dsfield &= ~PBR_DSFIELD_ECN;
@@ -717,6 +721,67 @@ static void vty_show_pbrms(struct vty *vty,
 	}
 }
 
+static void vty_json_pbrms(json_object *j, struct vty *vty,
+			   const struct pbr_map_sequence *pbrms)
+{
+	json_object *jpbrm, *nexthop_group;
+	char *nhg_name = pbrms->nhgrp_name ? pbrms->nhgrp_name
+					   : pbrms->internal_nhg_name;
+	char buf[PREFIX_STRLEN];
+	char rbuf[64];
+
+	jpbrm = json_object_new_object();
+
+	json_object_int_add(jpbrm, "id", pbrms->unique);
+
+	if (pbrms->reason)
+		pbr_map_reason_string(pbrms->reason, rbuf, sizeof(rbuf));
+
+	json_object_int_add(jpbrm, "sequenceNumber", pbrms->seqno);
+	json_object_int_add(jpbrm, "ruleNumber", pbrms->ruleno);
+	json_object_boolean_add(jpbrm, "vrfUnchanged", pbrms->vrf_unchanged);
+	json_object_boolean_add(jpbrm, "installed",
+				pbr_nht_get_installed(nhg_name));
+	json_object_string_add(jpbrm, "installedReason",
+			       pbrms->reason ? rbuf : "Valid");
+
+	if (nhg_name) {
+		nexthop_group = json_object_new_object();
+
+		json_object_int_add(nexthop_group, "tableId",
+				    pbr_nht_get_table(nhg_name));
+		json_object_string_add(nexthop_group, "name", nhg_name);
+		json_object_boolean_add(nexthop_group, "installed",
+					pbr_nht_get_installed(nhg_name));
+		json_object_int_add(nexthop_group, "installedInternally",
+				    pbrms->nhs_installed);
+
+		json_object_object_add(jpbrm, "nexthopGroup", nexthop_group);
+	}
+
+	if (pbrms->vrf_lookup)
+		json_object_string_add(jpbrm, "vrfName", pbrms->vrf_name);
+
+	if (pbrms->src)
+		json_object_string_add(
+			jpbrm, "matchSrc",
+			prefix2str(pbrms->src, buf, sizeof(buf)));
+	if (pbrms->dst)
+		json_object_string_add(
+			jpbrm, "matchDst",
+			prefix2str(pbrms->dst, buf, sizeof(buf)));
+	if (pbrms->mark)
+		json_object_int_add(jpbrm, "matchMark", pbrms->mark);
+	if (pbrms->dsfield & PBR_DSFIELD_DSCP)
+		json_object_int_add(jpbrm, "matchDscp",
+				    (pbrms->dsfield & PBR_DSFIELD_DSCP) >> 2);
+	if (pbrms->dsfield & PBR_DSFIELD_ECN)
+		json_object_int_add(jpbrm, "matchEcn",
+				    pbrms->dsfield & PBR_DSFIELD_ECN);
+
+	json_object_array_add(j, jpbrm);
+}
+
 static void vty_show_pbr_map(struct vty *vty, const struct pbr_map *pbrm,
 			     bool detail)
 {
@@ -730,54 +795,121 @@ static void vty_show_pbr_map(struct vty *vty, const struct pbr_map *pbrm,
 		vty_show_pbrms(vty, pbrms, detail);
 }
 
+static void vty_json_pbr_map(json_object *j, struct vty *vty,
+			     const struct pbr_map *pbrm)
+{
+	struct pbr_map_sequence *pbrms;
+	struct listnode *node;
+	json_object *jpbrms;
+
+	json_object_string_add(j, "name", pbrm->name);
+	json_object_boolean_add(j, "valid", pbrm->valid);
+
+	jpbrms = json_object_new_array();
+
+	for (ALL_LIST_ELEMENTS_RO(pbrm->seqnumbers, node, pbrms))
+		vty_json_pbrms(jpbrms, vty, pbrms);
+
+	json_object_object_add(j, "policies", jpbrms);
+}
+
 DEFPY (show_pbr_map,
 	show_pbr_map_cmd,
-	"show pbr map [NAME$name] [detail$detail]",
+	"show pbr map [NAME$name] [detail$detail|json$json]",
 	SHOW_STR
 	PBR_STR
 	"PBR Map\n"
 	"PBR Map Name\n"
-	"Detailed information\n")
+	"Detailed information\n"
+	JSON_STR)
 {
 	struct pbr_map *pbrm;
+	json_object *j = NULL;
+
+	if (json)
+		j = json_object_new_array();
 
 	RB_FOREACH (pbrm, pbr_map_entry_head, &pbr_maps) {
+		json_object *this_map = NULL;
 		if (name && strcmp(name, pbrm->name) != 0)
 			continue;
 
+		if (j)
+			this_map = json_object_new_object();
+
+		if (this_map) {
+			vty_json_pbr_map(this_map, vty, pbrm);
+
+			json_object_array_add(j, this_map);
+			continue;
+		}
+
 		vty_show_pbr_map(vty, pbrm, detail);
 	}
+
+	if (j) {
+		vty_out(vty, "%s\n",
+			json_object_to_json_string_ext(
+				j, JSON_C_TO_STRING_PRETTY));
+		json_object_free(j);
+	}
+
 	return CMD_SUCCESS;
 }
 
 DEFPY(show_pbr_nexthop_group,
       show_pbr_nexthop_group_cmd,
-      "show pbr nexthop-groups [WORD$word]",
+      "show pbr nexthop-groups [WORD$word] [json$json]",
       SHOW_STR
       PBR_STR
       "Nexthop Groups\n"
-      "Optional Name of the nexthop group\n")
+      "Optional Name of the nexthop group\n"
+      JSON_STR)
 {
-	pbr_nht_show_nexthop_group(vty, word);
+	json_object *j = NULL;
+
+	if (json)
+		j = json_object_new_array();
+
+	if (j) {
+		pbr_nht_json_nexthop_group(j, word);
+
+		vty_out(vty, "%s\n",
+			json_object_to_json_string_ext(
+				j, JSON_C_TO_STRING_PRETTY));
+
+		json_object_free(j);
+	} else
+		pbr_nht_show_nexthop_group(vty, word);
+
 
 	return CMD_SUCCESS;
 }
 
 DEFPY (show_pbr_interface,
 	show_pbr_interface_cmd,
-	"show pbr interface [NAME$name]",
+	"show pbr interface [NAME$name] [json$json]",
 	SHOW_STR
 	PBR_STR
 	"PBR Interface\n"
-	"PBR Interface Name\n")
+	"PBR Interface Name\n"
+	JSON_STR)
 {
 	struct interface *ifp;
 	struct vrf *vrf;
 	struct pbr_interface *pbr_ifp;
+	json_object *j = NULL;
+
+	if (json)
+		j = json_object_new_array();
 
 	RB_FOREACH(vrf, vrf_name_head, &vrfs_by_name) {
 		FOR_ALL_INTERFACES(vrf, ifp) {
 			struct pbr_map *pbrm;
+			json_object *this_iface = NULL;
+
+			if (j)
+				this_iface = json_object_new_object();
 
 			if (!ifp->info)
 				continue;
@@ -791,6 +923,21 @@ DEFPY (show_pbr_interface,
 				continue;
 
 			pbrm = pbrm_find(pbr_ifp->mapname);
+
+			if (this_iface) {
+				json_object_string_add(this_iface, "name",
+						       ifp->name);
+				json_object_int_add(this_iface, "index",
+						    ifp->ifindex);
+				json_object_string_add(this_iface, "policy",
+						       pbr_ifp->mapname);
+				json_object_boolean_add(this_iface, "valid",
+							pbrm);
+
+				json_object_array_add(j, this_iface);
+				continue;
+			}
+
 			vty_out(vty, "  %s(%d) with pbr-policy %s", ifp->name,
 				ifp->ifindex, pbr_ifp->mapname);
 			if (!pbrm)
@@ -799,12 +946,24 @@ DEFPY (show_pbr_interface,
 		}
 	}
 
+	if (j) {
+		vty_out(vty, "%s\n",
+			json_object_to_json_string_ext(
+				j, JSON_C_TO_STRING_PRETTY));
+		json_object_free(j);
+	}
+
 	return CMD_SUCCESS;
 }
 
 /* PBR debugging CLI ------------------------------------------------------- */
 
-static struct cmd_node debug_node = {DEBUG_NODE, "", 1};
+static struct cmd_node debug_node = {
+	.name = "debug",
+	.node = DEBUG_NODE,
+	.prompt = "",
+	.config_write = pbr_debug_config_write,
+};
 
 DEFPY(debug_pbr,
       debug_pbr_cmd,
@@ -852,8 +1011,13 @@ DEFUN_NOSH(show_debugging_pbr,
 /* ------------------------------------------------------------------------- */
 
 
+static int pbr_interface_config_write(struct vty *vty);
 static struct cmd_node interface_node = {
-	INTERFACE_NODE, "%s(config-if)# ", 1 /* vtysh ? yes */
+	.name = "interface",
+	.node = INTERFACE_NODE,
+	.parent_node = CONFIG_NODE,
+	.prompt = "%s(config-if)# ",
+	.config_write = pbr_interface_config_write,
 };
 
 static int pbr_interface_config_write(struct vty *vty)
@@ -881,8 +1045,15 @@ static int pbr_interface_config_write(struct vty *vty)
 	return 1;
 }
 
+static int pbr_vty_map_config_write(struct vty *vty);
 /* PBR map node structure. */
-static struct cmd_node pbr_map_node = {PBRMAP_NODE, "%s(config-pbr-map)# ", 1};
+static struct cmd_node pbr_map_node = {
+	.name = "pbr-map",
+	.node = PBRMAP_NODE,
+	.parent_node = CONFIG_NODE,
+	.prompt = "%s(config-pbr-map)# ",
+	.config_write = pbr_vty_map_config_write,
+};
 
 static int pbr_vty_map_config_write_sequence(struct vty *vty,
 					     struct pbr_map *pbrm,
@@ -968,15 +1139,13 @@ void pbr_vty_init(void)
 {
 	cmd_variable_handler_register(pbr_map_name);
 
-	install_node(&interface_node,
-		     pbr_interface_config_write);
+	install_node(&interface_node);
 	if_cmd_init();
 
-	install_node(&pbr_map_node,
-		     pbr_vty_map_config_write);
+	install_node(&pbr_map_node);
 
 	/* debug */
-	install_node(&debug_node, pbr_debug_config_write);
+	install_node(&debug_node);
 	install_element(VIEW_NODE, &debug_pbr_cmd);
 	install_element(CONFIG_NODE, &debug_pbr_cmd);
 	install_element(VIEW_NODE, &show_debugging_pbr_cmd);
