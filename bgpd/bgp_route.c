@@ -1630,6 +1630,33 @@ void bgp_attr_add_gshut_community(struct attr *attr)
 }
 
 
+/* Notify BGP Conditional advertisement scanner process. */
+void bgp_notify_conditional_adv_scanner(struct update_subgroup *subgrp)
+{
+	struct peer *temp_peer;
+	struct peer *peer = SUBGRP_PEER(subgrp);
+	struct listnode *temp_node, *temp_nnode = NULL;
+	afi_t afi = SUBGRP_AFI(subgrp);
+	safi_t safi = SUBGRP_SAFI(subgrp);
+	struct bgp *bgp = SUBGRP_INST(subgrp);
+	struct bgp_filter *filter = &peer->filter[afi][safi];
+
+	if (!ADVERTISE_MAP_NAME(filter))
+		return;
+
+	for (ALL_LIST_ELEMENTS(bgp->peer, temp_node, temp_nnode, temp_peer)) {
+		if (!CHECK_FLAG(peer->flags, PEER_FLAG_CONFIG_NODE))
+			continue;
+
+		if (peer != temp_peer)
+			continue;
+
+		temp_peer->advmap_table_change = true;
+		break;
+	}
+}
+
+
 static void subgroup_announce_reset_nhop(uint8_t family, struct attr *attr)
 {
 	if (family == AF_INET) {
@@ -2010,28 +2037,6 @@ bool subgroup_announce_check(struct bgp_dest *dest, struct bgp_path_info *pi,
 				peer->host, prefix2str(p, buf, sizeof(buf)));
 
 			bgp_attr_flush(attr);
-
-			/* TBD : Not sure if this is the correct way to fetch
-			 * peer from group.
-			 * Notify BGP Conditional advertisement scanner process.
-			 */
-			if (ADVERTISE_MAP_NAME(filter)
-			    || CONDITION_MAP_NAME(filter)) {
-				struct peer *temp_peer;
-				struct listnode *temp_node, *temp_nnode = NULL;
-
-				for (ALL_LIST_ELEMENTS(bgp->peer, temp_node,
-						       temp_nnode, temp_peer)) {
-					if (!CHECK_FLAG(peer->flags,
-							PEER_FLAG_CONFIG_NODE))
-						continue;
-					if (strcmp(peer->host, temp_peer->host)
-					    != 0)
-						continue;
-					temp_peer->advmap_table_change = true;
-					break;
-				}
-			}
 			return false;
 		}
 	}
