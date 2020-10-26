@@ -132,7 +132,7 @@ static void bgp_bfd_peer_sendmsg(struct peer *peer, int command)
 	 * keep bfd independent controlplane bit set to 1
 	 */
 	if (!CHECK_FLAG(peer->bgp->flags, BGP_FLAG_GRACEFUL_RESTART)
-	    && !CHECK_FLAG(peer->bgp->flags, BGP_FLAG_GR_PRESERVE_FWD)
+	    && !bgp_gr_is_forwarding_preserved(peer->bgp)
 	    && !CHECK_FLAG(bfd_info->flags, BFD_FLAG_BFD_CHECK_CONTROLPLANE))
 		SET_FLAG(bfd_info->flags, BFD_FLAG_BFD_CBIT_ON);
 

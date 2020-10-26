@@ -2176,7 +2176,9 @@ static int bgp_route_select_timer_expire(struct thread *thread)
 	XFREE(MTYPE_TMP, info);
 
 	/* Best path selection */
-	return bgp_best_path_select_defer(bgp, afi, safi);
+	bgp_best_path_select_defer(bgp, afi, safi);
+
+	return 0;
 }
 
 void bgp_best_selection(struct bgp *bgp, struct bgp_dest *dest,
@@ -2855,20 +2857,25 @@ static void bgp_process_main_one(struct bgp *bgp, struct bgp_dest *dest,
 }
 
 /* Process the routes with the flag BGP_NODE_SELECT_DEFER set */
-int bgp_best_path_select_defer(struct bgp *bgp, afi_t afi, safi_t safi)
+void bgp_best_path_select_defer(struct bgp *bgp, afi_t afi, safi_t safi)
 {
 	struct bgp_dest *dest;
 	int cnt = 0;
 	struct afi_safi_info *thread_info;
 	struct listnode *node = NULL, *nnode = NULL;
+	bool route_sync_pending = false;
+	int num_routes;
 
 	if (bgp->gr_info[afi][safi].t_route_select)
 		BGP_TIMER_OFF(bgp->gr_info[afi][safi].t_route_select);
 
-	if (BGP_DEBUG(update, UPDATE_OUT)) {
-		zlog_debug("%s: processing route for %s : cnt %d", __func__,
-			   get_afi_safi_str(afi, safi, false),
-			   listcount(bgp->gr_info[afi][safi].route_list));
+	num_routes = listcount(bgp->gr_info[afi][safi].route_list);
+	if (num_routes) {
+		if (BGP_DEBUG(graceful_restart, GRACEFUL_RESTART))
+			zlog_debug("%s: Performing deferred path selection for %s, #routes %d",
+				   bgp->name_pretty,
+				   get_afi_safi_str(afi, safi, false),
+				   num_routes);
 	}
 
 	/* Process the route list */
@@ -2883,34 +2890,47 @@ int bgp_best_path_select_defer(struct bgp *bgp, afi_t afi, safi_t safi)
 			UNSET_FLAG(dest->flags, BGP_NODE_SELECT_DEFER);
 			bgp_process_main_one(bgp, dest, afi, safi);
 			cnt++;
-			if (cnt >= BGP_MAX_BEST_ROUTE_SELECT)
-				break;
+			if (cnt >= BGP_MAX_BEST_ROUTE_SELECT && nnode) {
+				/* If there are more routes to be processed,
+				 * start the selection timer again
+				 */
+				thread_info = XMALLOC(MTYPE_TMP,
+						sizeof(struct afi_safi_info));
+				thread_info->afi = afi;
+				thread_info->safi = safi;
+				thread_info->bgp = bgp;
+				thread_add_timer(bm->master,
+					bgp_route_select_timer_expire,
+					thread_info, BGP_ROUTE_SELECT_DELAY,
+					&bgp->gr_info[afi][safi].
+							t_route_select);
+				return;
+			}
 		}
+
 		node = nnode;
 	}
 
-	/* Send EOR message when all routes are processed */
-	if (list_isempty(bgp->gr_info[afi][safi].route_list)) {
-		bgp_send_delayed_eor(bgp);
-		/* Send route processing complete message to RIB */
-		bgp_zebra_update(afi, safi, bgp->vrf_id,
-				 ZEBRA_CLIENT_ROUTE_UPDATE_COMPLETE);
-		return 0;
+	/* Send EOR message and inform path selection is complete to zebra */
+	bgp_send_delayed_eor(bgp);
+	bgp->gr_info[afi][safi].route_sync = true;
+	bgp_zebra_update(afi, safi, bgp->vrf_id,
+			 ZEBRA_CLIENT_ROUTE_UPDATE_COMPLETE);
+
+	/* If this instance is all done, check for GR completion overall */
+	for (afi = AFI_IP; afi < AFI_MAX; afi++) {
+		for (safi = SAFI_UNICAST; safi <= SAFI_MPLS_VPN; safi++) {
+			if (bgp->gr_info[afi][safi].af_enabled
+			    && !bgp->gr_info[afi][safi].route_sync) {
+				route_sync_pending = true;
+				break;
+			}
+		}
 	}
-
-	thread_info = XMALLOC(MTYPE_TMP, sizeof(struct afi_safi_info));
-
-	thread_info->afi = afi;
-	thread_info->safi = safi;
-	thread_info->bgp = bgp;
-
-	/* If there are more routes to be processed, start the
-	 * selection timer
-	 */
-	thread_add_timer(bm->master, bgp_route_select_timer_expire, thread_info,
-			BGP_ROUTE_SELECT_DELAY,
-			&bgp->gr_info[afi][safi].t_route_select);
-	return 0;
+	if (!route_sync_pending) {
+		bgp->gr_route_sync_pending = false;
+		bgp_update_gr_completion();
+	}
 }
 
 static wq_item_status bgp_process_wq(struct work_queue *wq, void *data)

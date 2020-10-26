@@ -490,6 +490,7 @@ int main(int argc, char **argv)
 
 	/* BGP master init. */
 	bgp_master_init(frr_init(), buffer_size);
+	bm->startup_time = monotime(NULL);
 	bm->port = bgp_port;
 	if (bgp_port == 0)
 		bgp_option_set(BGP_OPT_NO_LISTEN);
@@ -498,6 +499,7 @@ int main(int argc, char **argv)
 		bgp_option_set(BGP_OPT_NO_FIB);
 	if (no_zebra_flag)
 		bgp_option_set(BGP_OPT_NO_ZEBRA);
+	SET_FLAG(bm->flags, BM_FLAG_GRACEFUL_RESTART);
 	bgp_error_init();
 	/* Initializations. */
 	bgp_vrf_init();
