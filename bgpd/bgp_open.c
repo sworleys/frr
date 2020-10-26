@@ -465,16 +465,11 @@ static int bgp_capability_restart(struct peer *peer,
 	UNSET_FLAG(restart_flag_time, 0xF000);
 	peer->v_gr_restart = restart_flag_time;
 
-	if (bgp_debug_neighbor_events(peer)) {
-		zlog_debug("%s OPEN has Graceful Restart capability",
-			   peer->host);
-		zlog_debug("%s Peer has%srestarted. Restart Time : %d",
-			   peer->host,
+	if (bgp_debug_neighbor_events(peer))
+		zlog_debug("%s OPEN has GR capability, Restart time %d R-bit %s",
+			   peer->host, peer->v_gr_restart,
 			   CHECK_FLAG(peer->cap, PEER_CAP_RESTART_BIT_RCV)
-				   ? " "
-				   : " not ",
-			   peer->v_gr_restart);
-	}
+				   ? "SET": "NOT-SET");
 
 	while (stream_get_getp(s) + 4 <= end) {
 		afi_t afi;
@@ -499,13 +494,10 @@ static int bgp_capability_restart(struct peer *peer,
 		} else {
 			if (bgp_debug_neighbor_events(peer))
 				zlog_debug(
-					"%s Address family %s is%spreserved",
-					peer->host, get_afi_safi_str(afi, safi, false),
-					CHECK_FLAG(
-						peer->af_cap[afi][safi],
-						PEER_CAP_RESTART_AF_PRESERVE_RCV)
-						? " "
-						: " not ");
+					"... F-bit %s for %s",
+					CHECK_FLAG(flag, RESTART_F_BIT)
+						? "SET" : "NOT-SET",
+					get_afi_safi_str(afi, safi, false));
 
 			SET_FLAG(peer->af_cap[afi][safi],
 				 PEER_CAP_RESTART_AF_RCV);
