@@ -679,7 +679,7 @@ static int bgp_graceful_deferral_timer_expire(struct thread *thread)
 	XFREE(MTYPE_TMP, info);
 
 	/* Best path selection */
-	bgp_best_path_select_defer(bgp, afi, safi);
+	bgp_do_deferred_path_selection(bgp, afi, safi);
 
 	return 0;
 }
@@ -1098,7 +1098,7 @@ void bgp_gr_check_path_select(struct bgp *bgp,
 		gr_info = &(bgp->gr_info[afi][safi]);
 		BGP_TIMER_OFF(gr_info->t_select_deferral);
 		gr_info->select_defer_over = true;
-		bgp_best_path_select_defer(bgp, afi, safi);
+		bgp_do_deferred_path_selection(bgp, afi, safi);
 	}
 }
 
