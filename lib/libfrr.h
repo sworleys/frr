@@ -70,6 +70,8 @@ struct frr_daemon_info {
 	bool dryrun;
 	bool daemon_mode;
 	bool terminal;
+	bool graceful_restart;
+	int gr_cleanup_time;
 	enum frr_cli_mode cli_mode;
 
 	struct thread *read_in;

@@ -3512,6 +3512,20 @@ DEFUN (show_zebra,
        ZEBRA_STR)
 {
 	struct vrf *vrf;
+	char timebuf[MONOTIME_STRLEN];
+
+	time_to_string(zrouter.startup_time, timebuf);
+	vty_out(vty, "Zebra started%s at time %s",
+		zrouter.graceful_restart ? " gracefully" : "",
+		timebuf);
+
+	if (zrouter.t_rib_sweep)
+		vty_out(vty, "Zebra RIB sweep timer running, remaining time %lds\n",
+			thread_timer_remain_second(zrouter.t_rib_sweep));
+	else {
+		time_to_string(zrouter.rib_sweep_time, timebuf);
+		vty_out(vty, "Zebra RIB sweep happened at %s", timebuf);
+	}
 
 	vty_out(vty,
 		"                            Route      Route      Neighbor   LSP        LSP\n");

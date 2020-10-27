@@ -106,6 +106,7 @@ static const struct option lo_always[] = {
 	{"module", no_argument, NULL, 'M'},
 	{"profile", required_argument, NULL, 'F'},
 	{"pathspace", required_argument, NULL, 'N'},
+	{"graceful_restart", optional_argument, NULL, 'K'},
 	{"vty_socket", required_argument, NULL, OPTION_VTYSOCK},
 	{"moduledir", required_argument, NULL, OPTION_MODULEDIR},
 	{"log", required_argument, NULL, OPTION_LOG},
@@ -114,13 +115,14 @@ static const struct option lo_always[] = {
 	{"command-log-always", no_argument, NULL, OPTION_LOGGING},
 	{NULL}};
 static const struct optspec os_always = {
-	"hvdM:F:N:",
+	"hvdM:F:N:K::",
 	"  -h, --help         Display this help and exit\n"
 	"  -v, --version      Print program version\n"
 	"  -d, --daemon       Runs in daemon mode\n"
 	"  -M, --module       Load specified module\n"
 	"  -F, --profile      Use specified configuration profile\n"
 	"  -N, --pathspace    Insert prefix into config & socket paths\n"
+	"  -K, --graceful_restart   FRR starting in Graceful Restart mode, with optional route-cleanup timer\n"
 	"      --vty_socket   Override vty socket path\n"
 	"      --moduledir    Override modules directory\n"
 	"      --log          Set Logging to stdout, syslog, or file:<name>\n"
@@ -332,6 +334,8 @@ void frr_preinit(struct frr_daemon_info *daemon, int argc, char **argv)
 	strlcpy(frr_protonameinst, di->logname, sizeof(frr_protonameinst));
 
 	di->cli_mode = FRR_CLI_CLASSIC;
+	di->graceful_restart = false;
+	di->gr_cleanup_time = 0;
 }
 
 void frr_opt_add(const char *optstr, const struct option *longopts,
@@ -461,6 +465,11 @@ static int frr_opt(int opt)
 		di->db_file = optarg;
 		break;
 #endif
+	case 'K':
+		di->graceful_restart = true;
+		if (optarg)
+			di->gr_cleanup_time = atoi(optarg);
+ 		break;
 	case 'C':
 		if (di->flags & FRR_NO_CFG_PID_DRY)
 			return 1;

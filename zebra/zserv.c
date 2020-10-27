@@ -1091,6 +1091,11 @@ static void zebra_show_client_detail(struct vty *vty, struct zserv *client)
 			client->local_es_evi_del_cnt);
 
 	TAILQ_FOREACH (info, &client->gr_info_queue, gr_info) {
+		afi_t afi;
+		safi_t safi;
+		bool route_sync_done = true;
+		char timebuf[MONOTIME_STRLEN];
+
 		vty_out(vty, "VRF : %s\n", vrf_id_to_name(info->vrf_id));
 		vty_out(vty, "Capabilities : ");
 		switch (info->capabilities) {
@@ -1103,6 +1108,25 @@ static void zebra_show_client_detail(struct vty *vty, struct zserv *client)
 		case ZEBRA_CLIENT_RIB_STALE_TIME:
 			vty_out(vty, "None\n");
 			break;
+		}
+		for (afi = AFI_IP; afi < AFI_MAX; afi++) {
+			for (safi = SAFI_UNICAST;
+			     safi <= SAFI_MPLS_VPN; safi++) {
+				if (info->af_enabled[afi][safi]) {
+					if (info->route_sync[afi][safi])
+						vty_out(vty, "AFI/SAFI %d/%d enabled, route sync DONE\n",
+							afi, safi);
+					else {
+						vty_out(vty, "AFI/SAFI %d/%d enabled, route sync NOT DONE\n",
+							afi, safi);
+						route_sync_done = false;
+					}
+				}
+			}
+		}
+		if (route_sync_done) {
+			time_to_string(info->route_sync_done_time, timebuf);
+			vty_out(vty, "Route sync finished at %s", timebuf);
 		}
 	}
 

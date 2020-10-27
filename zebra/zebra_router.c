@@ -254,6 +254,7 @@ void zebra_router_terminate(void)
 	hash_free(zrouter.ipset_entry_hash);
 	hash_clean(zrouter.iptable_hash, zebra_pbr_iptable_free);
 	hash_free(zrouter.iptable_hash);
+	THREAD_OFF(zrouter.t_rib_sweep);
 }
 
 void zebra_router_init(void)
