@@ -266,11 +266,10 @@ enum bgp_instance_type {
 	BGP_INSTANCE_TYPE_VIEW
 };
 
-#define BGP_SEND_EOR(bgp, afi, safi)                                           \
-	(!CHECK_FLAG(bgp->flags, BGP_FLAG_GR_DISABLE_EOR)                      \
-	 && ((bgp->gr_info[afi][safi].t_select_deferral == NULL)               \
-	     || (bgp->gr_info[afi][safi].eor_required                          \
-		 == bgp->gr_info[afi][safi].eor_received)))
+#define BGP_SEND_EOR(bgp, afi, safi)                                   \
+	(!CHECK_FLAG(bgp->flags, BGP_FLAG_GR_DISABLE_EOR)              \
+	 && (!bgp_in_graceful_restart() ||                             \
+	    bgp->gr_info[afi][safi].select_defer_over))
 
 /* BGP GR Global ds */
 
@@ -279,10 +278,6 @@ enum bgp_instance_type {
 
 /* Graceful restart selection deferral timer info */
 struct graceful_restart_info {
-	/* Count of EOR message expected */
-	uint32_t eor_required;
-	/* Count of EOR received */
-	uint32_t eor_received;
 	/* Deferral Timer */
 	struct thread *t_select_deferral;
 	/* Route list */
@@ -293,6 +288,7 @@ struct graceful_restart_info {
 	bool af_enabled;
 	/* Route update completed */
 	bool route_sync;
+	bool select_defer_over;
 };
 
 enum global_mode {
@@ -1243,6 +1239,7 @@ struct peer {
 #define PEER_STATUS_PREFIX_LIMIT      (1 << 3) /* exceed prefix-limit */
 #define PEER_STATUS_EOR_SEND          (1 << 4) /* end-of-rib send to peer */
 #define PEER_STATUS_EOR_RECEIVED      (1 << 5) /* end-of-rib received from peer */
+#define PEER_STATUS_GR_WAIT_EOR       (1 << 6) /* wait for EOR */
 
 	/* Configured timer values. */
 	_Atomic uint32_t holdtime;
