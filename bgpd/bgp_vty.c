@@ -115,6 +115,8 @@ FRR_CFG_DEFAULT_BOOL(BGP_EBGP_REQUIRES_POLICY,
 	{ .val_bool = true },
 )
 
+extern const char *bgp_global_gr_mode_str[];
+
 DEFINE_HOOK(bgp_inst_config_write,
 		(struct bgp *bgp, struct vty *vty),
 		(bgp, vty))
@@ -8767,13 +8769,30 @@ DEFUN (show_bgp_views,
 	return CMD_SUCCESS;
 }
 
+static inline void calc_peers_cfgd_estbd(struct bgp *bgp, int *peers_cfgd,
+					 int *peers_estbd)
+{
+	struct peer *peer;
+	struct listnode *node, *nnode;
+
+	*peers_cfgd = *peers_estbd = 0;
+	for (ALL_LIST_ELEMENTS(bgp->peer, node, nnode, peer)) {
+		if (!CHECK_FLAG(peer->flags, PEER_FLAG_CONFIG_NODE))
+			continue;
+		(*peers_cfgd)++;
+		if (peer->status == Established)
+			(*peers_estbd)++;
+	}
+}
+
 DEFUN (show_bgp_vrfs,
        show_bgp_vrfs_cmd,
-       "show [ip] bgp vrfs [json]",
+       "show [ip] bgp vrfs [VRFNAME] [json]",
        SHOW_STR
        IP_STR
        BGP_STR
        "Show BGP VRFs\n"
+       "Specific VRF name\n"
        JSON_STR)
 {
 	char buf[ETHER_ADDR_STRLEN];
@@ -8784,6 +8803,89 @@ DEFUN (show_bgp_vrfs,
 	json_object *json = NULL;
 	json_object *json_vrfs = NULL;
 	int count = 0;
+	char *name = NULL;
+	int max_args = 4;
+	int idx = 0;
+	bool specific_vrf = false;
+	int peers_cfg, peers_estb;
+
+	if (argv_find(argv, argc, "ip", &idx))
+		max_args = 5;
+
+	if (argc > max_args) {
+		vty_out(vty, "%% JSON option not yet supported for specific VRF\n");
+		return CMD_WARNING;
+	}
+
+	if (!uj) {
+		if (argc == max_args)
+			name = argv[argc-1]->arg;
+	}
+
+	if (name) {
+		if (strmatch(name, VRF_DEFAULT_NAME))
+			bgp = bgp_get_default();
+		else
+			bgp = bgp_lookup_by_name(name);
+		if (!bgp) {
+			vty_out(vty, "%% Specified BGP instance not found\n");
+			return CMD_WARNING;
+		}
+		specific_vrf = true;
+	}
+
+	if (specific_vrf) {
+
+		enum global_mode gr_mode = bgp_global_gr_mode_get(bgp);
+
+		vty_out(vty,
+			"BGP instance %s VRF id %d\n",
+			bgp->name_pretty,
+			bgp->vrf_id == VRF_UNKNOWN ? -1 : (int)bgp->vrf_id);
+		vty_out(vty, "Router Id %s\n",
+			inet_ntoa(bgp->router_id));
+		calc_peers_cfgd_estbd(bgp, &peers_cfg, &peers_estb);
+		vty_out(vty, "Num Configured Peers %d, Established %d\n",
+			peers_cfg, peers_estb);
+		vty_out(vty, "Global graceful restart mode is %s\n",
+			bgp_global_gr_mode_str[gr_mode]);
+
+		if (bgp->l3vni) {
+			vty_out(vty,
+				"L3VNI %u, L3VNI-SVI %s, Router MAC %s\n",
+				bgp->l3vni,
+				ifindex2ifname(bgp->l3vni_svi_ifindex,
+					       bgp->vrf_id),
+				prefix_mac2str(&bgp->rmac, buf, sizeof(buf)));
+		}
+
+		if (CHECK_FLAG(bm->flags, BM_FLAG_GRACEFUL_RESTART)) {
+			afi_t afi;
+			safi_t safi = SAFI_UNICAST;
+			struct graceful_restart_info *gr_info;
+
+			for (afi = AFI_IP; afi <= AFI_IP6; afi++) {
+				vty_out(vty, "For address-family %s:\n",
+					get_afi_safi_str(afi, safi, false));
+				gr_info = &(bgp->gr_info[afi][safi]);
+				vty_out(vty,
+					"  GR enabled %s Path Selection Deferral %s\n",
+					gr_info->af_enabled ? "YES" : "NO",
+					gr_info->select_defer_over ?
+						"DONE" : "IN-PROGRESS");
+				if (gr_info->t_select_deferral)
+					vty_out(vty,
+						"  Path selection deferral timer running, remaining time %lds\n",
+						thread_timer_remain_second(
+						gr_info->t_select_deferral));
+			}
+			vty_out(vty, "Route sync with zebra %s\n",
+				bgp->gr_route_sync_pending ?
+				"pending" : "completed");
+		}
+
+		return CMD_SUCCESS;
+	}
 
 	if (uj) {
 		json = json_object_new_object();
@@ -8792,9 +8894,6 @@ DEFUN (show_bgp_vrfs,
 
 	for (ALL_LIST_ELEMENTS_RO(inst, node, bgp)) {
 		const char *name, *type;
-		struct peer *peer;
-		struct listnode *node2, *nnode2;
-		int peers_cfg, peers_estb;
 		json_object *json_vrf = NULL;
 
 		/* Skip Views. */
@@ -8811,18 +8910,11 @@ DEFUN (show_bgp_vrfs,
 				"L3-VNI", "RouterMAC", "Interface");
 		}
 
-		peers_cfg = peers_estb = 0;
+		calc_peers_cfgd_estbd(bgp, &peers_cfg, &peers_estb);
+
 		if (uj)
 			json_vrf = json_object_new_object();
 
-
-		for (ALL_LIST_ELEMENTS(bgp->peer, node2, nnode2, peer)) {
-			if (!CHECK_FLAG(peer->flags, PEER_FLAG_CONFIG_NODE))
-				continue;
-			peers_cfg++;
-			if (peer->status == Established)
-				peers_estb++;
-		}
 
 		if (bgp->inst_type == BGP_INSTANCE_TYPE_DEFAULT) {
 			name = VRF_DEFAULT_NAME;
@@ -8884,6 +8976,33 @@ DEFUN (show_bgp_vrfs,
 				"\nTotal number of VRFs (including default): %d\n",
 				count);
 	}
+
+	return CMD_SUCCESS;
+}
+
+DEFUN (show_bgp_router,
+       show_bgp_router_cmd,
+       "show bgp router",
+       SHOW_STR
+       BGP_STR
+       "Overall BGP information\n")
+{
+	char timebuf[BGP_UPTIME_LEN];
+
+	time_to_string(bm->startup_time, timebuf);
+	if (CHECK_FLAG(bm->flags, BM_FLAG_GRACEFUL_RESTART)) {
+		vty_out(vty, "BGP started gracefully at %s", timebuf);
+		if (CHECK_FLAG(bm->flags, BM_FLAG_GR_COMPLETE)) {
+			time_to_string(bm->gr_completion_time, timebuf);
+			vty_out(vty,
+				"Graceful restart completed at %s", timebuf);
+		} else
+			vty_out(vty, "Graceful restart is in progress\n");
+	} else
+		vty_out(vty, "BGP started at %s", timebuf);
+
+	vty_out(vty, "Number of BGP instances (including default): %d\n",
+		listcount(bm->bgp));
 
 	return CMD_SUCCESS;
 }
@@ -17418,6 +17537,9 @@ void bgp_vty_init(void)
 
 	/* "show [ip] bgp vrfs" commands. */
 	install_element(VIEW_NODE, &show_bgp_vrfs_cmd);
+
+	/* BGP-wide show */
+	install_element(VIEW_NODE, &show_bgp_router_cmd);
 
 	/* Community-list. */
 	community_list_vty();
