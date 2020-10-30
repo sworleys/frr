@@ -14,6 +14,7 @@ WatchdogSec=60s
 RestartSec=5
 Restart=on-abnormal
 LimitNOFILE=1024
+LimitCORE=536870912
 ExecStart=/usr/lib/frr/frrinit.sh start
 ExecStop=/usr/lib/frr/frrinit.sh stop
 ExecStopPost=/usr/lib/cumulus/on-failure-run-support %N
