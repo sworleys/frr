@@ -15311,6 +15311,7 @@ static void bgp_config_write_peer_global(struct vty *vty, struct bgp *bgp,
 		vty_out(vty, " neighbor %s sender-as-path-loop-detection\n",
 			addr);
 
+	if (!CHECK_FLAG(peer->sflags, PEER_STATUS_GROUP)) {
 	if (!CHECK_FLAG(peer->peer_gr_new_status_flag,
 			PEER_GRACEFUL_RESTART_NEW_STATE_INHERIT)) {
 
@@ -15332,6 +15333,7 @@ static void bgp_config_write_peer_global(struct vty *vty, struct bgp *bgp,
 			vty_out(vty, " neighbor %s graceful-restart-disable\n",
 				addr);
 		}
+	}
 	}
 }
 
