@@ -64,8 +64,8 @@ struct bgp;
 				vty, p, use_json, json);	\
 		bgp_show_neighbor_graceful_restart_time( \
 				vty, p, use_json, json);	\
-		bgp_show_neighbor_graceful_restart_capability_per_afi_safi(\
-						vty, p, use_json, json); \
+		bgp_show_peer_gr_info_afi_safi(\
+				vty, p, use_json, json); \
 	} while (0)
 
 #define VTY_BGP_GR_DEFINE_LOOP_VARIABLE                                        \
@@ -142,6 +142,11 @@ struct bgp;
 				json_endofrib_status,                          \
 				"endOfRibSentAfterUpdate");                    \
 	} while (0)
+
+
+/* Peer show flags */
+/* Value of 0 means show all information */
+#define VTY_BGP_PEER_SHOW_GR_INFO  (1 << 0)
 
 extern void bgp_vty_init(void);
 extern const char *get_afi_safi_str(afi_t afi, safi_t safi, bool for_json);
