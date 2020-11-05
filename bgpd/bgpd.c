@@ -3441,11 +3441,20 @@ int bgp_delete(struct bgp *bgp)
 
 	/* Delete the graceful restart info */
 	FOREACH_AFI_SAFI (afi, safi) {
+		struct thread *t;
+
 		gr_info = &bgp->gr_info[afi][safi];
 		if (!gr_info)
 			continue;
 
 		BGP_TIMER_OFF(gr_info->t_select_deferral);
+
+		t = gr_info->t_route_select;
+		if (t) {
+			void *info = THREAD_ARG(t);
+
+			XFREE(MTYPE_TMP, info);
+		}
 		BGP_TIMER_OFF(gr_info->t_route_select);
 		if (gr_info->route_list)
 			list_delete(&gr_info->route_list);

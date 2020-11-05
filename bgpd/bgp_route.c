@@ -2884,8 +2884,13 @@ void bgp_do_deferred_path_selection(struct bgp *bgp, afi_t afi, safi_t safi)
 	bool route_sync_pending = false;
 	int num_routes;
 
-	if (bgp->gr_info[afi][safi].t_route_select)
+	if (bgp->gr_info[afi][safi].t_route_select) {
+		struct thread *t = bgp->gr_info[afi][safi].t_route_select;
+
+		thread_info = THREAD_ARG(t);
+		XFREE(MTYPE_TMP, thread_info);
 		BGP_TIMER_OFF(bgp->gr_info[afi][safi].t_route_select);
+	}
 
 	num_routes = listcount(bgp->gr_info[afi][safi].route_list);
 	if (num_routes) {
