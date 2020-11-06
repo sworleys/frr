@@ -164,7 +164,8 @@ static int route_notify_owner(ZAPI_CALLBACK_ARGS)
 	uint32_t table_id;
 	char buf[PREFIX_STRLEN];
 
-	if (!zapi_route_notify_decode(zclient->ibuf, &p, &table_id, &note))
+	if (!zapi_route_notify_decode(zclient->ibuf, &p, &table_id, &note,
+				      NULL, NULL))
 		return -1;
 
 	prefix2str(&p, buf, sizeof(buf));
