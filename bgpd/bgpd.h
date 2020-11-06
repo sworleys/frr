@@ -1286,6 +1286,8 @@ struct peer {
 #define PEER_THREAD_WRITES_ON         (1 << 0)
 #define PEER_THREAD_READS_ON          (1 << 1)
 #define PEER_THREAD_KEEPALIVES_ON     (1 << 2)
+#define PEER_THREAD_SUBGRP_ADV_DELAY  (1U << 3)
+
 	/* workqueues */
 	struct work_queue *clear_node_queue;
 
@@ -1504,8 +1506,8 @@ DECLARE_QOBJ_TYPE(peer)
 	(CHECK_FLAG((P)->flags, PEER_FLAG_SHUTDOWN)                            \
 	 || CHECK_FLAG((P)->sflags, PEER_STATUS_PREFIX_OVERFLOW))
 
-#define PEER_ROUTE_ADV_DELAY(peer)  \
-	CHECK_FLAG(peer->thread_flags, PEER_THREAD_SUBGRP_ADV_DELAY)
+#define PEER_ROUTE_ADV_DELAY(peer)					       \
+	(CHECK_FLAG(peer->thread_flags, PEER_THREAD_SUBGRP_ADV_DELAY))
 
 #define PEER_PASSWORD_MINLEN	(1)
 #define PEER_PASSWORD_MAXLEN	(80)
