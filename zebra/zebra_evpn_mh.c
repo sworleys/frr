@@ -562,7 +562,7 @@ static void zebra_evpn_acc_vl_free(struct zebra_evpn_access_bd *acc_bd)
 	if (IS_ZEBRA_DEBUG_EVPN_MH_ES)
 		zlog_debug("access vlan %d del", acc_bd->vid);
 
-	if (acc_bd->vlan_zif && acc_bd->zevpn)
+	if (acc_bd->vlan_zif && acc_bd->zevpn && acc_bd->zevpn->mac_table)
 		zebra_evpn_mac_svi_del(acc_bd->vlan_zif->ifp, acc_bd->zevpn);
 
 	/* cleanup resources maintained against the ES */
@@ -632,7 +632,7 @@ void zebra_evpn_acc_bd_svi_set(struct zebra_if *vlan_zif,
 		if (IS_ZEBRA_DEBUG_EVPN_MH_ES)
 			zlog_debug("vlan %d SVI clear", vid);
 		acc_bd->vlan_zif = NULL;
-		if (acc_bd->zevpn)
+		if (acc_bd->zevpn && acc_bd->zevpn->mac_table)
 			zebra_evpn_mac_svi_del(vlan_zif->ifp, acc_bd->zevpn);
 	}
 }
@@ -671,7 +671,7 @@ static void zebra_evpn_acc_bd_evpn_set(struct zebra_evpn_access_bd *acc_bd,
 		if (zevpn)
 			zebra_evpn_mac_svi_add(acc_bd->vlan_zif->ifp,
 					       acc_bd->zevpn);
-		else if (old_zevpn)
+		else if (old_zevpn && old_zevpn->mac_table)
 			zebra_evpn_mac_svi_del(acc_bd->vlan_zif->ifp,
 					       old_zevpn);
 	}
