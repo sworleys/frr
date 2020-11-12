@@ -3741,6 +3741,16 @@ static int zclient_read(struct thread *thread)
 			(*zclient->opaque_unregister_handler)(command, zclient,
 							    length, vrf_id);
 		break;
+	case ZEBRA_MAINTENANCE_MODE:
+		if (zclient->handle_maint_mode)
+			(*zclient->handle_maint_mode)(command, zclient,
+						      length, vrf_id);
+		break;
+	case ZEBRA_COMMAND_ACK:
+		if (zclient->handle_cmd_ack)
+			(*zclient->handle_cmd_ack)(command, zclient,
+						   length, vrf_id);
+		break;
 	default:
 		break;
 	}

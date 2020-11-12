@@ -454,7 +454,10 @@ static const struct zebra_desc_table command_types[] = {
 	DESC_ENTRY(ZEBRA_NHG_NOTIFY_OWNER),
 	DESC_ENTRY(ZEBRA_EVPN_REMOTE_NH_ADD),
 	DESC_ENTRY(ZEBRA_EVPN_REMOTE_NH_DEL),
-	DESC_ENTRY(ZEBRA_ROUTE_NOTIFY_REQUEST)};
+	DESC_ENTRY(ZEBRA_ROUTE_NOTIFY_REQUEST),
+	DESC_ENTRY(ZEBRA_MAINTENANCE_MODE),
+	DESC_ENTRY(ZEBRA_COMMAND_ACK)
+};
 #undef DESC_ENTRY
 
 static const struct zebra_desc_table unknown = {0, "unknown", '?'};

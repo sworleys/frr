@@ -214,6 +214,8 @@ typedef enum {
 	ZEBRA_OPAQUE_REGISTER,
 	ZEBRA_OPAQUE_UNREGISTER,
 	ZEBRA_ROUTE_NOTIFY_REQUEST,
+	ZEBRA_MAINTENANCE_MODE,
+	ZEBRA_COMMAND_ACK,
 } zebra_message_types_t;
 
 enum zebra_error_types {
@@ -358,6 +360,8 @@ struct zclient {
 	int (*opaque_msg_handler)(ZAPI_CALLBACK_ARGS);
 	int (*opaque_register_handler)(ZAPI_CALLBACK_ARGS);
 	int (*opaque_unregister_handler)(ZAPI_CALLBACK_ARGS);
+	int (*handle_maint_mode)(ZAPI_CALLBACK_ARGS);
+	int (*handle_cmd_ack)(ZAPI_CALLBACK_ARGS);
 };
 
 /* Zebra API message flag. */

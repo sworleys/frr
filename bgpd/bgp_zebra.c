@@ -2923,6 +2923,33 @@ stream_failure:		/* for STREAM_GETX */
 	return;
 }
 
+static int bgp_zebra_handle_maint_mode(ZAPI_CALLBACK_ARGS)
+{
+	struct stream *s;
+	bool enter_maint;
+
+	s = zclient->ibuf;
+	enter_maint = stream_getc(s);
+
+	if (BGP_DEBUG(zebra, ZEBRA))
+		zlog_debug("Rx %s maintenance mode",
+			   enter_maint ? "Enter" : "Exit");
+
+	/* Process maintenance mode */
+	bgp_process_maintenance_mode(NULL, enter_maint);
+
+	/* Ack the command handling to zebra */
+	s = zclient->obuf;
+	stream_reset(s);
+
+	zclient_create_header(s, ZEBRA_COMMAND_ACK, vrf_id);
+	stream_putw(s, cmd);
+	stream_putc(s, enter_maint);
+	stream_putw_at(s, 0, stream_get_endp(s));
+
+	return zclient_send_message(zclient);
+}
+
 extern struct zebra_privs_t bgpd_privs;
 
 static int bgp_ifp_create(struct interface *ifp)
@@ -2983,6 +3010,7 @@ void bgp_zebra_init(struct thread_master *master, unsigned short instance)
 	zclient->ipset_entry_notify_owner = ipset_entry_notify_owner;
 	zclient->iptable_notify_owner = iptable_notify_owner;
 	zclient->route_notify_owner = bgp_zebra_route_notify_owner;
+	zclient->handle_maint_mode = bgp_zebra_handle_maint_mode;
 	zclient->instance = instance;
 }
 

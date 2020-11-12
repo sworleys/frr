@@ -812,6 +812,7 @@ static int bgp_peer_clear(struct peer *peer, afi_t afi, safi_t safi,
 }
 
 /* `clear ip bgp' functions. */
+/* Allow this to be invoked in non-vty context also. */
 static int bgp_clear(struct vty *vty, struct bgp *bgp, afi_t afi, safi_t safi,
 		     enum clear_sort sort, enum bgp_clear_type stype,
 		     const char *arg)
@@ -839,8 +840,11 @@ static int bgp_clear(struct vty *vty, struct bgp *bgp, afi_t afi, safi_t safi,
 			ret = bgp_peer_clear(peer, afi, safi, &nnode,
 							  stype);
 
-			if (ret < 0)
-				bgp_clear_vty_error(vty, peer, afi, safi, ret);
+			if (ret < 0) {
+				if (vty)
+					bgp_clear_vty_error(vty, peer,
+							afi, safi, ret);
+			}
 		}
 
 		if (gr_router_detected
@@ -869,19 +873,25 @@ static int bgp_clear(struct vty *vty, struct bgp *bgp, afi_t afi, safi_t safi,
 			if (!peer) {
 				peer = peer_lookup_by_hostname(bgp, arg);
 				if (!peer) {
-					vty_out(vty,
-						"Malformed address or name: %s\n",
-						arg);
-					return CMD_WARNING;
+					if (vty) {
+						vty_out(vty,
+							"Malformed address or name: %s\n",
+							arg);
+						return CMD_WARNING;
+					} else
+						return -1;
 				}
 			}
 		} else {
 			peer = peer_lookup(bgp, &su);
 			if (!peer) {
-				vty_out(vty,
-					"%%BGP: Unknown neighbor - \"%s\"\n",
-					arg);
-				return CMD_WARNING;
+				if (vty) {
+					vty_out(vty,
+						"%%BGP: Unknown neighbor - \"%s\"\n",
+						arg);
+					return CMD_WARNING;
+				} else
+					return -1;
 			}
 		}
 
@@ -895,8 +905,10 @@ static int bgp_clear(struct vty *vty, struct bgp *bgp, afi_t afi, safi_t safi,
 		if (ret == 1)
 			ret = BGP_ERR_AF_UNCONFIGURED;
 
-		if (ret < 0)
-			bgp_clear_vty_error(vty, peer, afi, safi, ret);
+		if (ret < 0) {
+			if (vty)
+				bgp_clear_vty_error(vty, peer, afi, safi, ret);
+		}
 
 		return CMD_SUCCESS;
 	}
@@ -907,23 +919,31 @@ static int bgp_clear(struct vty *vty, struct bgp *bgp, afi_t afi, safi_t safi,
 
 		group = peer_group_lookup(bgp, arg);
 		if (!group) {
-			vty_out(vty, "%%BGP: No such peer-group %s\n", arg);
-			return CMD_WARNING;
+			if (vty) {
+				vty_out(vty, "%%BGP: No such peer-group %s\n", arg);
+				return CMD_WARNING;
+			} else
+				return -1;
 		}
 
 		for (ALL_LIST_ELEMENTS(group->peer, node, nnode, peer)) {
 			ret = bgp_peer_clear(peer, afi, safi, &nnode, stype);
 
-			if (ret < 0)
-				bgp_clear_vty_error(vty, peer, afi, safi, ret);
-			else
+			if (ret < 0) {
+				if (vty)
+					bgp_clear_vty_error(vty, peer,
+							afi, safi, ret);
+			} else
 				found = true;
 		}
 
-		if (!found)
-			vty_out(vty,
-				"%%BGP: No %s peer belonging to peer-group %s is configured\n",
-				get_afi_safi_str(afi, safi, false), arg);
+		if (!found) {
+			if (vty)
+				vty_out(vty,
+					"%%BGP: No %s peer belonging to peer-group %s is configured\n",
+					get_afi_safi_str(afi, safi, false),
+					arg);
+		}
 
 		return CMD_SUCCESS;
 	}
@@ -941,9 +961,11 @@ static int bgp_clear(struct vty *vty, struct bgp *bgp, afi_t afi, safi_t safi,
 
 			ret = bgp_peer_clear(peer, afi, safi, &nnode, stype);
 
-			if (ret < 0)
-				bgp_clear_vty_error(vty, peer, afi, safi, ret);
-			else
+			if (ret < 0) {
+				if (vty)
+					bgp_clear_vty_error(vty, peer,
+							afi, safi, ret);
+			} else
 				found = true;
 		}
 
@@ -955,10 +977,12 @@ static int bgp_clear(struct vty *vty, struct bgp *bgp, afi_t afi, safi_t safi,
 			bgp_zebra_send_capabilities(bgp, true);
 		}
 
-		if (!found)
-			vty_out(vty,
-				"%%BGP: No external %s peer is configured\n",
-				get_afi_safi_str(afi, safi, false));
+		if (!found) {
+			if (vty)
+				vty_out(vty,
+					"%%BGP: No external %s peer is configured\n",
+					get_afi_safi_str(afi, safi, false));
+		}
 
 		return CMD_SUCCESS;
 	}
@@ -978,9 +1002,11 @@ static int bgp_clear(struct vty *vty, struct bgp *bgp, afi_t afi, safi_t safi,
 
 			ret = bgp_peer_clear(peer, afi, safi, &nnode, stype);
 
-			if (ret < 0)
-				bgp_clear_vty_error(vty, peer, afi, safi, ret);
-			else
+			if (ret < 0) {
+				if (vty)
+					bgp_clear_vty_error(vty, peer,
+							afi, safi, ret);
+			} else
 				found = true;
 		}
 
@@ -992,10 +1018,13 @@ static int bgp_clear(struct vty *vty, struct bgp *bgp, afi_t afi, safi_t safi,
 			bgp_zebra_send_capabilities(bgp, true);
 		}
 
-		if (!found)
-			vty_out(vty,
-				"%%BGP: No %s peer is configured with AS %s\n",
-				get_afi_safi_str(afi, safi, false), arg);
+		if (!found) {
+			if (vty)
+				vty_out(vty,
+					"%%BGP: No %s peer is configured with AS %s\n",
+					get_afi_safi_str(afi, safi, false),
+					arg);
+		}
 
 		return CMD_SUCCESS;
 	}
@@ -1003,6 +1032,9 @@ static int bgp_clear(struct vty *vty, struct bgp *bgp, afi_t afi, safi_t safi,
 	return CMD_SUCCESS;
 }
 
+/*
+ * Allow this to be invoked in non-vty context also.
+ */
 static int bgp_clear_vty(struct vty *vty, const char *name, afi_t afi,
 			 safi_t safi, enum clear_sort sort,
 			 enum bgp_clear_type stype, const char *arg)
@@ -1013,14 +1045,21 @@ static int bgp_clear_vty(struct vty *vty, const char *name, afi_t afi,
 	if (name) {
 		bgp = bgp_lookup_by_name(name);
 		if (bgp == NULL) {
-			vty_out(vty, "Can't find BGP instance %s\n", name);
-			return CMD_WARNING;
+			if (vty) {
+				vty_out(vty, "Can't find BGP instance %s\n",
+					name);
+				return CMD_WARNING;
+			} else
+				return -1;
 		}
 	} else {
 		bgp = bgp_get_default();
 		if (bgp == NULL) {
-			vty_out(vty, "No BGP process is configured\n");
-			return CMD_WARNING;
+			if (vty) {
+				vty_out(vty, "No BGP process is configured\n");
+				return CMD_WARNING;
+			} else
+				return -1;
 		}
 	}
 
@@ -2943,15 +2982,6 @@ DEFUN (no_bgp_graceful_restart_rib_stale_time,
 	return CMD_SUCCESS;
 }
 
-static inline void bgp_initiate_graceful_shut_unshut(struct vty *vty,
-						     struct bgp *bgp)
-{
-	bgp_static_redo_import_check(bgp);
-	bgp_redistribute_redo(bgp);
-	bgp_clear_star_soft_out(vty, bgp->name);
-	bgp_clear_star_soft_in(vty, bgp->name);
-}
-
 static int bgp_global_graceful_shutdown_config_vty(struct vty *vty)
 {
 	struct listnode *node, *nnode;
@@ -3004,6 +3034,14 @@ static int bgp_global_graceful_shutdown_deconfig_vty(struct vty *vty)
 		bgp_initiate_graceful_shut_unshut(vty, bgp);
 
 	return CMD_SUCCESS;
+}
+
+void bgp_initiate_graceful_shut_unshut(struct vty *vty, struct bgp *bgp)
+{
+	bgp_static_redo_import_check(bgp);
+	bgp_redistribute_redo(bgp);
+	bgp_clear_star_soft_out(vty, bgp->name);
+	bgp_clear_star_soft_in(vty, bgp->name);
 }
 
 /* "bgp graceful-shutdown" configuration */
@@ -8711,21 +8749,7 @@ DEFUN (set_bgp_maintenance_mode,
        BGP_STR
        "Maintenance Mode (isolation)\n")
 {
-	struct listnode *node, *nnode;
-	struct bgp *bgp;
-
-	if (CHECK_FLAG(bm->flags, BM_FLAG_MAINTENANCE_MODE))
-		return CMD_SUCCESS;
-
-	/* Set flag globally */
-	SET_FLAG(bm->flags, BM_FLAG_MAINTENANCE_MODE);
-
-	/* When we enter maintenance mode, the BGP action is to
-	 * initiate graceful shutdown.
-	 */
-	for (ALL_LIST_ELEMENTS(bm->bgp, node, nnode, bgp))
-		bgp_initiate_graceful_shut_unshut(vty, bgp);
-
+	bgp_process_maintenance_mode(vty, true);
 	return CMD_SUCCESS;
 }
 
@@ -8736,21 +8760,7 @@ DEFUN (clear_bgp_maintenance_mode,
        BGP_STR
        "Maintenance Mode (isolation)\n")
 {
-	struct listnode *node, *nnode;
-	struct bgp *bgp;
-
-	if (!CHECK_FLAG(bm->flags, BM_FLAG_MAINTENANCE_MODE))
-		return CMD_SUCCESS;
-
-	/* Set flag globally */
-	UNSET_FLAG(bm->flags, BM_FLAG_MAINTENANCE_MODE);
-
-	/* When we exit maintenance mode, the BGP action is to
-	 * stop graceful shutdown.
-	 */
-	for (ALL_LIST_ELEMENTS(bm->bgp, node, nnode, bgp))
-		bgp_initiate_graceful_shut_unshut(vty, bgp);
-
+	bgp_process_maintenance_mode(vty, false);
 	return CMD_SUCCESS;
 }
 
