@@ -1966,6 +1966,8 @@ static void vty_show_ip_route_summary(struct vty *vty,
 #define ZEBRA_ROUTE_TOTAL (ZEBRA_ROUTE_IBGP + 1)
 	uint32_t rib_cnt[ZEBRA_ROUTE_TOTAL + 1];
 	uint32_t fib_cnt[ZEBRA_ROUTE_TOTAL + 1];
+	uint32_t offload_cnt[ZEBRA_ROUTE_TOTAL + 1];
+	uint32_t trap_cnt[ZEBRA_ROUTE_TOTAL + 1];
 	uint32_t i;
 	uint32_t is_ibgp;
 	json_object *json_route_summary = NULL;
@@ -2000,6 +2002,20 @@ static void vty_show_ip_route_summary(struct vty *vty,
 				else
 					fib_cnt[re->type]++;
 			}
+
+			if (CHECK_FLAG(re->flags, ZEBRA_FLAG_TRAPPED)) {
+				if (is_ibgp)
+					trap_cnt[ZEBRA_ROUTE_IBGP]++;
+				else
+					trap_cnt[re->type]++;
+			}
+
+			if (CHECK_FLAG(re->flags, ZEBRA_FLAG_OFFLOADED)) {
+				if (is_ibgp)
+					offload_cnt[ZEBRA_ROUTE_IBGP]++;
+				else
+					offload_cnt[re->type]++;
+			}
 		}
 
 	if (!use_json)
@@ -2023,6 +2039,13 @@ static void vty_show_ip_route_summary(struct vty *vty,
 					json_object_int_add(
 						json_route_ebgp, "rib",
 						rib_cnt[ZEBRA_ROUTE_BGP]);
+					json_object_int_add(
+						json_route_ebgp, "fibOffLoaded",
+						offload_cnt[ZEBRA_ROUTE_BGP]);
+					json_object_int_add(
+						json_route_ebgp, "fibTrapped",
+						trap_cnt[ZEBRA_ROUTE_BGP]);
+
 					json_object_string_add(json_route_ebgp,
 							       "type", "ebgp");
 					json_object_array_add(json_route_routes,
@@ -2037,6 +2060,12 @@ static void vty_show_ip_route_summary(struct vty *vty,
 					json_object_int_add(
 						json_route_ibgp, "rib",
 						rib_cnt[ZEBRA_ROUTE_IBGP]);
+					json_object_int_add(
+						json_route_ibgp, "fibOffLoaded",
+						offload_cnt[ZEBRA_ROUTE_IBGP]);
+					json_object_int_add(
+						json_route_ibgp, "fibTrapped",
+						trap_cnt[ZEBRA_ROUTE_IBGP]);
 					json_object_string_add(json_route_ibgp,
 							       "type", "ibgp");
 					json_object_array_add(json_route_routes,
@@ -2060,6 +2089,13 @@ static void vty_show_ip_route_summary(struct vty *vty,
 							    "fib", fib_cnt[i]);
 					json_object_int_add(json_route_type,
 							    "rib", rib_cnt[i]);
+
+					json_object_int_add(json_route_type,
+							    "fibOffLoaded",
+							    offload_cnt[i]);
+					json_object_int_add(json_route_type,
+							    "fibTrapped",
+							    trap_cnt[i]);
 					json_object_string_add(
 						json_route_type, "type",
 						zebra_route_string(i));
