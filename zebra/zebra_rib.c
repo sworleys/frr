@@ -1911,10 +1911,19 @@ static void rib_process_result(struct zebra_dplane_ctx *ctx)
 			if (zebra_router_notify_on_ack())
 				zsend_route_notify_owner_ctx(ctx, ZAPI_ROUTE_INSTALLED);
 			else {
-				if (CHECK_FLAG(re->flags, ZEBRA_FLAG_OFFLOADED))
-					zsend_route_notify_owner_ctx(ctx, ZAPI_ROUTE_INSTALLED);
-				if (CHECK_FLAG(re->flags, ZEBRA_FLAG_OFFLOAD_FAILED))
-					zsend_route_notify_owner_ctx(ctx, ZAPI_ROUTE_FAIL_INSTALL);
+				if (re) {
+					if (CHECK_FLAG(re->flags,
+						       ZEBRA_FLAG_OFFLOADED))
+						zsend_route_notify_owner_ctx(
+							ctx,
+							ZAPI_ROUTE_INSTALLED);
+					if (CHECK_FLAG(
+						    re->flags,
+						    ZEBRA_FLAG_OFFLOAD_FAILED))
+						zsend_route_notify_owner_ctx(
+							ctx,
+							ZAPI_ROUTE_FAIL_INSTALL);
+				}
 			}
 		} else {
 			if (re) {

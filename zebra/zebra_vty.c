@@ -1975,6 +1975,8 @@ static void vty_show_ip_route_summary(struct vty *vty,
 
 	memset(&rib_cnt, 0, sizeof(rib_cnt));
 	memset(&fib_cnt, 0, sizeof(fib_cnt));
+	memset(&offload_cnt, 0, sizeof(offload_cnt));
+	memset(&trap_cnt, 0, sizeof(trap_cnt));
 
 	if (use_json) {
 		json_route_summary = json_object_new_object();
