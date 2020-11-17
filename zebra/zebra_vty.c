@@ -3589,7 +3589,7 @@ DEFUN (show_zebra,
 	if (zrouter.asic_offloaded)
 		vty_out(vty, "Asic Offload is being used\n");
 
-#if defined(HAVE_CUMULUS)
+#if defined(HAVE_CSMGR)
 	vty_out(vty, "%s with CSM, start mode %s\n",
 		zrouter.frr_csm_regd ? "Registered" : "Not registered",
 		frr_csm_smode2str(zrouter.frr_csm_smode));

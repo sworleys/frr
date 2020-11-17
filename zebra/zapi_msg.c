@@ -60,10 +60,7 @@
 #include "zebra/zebra_mlag.h"
 #include "zebra/connected.h"
 #include "zebra/zebra_opaque.h"
-
-#if defined(HAVE_CUMULUS)
 #include "zebra/zebra_csm.h"
-#endif
 
 /* Encoding helpers -------------------------------------------------------- */
 
@@ -3015,9 +3012,7 @@ static void zebra_handle_cmd_ack(ZAPI_HANDLER_ARGS)
 			bool enter_maint;
 
 			STREAM_GETC(s, enter_maint);
-#if defined(HAVE_CUMULUS)
 			zebra_csm_maint_mode_client_ack(client, enter_maint);
-#endif
 		}
 		break;
 	default:

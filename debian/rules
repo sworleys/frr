@@ -75,6 +75,7 @@ override_dh_auto_configure:
 		$(CONF_ASAN) \
 		--enable-protobuf \
 		--enable-cumulus=yes \
+		--enable-csmgr=yes \
 		--enable-datacenter=yes \
 		--enable-bfdd=no \
 		--enable-sharpd=yes \
