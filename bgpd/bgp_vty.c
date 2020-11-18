@@ -9006,7 +9006,7 @@ DEFUN (show_bgp_router,
        BGP_STR
        "Overall BGP information\n")
 {
-	char timebuf[BGP_UPTIME_LEN];
+	char timebuf[MONOTIME_STRLEN];
 
 	time_to_string(bm->startup_time, timebuf);
 	if (CHECK_FLAG(bm->flags, BM_FLAG_GRACEFUL_RESTART)) {
