@@ -60,11 +60,6 @@
 #include "northbound_cli.h"
 #include "zebra/zebra_nb.h"
 
-#if defined(HAVE_CUMULUS)
-#include <cumulus/cs_mgr_intf.h>
-#include "zebra/zebra_csm.h"
-#endif
-
 extern int allow_delete;
 
 static int do_show_ip_route(struct vty *vty, const char *vrf_name, afi_t afi,
@@ -3595,11 +3590,9 @@ DEFUN (show_zebra,
 		vty_out(vty, "Asic Offload is being used\n");
 
 #if defined(HAVE_CSMGR)
-	vty_out(vty, "%s with CSM, CSM start mode %s (mapped to %s), current mode %s\n",
+	vty_out(vty, "%s with CSM, start mode %s\n",
 		zrouter.frr_csm_regd ? "Registered" : "Not registered",
-		mode_to_str(zrouter.csm_smode),
-		frr_csm_smode2str(zrouter.frr_csm_smode),
-		mode_to_str(zrouter.csm_cmode));
+		frr_csm_smode2str(zrouter.frr_csm_smode));
 #endif
 
 	vty_out(vty,

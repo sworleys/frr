@@ -180,8 +180,6 @@ struct bgp_master {
 #define BM_FLAG_GR_PRESERVE_FWD          (1 << 4)
 #define BM_FLAG_GRACEFUL_RESTART         (1 << 5)
 #define BM_FLAG_GR_COMPLETE              (1 << 6)
-#define BM_FLAG_FAST_SHUTDOWN            (1 << 7)
-#define BM_FLAG_UPGRADE                  (1 << 8)
 
 #define BM_FLAG_GR_CONFIGURED \
 	(BM_FLAG_GR_RESTARTER | BM_FLAG_GR_DISABLED)
@@ -2007,7 +2005,6 @@ extern void bgp_close(void);
 extern void bgp_free(struct bgp *);
 void bgp_gr_apply_running_config(void);
 extern void bgp_process_maintenance_mode(struct vty *vty, bool enter);
-extern void bgp_process_fast_down(bool upgrade);
 
 /* BGP GR */
 int bgp_global_gr_init(struct bgp *bgp);

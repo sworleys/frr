@@ -3134,7 +3134,6 @@ static void zclient_capability_decode(ZAPI_CALLBACK_ARGS)
 	struct stream *s = zclient->ibuf;
 	int vrf_backend;
 	uint8_t mpls_enabled;
-	uint8_t gr;
 
 	STREAM_GETL(s, vrf_backend);
 
@@ -3151,8 +3150,6 @@ static void zclient_capability_decode(ZAPI_CALLBACK_ARGS)
 	cap.mpls_enabled = !!mpls_enabled;
 	STREAM_GETL(s, cap.ecmp);
 	STREAM_GETC(s, cap.role);
-	STREAM_GETC(s, gr);
-	cap.graceful_restart = !!gr;
 
 	if (zclient->zebra_capabilities)
 		(*zclient->zebra_capabilities)(&cap);
@@ -3737,11 +3734,6 @@ static int zclient_read(struct thread *thread)
 		if (zclient->handle_cmd_ack)
 			(*zclient->handle_cmd_ack)(command, zclient,
 						   length, vrf_id);
-		break;
-	case ZEBRA_FAST_SHUTDOWN:
-		if (zclient->handle_fast_down)
-			(*zclient->handle_fast_down)(command, zclient,
-						     length, vrf_id);
 		break;
 	default:
 		break;
