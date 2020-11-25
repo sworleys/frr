@@ -60,7 +60,7 @@
 #include "northbound_cli.h"
 #include "zebra/zebra_nb.h"
 
-#if defined(HAVE_CUMULUS)
+#if defined(HAVE_CUMULUS) && defined(HAVE_CSMGR)
 #include <cumulus/cs_mgr_intf.h>
 #include "zebra/zebra_csm.h"
 #endif
