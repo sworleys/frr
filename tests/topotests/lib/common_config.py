@@ -327,16 +327,15 @@ def start_router_daemons(tgen, router, daemons):
         router_list = tgen.routers()
 
         # Start daemons
-        result = router_list[router].startDaemons(daemons)
-        return result
+        res = router_list[router].startDaemons(daemons)
 
     except Exception as e:
         errormsg = traceback.format_exc()
         logger.error(errormsg)
-        return errormsg
+        res = errormsg
 
     logger.debug("Exiting lib API: {}".format(sys._getframe().f_code.co_name))
-    return True
+    return res
 
 
 def kill_mininet_routers_process(tgen):
@@ -1115,6 +1114,8 @@ def generate_ips(network, no_of_ips):
         if addr_type == "ipv6":
             start_ip = ipaddress.IPv6Address(unicode(start_ip))
             step = 2 ** (128 - mask)
+        else
+            return false
 
         next_ip = start_ip
         count = 0
