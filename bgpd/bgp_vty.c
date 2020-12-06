@@ -9018,6 +9018,9 @@ DEFUN (show_bgp_router,
 	} else
 		vty_out(vty, "BGP started at %s", timebuf);
 
+	if (CHECK_FLAG(bm->flags, BM_FLAG_MAINTENANCE_MODE))
+		vty_out(vty, "BGP is in Maintenance mode (BGP GSHUT is in effect)\n");
+
 	vty_out(vty, "Number of BGP instances (including default): %d\n",
 		listcount(bm->bgp));
 
