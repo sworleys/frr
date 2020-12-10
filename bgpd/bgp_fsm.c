@@ -663,22 +663,24 @@ static int bgp_graceful_deferral_timer_expire(struct thread *thread)
 	afi_t afi;
 	safi_t safi;
 	struct bgp *bgp;
+	int num_routes;
 
 	info = THREAD_ARG(thread);
 	afi = info->afi;
 	safi = info->safi;
 	bgp = info->bgp;
 
-	if (BGP_DEBUG(update, UPDATE_OUT))
-		zlog_debug(
-			"afi %d, safi %d : graceful restart deferral timer expired",
-			afi, safi);
-
 	bgp->gr_info[afi][safi].t_select_deferral = NULL;
 	bgp->gr_info[afi][safi].select_defer_over = true;
 	XFREE(MTYPE_TMP, info);
 
 	/* Best path selection */
+	num_routes = listcount(bgp->gr_info[afi][safi].route_list);
+	if (BGP_DEBUG(graceful_restart, GRACEFUL_RESTART))
+		zlog_debug("%s: Starting deferred path selection for %s, #routes %d -- timeout",
+			   bgp->name_pretty,
+			   get_afi_safi_str(afi, safi, false),
+			   num_routes);
 	bgp_do_deferred_path_selection(bgp, afi, safi);
 
 	return 0;
@@ -1100,11 +1102,18 @@ void bgp_gr_check_path_select(struct bgp *bgp,
 			      afi_t afi, safi_t safi)
 {
 	struct graceful_restart_info *gr_info;
+	int num_routes;
 
 	if (bgp_gr_check_all_eors(bgp, afi, safi)) {
 		gr_info = &(bgp->gr_info[afi][safi]);
 		BGP_TIMER_OFF(gr_info->t_select_deferral);
 		gr_info->select_defer_over = true;
+		num_routes = listcount(gr_info->route_list);
+		if (BGP_DEBUG(graceful_restart, GRACEFUL_RESTART))
+			zlog_debug("%s: Starting deferred path selection for %s, #routes %d -- EORs recvd",
+				   bgp->name_pretty,
+				   get_afi_safi_str(afi, safi, false),
+				   num_routes);
 		bgp_do_deferred_path_selection(bgp, afi, safi);
 	}
 }
