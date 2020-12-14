@@ -1225,12 +1225,15 @@ static int lib_prefix_list_entry_ipv4_prefix_length_greater_or_equal_modify(
 	    prefix_list_length_validate(args->dnode) != NB_OK)
 		return NB_ERR_VALIDATION;
 
+	if (args->event == NB_EV_VALIDATE) {
 		if (plist_is_dup_nb(args->dnode)) {
 			snprintf(args->errmsg, args->errmsg_len,
 				 "duplicated prefix list value: %s",
 				 yang_dnode_get_string(args->dnode, NULL));
 			return NB_ERR_VALIDATION;
 		}
+		return NB_OK;
+	}
 
 	if (args->event != NB_EV_APPLY)
 		return NB_OK;
