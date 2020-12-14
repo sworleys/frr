@@ -24,6 +24,7 @@
 
 #include "lib/northbound.h"
 #include "lib/prefix.h"
+#include "lib/printfrr.h"
 
 #include "lib/filter.h"
 #include "lib/plist.h"
