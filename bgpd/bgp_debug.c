@@ -30,6 +30,7 @@
 #include "memory.h"
 #include "queue.h"
 #include "filter.h"
+#include "printfrr.h"
 
 #include "bgpd/bgpd.h"
 #include "bgpd/bgp_aspath.h"
@@ -2672,9 +2673,9 @@ const char *bgp_debug_rdpfxpath2str(afi_t afi, safi_t safi,
 	}
 
 	if (prd)
-		snprintf(str, size, "RD %s %pFX%s%s %s %s",
-			 prefix_rd2str(prd, rd_buf, sizeof(rd_buf)), pu.p,
-			 tag_buf, pathid_buf, afi2str(afi), safi2str(safi));
+		snprintfrr(str, size, "RD %s %pFX%s%s %s %s",
+			   prefix_rd2str(prd, rd_buf, sizeof(rd_buf)), pu.p,
+			   tag_buf, pathid_buf, afi2str(afi), safi2str(safi));
 	else if (safi == SAFI_FLOWSPEC) {
 		char return_string[BGP_FLOWSPEC_NLRI_STRING_MAX];
 		const struct prefix_fs *fs = pu.fs;
@@ -2686,8 +2687,8 @@ const char *bgp_debug_rdpfxpath2str(afi_t afi, safi_t safi,
 		snprintf(str, size, "FS %s Match{%s}", afi2str(afi),
 			 return_string);
 	} else
-		snprintf(str, size, "%pFX%s%s %s %s", pu.p, tag_buf,
-			 pathid_buf, afi2str(afi), safi2str(safi));
+		snprintfrr(str, size, "%pFX%s%s %s %s", pu.p, tag_buf,
+			   pathid_buf, afi2str(afi), safi2str(safi));
 
 	return str;
 }
