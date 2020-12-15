@@ -1824,12 +1824,8 @@ static void rib_process_result(struct zebra_dplane_ctx *ctx)
 					"%s(%u):%s Stale dplane result for re %p",
 					VRF_LOGNAME(vrf),
 					dplane_ctx_get_vrf(ctx), dest_str, re);
-		} else {
-			if (!zrouter.asic_offloaded ||
-			    (CHECK_FLAG(re->flags, ZEBRA_FLAG_OFFLOADED) ||
-			     CHECK_FLAG(re->flags, ZEBRA_FLAG_OFFLOAD_FAILED)))
-				UNSET_FLAG(re->status, ROUTE_ENTRY_QUEUED);
-		}
+		} else
+			UNSET_FLAG(re->status, ROUTE_ENTRY_QUEUED);
 	}
 
 	if (old_re) {
