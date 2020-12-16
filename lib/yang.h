@@ -604,6 +604,9 @@ extern uint32_t yang_get_list_elements_count(const struct lyd_node *node);
 const struct lyd_node *yang_dnode_get_child(const struct lyd_node *dnode);
 
 
+extern const struct lyd_node *yang_hash_based_dnode_get(const struct lyd_node *dnode,
+						  const char *xpath_fmt, ...);
+
 #ifdef __cplusplus
 }
 #endif
