@@ -1218,12 +1218,6 @@ lib_prefix_list_entry_ipv4_prefix_modify(struct nb_cb_modify_args *args)
 			return NB_ERR_VALIDATION;
 		}
 
-		if (plist_is_dup_nb(args->dnode)) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "duplicated prefix list value: %s",
-				 yang_dnode_get_string(args->dnode, NULL));
-			return NB_ERR_VALIDATION;
-		}
 		return NB_OK;
 	}
 
@@ -1274,12 +1268,6 @@ lib_prefix_list_entry_ipv6_prefix_modify(struct nb_cb_modify_args *args)
 			return NB_ERR_VALIDATION;
 		}
 
-		if (plist_is_dup_nb(args->dnode)) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "duplicated prefix list value: %s",
-				 yang_dnode_get_string(args->dnode, NULL));
-			return NB_ERR_VALIDATION;
-		}
 		return NB_OK;
 	}
 
@@ -1335,12 +1323,6 @@ static int lib_prefix_list_entry_ipv4_prefix_length_greater_or_equal_modify(
 			return NB_ERR_VALIDATION;
 		}
 
-		if (plist_is_dup_nb(args->dnode)) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "duplicated prefix list value: %s",
-				 yang_dnode_get_string(args->dnode, NULL));
-			return NB_ERR_VALIDATION;
-		}
 		return NB_OK;
 	}
 
@@ -1417,12 +1399,6 @@ static int lib_prefix_list_entry_ipv6_prefix_length_greater_or_equal_modify(
 			return NB_ERR_VALIDATION;
 		}
 
-		if (plist_is_dup_nb(args->dnode)) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "duplicated prefix list value: %s",
-				 yang_dnode_get_string(args->dnode, NULL));
-			return NB_ERR_VALIDATION;
-		}
 		return NB_OK;
 	}
 
@@ -1498,12 +1474,7 @@ static int lib_prefix_list_entry_ipv4_prefix_length_lesser_or_equal_modify(
 				 "prefix-list type %s is mismatched.", af_type);
 			return NB_ERR_VALIDATION;
 		}
-		if (plist_is_dup_nb(args->dnode)) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "duplicated prefix list value: %s",
-				 yang_dnode_get_string(args->dnode, NULL));
-			return NB_ERR_VALIDATION;
-		}
+
 		return NB_OK;
 	}
 
@@ -1579,12 +1550,7 @@ static int lib_prefix_list_entry_ipv6_prefix_length_lesser_or_equal_modify(
 				 "prefix-list type %s is mismatched.", af_type);
 			return NB_ERR_VALIDATION;
 		}
-		if (plist_is_dup_nb(args->dnode)) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "duplicated prefix list value: %s",
-				 yang_dnode_get_string(args->dnode, NULL));
-			return NB_ERR_VALIDATION;
-		}
+
 		return NB_OK;
 	}
 
@@ -1644,16 +1610,6 @@ static int lib_prefix_list_entry_any_create(struct nb_cb_create_args *args)
 {
 	struct prefix_list_entry *ple;
 	int type;
-
-       if (args->event == NB_EV_VALIDATE) {
-		if (plist_is_dup_nb(args->dnode)) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "duplicated prefix list value: %s",
-				 yang_dnode_get_string(args->dnode, NULL));
-			return NB_ERR_VALIDATION;
-		}
-		return NB_OK;
-	}
 
 	if (args->event != NB_EV_APPLY)
 		return NB_OK;
