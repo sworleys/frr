@@ -215,6 +215,8 @@ struct zebra_router {
 #define ZEBRA_GR_DEFAULT_RIB_SWEEP_TIME 500
 	struct thread *t_rib_sweep;
 
+	bool maint_mode;
+
 #if defined(HAVE_CSMGR)
 	bool frr_csm_regd;
 	enum frr_csm_smode frr_csm_smode;

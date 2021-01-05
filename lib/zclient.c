@@ -3135,6 +3135,7 @@ static void zclient_capability_decode(ZAPI_CALLBACK_ARGS)
 	int vrf_backend;
 	uint8_t mpls_enabled;
 	uint8_t gr;
+	uint8_t maint;
 
 	STREAM_GETL(s, vrf_backend);
 
@@ -3153,6 +3154,8 @@ static void zclient_capability_decode(ZAPI_CALLBACK_ARGS)
 	STREAM_GETC(s, cap.role);
 	STREAM_GETC(s, gr);
 	cap.graceful_restart = !!gr;
+	STREAM_GETC(s, maint);
+	cap.maint_mode = !!maint;
 
 	if (zclient->zebra_capabilities)
 		(*zclient->zebra_capabilities)(&cap);
