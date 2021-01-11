@@ -307,45 +307,6 @@ bool plist_is_dup(const struct lyd_node *dnode, struct plist_dup_args *pda)
 	return pda->pda_found;
 }
 
-static bool plist_is_dup_nb(const struct lyd_node *dnode)
-{
-	const struct lyd_node *entry_dnode =
-		yang_dnode_get_parent(dnode, "entry");
-	struct plist_dup_args pda = {};
-	int idx = 0, arg_idx = 0;
-	static const char *entries[] = {
-		"./ipv4-prefix",
-		"./ipv4-prefix-length-greater-or-equal",
-		"./ipv4-prefix-length-lesser-or-equal",
-		"./ipv6-prefix",
-		"./ipv6-prefix-length-greater-or-equal",
-		"./ipv6-prefix-length-lesser-or-equal",
-		"./any",
-		NULL
-	};
-
-	/* Initialize. */
-	pda.pda_type = yang_dnode_get_string(entry_dnode, "../type");
-	pda.pda_name = yang_dnode_get_string(entry_dnode, "../name");
-	pda.pda_entry_dnode = entry_dnode;
-
-	/* Load all values/XPaths. */
-	while (entries[idx] != NULL) {
-		if (!yang_dnode_exists(entry_dnode, entries[idx])) {
-			idx++;
-			continue;
-		}
-
-		pda.pda_xpath[arg_idx] = entries[idx];
-		pda.pda_value[arg_idx] =
-			yang_dnode_get_string(entry_dnode, entries[idx]);
-		arg_idx++;
-		idx++;
-	}
-
-	return plist_is_dup(entry_dnode, &pda);
-}
-
 /*
  * XPath: /frr-filter:lib/access-list
  */
