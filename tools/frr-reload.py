@@ -1249,6 +1249,8 @@ def is_evpn_enabled():
         if 'Enabled' in adv_vnis:
             evpn_enabled = True
 
+    return evpn_enabled
+
 if __name__ == '__main__':
     # Command line options
     parser = argparse.ArgumentParser(description='Dynamically apply diff in frr configs')
