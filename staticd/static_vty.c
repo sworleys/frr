@@ -307,11 +307,12 @@ static int static_route_leak(struct vty *vty, const char *svrf,
 		if (!dnode) {
 			if (vty)
 				vty_out(vty,
-					"%% Refusing to remove a non-existent route\n");
+					"%% Refusing to remove a non-existent route %s\n",
+					buf_prefix);
 			else
 				zlog_warn(
-					"%s: Refusing to remove a non-existent route",
-					__func__);
+					"Refusing to remove a non-existent route %s",
+					buf_prefix);
 			return ret;
 		}
 
