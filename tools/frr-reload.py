@@ -1040,8 +1040,8 @@ def ignore_delete_re_add_lines(lines_to_add, lines_to_del):
             if (line.startswith('ip route') or
                 line.startswith('ipv6 route')):
                 add_cmd = ('no ' + line)
-                lines_to_add.insert(0, (ctx_keys, add_cmd))
-                lines_to_del_to_del.insert(0, (ctx_keys, line))
+                lines_to_add.append((ctx_keys, add_cmd))
+                lines_to_del_to_del.append((ctx_keys, line))
 
         if not deleted:
             found_add_line = line_exist(lines_to_add, ctx_keys, line)
