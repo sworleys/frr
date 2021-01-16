@@ -1167,18 +1167,8 @@ lib_prefix_list_entry_prefix_destroy(struct nb_cb_destroy_args *args)
 static int
 lib_prefix_list_entry_ipv4_prefix_modify(struct nb_cb_modify_args *args)
 {
-	const char *af_type;
 
 	if (args->event == NB_EV_VALIDATE) {
-		const struct lyd_node *entry_dnode =
-			yang_dnode_get_parent(args->dnode, "entry");
-		af_type = yang_dnode_get_string(entry_dnode, "../type");
-		if (strcmp(af_type, "ipv4")) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "prefix-list type %s is mismatched.", af_type);
-			return NB_ERR_VALIDATION;
-		}
-
 		return NB_OK;
 	}
 
@@ -1191,17 +1181,8 @@ lib_prefix_list_entry_ipv4_prefix_modify(struct nb_cb_modify_args *args)
 static int
 lib_prefix_list_entry_ipv4_prefix_destroy(struct nb_cb_destroy_args *args)
 {
-	const char *af_type;
 
 	if (args->event == NB_EV_VALIDATE) {
-		const struct lyd_node *entry_dnode =
-			yang_dnode_get_parent(args->dnode, "entry");
-		af_type = yang_dnode_get_string(entry_dnode, "../type");
-		if (strcmp(af_type, "ipv4")) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "prefix-list type %s is mismatched.", af_type);
-			return NB_ERR_VALIDATION;
-		}
 		return NB_OK;
 	}
 
@@ -1217,18 +1198,8 @@ lib_prefix_list_entry_ipv4_prefix_destroy(struct nb_cb_destroy_args *args)
 static int
 lib_prefix_list_entry_ipv6_prefix_modify(struct nb_cb_modify_args *args)
 {
-	const char *af_type;
 
 	if (args->event == NB_EV_VALIDATE) {
-		const struct lyd_node *entry_dnode =
-			yang_dnode_get_parent(args->dnode, "entry");
-		af_type = yang_dnode_get_string(entry_dnode, "../type");
-		if (strcmp(af_type, "ipv6")) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "prefix-list type %s is mismatched.", af_type);
-			return NB_ERR_VALIDATION;
-		}
-
 		return NB_OK;
 	}
 
@@ -1241,18 +1212,8 @@ lib_prefix_list_entry_ipv6_prefix_modify(struct nb_cb_modify_args *args)
 static int
 lib_prefix_list_entry_ipv6_prefix_destroy(struct nb_cb_destroy_args *args)
 {
-	const char *af_type;
 
 	if (args->event == NB_EV_VALIDATE) {
-		const struct lyd_node *entry_dnode =
-			yang_dnode_get_parent(args->dnode, "entry");
-		af_type = yang_dnode_get_string(entry_dnode, "../type");
-		if (strcmp(af_type, "ipv6")) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "prefix-list type %s is mismatched.", af_type);
-			return NB_ERR_VALIDATION;
-		}
-		return NB_OK;
 	}
 
 	if (args->event != NB_EV_APPLY)
@@ -1268,22 +1229,12 @@ static int lib_prefix_list_entry_ipv4_prefix_length_greater_or_equal_modify(
 	struct nb_cb_modify_args *args)
 {
 	struct prefix_list_entry *ple;
-	const char *af_type;
 
 	if (args->event == NB_EV_VALIDATE &&
 	    prefix_list_length_validate(args->dnode) != NB_OK)
 		return NB_ERR_VALIDATION;
 
 	if (args->event == NB_EV_VALIDATE) {
-		const struct lyd_node *entry_dnode =
-			yang_dnode_get_parent(args->dnode, "entry");
-		af_type = yang_dnode_get_string(entry_dnode, "../type");
-		if (strcmp(af_type, "ipv4")) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "prefix-list type %s is mismatched.", af_type);
-			return NB_ERR_VALIDATION;
-		}
-
 		return NB_OK;
 	}
 
@@ -1307,17 +1258,8 @@ static int lib_prefix_list_entry_ipv4_prefix_length_greater_or_equal_destroy(
 	struct nb_cb_destroy_args *args)
 {
 	struct prefix_list_entry *ple;
-	const char *af_type;
 
 	if (args->event == NB_EV_VALIDATE) {
-		const struct lyd_node *entry_dnode =
-			yang_dnode_get_parent(args->dnode, "entry");
-		af_type = yang_dnode_get_string(entry_dnode, "../type");
-		if (strcmp(af_type, "ipv4")) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "prefix-list type %s is mismatched.", af_type);
-			return NB_ERR_VALIDATION;
-		}
 		return NB_OK;
 	}
 
@@ -1344,22 +1286,12 @@ static int lib_prefix_list_entry_ipv6_prefix_length_greater_or_equal_modify(
 	struct nb_cb_modify_args *args)
 {
 	struct prefix_list_entry *ple;
-	const char *af_type;
 
 	if (args->event == NB_EV_VALIDATE &&
 	    prefix_list_length_validate(args->dnode) != NB_OK)
 		return NB_ERR_VALIDATION;
 
 	if (args->event == NB_EV_VALIDATE) {
-		const struct lyd_node *entry_dnode =
-			yang_dnode_get_parent(args->dnode, "entry");
-		af_type = yang_dnode_get_string(entry_dnode, "../type");
-		if (strcmp(af_type, "ipv6")) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "prefix-list type %s is mismatched.", af_type);
-			return NB_ERR_VALIDATION;
-		}
-
 		return NB_OK;
 	}
 
@@ -1383,17 +1315,8 @@ static int lib_prefix_list_entry_ipv6_prefix_length_greater_or_equal_destroy(
 	struct nb_cb_destroy_args *args)
 {
 	struct prefix_list_entry *ple;
-	const char *af_type;
 
 	if (args->event == NB_EV_VALIDATE) {
-		const struct lyd_node *entry_dnode =
-			yang_dnode_get_parent(args->dnode, "entry");
-		af_type = yang_dnode_get_string(entry_dnode, "../type");
-		if (strcmp(af_type, "ipv6")) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "prefix-list type %s is mismatched.", af_type);
-			return NB_ERR_VALIDATION;
-		}
 		return NB_OK;
 	}
 
@@ -1420,22 +1343,12 @@ static int lib_prefix_list_entry_ipv4_prefix_length_lesser_or_equal_modify(
 	struct nb_cb_modify_args *args)
 {
 	struct prefix_list_entry *ple;
-	const char *af_type;
 
 	if (args->event == NB_EV_VALIDATE &&
 	    prefix_list_length_validate(args->dnode) != NB_OK)
 		return NB_ERR_VALIDATION;
 
 	if (args->event == NB_EV_VALIDATE) {
-		const struct lyd_node *entry_dnode =
-			yang_dnode_get_parent(args->dnode, "entry");
-		af_type = yang_dnode_get_string(entry_dnode, "../type");
-		if (strcmp(af_type, "ipv4")) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "prefix-list type %s is mismatched.", af_type);
-			return NB_ERR_VALIDATION;
-		}
-
 		return NB_OK;
 	}
 
@@ -1459,17 +1372,8 @@ static int lib_prefix_list_entry_ipv4_prefix_length_lesser_or_equal_destroy(
 	struct nb_cb_destroy_args *args)
 {
 	struct prefix_list_entry *ple;
-	const char *af_type;
 
 	if (args->event == NB_EV_VALIDATE) {
-		const struct lyd_node *entry_dnode =
-			yang_dnode_get_parent(args->dnode, "entry");
-		af_type = yang_dnode_get_string(entry_dnode, "../type");
-		if (strcmp(af_type, "ipv4")) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "prefix-list type %s is mismatched.", af_type);
-			return NB_ERR_VALIDATION;
-		}
 		return NB_OK;
 	}
 
@@ -1496,22 +1400,12 @@ static int lib_prefix_list_entry_ipv6_prefix_length_lesser_or_equal_modify(
 	struct nb_cb_modify_args *args)
 {
 	struct prefix_list_entry *ple;
-	const char *af_type;
 
 	if (args->event == NB_EV_VALIDATE &&
 	    prefix_list_length_validate(args->dnode) != NB_OK)
 		return NB_ERR_VALIDATION;
 
 	if (args->event == NB_EV_VALIDATE) {
-		const struct lyd_node *entry_dnode =
-			yang_dnode_get_parent(args->dnode, "entry");
-		af_type = yang_dnode_get_string(entry_dnode, "../type");
-		if (strcmp(af_type, "ipv6")) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "prefix-list type %s is mismatched.", af_type);
-			return NB_ERR_VALIDATION;
-		}
-
 		return NB_OK;
 	}
 
@@ -1535,17 +1429,8 @@ static int lib_prefix_list_entry_ipv6_prefix_length_lesser_or_equal_destroy(
 	struct nb_cb_destroy_args *args)
 {
 	struct prefix_list_entry *ple;
-	const char *af_type;
 
 	if (args->event == NB_EV_VALIDATE) {
-		const struct lyd_node *entry_dnode =
-			yang_dnode_get_parent(args->dnode, "entry");
-		af_type = yang_dnode_get_string(entry_dnode, "../type");
-		if (strcmp(af_type, "ipv6")) {
-			snprintf(args->errmsg, args->errmsg_len,
-				 "prefix-list type %s is mismatched.", af_type);
-			return NB_ERR_VALIDATION;
-		}
 		return NB_OK;
 	}
 	if (args->event != NB_EV_APPLY)
