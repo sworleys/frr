@@ -92,7 +92,6 @@ static void nb_cli_pending_commit_clear(struct vty *vty)
 
 static int nb_cli_pending_commit_cb(struct thread *thread)
 {
-	fprintf(stderr, "timeout exceeded\n");
 	struct vty *vty = THREAD_ARG(thread);
 
 	(void)nb_cli_classic_commit(vty);
@@ -111,6 +110,22 @@ void nb_cli_pending_commit_check(struct vty *vty)
 
 static int nb_cli_schedule_command(struct vty *vty)
 {
+	bool no_received = false;
+
+	THREAD_TIMER_OFF(vty->t_pending_commit);
+
+	/*
+	 * If we receive a `no ...` form of any command
+	 * we need to stop what we are doing and run that command
+	 * immediately.
+	 */
+	if (strstr(vty->buf, "no ")) {
+		(void)nb_cli_classic_commit(vty);
+		nb_cli_pending_commit_clear(vty);
+
+		no_received = true;
+	}
+
 	/* Append command to dynamically sized buffer of scheduled commands. */
 	if (!vty->pending_cmds_buf) {
 		vty->pending_cmds_buflen = 4096;
@@ -128,10 +143,9 @@ static int nb_cli_schedule_command(struct vty *vty)
 	vty->pending_cmds_bufpos = strlcat(vty->pending_cmds_buf, vty->buf,
 					   vty->pending_cmds_buflen);
 
-	/* Schedule the commit operation. */
-	THREAD_TIMER_OFF(vty->t_pending_commit);
-
 	/*
+	 * Schedule the commit operation
+	 *
 	 * If we reached the maximum command batch size then apply all
 	 * commands and reset the batch size. No timers are needed in
 	 * this case because we might not receive commands anymore.
@@ -142,8 +156,7 @@ static int nb_cli_schedule_command(struct vty *vty)
 	 * the maximum amount.
 	 */
 	vty->backoff_cmd_count++;
-	if (vty->backoff_cmd_count >= vty->backoff_cmd_max) {
-		fprintf(stderr, "backoff exceeded\n");
+	if ((vty->backoff_cmd_count >= vty->backoff_cmd_max) || no_received) {
 		(void)nb_cli_classic_commit(vty);
 		nb_cli_pending_commit_clear(vty);
 	} else
