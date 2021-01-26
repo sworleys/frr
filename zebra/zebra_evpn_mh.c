@@ -1033,7 +1033,6 @@ void zebra_evpn_if_cleanup(struct zebra_if *zif)
 {
 	vlanid_t vid;
 	struct zebra_evpn_es *es;
-	struct interface *ifp = zif->ifp;
 
 	if (!bf_is_inited(zif->vlan_bitmap))
 		return;
