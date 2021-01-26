@@ -1035,10 +1035,6 @@ void zebra_evpn_if_cleanup(struct zebra_if *zif)
 	struct zebra_evpn_es *es;
 	struct interface *ifp = zif->ifp;
 
-	/* force svi mac cleanup if an oper-up svi is being deleted */
-	if (IS_ZEBRA_IF_VLAN(ifp) && if_is_operative(ifp))
-		zebra_evpn_acc_bd_svi_set(zif, NULL, false);
-
 	if (!bf_is_inited(zif->vlan_bitmap))
 		return;
 
