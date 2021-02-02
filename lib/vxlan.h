@@ -40,6 +40,9 @@ extern "C" {
 typedef uint32_t vni_t;
 #define VNI_MAX 16777215 /* (2^24 - 1) */
 
+/* Maximum # VNI labels that can be encapped. */
+#define VNI_MAX_LABELS 255
+
 /* Flooding mechanisms for BUM packets. */
 /* Currently supported mechanisms are head-end (ingress) replication
  * (which is the default) and no flooding. Future options could be
@@ -50,6 +53,22 @@ enum vxlan_flood_control {
 	VXLAN_FLOOD_DISABLED,
 	VXLAN_FLOOD_PIM_SM,
 };
+
+struct vni_label_stack {
+	uint8_t num_vnis;
+	vni_t vni[0]; /* 1 or more vnis */
+};
+
+/*
+ * String to VNI conversion, VNIs separated by '/'.
+ */
+int vni_str2label(const char *vni_str, uint8_t *num_vnis, vni_t *vnis);
+
+/*
+ * VNI Label to string conversion, VNIs in string separated by '/'.
+ */
+char *vni_label2str(uint8_t num_vnis, const vni_t *vnis, char *buf, int len,
+		    int pretty);
 
 #ifdef __cplusplus
 }

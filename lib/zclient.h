@@ -431,6 +431,11 @@ struct zapi_nexthop {
 	uint8_t label_num;
 	mpls_label_t labels[MPLS_MAX_LABELS];
 
+	// TODO: probably union with mpls here
+	/* VNI encaps */
+	uint8_t vni_num;
+	vni_t vnis[VNI_MAX_LABELS];
+
 	struct ethaddr rmac;
 
 	uint32_t weight;
@@ -453,6 +458,7 @@ struct zapi_nexthop {
 #define ZAPI_NEXTHOP_FLAG_LABEL		0x02
 #define ZAPI_NEXTHOP_FLAG_WEIGHT	0x04
 #define ZAPI_NEXTHOP_FLAG_HAS_BACKUP	0x08 /* Nexthop has a backup */
+#define ZAPI_NEXTHOP_FLAG_VNI           0x10
 
 /*
  * ZAPI Nexthop Group. For use with protocol creation of nexthop groups.

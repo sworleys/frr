@@ -796,6 +796,18 @@ static int zapi_nexthop_labels_cmp(const struct zapi_nexthop *next1,
 	return memcmp(next1->labels, next2->labels, next1->label_num);
 }
 
+static int zapi_nexthop_vnis_cmp(const struct zapi_nexthop *next1,
+				 const struct zapi_nexthop *next2)
+{
+	if (next1->vni_num > next2->vni_num)
+		return 1;
+
+	if (next1->vni_num < next2->vni_num)
+		return -1;
+
+	return memcmp(next1->vnis, next2->vnis, next1->vni_num);
+}
+
 static int zapi_nexthop_cmp_no_labels(const struct zapi_nexthop *next1,
 				      const struct zapi_nexthop *next2)
 {
@@ -896,6 +908,10 @@ static int zapi_nexthop_cmp(const void *item1, const void *item2)
 		return ret;
 
 	ret = zapi_nexthop_labels_cmp(next1, next2);
+	if (ret != 0)
+		return ret;
+
+	ret = zapi_nexthop_vnis_cmp(next1, next2);
 
 	return ret;
 }
@@ -925,6 +941,17 @@ int zapi_nexthop_encode(struct stream *s, const struct zapi_nexthop *api_nh,
 
 		/* Validate label count */
 		if (api_nh->label_num > MPLS_MAX_LABELS) {
+			ret = -1;
+			goto done;
+		}
+	}
+
+	/* If needed, set 'vni nexthop' flag */
+	if (api_nh->vni_num > 0) {
+		SET_FLAG(nh_flags, ZAPI_NEXTHOP_FLAG_VNI);
+
+		/* Validate label count */
+		if (api_nh->vni_num > VNI_MAX_LABELS) {
 			ret = -1;
 			goto done;
 		}
@@ -965,6 +992,12 @@ int zapi_nexthop_encode(struct stream *s, const struct zapi_nexthop *api_nh,
 		stream_putc(s, api_nh->label_num);
 		stream_put(s, &api_nh->labels[0],
 			   api_nh->label_num * sizeof(mpls_label_t));
+	}
+
+	if (api_nh->vni_num > 0) {
+		stream_putc(s, api_nh->vni_num);
+		stream_put(s, &api_nh->vnis[0],
+			   api_nh->vni_num * sizeof(vni_t));
 	}
 
 	if (api_nh->weight)
@@ -1131,6 +1164,16 @@ int zapi_route_encode(uint8_t cmd, struct stream *s, struct zapi_route *api)
 				return -1;
 			}
 
+			/* VNI labels */
+			if (api_nh->vni_num > VNI_MAX_LABELS) {
+				flog_err(
+					EC_LIB_ZAPI_ENCODE,
+					"%s: prefix %pFX: can't encode %u vnis (maximum is %u)",
+					__func__, &api->prefix, api_nh->vni_num,
+					VNI_MAX_LABELS);
+				return -1;
+			}
+
 			if (zapi_nexthop_encode(s, api_nh, api->flags,
 						api->message)
 			    != 0)
@@ -1167,6 +1210,16 @@ int zapi_route_encode(uint8_t cmd, struct stream *s, struct zapi_route *api)
 					"%s: prefix %pFX: backup: can't encode %u labels (maximum is %u)",
 					__func__, &api->prefix,
 					api_nh->label_num, MPLS_MAX_LABELS);
+				return -1;
+			}
+
+			/* VNI labels */
+			if (api_nh->vni_num > VNI_MAX_LABELS) {
+				flog_err(
+					EC_LIB_ZAPI_ENCODE,
+					"%s: prefix %pFX: backup: can't encode %u vnis (maximum is %u)",
+					__func__, &api->prefix, api_nh->vni_num,
+					VNI_MAX_LABELS);
 				return -1;
 			}
 
@@ -1248,6 +1301,20 @@ int zapi_nexthop_decode(struct stream *s, struct zapi_nexthop *api_nh,
 
 		STREAM_GET(&api_nh->labels[0], s,
 			   api_nh->label_num * sizeof(mpls_label_t));
+	}
+
+	/* VNI labels */
+	if (CHECK_FLAG(api_nh->flags, ZAPI_NEXTHOP_FLAG_VNI)) {
+		STREAM_GETC(s, api_nh->vni_num);
+		if (api_nh->vni_num > VNI_MAX_LABELS) {
+			flog_err(EC_LIB_ZAPI_ENCODE,
+				 "%s: invalid number of VNI labels (%u)",
+				 __func__, api_nh->vni_num);
+			return -1;
+		}
+
+		STREAM_GET(&api_nh->vnis[0], s,
+			   api_nh->vni_num * sizeof(vni_t));
 	}
 
 	if (CHECK_FLAG(api_nh->flags, ZAPI_NEXTHOP_FLAG_WEIGHT))
@@ -1626,6 +1693,10 @@ struct nexthop *nexthop_from_zapi_nexthop(const struct zapi_nexthop *znh)
 				   znh->labels);
 	}
 
+	if (znh->vni_num) {
+		nexthop_add_vnis(n, znh->vni_num, znh->vnis);
+	}
+
 	if (CHECK_FLAG(znh->flags, ZAPI_NEXTHOP_FLAG_HAS_BACKUP)) {
 		SET_FLAG(n->flags, NEXTHOP_FLAG_HAS_BACKUP);
 		n->backup_num = znh->backup_num;
@@ -1665,6 +1736,19 @@ int zapi_nexthop_from_nexthop(struct zapi_nexthop *znh,
 
 		znh->label_num = i;
 		SET_FLAG(znh->flags, ZAPI_NEXTHOP_FLAG_LABEL);
+	}
+
+	if (nh->nh_vni && (nh->nh_vni->num_vnis > 0)) {
+
+		/* Validate */
+		if (nh->nh_vni->num_vnis > VNI_MAX_LABELS)
+			return -1;
+
+		for (i = 0; i < nh->nh_vni->num_vnis; i++)
+			znh->vnis[i] = nh->nh_vni->vni[i];
+
+		znh->vni_num = i;
+		SET_FLAG(znh->flags, ZAPI_NEXTHOP_FLAG_VNI);
 	}
 
 	if (CHECK_FLAG(nh->flags, NEXTHOP_FLAG_HAS_BACKUP)) {

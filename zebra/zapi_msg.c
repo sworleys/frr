@@ -1694,6 +1694,14 @@ static bool zapi_read_nexthops(struct zserv *client, struct prefix *p,
 					   &api_nh->labels[0]);
 		}
 
+		/* VNI Labels */
+		if (CHECK_FLAG(api_nh->flags, ZAPI_NEXTHOP_FLAG_VNI)
+		    && api_nh->vni_num > 0) {
+
+			nexthop_add_vnis(nexthop, api_nh->vni_num,
+					 &api_nh->vnis[0]);
+		}
+
 		if (IS_ZEBRA_DEBUG_RECV) {
 			labelbuf[0] = '\0';
 			nhbuf[0] = '\0';
@@ -1706,6 +1714,11 @@ static bool zapi_read_nexthops(struct zserv *client, struct prefix *p,
 					       nexthop->nh_label->label,
 					       labelbuf, sizeof(labelbuf),
 					       false);
+			} else if (nexthop->nh_vni
+				   && nexthop->nh_vni->num_vnis > 0) {
+				vni_label2str(nexthop->nh_vni->num_vnis,
+					      nexthop->nh_vni->vni, labelbuf,
+					      sizeof(labelbuf), false);
 			}
 
 			zlog_debug("%s: nh=%s, vrf_id=%d %s",

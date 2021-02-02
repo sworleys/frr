@@ -43,6 +43,7 @@ struct nexthop_hold {
 	char *intf;
 	bool onlink;
 	char *labels;
+	char *vnis;
 	uint32_t weight;
 	char *backup_str;
 };
@@ -747,8 +748,8 @@ static bool nexthop_group_parse_nexthop(struct nexthop *nhop,
 					const union sockunion *addr,
 					const char *intf, bool onlink,
 					const char *name, const char *labels,
-					int *lbl_ret, uint32_t weight,
-					const char *backup_str)
+					const char *vnis, int *lbl_ret,
+					uint32_t weight, const char *backup_str)
 {
 	int ret = 0;
 	struct vrf *vrf;
@@ -809,6 +810,23 @@ static bool nexthop_group_parse_nexthop(struct nexthop *nhop,
 					   num, larray);
 	}
 
+	// TODO: reuse and change some stuff here
+	if (vnis) {
+		uint8_t num = 0;
+		vni_t larray[VNI_MAX_LABELS];
+
+		ret = vni_str2label(vnis, &num, larray);
+
+		/* Return label parse result */
+		if (lbl_ret)
+			*lbl_ret = ret;
+
+		if (ret < 0)
+			return false;
+		else if (num > 0)
+			nexthop_add_vnis(nhop, num, larray);
+	}
+
 	nhop->weight = weight;
 
 	if (backup_str) {
@@ -833,7 +851,7 @@ static bool nexthop_group_parse_nhh(struct nexthop *nhop,
 {
 	return (nexthop_group_parse_nexthop(
 		nhop, nhh->addr, nhh->intf, nhh->onlink, nhh->nhvrf_name,
-		nhh->labels, NULL, nhh->weight, nhh->backup_str));
+		nhh->labels, nhh->vnis, NULL, nhh->weight, nhh->backup_str));
 }
 
 DEFPY(ecmp_nexthops, ecmp_nexthops_cmd,
@@ -845,6 +863,7 @@ DEFPY(ecmp_nexthops, ecmp_nexthops_cmd,
 	[{ \
 	   nexthop-vrf NAME$vrf_name \
 	   |label WORD \
+	   |vni WORD \
            |weight (1-255) \
            |backup-idx WORD \
 	}]",
@@ -859,6 +878,8 @@ DEFPY(ecmp_nexthops, ecmp_nexthops_cmd,
       "The nexthop-vrf Name\n"
       "Specify label(s) for this nexthop\n"
       "One or more labels in the range (16-1048575) separated by '/'\n"
+      "Specify VNI(s) for this nexthop\n"
+      "One or more labels in the range (1-16777215) separated by '/'\n"
       "Weight to be used by the nexthop for purposes of ECMP\n"
       "Weight value to be used\n"
       "Specify backup nexthop indexes in another group\n"
@@ -883,8 +904,8 @@ DEFPY(ecmp_nexthops, ecmp_nexthops_cmd,
 	}
 
 	legal = nexthop_group_parse_nexthop(&nhop, addr, intf, !!onlink,
-					    vrf_name, label, &lbl_ret, weight,
-					    backup_idx);
+					    vrf_name, label, vni, &lbl_ret,
+					    weight, backup_idx);
 
 	if (nhop.type == NEXTHOP_TYPE_IPV6
 	    && IN6_IS_ADDR_LINKLOCAL(&nhop.gate.ipv6)) {

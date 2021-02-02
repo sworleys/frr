@@ -122,6 +122,10 @@ struct nexthop {
 	/* Label(s) associated with this nexthop. */
 	struct mpls_label_stack *nh_label;
 
+	/* VNI stack */
+	// TODO: probably union with mpls
+	struct vni_label_stack *nh_vni;
+
 	/* Weight of the nexthop ( for unequal cost ECMP ) */
 	uint8_t weight;
 
@@ -131,6 +135,7 @@ struct nexthop {
 	uint8_t backup_num;
 	uint8_t backup_idx[NEXTHOP_MAX_BACKUPS];
 
+	// TODO: update below to use new
 	/* Encapsulation information. */
 	enum nh_encap_type nh_encap_type;
 	union {
@@ -157,6 +162,10 @@ void nexthops_free(struct nexthop *nexthop);
 void nexthop_add_labels(struct nexthop *nexthop, enum lsp_types_t ltype,
 			uint8_t num_labels, const mpls_label_t *labels);
 void nexthop_del_labels(struct nexthop *);
+
+void nexthop_add_vnis(struct nexthop *nexthop, uint8_t num_vnis,
+		      const vni_t *vnis);
+void nexthop_del_vnis(struct nexthop *);
 
 /*
  * Allocate a new nexthop object and initialize it from various args.

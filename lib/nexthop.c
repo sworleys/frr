@@ -36,6 +36,7 @@
 
 DEFINE_MTYPE_STATIC(LIB, NEXTHOP, "Nexthop")
 DEFINE_MTYPE_STATIC(LIB, NH_LABEL, "Nexthop label")
+DEFINE_MTYPE_STATIC(LIB, NH_VNI, "Nexthop vni")
 
 static int _nexthop_labels_cmp(const struct nexthop *nh1,
 			       const struct nexthop *nh2)
@@ -63,6 +64,34 @@ static int _nexthop_labels_cmp(const struct nexthop *nh1,
 		return -1;
 
 	return memcmp(nhl1->label, nhl2->label, nhl1->num_labels);
+}
+
+static int _nexthop_vnis_cmp(const struct nexthop *nh1,
+			       const struct nexthop *nh2)
+{
+	const struct vni_label_stack *nhl1 = NULL;
+	const struct vni_label_stack *nhl2 = NULL;
+
+	nhl1 = nh1->nh_vni;
+	nhl2 = nh2->nh_vni;
+
+	/* No labels is a match */
+	if (!nhl1 && !nhl2)
+		return 0;
+
+	if (nhl1 && !nhl2)
+		return 1;
+
+	if (nhl2 && !nhl1)
+		return -1;
+
+	if (nhl1->num_vnis > nhl2->num_vnis)
+		return 1;
+
+	if (nhl1->num_vnis < nhl2->num_vnis)
+		return -1;
+
+	return memcmp(nhl1->vni, nhl2->vni, nhl1->num_vnis);
 }
 
 int nexthop_g_addr_cmp(enum nexthop_types_t type, const union g_addr *addr1,
@@ -198,6 +227,12 @@ int nexthop_cmp(const struct nexthop *next1, const struct nexthop *next2)
 		return ret;
 
 	ret = _nexthop_labels_cmp(next1, next2);
+
+	if (ret != 0)
+		return ret;
+
+	// TODO: probably combine with above
+	ret = _nexthop_vnis_cmp(next1, next2);
 
 	return ret;
 }
@@ -423,6 +458,33 @@ void nexthop_del_labels(struct nexthop *nexthop)
 	nexthop->nh_label_type = ZEBRA_LSP_NONE;
 }
 
+/* Update nexthop with vni information. */
+void nexthop_add_vnis(struct nexthop *nexthop, uint8_t num_vnis,
+		      const vni_t *vnis)
+{
+	struct vni_label_stack *nh_vni;
+	int i;
+
+	if (num_vnis == 0)
+		return;
+
+	/* Enforce limit on label stack size */
+	if (num_vnis > VNI_MAX_LABELS)
+		num_vnis = VNI_MAX_LABELS;
+
+	nh_vni = XCALLOC(MTYPE_NH_VNI, sizeof(struct vni_label_stack)
+					       + num_vnis * sizeof(vni_t));
+	nh_vni->num_vnis = num_vnis;
+	for (i = 0; i < num_vnis; i++)
+		nh_vni->vni[i] = *(vnis + i);
+	nexthop->nh_vni = nh_vni;
+}
+
+/* Free vni label information of nexthop, if present. */
+void nexthop_del_vnis(struct nexthop *nexthop)
+{
+	XFREE(MTYPE_NH_VNI, nexthop->nh_vni);
+}
 const char *nexthop2str(const struct nexthop *nexthop, char *str, int size)
 {
 	switch (nexthop->type) {
@@ -620,6 +682,10 @@ void nexthop_copy_no_recurse(struct nexthop *copy,
 		nexthop_add_labels(copy, nexthop->nh_label_type,
 				   nexthop->nh_label->num_labels,
 				   &nexthop->nh_label->label[0]);
+
+	if (nexthop->nh_vni)
+		nexthop_add_vnis(copy, nexthop->nh_vni->num_vnis,
+				 &nexthop->nh_vni->vni[0]);
 }
 
 void nexthop_copy(struct nexthop *copy, const struct nexthop *nexthop,

@@ -408,6 +408,13 @@ static void show_nexthop_detail_helper(struct vty *vty,
 				       sizeof(buf), 1 /*pretty*/));
 	}
 
+	if (nexthop->nh_vni && nexthop->nh_vni->num_vnis) {
+		vty_out(vty, ", vni %s",
+			vni_label2str(nexthop->nh_vni->num_vnis,
+				      nexthop->nh_vni->vni, buf, sizeof(buf),
+				      1 /*pretty*/));
+	}
+
 	if (nexthop->weight)
 		vty_out(vty, ", weight %u", nexthop->weight);
 
@@ -629,6 +636,13 @@ static void show_route_nexthop_helper(struct vty *vty,
 				       sizeof(buf), 1));
 	}
 
+	if (nexthop->nh_vni && nexthop->nh_vni->num_vnis) {
+		vty_out(vty, ", vni %s",
+			vni_label2str(nexthop->nh_vni->num_vnis,
+				      nexthop->nh_vni->vni, buf, sizeof(buf),
+				      1 /*pretty*/));
+	}
+
 	if (nexthop->weight)
 		vty_out(vty, ", weight %u", nexthop->weight);
 
@@ -819,6 +833,19 @@ static void show_nexthop_json_helper(json_object *json_nexthop,
 
 		json_object_object_add(json_nexthop, "labels",
 				       json_labels);
+	}
+
+	if (nexthop->nh_vni && nexthop->nh_vni->num_vnis) {
+		json_labels = json_object_new_array();
+
+		for (int label_index = 0;
+		     label_index < nexthop->nh_vni->num_vnis; label_index++)
+			json_object_array_add(
+				json_labels,
+				json_object_new_int(
+					nexthop->nh_vni->vni[label_index]));
+
+		json_object_object_add(json_nexthop, "vnis", json_labels);
 	}
 
 	if (nexthop->weight)
