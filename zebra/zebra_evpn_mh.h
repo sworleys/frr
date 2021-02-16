@@ -297,7 +297,7 @@ static inline bool zebra_evpn_mh_do_adv_reachable_neigh_only(void)
 
 static inline bool zebra_evpn_mh_do_adv_svi_mac(void)
 {
-	return !!(zmh_info->flags & ZEBRA_EVPN_MH_ADV_SVI_MAC);
+	return zmh_info && (zmh_info->flags & ZEBRA_EVPN_MH_ADV_SVI_MAC);
 }
 
 /*****************************************************************************/
