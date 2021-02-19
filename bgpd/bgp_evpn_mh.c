@@ -73,6 +73,7 @@ static void bgp_evpn_path_es_unlink(struct bgp_path_es_info *es_info);
 esi_t zero_esi_buf, *zero_esi = &zero_esi_buf;
 static void bgp_evpn_path_nh_info_free(struct bgp_path_evpn_nh_info *nh_info);
 static void bgp_evpn_path_nh_unlink(struct bgp_path_evpn_nh_info *nh_info);
+static int bgp_evpn_run_consistency_checks(struct thread *t);
 
 /******************************************************************************
  * per-ES (Ethernet Segment) routing table
@@ -3851,6 +3852,19 @@ void bgp_evpn_es_evi_show_vni(struct vty *vty, vni_t vni,
  * show commands) at this point. A more drastic action can be executed (based
  * on user config) in the future.
  */
+static void bgp_evpn_es_cons_checks_timer_start(void)
+{
+	if (!bgp_mh_info->consistency_checking || bgp_mh_info->t_cons_check)
+		return;
+
+	if (BGP_DEBUG(evpn_mh, EVPN_MH_ES))
+		zlog_debug("periodic consistency checking started");
+
+	thread_add_timer(bm->master, bgp_evpn_run_consistency_checks, NULL,
+			 BGP_EVPN_CONS_CHECK_INTERVAL,
+			 &bgp_mh_info->t_cons_check);
+}
+
 /* queue up the es for background consistency checks */
 static void bgp_evpn_es_cons_checks_pend_add(struct bgp_evpn_es *es)
 {
@@ -3861,6 +3875,10 @@ static void bgp_evpn_es_cons_checks_pend_add(struct bgp_evpn_es *es)
 	if (CHECK_FLAG(es->flags, BGP_EVPNES_CONS_CHECK_PEND))
 		/* already queued for consistency checking */
 		return;
+
+	/* start the periodic timer for consistency checks if it is not
+	 * already running */
+	bgp_evpn_es_cons_checks_timer_start();
 
 	SET_FLAG(es->flags, BGP_EVPNES_CONS_CHECK_PEND);
 	listnode_init(&es->pend_es_listnode, es);
@@ -4598,11 +4616,6 @@ void bgp_evpn_mh_init(void)
 	bgp_mh_info->suppress_l3_ecomm_on_inactive_es = true;
 	bgp_mh_info->bgp_evpn_nh_setup = BGP_EVPN_MH_USE_ES_NH_AS_NEIGH_DEF;
 
-	if (bgp_mh_info->consistency_checking)
-		thread_add_timer(bm->master, bgp_evpn_run_consistency_checks,
-				NULL, BGP_EVPN_CONS_CHECK_INTERVAL,
-				&bgp_mh_info->t_cons_check);
-
 	memset(&zero_esi_buf, 0, sizeof(esi_t));
 }
 
@@ -4618,7 +4631,8 @@ void bgp_evpn_mh_finish(void)
 			 es_next) {
 		bgp_evpn_es_local_info_clear(es, true);
 	}
-	thread_cancel(bgp_mh_info->t_cons_check);
+	if (bgp_mh_info->t_cons_check)
+		thread_cancel(bgp_mh_info->t_cons_check);
 	list_delete(&bgp_mh_info->local_es_list);
 	list_delete(&bgp_mh_info->pend_es_list);
 
