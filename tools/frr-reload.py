@@ -1624,6 +1624,7 @@ if __name__ == '__main__':
 
                             if len(last_arg) <= 2:
                                 log.error('"%s" we failed to remove this command', ' -- '.join(original_cmd))
+                                reload_ok = False
                                 break
 
                             new_last_arg = last_arg[0:-1]
