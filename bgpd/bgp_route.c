@@ -3466,19 +3466,6 @@ int bgp_update(struct peer *peer, const struct prefix *p, uint32_t addpath_id,
 	else
 		has_valid_label = bgp_is_valid_label(label);
 
-	/* The flag BGP_NODE_FIB_INSTALL_PENDING is for the following
-	 * condition :
-	 * Suppress fib is enabled
-	 * BGP_OPT_NO_FIB is not enabled
-	 * Route type is BGP_ROUTE_NORMAL (peer learnt routes)
-	 * Route is being installed first time (BGP_NODE_FIB_INSTALLED not set)
-	 */
-	if (BGP_SUPPRESS_FIB_ENABLED(bgp) &&
-	    (sub_type == BGP_ROUTE_NORMAL) &&
-	    (!bgp_option_check(BGP_OPT_NO_FIB)) &&
-	    (!CHECK_FLAG(dest->flags, BGP_NODE_FIB_INSTALLED)))
-		SET_FLAG(dest->flags, BGP_NODE_FIB_INSTALL_PENDING);
-
 	/* When peer's soft reconfiguration enabled.  Record input packet in
 	   Adj-RIBs-In.  */
 	if (!soft_reconfig
@@ -3639,6 +3626,19 @@ int bgp_update(struct peer *peer, const struct prefix *p, uint32_t addpath_id,
 		reason = "self mac;";
 		goto filtered;
 	}
+
+	/* The flag BGP_NODE_FIB_INSTALL_PENDING is for the following
+	 * condition :
+	 * Suppress fib is enabled
+	 * BGP_OPT_NO_FIB is not enabled
+	 * Route type is BGP_ROUTE_NORMAL (peer learnt routes)
+	 * Route is being installed first time (BGP_NODE_FIB_INSTALLED not set)
+	 */
+	if (bgp_fibupd_safi(safi) && BGP_SUPPRESS_FIB_ENABLED(bgp)
+	    && (sub_type == BGP_ROUTE_NORMAL)
+	    && (!bgp_option_check(BGP_OPT_NO_FIB))
+	    && (!CHECK_FLAG(dest->flags, BGP_NODE_FIB_INSTALLED)))
+		SET_FLAG(dest->flags, BGP_NODE_FIB_INSTALL_PENDING);
 
 	attr_new = bgp_attr_intern(&new_attr);
 
