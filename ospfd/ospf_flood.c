@@ -373,6 +373,7 @@ static int ospf_flood_through_interface(struct ospf_interface *oi,
 	struct ospf_neighbor *onbr;
 	struct route_node *rn;
 	int retx_flag;
+	char buf[PREFIX_STRLEN];
 
 	if (IS_DEBUG_OSPF_EVENT)
 		zlog_debug(
