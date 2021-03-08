@@ -1235,8 +1235,10 @@ void bgp_zebra_announce(struct bgp_dest *dest, const struct prefix *p,
 
 	/* If the route's source is EVPN, flag as such. */
 	is_evpn = is_route_parent_evpn(info);
+#if 0
 	if (is_evpn)
 		SET_FLAG(api.flags, ZEBRA_FLAG_EVPN_ROUTE);
+#endif
 
 	if (peer->sort == BGP_PEER_IBGP || peer->sort == BGP_PEER_CONFED
 	    || info->sub_type == BGP_ROUTE_AGGREGATE) {
@@ -1390,7 +1392,7 @@ void bgp_zebra_announce(struct bgp_dest *dest, const struct prefix *p,
 
 		if (mpinfo->extra
 		    && bgp_is_valid_label(&mpinfo->extra->label[0])
-		    && !CHECK_FLAG(api.flags, ZEBRA_FLAG_EVPN_ROUTE)) {
+		    && !is_evpn) {
 			has_valid_label = 1;
 			label = label_pton(&mpinfo->extra->label[0]);
 
@@ -1434,8 +1436,6 @@ void bgp_zebra_announce(struct bgp_dest *dest, const struct prefix *p,
 
 	if (bgp_debug_zebra(p)) {
 		char nh_buf[INET6_ADDRSTRLEN];
-		char eth_buf[ETHER_ADDR_STRLEN + 7] = {'\0'};
-		char buf1[ETHER_ADDR_STRLEN];
 		char label_buf[20];
 		int i;
 
@@ -1473,20 +1473,20 @@ void bgp_zebra_announce(struct bgp_dest *dest, const struct prefix *p,
 			}
 
 			label_buf[0] = '\0';
-			eth_buf[0] = '\0';
-			if (has_valid_label
-			    && !CHECK_FLAG(api.flags, ZEBRA_FLAG_EVPN_ROUTE))
+			if (has_valid_label)
 				snprintf(label_buf, sizeof(label_buf),
 					"label %u", api_nh->labels[0]);
+#if 0
 			if (CHECK_FLAG(api.flags, ZEBRA_FLAG_EVPN_ROUTE)
 			    && !is_zero_mac(&api_nh->rmac))
 				snprintf(eth_buf, sizeof(eth_buf), " RMAC %s",
 					 prefix_mac2str(&api_nh->rmac,
 							buf1, sizeof(buf1)));
-			zlog_debug("  nhop [%d]: %s if %u VRF %u wt %u %s %s",
+#endif
+			zlog_debug("  nhop [%d]: %s if %u VRF %u wt %u %s",
 				   i + 1, nh_buf, api_nh->ifindex,
 				   api_nh->vrf_id, api_nh->weight,
-				   label_buf, eth_buf);
+				   label_buf);
 		}
 	}
 
@@ -1564,9 +1564,11 @@ void bgp_zebra_withdraw(const struct prefix *p, struct bgp_path_info *info,
 		api.tableid = info->attr->rmap_table_id;
 	}
 
+#if 0
 	/* If the route's source is EVPN, flag as such. */
 	if (is_route_parent_evpn(info))
 		SET_FLAG(api.flags, ZEBRA_FLAG_EVPN_ROUTE);
+#endif
 
 	if (bgp_debug_zebra(p))
 		zlog_debug("Tx route delete VRF %u %pFX", bgp->vrf_id,
