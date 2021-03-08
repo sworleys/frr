@@ -437,9 +437,7 @@ static void vrf_rt2ecom_val(struct ecommunity_val *to_eval,
  */
 static void map_vrf_to_rt(struct bgp *bgp_vrf, struct vrf_route_target *l3rt)
 {
-	uint32_t i = 0;
-
-	for (i = 0; i < l3rt->ecom->size; i++) {
+	for (int i = 0; i < l3rt->ecom->size; i++) {
 		struct vrf_irt_node *irt = NULL;
 		struct ecommunity_val eval_tmp;
 
@@ -467,9 +465,7 @@ static void map_vrf_to_rt(struct bgp *bgp_vrf, struct vrf_route_target *l3rt)
 static void unmap_vrf_from_rt(struct bgp *bgp_vrf,
 			      struct vrf_route_target *l3rt)
 {
-	uint32_t i;
-
-	for (i = 0; i < l3rt->ecom->size; i++) {
+	for (int i = 0; i < l3rt->ecom->size; i++) {
 		struct vrf_irt_node *irt;
 		struct ecommunity_val eval_tmp;
 
