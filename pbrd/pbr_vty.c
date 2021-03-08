@@ -360,7 +360,8 @@ DEFPY(pbr_map_nexthop_group, pbr_map_nexthop_group_cmd,
 	/* This is new/replacement config */
 	pbrms_clear_set_config(pbrms);
 
-	pbrms->nhgrp_name = XSTRDUP(MTYPE_TMP, name);
+	pbr_nht_set_seq_nhg(pbrms, nhgc);
+
 	pbr_map_check(pbrms, true);
 
 	return CMD_SUCCESS;
