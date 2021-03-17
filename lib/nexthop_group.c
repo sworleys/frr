@@ -1025,7 +1025,7 @@ void nexthop_group_write_nexthop(struct vty *vty, const struct nexthop *nh)
 
 		mpls_label2str(nh->nh_label->num_labels,
 			       nh->nh_label->label,
-			       buf, sizeof(buf), 0);
+			       buf, sizeof(buf), nh->nh_label_type, 0);
 		vty_out(vty, " label %s", buf);
 	}
 
@@ -1087,7 +1087,7 @@ void nexthop_group_json_nexthop(json_object *j, const struct nexthop *nh)
 		char buf[200];
 
 		mpls_label2str(nh->nh_label->num_labels, nh->nh_label->label,
-			       buf, sizeof(buf), 0);
+			       buf, sizeof(buf), nh->nh_label_type, 0);
 		json_object_string_add(j, "label", buf);
 	}
 

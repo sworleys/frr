@@ -1665,13 +1665,17 @@ static bool zapi_read_nexthops(struct zserv *client, struct prefix *p,
 			nexthop->backup_num = 0;
 		}
 
-		/* MPLS labels for BGP-LU or Segment Routing */
+		/* Labels for MPLS BGP-LU or Segment Routing or EVPN */
 		if (CHECK_FLAG(api_nh->flags, ZAPI_NEXTHOP_FLAG_LABEL)
 		    && api_nh->type != NEXTHOP_TYPE_IFINDEX
 		    && api_nh->type != NEXTHOP_TYPE_BLACKHOLE
 		    && api_nh->label_num > 0) {
 
-			label_type = lsp_type_from_re_type(client->proto);
+			if (CHECK_FLAG(flags, ZEBRA_FLAG_EVPN_ROUTE))
+				label_type = ZEBRA_LSP_EVPN;
+			else
+				label_type = lsp_type_from_re_type(client->proto);
+
 			nexthop_add_labels(nexthop, label_type,
 					   api_nh->label_num,
 					   &api_nh->labels[0]);
@@ -1687,7 +1691,7 @@ static bool zapi_read_nexthops(struct zserv *client, struct prefix *p,
 			    nexthop->nh_label->num_labels > 0) {
 				mpls_label2str(nexthop->nh_label->num_labels,
 					       nexthop->nh_label->label,
-					       labelbuf, sizeof(labelbuf),
+					       labelbuf, sizeof(labelbuf), nexthop->nh_label_type,
 					       false);
 			}
 
