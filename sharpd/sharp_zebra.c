@@ -558,6 +558,9 @@ static int nhg_notify_owner(ZAPI_CALLBACK_ARGS)
 	enum zapi_nhg_notify_owner note;
 	uint32_t id;
 
+	// TODO TESTING DONT USE NHGS
+	return 0;
+
 	if (!zapi_nhg_notify_decode(zclient->ibuf, &id, &note))
 		return -1;
 
