@@ -108,6 +108,7 @@ func_frr()
     exec_cmd bgp.evpn.route.vni.all vtysh -c "show bgp l2vpn evpn route vni all"
     exec_cmd bgp.evpn.route.mac_ip_evi_es vtysh -c "show bgp l2vpn evpn route mac-ip-evi-es"
     exec_cmd bgp.evpn.route.mac_ip_global_es vtysh -c "show bgp l2vpn evpn route mac-ip-global-es"
+    exec_cmd $jexec evpn.vlan.vni vtysh -c "show evpn access-vlan $json"
     exec_cmd $jexec bgp.evpn.vrfimportrt vtysh -c "show bgp l2vpn evpn vrf-import-rt $json"
     exec_cmd $jexec bgp.evpn.importrt vtysh -c "show bgp l2vpn evpn import-rt $json"
     exec_cmd bgp.evpn.update_group vtysh -c "show bgp l2vpn evpn update-groups"
