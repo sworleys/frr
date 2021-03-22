@@ -644,7 +644,6 @@ zebra_evpn_t *zebra_evpn_map_vlan(struct interface *ifp,
 	struct route_node *rn;
 	struct interface *tmp_if = NULL;
 	struct zebra_if *zif;
-	struct zebra_l2info_bridge *br;
 	struct zebra_vxlan_vni *vni;
 	uint8_t bridge_vlan_aware;
 	zebra_evpn_t *zevpn;
@@ -653,8 +652,7 @@ zebra_evpn_t *zebra_evpn_map_vlan(struct interface *ifp,
 	/* Determine if bridge is VLAN-aware or not */
 	zif = br_if->info;
 	assert(zif);
-	br = &zif->l2info.br;
-	bridge_vlan_aware = br->vlan_aware;
+	bridge_vlan_aware = IS_ZEBRA_IF_BRIDGE_VLAN_AWARE(zif);
 
 	/* See if this interface (or interface plus VLAN Id) maps to a VxLAN */
 	/* TODO: Optimize with a hash. */
@@ -696,7 +694,6 @@ zebra_evpn_t *zebra_evpn_from_svi(struct interface *ifp,
 	struct route_node *rn;
 	struct interface *tmp_if = NULL;
 	struct zebra_if *zif;
-	struct zebra_l2info_bridge *br;
 	struct zebra_vxlan_vni *vni;
 	uint8_t bridge_vlan_aware;
 	vlanid_t vid = 0;
@@ -713,8 +710,7 @@ zebra_evpn_t *zebra_evpn_from_svi(struct interface *ifp,
 	/* Determine if bridge is VLAN-aware or not */
 	zif = br_if->info;
 	assert(zif);
-	br = &zif->l2info.br;
-	bridge_vlan_aware = br->vlan_aware;
+	bridge_vlan_aware = IS_ZEBRA_IF_BRIDGE_VLAN_AWARE(zif);
 	if (bridge_vlan_aware) {
 		struct zebra_l2info_vlan *vl;
 
@@ -836,7 +832,7 @@ void zebra_evpn_read_mac_neigh(zebra_evpn_t *zevpn, struct interface *ifp)
 			ifp->name, ifp->ifindex, zevpn->vni,
 			zif->brslave_info.bridge_ifindex);
 
-	macfdb_read_for_bridge(zns, ifp, zif->brslave_info.br_if);
+	macfdb_read_for_bridge(zns, ifp, zif->brslave_info.br_if, vni->access_vlan);
 	vlan_if = zvni_map_to_svi(vni->access_vlan, zif->brslave_info.br_if);
 	if (vlan_if) {
 		/* Add SVI MAC */
