@@ -409,6 +409,7 @@ uint32_t dplane_ctx_mac_get_update_flags(const struct zebra_dplane_ctx *ctx);
 uint32_t dplane_ctx_mac_get_nhg_id(const struct zebra_dplane_ctx *ctx);
 const struct ethaddr *dplane_ctx_mac_get_addr(
 	const struct zebra_dplane_ctx *ctx);
+vni_t dplane_ctx_mac_get_vni(const struct zebra_dplane_ctx *ctx);
 const struct in_addr *dplane_ctx_mac_get_vtep_ip(
 	const struct zebra_dplane_ctx *ctx);
 ifindex_t dplane_ctx_mac_get_br_ifindex(const struct zebra_dplane_ctx *ctx);
@@ -418,6 +419,7 @@ const struct ipaddr *dplane_ctx_neigh_get_ipaddr(
 	const struct zebra_dplane_ctx *ctx);
 const struct ethaddr *dplane_ctx_neigh_get_mac(
 	const struct zebra_dplane_ctx *ctx);
+vni_t dplane_ctx_neigh_get_vni(const struct zebra_dplane_ctx *ctx);
 uint32_t dplane_ctx_neigh_get_flags(const struct zebra_dplane_ctx *ctx);
 uint16_t dplane_ctx_neigh_get_state(const struct zebra_dplane_ctx *ctx);
 uint32_t dplane_ctx_neigh_get_update_flags(const struct zebra_dplane_ctx *ctx);
@@ -541,6 +543,7 @@ enum zebra_dplane_result dplane_rem_mac_add(const struct interface *ifp,
 					const struct interface *bridge_ifp,
 					vlanid_t vid,
 					const struct ethaddr *mac,
+					vni_t vni,
 					struct in_addr vtep_ip,
 					bool sticky,
 					uint32_t nhg_id,
@@ -563,6 +566,7 @@ enum zebra_dplane_result dplane_rem_mac_del(const struct interface *ifp,
 					const struct interface *bridge_ifp,
 					vlanid_t vid,
 					const struct ethaddr *mac,
+					vni_t vni,
 					struct in_addr vtep_ip);
 
 /* Helper api to init an empty or new context for a MAC update */
@@ -571,6 +575,7 @@ void dplane_mac_init(struct zebra_dplane_ctx *ctx,
 		     const struct interface *br_ifp,
 		     vlanid_t vid,
 		     const struct ethaddr *mac,
+		     vni_t vni,
 		     struct in_addr vtep_ip,
 		     bool sticky,
 		     uint32_t nhg_id, uint32_t update_flags);

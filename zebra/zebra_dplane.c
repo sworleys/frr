@@ -192,6 +192,7 @@ struct dplane_mac_info {
 	vlanid_t vid;
 	ifindex_t br_ifindex;
 	struct ethaddr mac;
+	vni_t vni;
 	struct in_addr vtep_ip;
 	bool is_sticky;
 	uint32_t nhg_id;
@@ -204,6 +205,7 @@ struct dplane_mac_info {
 struct dplane_neigh_info {
 	struct ipaddr ip_addr;
 	struct ethaddr mac;
+	vni_t vni;
 	uint32_t flags;
 	uint16_t state;
 	uint32_t update_flags;
@@ -462,7 +464,7 @@ static enum zebra_dplane_result intf_addr_update_internal(
 static enum zebra_dplane_result mac_update_common(
 	enum dplane_op_e op, const struct interface *ifp,
 	const struct interface *br_ifp,
-	vlanid_t vid, const struct ethaddr *mac,
+	vlanid_t vid, const struct ethaddr *mac, vni_t vni,
 	struct in_addr vtep_ip,	bool sticky, uint32_t nhg_id,
 	uint32_t update_flags);
 static enum zebra_dplane_result neigh_update_internal(
@@ -470,6 +472,7 @@ static enum zebra_dplane_result neigh_update_internal(
 	const struct interface *ifp,
 	const struct ethaddr *mac,
 	const struct ipaddr *ip,
+	vni_t vni,
 	uint32_t flags, uint16_t state, uint32_t update_flags);
 
 /*
@@ -1612,6 +1615,12 @@ const struct ethaddr *dplane_ctx_mac_get_addr(
 	return &(ctx->u.macinfo.mac);
 }
 
+vni_t dplane_ctx_mac_get_vni(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+	return ctx->u.macinfo.vni;
+}
+
 const struct in_addr *dplane_ctx_mac_get_vtep_ip(
 	const struct zebra_dplane_ctx *ctx)
 {
@@ -1638,6 +1647,12 @@ const struct ethaddr *dplane_ctx_neigh_get_mac(
 {
 	DPLANE_CTX_VALID(ctx);
 	return &(ctx->u.neigh.mac);
+}
+
+vni_t dplane_ctx_neigh_get_vni(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+	return ctx->u.neigh.vni;
 }
 
 uint32_t dplane_ctx_neigh_get_flags(const struct zebra_dplane_ctx *ctx)
@@ -3059,6 +3074,7 @@ enum zebra_dplane_result dplane_rem_mac_add(const struct interface *ifp,
 					const struct interface *bridge_ifp,
 					vlanid_t vid,
 					const struct ethaddr *mac,
+					vni_t vni,
 					struct in_addr vtep_ip,
 					bool sticky,
 					uint32_t nhg_id,
@@ -3073,7 +3089,7 @@ enum zebra_dplane_result dplane_rem_mac_add(const struct interface *ifp,
 
 	/* Use common helper api */
 	result = mac_update_common(DPLANE_OP_MAC_INSTALL, ifp, bridge_ifp,
-				   vid, mac, vtep_ip, sticky, nhg_id, update_flags);
+				   vid, mac, vni, vtep_ip, sticky, nhg_id, update_flags);
 	return result;
 }
 
@@ -3084,6 +3100,7 @@ enum zebra_dplane_result dplane_rem_mac_del(const struct interface *ifp,
 					const struct interface *bridge_ifp,
 					vlanid_t vid,
 					const struct ethaddr *mac,
+					vni_t vni,
 					struct in_addr vtep_ip)
 {
 	enum zebra_dplane_result result;
@@ -3093,7 +3110,7 @@ enum zebra_dplane_result dplane_rem_mac_del(const struct interface *ifp,
 
 	/* Use common helper api */
 	result = mac_update_common(DPLANE_OP_MAC_DELETE, ifp, bridge_ifp,
-				   vid, mac, vtep_ip, false, 0, update_flags);
+				   vid, mac, vni, vtep_ip, false, 0, update_flags);
 	return result;
 }
 
@@ -3122,7 +3139,7 @@ enum zebra_dplane_result dplane_local_mac_add(const struct interface *ifp,
 
 	/* Use common helper api */
 	result = mac_update_common(DPLANE_OP_MAC_INSTALL, ifp, bridge_ifp,
-				     vid, mac, vtep_ip, sticky, 0,
+				     vid, mac, 0, vtep_ip, sticky, 0,
 				     update_flags);
 	return result;
 }
@@ -3142,7 +3159,7 @@ dplane_local_mac_del(const struct interface *ifp,
 
 	/* Use common helper api */
 	result = mac_update_common(DPLANE_OP_MAC_DELETE, ifp, bridge_ifp, vid,
-				   mac, vtep_ip, false, 0, 0);
+				   mac, 0, vtep_ip, false, 0, 0);
 	return result;
 }
 /*
@@ -3154,6 +3171,7 @@ void dplane_mac_init(struct zebra_dplane_ctx *ctx,
 		     const struct interface *br_ifp,
 		     vlanid_t vid,
 		     const struct ethaddr *mac,
+		     vni_t vni,
 		     struct in_addr vtep_ip,
 		     bool sticky,
 		     uint32_t nhg_id,
@@ -3174,6 +3192,7 @@ void dplane_mac_init(struct zebra_dplane_ctx *ctx,
 	memset(&ctx->u.macinfo, 0, sizeof(ctx->u.macinfo));
 
 	ctx->u.macinfo.br_ifindex = br_ifp->ifindex;
+	ctx->u.macinfo.vni = vni;
 	ctx->u.macinfo.vtep_ip = vtep_ip;
 	ctx->u.macinfo.mac = *mac;
 	ctx->u.macinfo.vid = vid;
@@ -3191,6 +3210,7 @@ mac_update_common(enum dplane_op_e op,
 		  const struct interface *br_ifp,
 		  vlanid_t vid,
 		  const struct ethaddr *mac,
+		  vni_t vni,
 		  struct in_addr vtep_ip,
 		  bool sticky,
 		  uint32_t nhg_id,
@@ -3214,7 +3234,7 @@ mac_update_common(enum dplane_op_e op,
 	ctx->zd_op = op;
 
 	/* Common init for the ctx */
-	dplane_mac_init(ctx, ifp, br_ifp, vid, mac, vtep_ip, sticky,
+	dplane_mac_init(ctx, ifp, br_ifp, vid, mac, vni, vtep_ip, sticky,
 			nhg_id, update_flags);
 
 	/* Enqueue for processing on the dplane pthread */
@@ -3253,7 +3273,7 @@ enum zebra_dplane_result dplane_rem_neigh_add(const struct interface *ifp,
 		update_flags |= DPLANE_NEIGH_WAS_STATIC;
 
 	result = neigh_update_internal(DPLANE_OP_NEIGH_INSTALL,
-				       ifp, mac, ip, flags, DPLANE_NUD_NOARP,
+				       ifp, mac, ip, 0, flags, DPLANE_NUD_NOARP,
 				       update_flags);
 
 	return result;
@@ -3287,7 +3307,7 @@ enum zebra_dplane_result dplane_local_neigh_add(const struct interface *ifp,
 		ntf |= DPLANE_NTF_ROUTER;
 
 	result = neigh_update_internal(DPLANE_OP_NEIGH_INSTALL,
-				       ifp, mac, ip, ntf,
+				       ifp, mac, ip, 0, ntf,
 				       state, update_flags);
 
 	return result;
@@ -3305,7 +3325,7 @@ enum zebra_dplane_result dplane_rem_neigh_delete(const struct interface *ifp,
 	update_flags |= DPLANE_NEIGH_REMOTE;
 
 	result = neigh_update_internal(DPLANE_OP_NEIGH_DELETE,
-				       ifp, NULL, ip, 0, 0, update_flags);
+				       ifp, NULL, ip, 0, 0, 0, update_flags);
 
 	return result;
 }
@@ -3329,7 +3349,7 @@ enum zebra_dplane_result dplane_vtep_add(const struct interface *ifp,
 	addr.ipaddr_v4 = *ip;
 
 	result = neigh_update_internal(DPLANE_OP_VTEP_ADD,
-				       ifp, &mac, &addr, 0, 0, 0);
+				       ifp, &mac, &addr, vni, 0, 0, 0);
 
 	return result;
 }
@@ -3354,7 +3374,7 @@ enum zebra_dplane_result dplane_vtep_delete(const struct interface *ifp,
 	addr.ipaddr_v4 = *ip;
 
 	result = neigh_update_internal(DPLANE_OP_VTEP_DELETE,
-				       ifp, &mac, &addr, 0, 0, 0);
+				       ifp, &mac, &addr, vni, 0, 0, 0);
 
 	return result;
 }
@@ -3367,6 +3387,7 @@ neigh_update_internal(enum dplane_op_e op,
 		      const struct interface *ifp,
 		      const struct ethaddr *mac,
 		      const struct ipaddr *ip,
+		      vni_t vni,
 		      uint32_t flags, uint16_t state,
 			  uint32_t update_flags)
 {
@@ -3404,6 +3425,7 @@ neigh_update_internal(enum dplane_op_e op,
 	if (mac)
 		ctx->u.neigh.mac = *mac;
 	ctx->u.neigh.flags = flags;
+	ctx->u.neigh.vni = vni;
 	ctx->u.neigh.state = state;
 	ctx->u.neigh.update_flags = update_flags;
 
