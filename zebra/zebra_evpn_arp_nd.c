@@ -34,6 +34,7 @@
 #include "prefix.h"
 #include "stream.h"
 #include "vlan.h"
+#include "zebra/interface.h"
 #include "zebra/zebra_vxlan.h"
 #include "zebra/zebra_vxlan_private.h"
 #include "zebra_evpn.h"
