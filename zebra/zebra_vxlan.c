@@ -46,6 +46,7 @@
 #include "zebra/rt_netlink.h"
 #include "zebra/zebra_errors.h"
 #include "zebra/zebra_l2.h"
+#include "zebra/zebra_l2_bridge_if.h"
 #include "zebra/zebra_memory.h"
 #include "zebra/zebra_ns.h"
 #include "zebra/zebra_vrf.h"
@@ -676,6 +677,9 @@ static void zl3vni_print(zebra_l3vni_t *zl3vni, void **ctx)
 		vty_out(vty, "VNI: %u\n", zl3vni->vni);
 		vty_out(vty, "  Type: %s\n", "L3");
 		vty_out(vty, "  Tenant VRF: %s\n", zl3vni_vrf_name(zl3vni));
+		vty_out(vty, "  Vlan: %u\n", zl3vni->vid);
+		vty_out(vty, "  Bridge: %s\n",
+			zl3vni->bridge_if ? zl3vni->bridge_if->name : "-");
 		vty_out(vty, "  Local Vtep Ip: %s\n",
 			inet_ntoa(zl3vni->local_vtep_ip));
 		vty_out(vty, "  Vxlan-Intf: %s\n",
@@ -841,13 +845,16 @@ struct interface *zvni_map_to_svi(vlanid_t vid, struct interface *br_if)
 
 int zebra_evpn_vxlan_del(zebra_evpn_t *zevpn)
 {
+	zevpn->vid = 0;
 	zevpn_vxlan_if_set(zevpn, zevpn->vxlan_if, false /* set */);
+	zevpn_bridge_if_set(zevpn, zevpn->bridge_if, false /* set */);
 
 	/* Remove references to the BUM mcast grp */
 	zebra_vxlan_sg_deref(zevpn->local_vtep_ip, zevpn->mcast_grp);
 
 	return zebra_evpn_del(zevpn);
 }
+
 static int zevpn_build_vni_hash_table(struct zebra_if *zif,
 	struct zebra_vxlan_vni *vnip, void *arg)
 {
@@ -856,6 +863,7 @@ static int zevpn_build_vni_hash_table(struct zebra_if *zif,
 	zebra_l3vni_t *zl3vni;
 	struct interface *ifp;
 	struct zebra_l2info_vxlan *vxl;
+	struct interface *br_if;
 
 	ifp = zif->ifp;
 	vxl = &zif->l2info.vxl;
@@ -953,10 +961,11 @@ static int zevpn_build_vni_hash_table(struct zebra_if *zif,
 				zebra_evpn_es_set_base_evpn(zevpn);
 			}
 			zevpn_vxlan_if_set(zevpn, ifp, true /* set */);
-			vlan_if = zvni_map_to_svi(
-					vnip->access_vlan,
-					zif->brslave_info.br_if);
+			br_if = zif->brslave_info.br_if;
+			zevpn_bridge_if_set(zevpn, br_if, true /* set */);
+			vlan_if = zvni_map_to_svi(vnip->access_vlan, br_if);
 			if (vlan_if) {
+				zevpn->vid = vnip->access_vlan;
 				zevpn->vrf_id = vlan_if->vrf_id;
 				zl3vni = zl3vni_from_vrf(
 						vlan_if->vrf_id);
@@ -1728,14 +1737,15 @@ static zebra_l3vni_t *zl3vni_from_svi(struct interface *ifp,
 				      struct interface *br_if)
 {
 	int found = 0;
+	vni_t vni_id = 0;
 	vlanid_t vid = 0;
 	uint8_t bridge_vlan_aware = 0;
 	zebra_l3vni_t *zl3vni = NULL;
 	struct zebra_ns *zns = NULL;
 	struct route_node *rn = NULL;
 	struct zebra_if *zif = NULL;
+	struct zebra_if *br_zif = NULL;
 	struct interface *tmp_if = NULL;
-	struct zebra_vxlan_vni *vni = NULL;
 
 	if (!br_if)
 		return NULL;
@@ -1745,9 +1755,9 @@ static zebra_l3vni_t *zl3vni_from_svi(struct interface *ifp,
 		return NULL;
 
 	/* Determine if bridge is VLAN-aware or not */
-	zif = br_if->info;
-	assert(zif);
-	bridge_vlan_aware = IS_ZEBRA_IF_BRIDGE_VLAN_AWARE(zif);
+	br_zif = br_if->info;
+	assert(br_zif);
+	bridge_vlan_aware = IS_ZEBRA_IF_BRIDGE_VLAN_AWARE(br_zif);
 	if (bridge_vlan_aware) {
 		struct zebra_l2info_vlan *vl;
 
@@ -1758,26 +1768,28 @@ static zebra_l3vni_t *zl3vni_from_svi(struct interface *ifp,
 		assert(zif);
 		vl = &zif->l2info.vl;
 		vid = vl->vid;
-	}
+		vni_id = zebra_l2_bridge_if_vni_find(br_zif, vid);
+		if (vni_id)
+			found = 1;
+	} else {
 
-	/* See if this interface (or interface plus VLAN Id) maps to a VxLAN */
-	/* TODO: Optimize with a hash. */
-	zns = zebra_ns_lookup(NS_DEFAULT);
-	for (rn = route_top(zns->if_table); rn; rn = route_next(rn)) {
-		tmp_if = (struct interface *)rn->info;
-		if (!tmp_if)
-			continue;
-		zif = tmp_if->info;
-		if (!zif || zif->zif_type != ZEBRA_IF_VXLAN)
-			continue;
-		if (!if_is_operative(tmp_if))
-			continue;
+		/* See if this interface (or interface plus VLAN Id) maps to a VxLAN */
+		/* TODO: Optimize with a hash. */
+		zns = zebra_ns_lookup(NS_DEFAULT);
+		for (rn = route_top(zns->if_table); rn; rn = route_next(rn)) {
+			tmp_if = (struct interface *)rn->info;
+			if (!tmp_if)
+				continue;
+			zif = tmp_if->info;
+			if (!zif || zif->zif_type != ZEBRA_IF_VXLAN)
+				continue;
+			if (!if_is_operative(tmp_if))
+				continue;
 
-		if (zif->brslave_info.br_if != br_if)
-			continue;
+			if (zif->brslave_info.br_if != br_if)
+				continue;
 
-		vni = zebra_vxlan_if_access_vlan_find(zif, bridge_vlan_aware, vid);
-		if (!bridge_vlan_aware || vni) {
+			vni_id = zebra_vxlan_if_access_vlan_vni_find(zif, vid, br_if);
 			found = 1;
 			break;
 		}
@@ -1786,7 +1798,7 @@ static zebra_l3vni_t *zl3vni_from_svi(struct interface *ifp,
 	if (!found)
 		return NULL;
 
-	zl3vni = zl3vni_lookup(vni->vni);
+	zl3vni = zl3vni_lookup(vni_id);
 	return zl3vni;
 }
 
