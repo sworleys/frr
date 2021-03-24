@@ -68,3 +68,9 @@ dist_yangmodels_DATA += yang/frr-igmp.yang
 dist_yangmodels_DATA += yang/frr-pim.yang
 dist_yangmodels_DATA += yang/frr-pim-rp.yang
 endif
+
+CLEANFILES += \
+	yang/*.c \
+	yang/ietf/*.c \
+	yang/confd/*.c \
+	#
