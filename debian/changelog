@@ -1,4 +1,15 @@
-frr (7.5+cl5.0.0u1) RELEASED; urgency=medium
+frr (7.5+cl5.0.0u2) UNRELEASED; urgency=medium
+
+  * bgpd: copy asn for prefixes imported as type5 from a vrf
+  * bgpd: copy source vrf ASN to leaked route and block loops
+  * tools: fix systemd OnFailure directive
+  * yang: Allow `make clean` to actually clean up dependant files
+  * tools: limit bgp route-maps to direct changes only
+  * zebra crash fix with svd config and mcast handling code refactor
+
+ -- dev-support <dev-support@cumulusnetworks.com>  Fri, 26 Mar 2021 09:14:23 -0700
+
+frr (7.5+cl5.0.0u1) UNRELEASED; urgency=medium
 
   * New Enabled: New Work
   * New Enabled: Version 7.5 of FRR Uplift
