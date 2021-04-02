@@ -242,8 +242,6 @@ static int bgp_ifp_up(struct interface *ifp)
 	for (ALL_LIST_ELEMENTS(ifp->nbr_connected, node, nnode, nc))
 		bgp_nbr_connected_add(bgp, nc);
 
-	bgp_nht_ifp_up(ifp);
-
 	return 0;
 }
 
@@ -297,8 +295,6 @@ static int bgp_ifp_down(struct interface *ifp)
 			}
 		}
 	}
-
-	bgp_nht_ifp_down(ifp);
 
 	return 0;
 }
