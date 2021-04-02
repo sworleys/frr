@@ -106,9 +106,6 @@ const struct option longopts[] = {
 	{"nl-bufsize", required_argument, NULL, 's'},
 	{"v6-rr-semantics", no_argument, NULL, OPTION_V6_RR_SEMANTICS},
 #endif /* HAVE_NETLINK */
-       /* Cumulus Only */
-#define OPTION_ENABLE_NHG 9999
-	{"enable-nhg", no_argument, NULL, OPTION_ENABLE_NHG},
 	{0}};
 
 zebra_capabilities_t _caps_p[] = {
@@ -338,8 +335,6 @@ int main(int argc, char **argv)
 #if defined(HANDLE_NETLINK_FUZZING)
 		"  -w <file>                Bypass normal startup and use this file for testing of netlink input\n"
 #endif /* HANDLE_NETLINK_FUZZING */
-		/* Cumulus Only */
-		"      --enable-nhg         Use Kernel Nexthop Groups\n"
 	);
 
 	while (1) {
@@ -420,10 +415,6 @@ int main(int argc, char **argv)
 			netlink_read = true;
 			break;
 #endif /* HANDLE_NETLINK_FUZZING */
-		/* Cumulus Only */
-		case OPTION_ENABLE_NHG:
-			zebra_nhg_set_proto_nexthops_only(false);
-			break;
 		default:
 			frr_help_exit(1);
 			break;
