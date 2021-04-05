@@ -215,6 +215,9 @@ static int group_announce_route_walkcb(struct update_group *updgrp, void *arg)
 				}
 			}
 		}
+
+		/* Notify BGP Conditional advertisement */
+		bgp_notify_conditional_adv_scanner(subgrp);
 	}
 
 	return UPDWALK_CONTINUE;
@@ -666,7 +669,7 @@ void subgroup_announce_table(struct update_subgroup *subgrp,
 					   peer->addpath_type[afi][safi],
 					   ri))) {
 				if (subgroup_announce_check(dest, ri, subgrp,
-							    dest_p, &attr)) {
+							    dest_p, &attr, false)) {
 					/* Check if route can be advertised */
 					if (advertise)
 						bgp_adj_out_set_subgroup(dest,
@@ -852,7 +855,7 @@ void subgroup_default_originate(struct update_subgroup *subgrp, int withdraw)
 					if (subgroup_announce_check(
 						    dest, pi, subgrp,
 						    bgp_dest_get_prefix(dest),
-						    &attr))
+						    &attr, false))
 						bgp_adj_out_set_subgroup(
 							dest, subgrp, &attr,
 							pi);
