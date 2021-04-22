@@ -23,12 +23,18 @@
 #include <linux/netlink.h>
 #include <linux/nexthop.h>
 #include <linux/rtnetlink.h>
+#include <linux/if_bridge.h>
 #include <net/if_arp.h>
 
 #include <stdio.h>
 #include <stdint.h>
 
 #include "zebra/rt_netlink.h"
+
+#define SPACE_2 "  "
+#define SPACE_4 "    "
+#define SPACE_6 "      "
+#define SPACE_8 "        "
 
 const char *nlmsg_type2str(uint16_t type)
 {
@@ -88,6 +94,12 @@ const char *nlmsg_type2str(uint16_t type)
 	case RTM_GETNEXTHOP:
 		return "GETNEXTHOP";
 
+	case RTM_NEWNVLAN:
+		return "NEWVLAN";
+	case RTM_DELVLAN:
+		return "DELVLAN";
+	case RTM_GETVLAN:
+		return "GETVLAN";
 	default:
 		return "UNKNOWN";
 	}
@@ -247,8 +259,88 @@ const char *ifi_type2str(int type)
 	}
 }
 
+const char *rta_brport2str(int type)
+{
+	switch (type) {
+	case IFLA_BRPORT_UNSPEC:
+		return "UNSPEC";
+	case IFLA_BRPORT_STATE:
+		return "STATE";
+	case IFLA_BRPORT_PRIORITY:
+		return "PRIORITY";
+	case IFLA_BRPORT_COST:
+		return "COST";
+	case IFLA_BRPORT_MODE:
+		return "MODE";
+	case IFLA_BRPORT_GUARD:
+		return "GUARD";
+	case IFLA_BRPORT_PROTECT:
+		return "PROTECT";
+	case IFLA_BRPORT_FAST_LEAVE:
+		return "FAST_LEAVE";
+	case IFLA_BRPORT_LEARNING:
+		return "LEARNING";
+	case IFLA_BRPORT_UNICAST_FLOOD:
+		return "UNICAST_FLOOD";
+	case IFLA_BRPORT_PROXYARP:
+		return "PROXYARP";
+	case IFLA_BRPORT_LEARNING_SYNC:
+		return "LEARNING_SYNC";
+	case IFLA_BRPORT_PROXYARP_WIFI:
+		return "PROXYARP_WIFI";
+	case IFLA_BRPORT_ROOT_ID:
+		return "ROOT_ID";
+	case IFLA_BRPORT_BRIDGE_ID:
+		return "BRIDGE_ID";
+	case IFLA_BRPORT_DESIGNATED_PORT:
+		return "DESIGNATED_PORT";
+	case IFLA_BRPORT_DESIGNATED_COST:
+		return "DESIGNATED_COST";
+	case IFLA_BRPORT_ID:
+		return "ID";
+	case IFLA_BRPORT_NO:
+		return "NO";
+	case IFLA_BRPORT_TOPOLOGY_CHANGE_ACK:
+		return "TOPOLOGY_CHANGE_ACK";
+	case IFLA_BRPORT_CONFIG_PENDING:
+		return "CONFIG_PENDING";
+	case IFLA_BRPORT_MESSAGE_AGE_TIMER:
+		return "MESSAGE_AGE_TIMER";
+	case IFLA_BRPORT_FORWARD_DELAY_TIMER:
+		return "FORWARD_DELAY_TIMER";
+	case IFLA_BRPORT_HOLD_TIMER:
+		return "HOLD_TIMER";
+	case IFLA_BRPORT_FLUSH:
+		return "FLUSH";
+	case IFLA_BRPORT_MULTICAST_ROUTER:
+		return "MULTICAST_ROUTER";
+	case IFLA_BRPORT_PAD:
+		return "PAD";
+	case IFLA_BRPORT_MCAST_FLOOD:
+		return "MCAST_FLOOD";
+	case IFLA_BRPORT_MCAST_TO_UCAST:
+		return "MCAST_TO_UCAST";
+	case IFLA_BRPORT_VLAN_TUNNEL:
+		return "VLAN_TUNNEL";
+	case IFLA_BRPORT_BCAST_FLOOD:
+		return "BCAST_FLOOD";
+	case IFLA_BRPORT_GROUP_FWD_MASK:
+		return "GROUP_FWD_MASK";
+	case IFLA_BRPORT_NEIGH_SUPPRESS:
+		return "NEIGH_SUPPRESS";
+	case IFLA_BRPORT_ISOLATED:
+		return "ISOLATED";
+	case IFLA_BRPORT_BACKUP_PORT:
+		return "BACKUP_PORT";
+	default:
+		return "UNKNOWN";
+	}
+}
+
 const char *rta_type2str(int type)
 {
+	type = type & NLA_TYPE_MASK;
+
 	switch (type) {
 	case IFLA_UNSPEC:
 		return "UNSPEC";
@@ -275,6 +367,7 @@ const char *rta_type2str(int type)
 	case IFLA_WIRELESS:
 		return "WIRELESS";
 	case IFLA_PROTINFO:
+	case (IFLA_PROTINFO | NLA_F_NESTED):
 		return "PROTINFO";
 	case IFLA_TXQLEN:
 		return "TXQLEN";
@@ -575,6 +668,34 @@ const char *nhm_rta2str(int type)
 	}
 }
 
+const char *bvm_dbentry_rta2str(int type)
+{
+	switch (type) {
+	case BRIDGE_VLANDB_ENTRY_UNSPEC:
+		return "UNSPEC";
+	case BRIDGE_VLANDB_ENTRY_INFO:
+		return "INFO";
+	case BRIDGE_VLANDB_ENTRY_RANGE:
+		return "RANGE";
+	case BRIDGE_VLANDB_ENTRY_STATE:
+		return "STATE";
+	default:
+		return "UNKNOWN";
+	}
+}
+
+const char *bvm_rta2str(int type)
+{
+	switch (type) {
+	case BRIDGE_VLANDB_UNSPEC:
+		return "UNSPEC";
+	case BRIDGE_VLANDB_ENTRY:
+		return "ENTRY";
+	default:
+		return "UNKNOWN";
+	}
+}
+
 static inline void flag_write(int flags, int flag, const char *flagstr,
 			      char *buf, size_t buflen)
 {
@@ -716,6 +837,50 @@ const char *nh_flags2str(uint32_t flags, char *buf, size_t buflen)
 	return (bufp);
 }
 
+static int zlog_rta_check_invalid(struct rtattr *rta, size_t size,
+				  const char *s)
+{
+	if (RTA_PAYLOAD(rta) < size) {
+		zlog_debug("%sinvalid length", s);
+		return -1;
+	}
+
+	return 0;
+}
+
+static void zlog_rta_u32(struct rtattr *rta, const char *s)
+{
+	uint32_t v;
+
+	if (zlog_rta_check_invalid(rta, sizeof(uint32_t), s))
+		return;
+
+	v = *(uint32_t *)RTA_DATA(rta);
+	zlog_debug("%s%u", s, v);
+}
+
+static void zlog_rta_u16(struct rtattr *rta, const char *s)
+{
+	uint16_t v;
+
+	if (zlog_rta_check_invalid(rta, sizeof(uint16_t), s))
+		return;
+
+	v = *(uint16_t *)RTA_DATA(rta);
+	zlog_debug("%s%u", s, v);
+}
+
+static void zlog_rta_u8(struct rtattr *rta, const char *s)
+{
+	uint8_t v;
+
+	if (zlog_rta_check_invalid(rta, sizeof(uint8_t), s))
+		return;
+
+	v = *(uint8_t *)RTA_DATA(rta);
+	zlog_debug("%s%u", s, v);
+}
+
 /*
  * Netlink abstractions.
  */
@@ -730,27 +895,27 @@ next_rta:
 		return;
 
 	plen = RTA_PAYLOAD(rta);
-	zlog_debug("      linkinfo [len=%d (payload=%zu) type=(%d) %s]",
+	zlog_debug("%slinkinfo [len=%d (payload=%zu) type=(%d) %s]", SPACE_6,
 		   rta->rta_len, plen, rta->rta_type,
 		   rta_type2str(rta->rta_type));
 	switch (rta->rta_type) {
 	case IFLA_INFO_KIND:
 		if (plen == 0) {
-			zlog_debug("        invalid length");
+			zlog_debug("%sinvalid length", SPACE_8);
 			break;
 		}
 
 		snprintf(dbuf, sizeof(dbuf), "%s", (char *)RTA_DATA(rta));
-		zlog_debug("        %s", dbuf);
+		zlog_debug("%s%s", SPACE_8, dbuf);
 		break;
 	case IFLA_INFO_SLAVE_KIND:
 		if (plen == 0) {
-			zlog_debug("        invalid length");
+			zlog_debug("%sinvalid length", SPACE_8);
 			break;
 		}
 
 		snprintf(dbuf, sizeof(dbuf), "%s", (char *)RTA_DATA(rta));
-		zlog_debug("        %s", dbuf);
+		zlog_debug("%s%s", SPACE_8, dbuf);
 		break;
 
 	default:
@@ -768,7 +933,6 @@ static void nllink_dump(struct ifinfomsg *ifi, size_t msglen)
 	uint8_t *datap;
 	struct rtattr *rta;
 	size_t plen, it;
-	uint32_t u32v;
 	char bytestr[16];
 	char dbuf[128];
 
@@ -780,18 +944,17 @@ next_rta:
 		return;
 
 	plen = RTA_PAYLOAD(rta);
-	zlog_debug("    rta [len=%d (payload=%zu) type=(%d) %s]", rta->rta_len,
-		   plen, rta->rta_type, rta_type2str(rta->rta_type));
+	zlog_debug("%srta [len=%d (payload=%zu) type=(%d) %s]", SPACE_4,
+		   rta->rta_len, plen, rta->rta_type,
+		   rta_type2str(rta->rta_type));
 	switch (rta->rta_type) {
 	case IFLA_IFNAME:
 	case IFLA_IFALIAS:
-		if (plen == 0) {
-			zlog_debug("      invalid length");
+		if (zlog_rta_check_invalid(rta, 1, SPACE_6))
 			break;
-		}
 
 		snprintf(dbuf, sizeof(dbuf), "%s", (char *)RTA_DATA(rta));
-		zlog_debug("      %s", dbuf);
+		zlog_debug("%s%s", SPACE_6, dbuf);
 		break;
 
 	case IFLA_MTU:
@@ -808,13 +971,7 @@ next_rta:
 #endif /* IFLA_GSO_MAX_SIZE */
 	case IFLA_CARRIER_CHANGES:
 	case IFLA_MASTER:
-		if (plen < sizeof(uint32_t)) {
-			zlog_debug("      invalid length");
-			break;
-		}
-
-		u32v = *(uint32_t *)RTA_DATA(rta);
-		zlog_debug("      %u", u32v);
+		zlog_rta_u32(rta, SPACE_6);
 		break;
 
 	case IFLA_ADDRESS:
@@ -829,7 +986,7 @@ next_rta:
 		if (dbuf[0])
 			dbuf[strlen(dbuf) - 1] = 0;
 
-		zlog_debug("      %s", dbuf[0] ? dbuf : "<empty>");
+		zlog_debug("%s%s", SPACE_6, dbuf[0] ? dbuf : "<empty>");
 		break;
 
 	case IFLA_LINKINFO:
@@ -850,7 +1007,6 @@ static void nlroute_dump(struct rtmsg *rtm, size_t msglen)
 {
 	struct rtattr *rta;
 	size_t plen;
-	uint32_t u32v;
 
 	/* Get the first attribute and go from there. */
 	rta = RTM_RTA(rtm);
@@ -860,16 +1016,16 @@ next_rta:
 		return;
 
 	plen = RTA_PAYLOAD(rta);
-	zlog_debug("    rta [len=%d (payload=%zu) type=(%d) %s]", rta->rta_len,
-		   plen, rta->rta_type, rtm_rta2str(rta->rta_type));
+	zlog_debug("%srta [len=%d (payload=%zu) type=(%d) %s]", SPACE_4,
+		   rta->rta_len, plen, rta->rta_type,
+		   rtm_rta2str(rta->rta_type));
 	switch (rta->rta_type) {
 	case RTA_IIF:
 	case RTA_OIF:
 	case RTA_PRIORITY:
 	case RTA_TABLE:
 	case RTA_NH_ID:
-		u32v = *(uint32_t *)RTA_DATA(rta);
-		zlog_debug("      %u", u32v);
+		zlog_rta_u32(rta, SPACE_6);
 		break;
 
 	case RTA_GATEWAY:
@@ -878,11 +1034,11 @@ next_rta:
 	case RTA_PREFSRC:
 		switch (plen) {
 		case sizeof(struct in_addr):
-			zlog_debug("      %pI4",
+			zlog_debug("%s%pI4", SPACE_6,
 				   (struct in_addr *)RTA_DATA(rta));
 			break;
 		case sizeof(struct in6_addr):
-			zlog_debug("      %pI6",
+			zlog_debug("%s%pI6", SPACE_6,
 				   (struct in6_addr *)RTA_DATA(rta));
 			break;
 		default:
@@ -905,7 +1061,6 @@ static void nlneigh_dump(struct ndmsg *ndm, size_t msglen)
 	struct rtattr *rta;
 	uint8_t *datap;
 	size_t plen, it;
-	uint16_t vid;
 	char bytestr[16];
 	char dbuf[128];
 
@@ -924,8 +1079,9 @@ next_rta:
 		return;
 
 	plen = RTA_PAYLOAD(rta);
-	zlog_debug("    rta [len=%d (payload=%zu) type=(%d) %s]", rta->rta_len,
-		   plen, rta->rta_type, neigh_rta2str(rta->rta_type));
+	zlog_debug("%srta [len=%d (payload=%zu) type=(%d) %s]", SPACE_4,
+		   rta->rta_len, plen, rta->rta_type,
+		   neigh_rta2str(rta->rta_type));
 	switch (rta->rta_type) {
 	case NDA_LLADDR:
 		datap = RTA_DATA(rta);
@@ -939,17 +1095,17 @@ next_rta:
 		if (dbuf[0])
 			dbuf[strlen(dbuf) - 1] = 0;
 
-		zlog_debug("      %s", dbuf[0] ? dbuf : "<empty>");
+		zlog_debug("%s%s", SPACE_6, dbuf[0] ? dbuf : "<empty>");
 		break;
 
 	case NDA_DST:
 		switch (plen) {
 		case sizeof(struct in_addr):
-			zlog_debug("      %pI4",
+			zlog_debug("%s%pI4", SPACE_6,
 				   (struct in_addr *)RTA_DATA(rta));
 			break;
 		case sizeof(struct in6_addr):
-			zlog_debug("      %pI6",
+			zlog_debug("%s%pI6", SPACE_6,
 				   (struct in6_addr *)RTA_DATA(rta));
 			break;
 		default:
@@ -958,8 +1114,7 @@ next_rta:
 		break;
 
 	case NDA_VLAN:
-		vid = *(uint16_t *)RTA_DATA(rta);
-		zlog_debug("      %d", vid);
+		zlog_rta_u16(rta, SPACE_6);
 		break;
 
 	default:
@@ -976,7 +1131,6 @@ static void nlifa_dump(struct ifaddrmsg *ifa, size_t msglen)
 {
 	struct rtattr *rta;
 	size_t plen;
-	uint32_t u32v;
 
 	/* Get the first attribute and go from there. */
 	rta = IFA_RTA(ifa);
@@ -986,16 +1140,16 @@ next_rta:
 		return;
 
 	plen = RTA_PAYLOAD(rta);
-	zlog_debug("    rta [len=%d (payload=%zu) type=(%d) %s]", rta->rta_len,
-		   plen, rta->rta_type, ifa_rta2str(rta->rta_type));
+	zlog_debug("%srta [len=%d (payload=%zu) type=(%d) %s]", SPACE_4,
+		   rta->rta_len, plen, rta->rta_type,
+		   ifa_rta2str(rta->rta_type));
 	switch (rta->rta_type) {
 	case IFA_UNSPEC:
-		u32v = *(uint32_t *)RTA_DATA(rta);
-		zlog_debug("      %u", u32v);
+		zlog_rta_u32(rta, SPACE_6);
 		break;
 
 	case IFA_LABEL:
-		zlog_debug("      %s", (const char *)RTA_DATA(rta));
+		zlog_debug("%s%s", SPACE_6, (const char *)RTA_DATA(rta));
 		break;
 
 	case IFA_ADDRESS:
@@ -1003,11 +1157,11 @@ next_rta:
 	case IFA_BROADCAST:
 		switch (plen) {
 		case 4:
-			zlog_debug("      %pI4",
+			zlog_debug("%s%pI4", SPACE_6,
 				   (struct in_addr *)RTA_DATA(rta));
 			break;
 		case 16:
-			zlog_debug("      %pI6",
+			zlog_debug("%s%pI6", SPACE_6,
 				   (struct in6_addr *)RTA_DATA(rta));
 			break;
 		default:
@@ -1028,10 +1182,7 @@ next_rta:
 static void nlnh_dump(struct nhmsg *nhm, size_t msglen)
 {
 	struct rtattr *rta;
-	int ifindex;
 	size_t plen;
-	uint16_t u16v;
-	uint32_t u32v;
 	unsigned long count, i;
 	struct nexthop_grp *nhgrp;
 
@@ -1042,61 +1193,60 @@ next_rta:
 		return;
 
 	plen = RTA_PAYLOAD(rta);
-	zlog_debug("    rta [len=%d (payload=%zu) type=(%d) %s]", rta->rta_len,
-		   plen, rta->rta_type, nhm_rta2str(rta->rta_type));
+	zlog_debug("%srta [len=%d (payload=%zu) type=(%d) %s]", SPACE_4,
+		   rta->rta_len, plen, rta->rta_type,
+		   nhm_rta2str(rta->rta_type));
 	switch (rta->rta_type) {
 	case NHA_ID:
-		u32v = *(uint32_t *)RTA_DATA(rta);
-		zlog_debug("      %u", u32v);
+		zlog_rta_u32(rta, SPACE_6);
 		break;
 	case NHA_GROUP:
 		nhgrp = (struct nexthop_grp *)RTA_DATA(rta);
 		count = (RTA_PAYLOAD(rta) / sizeof(*nhgrp));
 		if (count == 0
 		    || (count * sizeof(*nhgrp)) != RTA_PAYLOAD(rta)) {
-			zlog_debug("      invalid nexthop group received");
+			zlog_debug("%sinvalid nexthop group received", SPACE_6);
 			return;
 		}
 
 		for (i = 0; i < count; i++)
-			zlog_debug("      id %d weight %d", nhgrp[i].id,
+			zlog_debug("%sid %d weight %d", SPACE_6, nhgrp[i].id,
 				   nhgrp[i].weight);
 		break;
 	case NHA_ENCAP_TYPE:
 	case NHA_GROUP_TYPE:
-		u16v = *(uint16_t *)RTA_DATA(rta);
-		zlog_debug("      %d", u16v);
+		zlog_rta_u16(rta, SPACE_6);
 		break;
 	case NHA_BLACKHOLE:
 		/* NOTHING */
 		break;
 	case NHA_OIF:
-		ifindex = *(int *)RTA_DATA(rta);
-		zlog_debug("      %d", ifindex);
+		zlog_rta_u32(rta, SPACE_6);
 		break;
 	case NHA_GATEWAY:
 		switch (nhm->nh_family) {
 		case AF_INET:
-			zlog_debug("      %pI4",
+			zlog_debug("%s%pI4", SPACE_6,
 				   (struct in_addr *)RTA_DATA(rta));
 			break;
 		case AF_INET6:
-			zlog_debug("      %pI6",
+			zlog_debug("%s%pI6", SPACE_6,
 				   (struct in6_addr *)RTA_DATA(rta));
 			break;
 
 		default:
-			zlog_debug("      invalid family %d", nhm->nh_family);
+			zlog_debug("%sinvalid family %d", SPACE_6,
+				   nhm->nh_family);
 			break;
 		}
 		break;
 	case NHA_ENCAP:
 		/* TODO: handle MPLS labels. */
-		zlog_debug("      unparsed MPLS labels");
+		zlog_debug("%sunparsed MPLS labels", SPACE_6);
 		break;
 	case NHA_GROUPS:
 		/* TODO: handle this message. */
-		zlog_debug("      unparsed GROUPS message");
+		zlog_debug("%sunparsed GROUPS message", SPACE_6);
 		break;
 
 	default:
@@ -1109,6 +1259,78 @@ next_rta:
 	goto next_rta;
 }
 
+static void nlbvm_dbentry_dump(struct rtattr *rta, size_t msglen)
+{
+	size_t plen;
+	struct bridge_vlan_info *vinfo;
+
+next_rta:
+	/* Check the header for valid length and for outbound access. */
+	if (RTA_OK(rta, msglen) == 0)
+		return;
+
+	plen = RTA_PAYLOAD(rta);
+	zlog_debug("%sdb-entry [len=%d (payload=%zu) type=(%d) %s]", SPACE_6,
+		   rta->rta_len, plen, rta->rta_type,
+		   bvm_dbentry_rta2str(rta->rta_type));
+	switch (rta->rta_type) {
+	case BRIDGE_VLANDB_ENTRY_INFO:
+		if (plen == 0) {
+			zlog_debug("%sinvalid length", SPACE_8);
+			break;
+		}
+
+		vinfo = (struct bridge_vlan_info *)RTA_DATA(rta);
+		zlog_debug("%svid %u flags %u", SPACE_8, vinfo->vid,
+			   vinfo->flags);
+		break;
+	case BRIDGE_VLANDB_ENTRY_RANGE:
+		zlog_rta_u16(rta, SPACE_8);
+		break;
+	case BRIDGE_VLANDB_ENTRY_STATE:
+		zlog_rta_u8(rta, SPACE_8);
+		break;
+
+	default:
+		/* NOTHING: unhandled. */
+		break;
+	}
+
+	/* Get next pointer and start iteration again. */
+	rta = RTA_NEXT(rta, msglen);
+	goto next_rta;
+}
+static void nlbvm_dump(struct br_vlan_msg *bvm, size_t msglen)
+{
+	struct rtattr *rta;
+	int type;
+	size_t plen;
+
+	rta = BRVLAN_RTA(bvm);
+next_rta:
+	/* Check the header for valid length and for outbound access. */
+	if (RTA_OK(rta, msglen) == 0)
+		return;
+
+	plen = RTA_PAYLOAD(rta);
+	type = rta->rta_type & NLA_TYPE_MASK;
+
+	zlog_debug("%srta [len=%d (payload=%zu) type=(%d) %s]", SPACE_4,
+		   rta->rta_len, plen, rta->rta_type, bvm_rta2str(type));
+	switch (type) {
+	case BRIDGE_VLANDB_ENTRY:
+		nlbvm_dbentry_dump(RTA_DATA(rta), msglen);
+		break;
+
+	default:
+		/* NOTHING: unhandled. */
+		break;
+	}
+
+	/* Get next pointer and start iteration again. */
+	rta = RTA_NEXT(rta, msglen);
+	goto next_rta;
+}
 void nl_dump(void *msg, size_t msglen)
 {
 	struct nlmsghdr *nlmsg = msg;
@@ -1119,8 +1341,10 @@ void nl_dump(void *msg, size_t msglen)
 	struct rtmsg *rtm;
 	struct nhmsg *nhm;
 	struct ifinfomsg *ifi;
+	struct br_vlan_msg *bvm;
 	char fbuf[128];
 	char ibuf[128];
+	char s[] = SPACE_2;
 
 next_header:
 	zlog_debug(
@@ -1136,7 +1360,7 @@ next_header:
 		break;
 	case NLMSG_ERROR:
 		nlmsgerr = NLMSG_DATA(nlmsg);
-		zlog_debug("  nlmsgerr [error=(%d) %s]", nlmsgerr->error,
+		zlog_debug("%snlmsgerr [error=(%d) %s]", s, nlmsgerr->error,
 			   strerror(-nlmsgerr->error));
 		break;
 	case NLMSG_DONE:
@@ -1150,9 +1374,9 @@ next_header:
 	case RTM_SETLINK:
 		ifi = NLMSG_DATA(nlmsg);
 		zlog_debug(
-			"  ifinfomsg [family=%d type=(%d) %s "
+			"%sifinfomsg [family=%d type=(%d) %s "
 			"index=%d flags=0x%04x {%s}]",
-			ifi->ifi_family, ifi->ifi_type,
+			s, ifi->ifi_family, ifi->ifi_type,
 			ifi_type2str(ifi->ifi_type), ifi->ifi_index,
 			ifi->ifi_flags,
 			if_flags2str(ifi->ifi_flags, ibuf, sizeof(ibuf)));
@@ -1160,7 +1384,7 @@ next_header:
 		break;
 	case RTM_GETLINK:
 		rtgen = NLMSG_DATA(nlmsg);
-		zlog_debug("  rtgen [family=(%d) %s]", rtgen->rtgen_family,
+		zlog_debug("%srtgen [family=(%d) %s]", s, rtgen->rtgen_family,
 			   af_type2str(rtgen->rtgen_family));
 		break;
 
@@ -1169,10 +1393,10 @@ next_header:
 	case RTM_GETROUTE:
 		rtm = NLMSG_DATA(nlmsg);
 		zlog_debug(
-			"  rtmsg [family=(%d) %s dstlen=%d srclen=%d tos=%d "
+			"%srtmsg [family=(%d) %s dstlen=%d srclen=%d tos=%d "
 			"table=%d protocol=(%d) %s scope=(%d) %s "
 			"type=(%d) %s flags=0x%04x {%s}]",
-			rtm->rtm_family, af_type2str(rtm->rtm_family),
+			s, rtm->rtm_family, af_type2str(rtm->rtm_family),
 			rtm->rtm_dst_len, rtm->rtm_src_len, rtm->rtm_tos,
 			rtm->rtm_table, rtm->rtm_protocol,
 			rtm_protocol2str(rtm->rtm_protocol), rtm->rtm_scope,
@@ -1187,9 +1411,9 @@ next_header:
 	case RTM_DELNEIGH:
 		ndm = NLMSG_DATA(nlmsg);
 		zlog_debug(
-			"  ndm [family=%d (%s) ifindex=%d state=0x%04x {%s} "
+			"%sndm [family=%d (%s) ifindex=%d state=0x%04x {%s} "
 			"flags=0x%04x {%s} type=%d (%s)]",
-			ndm->ndm_family, af_type2str(ndm->ndm_family),
+			s, ndm->ndm_family, af_type2str(ndm->ndm_family),
 			ndm->ndm_ifindex, ndm->ndm_state,
 			neigh_state2str(ndm->ndm_state, ibuf, sizeof(ibuf)),
 			ndm->ndm_flags,
@@ -1203,9 +1427,9 @@ next_header:
 	case RTM_DELADDR:
 		ifa = NLMSG_DATA(nlmsg);
 		zlog_debug(
-			"  ifa [family=(%d) %s prefixlen=%d "
+			"%sifa [family=(%d) %s prefixlen=%d "
 			"flags=0x%04x {%s} scope=%d index=%u]",
-			ifa->ifa_family, af_type2str(ifa->ifa_family),
+			s, ifa->ifa_family, af_type2str(ifa->ifa_family),
 			ifa->ifa_prefixlen, ifa->ifa_flags,
 			if_flags2str(ifa->ifa_flags, fbuf, sizeof(fbuf)),
 			ifa->ifa_scope, ifa->ifa_index);
@@ -1217,9 +1441,9 @@ next_header:
 	case RTM_GETNEXTHOP:
 		nhm = NLMSG_DATA(nlmsg);
 		zlog_debug(
-			"  nhm [family=(%d) %s scope=(%d) %s "
+			"%snhm [family=(%d) %s scope=(%d) %s "
 			"protocol=(%d) %s flags=0x%08x {%s}]",
-			nhm->nh_family, af_type2str(nhm->nh_family),
+			s, nhm->nh_family, af_type2str(nhm->nh_family),
 			nhm->nh_scope, rtm_scope2str(nhm->nh_scope),
 			nhm->nh_protocol, rtm_protocol2str(nhm->nh_protocol),
 			nhm->nh_flags,
@@ -1227,6 +1451,14 @@ next_header:
 		nlnh_dump(nhm, nlmsg->nlmsg_len - NLMSG_LENGTH(sizeof(*nhm)));
 		break;
 
+	case RTM_NEWVLAN:
+	case RTM_DELVLAN:
+	case RTM_GETVLAN:
+		bvm = NLMSG_DATA(nlmsg);
+		zlog_debug("%sbvm [family=(%u) %s index=%u]", s, bvm->family,
+			   af_type2str(bvm->family), bvm->ifindex);
+		nlbvm_dump(bvm, nlmsg->nlmsg_len - NLMSG_LENGTH(sizeof(*bvm)));
+		break;
 	default:
 		break;
 	}
