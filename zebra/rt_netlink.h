@@ -133,6 +133,8 @@ const char *rtm_rta2str(int type);
 const char *neigh_rta2str(int type);
 const char *ifa_rta2str(int type);
 const char *nhm_rta2str(int type);
+const char *bvm_dbentry_rta2str(int type);
+const char *bvm_rta2str(int type);
 const char *nlmsg_flags2str(uint16_t flags, char *buf, size_t buflen);
 const char *if_flags2str(uint32_t flags, char *buf, size_t buflen);
 const char *rtm_flags2str(uint32_t flags, char *buf, size_t buflen);

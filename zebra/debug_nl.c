@@ -23,6 +23,7 @@
 #include <linux/netlink.h>
 #include <linux/nexthop.h>
 #include <linux/rtnetlink.h>
+#include <linux/if_bridge.h>
 #include <net/if_arp.h>
 
 #include <stdio.h>
@@ -93,6 +94,12 @@ const char *nlmsg_type2str(uint16_t type)
 	case RTM_GETNEXTHOP:
 		return "GETNEXTHOP";
 
+	case RTM_NEWNVLAN:
+		return "NEWVLAN";
+	case RTM_DELVLAN:
+		return "DELVLAN";
+	case RTM_GETVLAN:
+		return "GETVLAN";
 	default:
 		return "UNKNOWN";
 	}
@@ -575,6 +582,34 @@ const char *nhm_rta2str(int type)
 		return "GROUPS";
 	case NHA_MASTER:
 		return "MASTER";
+	default:
+		return "UNKNOWN";
+	}
+}
+
+const char *bvm_dbentry_rta2str(int type)
+{
+	switch (type) {
+	case BRIDGE_VLANDB_ENTRY_UNSPEC:
+		return "UNSPEC";
+	case BRIDGE_VLANDB_ENTRY_INFO:
+		return "INFO";
+	case BRIDGE_VLANDB_ENTRY_RANGE:
+		return "RANGE";
+	case BRIDGE_VLANDB_ENTRY_STATE:
+		return "STATE";
+	default:
+		return "UNKNOWN";
+	}
+}
+
+const char *bvm_rta2str(int type)
+{
+	switch (type) {
+	case BRIDGE_VLANDB_UNSPEC:
+		return "UNSPEC";
+	case BRIDGE_VLANDB_ENTRY:
+		return "ENTRY";
 	default:
 		return "UNKNOWN";
 	}
@@ -1143,6 +1178,78 @@ next_rta:
 	goto next_rta;
 }
 
+static void nlbvm_dbentry_dump(struct rtattr *rta, size_t msglen)
+{
+	size_t plen;
+	struct bridge_vlan_info *vinfo;
+
+next_rta:
+	/* Check the header for valid length and for outbound access. */
+	if (RTA_OK(rta, msglen) == 0)
+		return;
+
+	plen = RTA_PAYLOAD(rta);
+	zlog_debug("%sdb-entry [len=%d (payload=%zu) type=(%d) %s]", SPACE_6,
+		   rta->rta_len, plen, rta->rta_type,
+		   bvm_dbentry_rta2str(rta->rta_type));
+	switch (rta->rta_type) {
+	case BRIDGE_VLANDB_ENTRY_INFO:
+		if (plen == 0) {
+			zlog_debug("%sinvalid length", SPACE_8);
+			break;
+		}
+
+		vinfo = (struct bridge_vlan_info *)RTA_DATA(rta);
+		zlog_debug("%svid %u flags %u", SPACE_8, vinfo->vid,
+			   vinfo->flags);
+		break;
+	case BRIDGE_VLANDB_ENTRY_RANGE:
+		zlog_rta_u16(rta, SPACE_8);
+		break;
+	case BRIDGE_VLANDB_ENTRY_STATE:
+		zlog_rta_u8(rta, SPACE_8);
+		break;
+
+	default:
+		/* NOTHING: unhandled. */
+		break;
+	}
+
+	/* Get next pointer and start iteration again. */
+	rta = RTA_NEXT(rta, msglen);
+	goto next_rta;
+}
+static void nlbvm_dump(struct br_vlan_msg *bvm, size_t msglen)
+{
+	struct rtattr *rta;
+	int type;
+	size_t plen;
+
+	rta = BRVLAN_RTA(bvm);
+next_rta:
+	/* Check the header for valid length and for outbound access. */
+	if (RTA_OK(rta, msglen) == 0)
+		return;
+
+	plen = RTA_PAYLOAD(rta);
+	type = rta->rta_type & NLA_TYPE_MASK;
+
+	zlog_debug("%srta [len=%d (payload=%zu) type=(%d) %s]", SPACE_4,
+		   rta->rta_len, plen, rta->rta_type, bvm_rta2str(type));
+	switch (type) {
+	case BRIDGE_VLANDB_ENTRY:
+		nlbvm_dbentry_dump(RTA_DATA(rta), msglen);
+		break;
+
+	default:
+		/* NOTHING: unhandled. */
+		break;
+	}
+
+	/* Get next pointer and start iteration again. */
+	rta = RTA_NEXT(rta, msglen);
+	goto next_rta;
+}
 void nl_dump(void *msg, size_t msglen)
 {
 	struct nlmsghdr *nlmsg = msg;
@@ -1153,6 +1260,7 @@ void nl_dump(void *msg, size_t msglen)
 	struct rtmsg *rtm;
 	struct nhmsg *nhm;
 	struct ifinfomsg *ifi;
+	struct br_vlan_msg *bvm;
 	char fbuf[128];
 	char ibuf[128];
 	char s[] = SPACE_2;
@@ -1262,6 +1370,14 @@ next_header:
 		nlnh_dump(nhm, nlmsg->nlmsg_len - NLMSG_LENGTH(sizeof(*nhm)));
 		break;
 
+	case RTM_NEWVLAN:
+	case RTM_DELVLAN:
+	case RTM_GETVLAN:
+		bvm = NLMSG_DATA(nlmsg);
+		zlog_debug("%sbvm [family=(%u) %s index=%u]", s, bvm->family,
+			   af_type2str(bvm->family), bvm->ifindex);
+		nlbvm_dump(bvm, nlmsg->nlmsg_len - NLMSG_LENGTH(sizeof(*bvm)));
+		break;
 	default:
 		break;
 	}
